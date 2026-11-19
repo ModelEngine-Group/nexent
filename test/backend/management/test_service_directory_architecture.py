@@ -171,6 +171,8 @@ MIGRATED_MODULES = {
     'knowledge_base/quota_rules.py',
     'knowledge_base/quota_read.py',
     'knowledge_base/quota_usage_read.py',
+    'knowledge_base/quota_usage.py',
+    'knowledge_base/usage_projection.py',
     'knowledge_base/quota_authorization.py',
     'knowledge_base/seed_documents.py',
     'knowledge_base/source_reference.py',

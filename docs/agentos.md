@@ -453,4 +453,4 @@ Infrastructure 的中立 `VectorStore.group` 负责命名空间条件、有限�
 
 响应 `KnowledgeCollectionsUsageResult.items` 保持请求顺序，每项给出knowledge_id、expected_revision、present。已有集合的statistics仅含record_count、source_count、size_bytes，或给出有限statistics_error；缺集合返回present=false，不附统计或错误。它不返回模型、源路径、正文、维度或provider细节。计数是物理观测，源文件配额仍以Management的COMMITTED ledger为准。
 
-该用途允许实际用户统计本租户全量KB，包含他人的PRIVATE KB；foreign仍只允许SU/ASSET_OWNER。它不授予正文、文件源或执行权限，普通读接口继续各自DAC。默认Runtime总预算30秒，客户端总截止40秒，不重试，客户端超时会关闭请求传输。Management公开配额usage/缓存和旧ES调用尚在迁移。
+该用途允许实际用户统计本租户全量KB，包含他人的PRIVATE KB；foreign仍只允许SU/ASSET_OWNER。它不授予正文、文件源或执行权限，普通读接口继续各自DAC。默认Runtime总预算30秒，客户端总截止40秒，不重试，客户端超时会关闭请求传输。Management公开 `/tenants/{tenant_id}/quota/usage` 已通过此接口获取ES物理观测，PG目录、配置和COMMITTED账本经SI读取。整租户source总量包含孤儿账本，USER/DEV的breakdown仍在Management按可管理KB过滤。缓存仍为60秒并支持force_refresh，同步剩余调用方与新异步入口共用刷新许可及失效代次；命中缓存前后仍校验当前实际用户和租户。平台/个人配额等剩余旧调用仍待迁移，当前不代表全部QuotaService ES访问已经移除。

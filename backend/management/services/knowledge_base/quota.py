@@ -7,9 +7,7 @@ from management.services.knowledge_base.quota_common import (
     _UNSET,
     ASSET_OWNER_TENANT_ID,
     CACHE_TTL_SECONDS,
-    DEFAULT_CRITICAL_THRESHOLD,
     DEFAULT_TENANT_ID,
-    DEFAULT_WARNING_THRESHOLD,
     GB,
     KEY_CRITICAL_THRESHOLD_PCT,
     KEY_HARD_LIMIT_EDITABLE,
@@ -233,38 +231,3 @@ class QuotaService(
         allocated=sum(row['quota_limit_bytes'] for row in quotas if row['quota_limit_bytes'] is not None)
         finite=sum(1 for row in quotas if row['quota_limit_bytes'] is not None)
         return allocation_summary(hard_limit,allocated,len(quotas),finite)
-
-    @staticmethod
-    def _compute_kb_warning_level(
-        usage_pct: Optional[float],
-        warning_threshold: int = DEFAULT_WARNING_THRESHOLD,
-        critical_threshold: int = DEFAULT_CRITICAL_THRESHOLD,
-    ) -> str:
-        """Compute KB-level warning: normal, warning, critical, exceeded.
-        Uses tenant-configured thresholds for consistency."""
-        if usage_pct is None:
-            return "normal"
-        if usage_pct >= 100:
-            return "exceeded"
-        if usage_pct >= critical_threshold:
-            return "critical"
-        if usage_pct >= warning_threshold:
-            return "warning"
-        return "normal"
-
-    @staticmethod
-    def _compute_tenant_warning_level(
-        usage_pct: Optional[float],
-        critical_threshold: int = DEFAULT_CRITICAL_THRESHOLD,
-        warning_threshold: int = DEFAULT_WARNING_THRESHOLD,
-    ) -> str:
-        """Compute tenant-level warning: normal, warning, critical, blocked."""
-        if usage_pct is None:
-            return "normal"
-        if usage_pct >= 100:
-            return "blocked"
-        if usage_pct >= critical_threshold:
-            return "critical"
-        if usage_pct >= warning_threshold:
-            return "warning"
-        return "normal"

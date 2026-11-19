@@ -28,6 +28,7 @@ from management.services.knowledge_base.storage import (
     get_tenant_committed_source_bytes,
 )
 from management.services.knowledge_base.usage_cache import (
+    CACHE_TTL_SECONDS as CACHE_TTL_SECONDS,  # noqa: PLC0414 - Export the shared TTL to current quota policies.
     _usage_cache, _usage_refresh_locks, invalidate_usage_cache, store_usage_cache, usage_refresh_guard,
 )
 
@@ -61,7 +62,6 @@ def _is_displayable_tenant_id(
 
 # Constants
 GB = 1024 * 1024 * 1024
-CACHE_TTL_SECONDS = 60
 DEFAULT_WARNING_THRESHOLD = 80
 DEFAULT_CRITICAL_THRESHOLD = 95
 

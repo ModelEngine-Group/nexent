@@ -7,7 +7,6 @@ from management.services.knowledge_base.quota_common import (
     DEFAULT_CRITICAL_THRESHOLD,
     DEFAULT_TENANT_ID,
     DEFAULT_WARNING_THRESHOLD,
-    GB,
     KEY_CRITICAL_THRESHOLD_PCT,
     KEY_HARD_LIMIT_EDITABLE,
     KEY_PERSONAL_KB_QUOTA_DEFAULT,
@@ -32,8 +31,6 @@ from management.services.knowledge_base.quota_common import (
     _personal_quota_key,
     _platform_allocation_lock,
     _usage_cache,
-    usage_refresh_guard,
-    store_usage_cache,
     bytes_to_readable,
     delete_config_by_tenant_config_id,
     get_committed_bytes_by_kb,
@@ -48,11 +45,15 @@ from management.services.knowledge_base.quota_common import (
     insert_config,
     logger,
     logging,
+    store_usage_cache,
     threading,
     time,
     update_config_by_tenant_config_id,
     update_knowledge_record,
+    usage_refresh_guard,
 )
+from management.services.knowledge_base.quota_formatting import parse_store_size
+from management.services.knowledge_base.usage_projection import project_usage
 
 
 class KnowledgeUsageAccounting:
@@ -162,7 +163,7 @@ class KnowledgeUsageAccounting:
                     else {}
                 )
                 store_size = base_info.get("store_size")
-                es_bytes = self._parse_store_size(store_size)
+                es_bytes = parse_store_size(store_size)
                 doc_count = base_info.get("doc_count", 0) or 0
                 chunk_count = base_info.get("chunk_count", 0) or 0
 
@@ -530,156 +531,10 @@ class KnowledgeUsageAccounting:
             return dict(usage_data)
 
     def _compute_usage(self) -> Dict[str, Any]:
-        """
-        Compute actual storage usage from the committed source-file ledger.
-        Elasticsearch physical index size is returned separately for
-        observability and is never part of the quota metric.
-        """
+        """Keep remaining synchronous consumers on the shared response rules."""
         kb_list = get_knowledge_info_by_tenant_id(self.tenant_id)
-        warning_config = self.get_warning_config()
-        tenant_warning_threshold = warning_config["warning_threshold_pct"]
-        tenant_critical_threshold = warning_config["critical_threshold_pct"]
-        hard_limit_info = self.get_hard_limit()
-
-        # Quota enforcement must always use every KB in the tenant, regardless
-        # of the requesting user's KB visibility.
-        storage_stats = self._get_kb_storage_stats(
-            kb_list,
-            exclude_datamate=True,
-        )
-        stats_lookup = {
-            name: {
-                # Quota usage is based on source files. Keep ES bytes in a
-                # separate field so Lucene segment reclamation cannot affect
-                # admission checks or displayed quota usage.
-                "bytes": detail.get("source_size_bytes", 0),
-                "source_bytes": detail.get("source_size_bytes", 0),
-                "total_bytes": detail.get("source_size_bytes", 0),
-                "es_bytes": detail.get("store_size_bytes", 0),
-                "file_count": detail.get("doc_count", 0),
-            }
-            for name, detail in storage_stats.get("details", {}).items()
-        }
-        tenant_minio_bytes = get_tenant_committed_source_bytes(self.tenant_id)
-
-        breakdown = []
-        total_es_bytes = storage_stats.get("total_es_bytes", 0)
-        total_files = 0
-
-        for kb in kb_list:
-            index_name = kb.get("index_name", "")
-            kb_id = kb.get("knowledge_id")
-            kb_name = kb.get("knowledge_name", index_name)
-            soft_quota_bytes = kb.get("quota_limit_bytes")
-
-            kb_stats = stats_lookup.get(index_name, {})
-            kb_actual_bytes = kb_stats.get("total_bytes", 0)
-            kb_es_bytes = kb_stats.get("es_bytes", 0)
-            kb_file_count = kb_stats.get("file_count", 0)
-
-            total_files += kb_file_count
-
-            # Compute KB-level warning
-            kb_usage_pct = None
-            if soft_quota_bytes and soft_quota_bytes > 0:
-                kb_usage_pct = round(kb_actual_bytes / soft_quota_bytes * 100, 2)
-            kb_warning_level = self._compute_kb_warning_level(
-                kb_usage_pct,
-                warning_threshold=tenant_warning_threshold,
-                critical_threshold=tenant_critical_threshold,
-            )
-
-            breakdown.append(
-                {
-                    "knowledge_id": kb_id,
-                    "knowledge_name": kb_name,
-                    "index_name": index_name,
-                    "soft_quota_bytes": soft_quota_bytes,
-                    "soft_quota_readable": _bytes_to_readable(soft_quota_bytes),
-                    "actual_bytes": kb_actual_bytes,
-                    "actual_readable": _bytes_to_readable(kb_actual_bytes),
-                    "es_physical_bytes": kb_es_bytes,
-                    "es_physical_readable": _bytes_to_readable(kb_es_bytes),
-                    "usage_pct": kb_usage_pct,
-                    "file_count": kb_file_count,
-                    "kb_warning_level": kb_warning_level,
-                }
-            )
-
-        # Tenant totals include all active tenant ledger rows, including rows whose
-        # KB is no longer returned in the active KB list. This avoids silently
-        # dropping retained source objects from the tenant hard-limit calculation.
-        # The durable source-file ledger is the sole quota metric. ES physical
-        # bytes are observability data and are intentionally excluded from the
-        # hard-limit calculation because segment merges/reclamation are async.
-        total_bytes = tenant_minio_bytes
-
-        # Compute tenant-level warning
-        hard_limit_bytes = hard_limit_info.get("hard_limit_bytes")
-        tenant_usage_pct = None
-        if hard_limit_bytes and hard_limit_bytes > 0:
-            tenant_usage_pct = round(total_bytes / hard_limit_bytes * 100, 2)
-        tenant_warning_level = self._compute_tenant_warning_level(
-            tenant_usage_pct,
-            warning_config["critical_threshold_pct"],
-            warning_config["warning_threshold_pct"],
-        )
-
-        available_bytes = None
-        if hard_limit_bytes:
-            available_bytes = max(0, hard_limit_bytes - total_bytes)
-
-        result = {
-            "total_bytes": total_bytes,
-            "total_readable": _bytes_to_readable(total_bytes),
-            "es_physical_bytes": total_es_bytes,
-            "es_physical_readable": _bytes_to_readable(total_es_bytes),
-            "kb_count": len(kb_list),
-            "file_count": total_files,
-            "hard_limit_bytes": hard_limit_bytes,
-            "hard_limit_readable": hard_limit_info.get("hard_limit_readable"),
-            "available_bytes": available_bytes,
-            "available_readable": _bytes_to_readable(available_bytes),
-            "usage_pct": tenant_usage_pct,
-            "tenant_warning_level": tenant_warning_level,
-            "warning_enabled": warning_config["warning_enabled"],
-            "warning_threshold_pct": warning_config["warning_threshold_pct"],
-            "critical_threshold_pct": warning_config["critical_threshold_pct"],
-            "breakdown": breakdown,
-        }
-
-        # Add summary when detail is provided
-        summary = self.get_quota_summary()
-        result["soft_allocated_total_bytes"] = summary["soft_allocated_total_bytes"]
-        result["soft_allocated_readable"] = summary["soft_allocated_readable"]
-        result["oversubscription_ratio"] = summary["oversubscription_ratio"]
-        result["kbs_with_quota"] = summary["kbs_with_quota"]
-
-        return result
-
-    @staticmethod
-    def _parse_store_size(size_str: Any) -> int:
-        """Parse store_size string like '1.5 GB' or '500 MB' into bytes."""
-        if size_str is None:
-            return 0
-        if isinstance(size_str, (int, float)):
-            return int(size_str)
-        if not isinstance(size_str, str) or not size_str.strip():
-            return 0
-        try:
-            parts = size_str.strip().split()
-            if len(parts) != 2:
-                return 0
-            value = float(parts[0])
-            unit = parts[1].upper()
-            if unit == "GB":
-                return int(value * GB)
-            elif unit == "MB":
-                return int(value * 1024 * 1024)
-            elif unit == "KB":
-                return int(value * 1024)
-            elif unit == "B":
-                return int(value)
-            return 0
-        except (ValueError, IndexError):
-            return 0
+        warning = self.get_warning_config()
+        hard = self.get_hard_limit()
+        storage_stats = self._get_kb_storage_stats(kb_list, exclude_datamate=True)
+        source_bytes = get_tenant_committed_source_bytes(self.tenant_id)
+        return project_usage(kb_list, storage_stats, source_bytes, hard, warning, self.get_quota_summary())

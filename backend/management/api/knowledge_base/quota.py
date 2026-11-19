@@ -32,11 +32,11 @@ from management.services.knowledge_base.inventory import (
 from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.quota_read import read_tenant_quota
+from management.services.knowledge_base.quota_usage import TenantQuotaUsage
 from management.services.permission.identity.session import (
     authenticate,
     get_current_user_id,
 )
-from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from permissions.depends import require
 from permissions.models import CurrentUser
@@ -283,22 +283,6 @@ def delete_tenant_quota(
         )
 
 
-def _read_quota_usage(tenant_id, authorization, force_refresh, detail, *, context):
-    context.remaining()
-    user_id, auth_tenant_id = get_current_user_id(authorization)
-    role = _get_user_role(authorization)
-    if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail="Cannot access usage data for another tenant",
-        )
-
-    service = QuotaService(tenant_id, user_id)
-    usage = service.get_usage(force_refresh=force_refresh, detail=detail)
-    context.remaining()
-    return user_id, auth_tenant_id, role, usage
-
-
 @tenant_quota_router.get("/{tenant_id}/quota/usage")
 async def get_tenant_quota_usage(
     tenant_id: str = Path(..., description="Tenant ID"),
@@ -310,16 +294,20 @@ async def get_tenant_quota_usage(
     Get tenant storage usage with optional per-KB breakdown.
     Accessible to any authenticated tenant user.
     """
+    auth_tenant_id = None
     try:
+        user_id, auth_tenant_id = get_current_user_id(authorization)
         async with knowledge_listing_operation() as context:
-            user_id, auth_tenant_id, role, usage = await run_blocking('knowledge-quota-usage', _read_quota_usage,
-                tenant_id, authorization, force_refresh, detail, context=context, lane='control-io', owner='management.knowledge_base')
+            role, usage = await TenantQuotaUsage().read(tenant_id, ServicePrincipal(user_id, auth_tenant_id),
+                force_refresh=force_refresh, detail=detail, context=context)
             if detail and has_any_role(role, {'USER','DEV'}):
                 manageable_index_names = await _get_manageable_index_names(tenant_id, user_id, auth_tenant_id, context=context)
                 usage['breakdown'] = [item for item in usage.get('breakdown', []) if item.get('index_name') in manageable_index_names]
             return JSONResponse(status_code=HTTPStatus.OK, content=usage)
     except ScopeDenied as exc:
-        raise HTTPException(status_code=403, detail="No permission to list knowledge bases") from exc
+        message = ("Cannot access usage data for another tenant" if auth_tenant_id is not None and tenant_id != auth_tenant_id
+                   else "No permission to list knowledge bases")
+        raise HTTPException(status_code=403, detail=message) from exc
     except (TimeoutError, DeadlineExceeded):
         return JSONResponse(status_code=504, content={"message": "Knowledge base list timed out"})
     except HTTPException:

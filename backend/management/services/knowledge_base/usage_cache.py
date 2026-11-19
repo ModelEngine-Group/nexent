@@ -7,6 +7,8 @@ from concurrent.futures import Future
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
+CACHE_TTL_SECONDS = 60
+
 # In-memory cache for usage data
 _usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _usage_refresh_locks = {}

@@ -35,6 +35,15 @@ class TenantQuotaReader:
         roles = quota_identity_roles(identity, actor, context=context)
         if tenant != actor.tenant_id and not has_any_role(roles, {"SU", "ASSET_OWNER"}):
             raise ScopeDenied()
+        return roles
+
+    def authorize(self, tenant, actor, *, context):
+        """Recheck current identity without opening the target records."""
+        context.remaining()
+        with self.ports(actor, context=context) as (identity, _):
+            roles = self._authorize(identity, actor, tenant, context)
+            context.remaining()
+            return roles
 
     def read(self, tenant, actor, *, context):
         context.remaining()

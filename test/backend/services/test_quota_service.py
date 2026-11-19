@@ -6,21 +6,26 @@ Covers: config methods, per-KB quota, usage tracking, warning levels,
 quota enforcement, summary, and platform quota.
 """
 
-from test.backend.management.import_patching import patch_import_context
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
-from management.services.knowledge_base.quota import (
-    QuotaService,
-    QuotaExceededError,
-    _bytes_to_readable,
-    GB,
-    DEFAULT_WARNING_THRESHOLD,
-    DEFAULT_CRITICAL_THRESHOLD,
-    _usage_cache,
-)
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
+from management.services.knowledge_base.quota import (
+    GB,
+    QuotaExceededError,
+    QuotaService,
+    _bytes_to_readable,
+    _usage_cache,
+)
+from management.services.knowledge_base.quota_common import (
+    DEFAULT_CRITICAL_THRESHOLD,
+    DEFAULT_WARNING_THRESHOLD,
+)
+from management.services.knowledge_base.quota_formatting import parse_store_size
+from management.services.knowledge_base.usage_projection import warning_level
+
+from test.backend.management.import_patching import patch_import_context
 
 
 @pytest.fixture
@@ -102,51 +107,51 @@ class TestWarningLevelComputation:
     """Tests for _compute_kb_warning_level and _compute_tenant_warning_level."""
 
     def test_kb_normal_below_80(self):
-        assert QuotaService._compute_kb_warning_level(0) == "normal"
-        assert QuotaService._compute_kb_warning_level(50) == "normal"
-        assert QuotaService._compute_kb_warning_level(79.9) == "normal"
+        assert warning_level(0) == "normal"
+        assert warning_level(50) == "normal"
+        assert warning_level(79.9) == "normal"
 
     def test_kb_warning_80_to_95(self):
-        assert QuotaService._compute_kb_warning_level(80) == "warning"
-        assert QuotaService._compute_kb_warning_level(90) == "warning"
+        assert warning_level(80) == "warning"
+        assert warning_level(90) == "warning"
 
     def test_kb_critical_95_to_100(self):
-        assert QuotaService._compute_kb_warning_level(95) == "critical"
-        assert QuotaService._compute_kb_warning_level(99.9) == "critical"
+        assert warning_level(95) == "critical"
+        assert warning_level(99.9) == "critical"
 
     def test_kb_exceeded_100_plus(self):
-        assert QuotaService._compute_kb_warning_level(100) == "exceeded"
-        assert QuotaService._compute_kb_warning_level(150) == "exceeded"
+        assert warning_level(100) == "exceeded"
+        assert warning_level(150) == "exceeded"
 
     def test_kb_none_usage(self):
-        assert QuotaService._compute_kb_warning_level(None) == "normal"
+        assert warning_level(None) == "normal"
 
     def test_tenant_normal_below_80(self):
-        assert QuotaService._compute_tenant_warning_level(0) == "normal"
-        assert QuotaService._compute_tenant_warning_level(50) == "normal"
-        assert QuotaService._compute_tenant_warning_level(79) == "normal"
+        assert warning_level(0, terminal="blocked") == "normal"
+        assert warning_level(50, terminal="blocked") == "normal"
+        assert warning_level(79, terminal="blocked") == "normal"
 
     def test_tenant_warning_80_to_95(self):
-        assert QuotaService._compute_tenant_warning_level(80) == "warning"
-        assert QuotaService._compute_tenant_warning_level(90) == "warning"
-        assert QuotaService._compute_tenant_warning_level(94) == "warning"
+        assert warning_level(80, terminal="blocked") == "warning"
+        assert warning_level(90, terminal="blocked") == "warning"
+        assert warning_level(94, terminal="blocked") == "warning"
 
     def test_tenant_critical_95_to_100(self):
-        assert QuotaService._compute_tenant_warning_level(95) == "critical"
-        assert QuotaService._compute_tenant_warning_level(99) == "critical"
+        assert warning_level(95, terminal="blocked") == "critical"
+        assert warning_level(99, terminal="blocked") == "critical"
 
     def test_tenant_blocked_100_plus(self):
-        assert QuotaService._compute_tenant_warning_level(100) == "blocked"
-        assert QuotaService._compute_tenant_warning_level(200) == "blocked"
+        assert warning_level(100, terminal="blocked") == "blocked"
+        assert warning_level(200, terminal="blocked") == "blocked"
 
     def test_tenant_none_usage(self):
-        assert QuotaService._compute_tenant_warning_level(None) == "normal"
+        assert warning_level(None, terminal="blocked") == "normal"
 
     def test_custom_thresholds(self):
         # Custom warning=70, critical=85
-        assert QuotaService._compute_tenant_warning_level(75, 85, 70) == "warning"
-        assert QuotaService._compute_tenant_warning_level(90, 85, 70) == "critical"
-        assert QuotaService._compute_tenant_warning_level(60, 85, 70) == "normal"
+        assert warning_level(75, 85, 70, terminal="blocked") == "warning"
+        assert warning_level(90, 85, 70, terminal="blocked") == "critical"
+        assert warning_level(60, 85, 70, terminal="blocked") == "normal"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -190,7 +195,7 @@ class TestStoreSizeParsing:
         ],
     )
     def test_parse_store_size(self, raw_value, expected):
-        assert QuotaService._parse_store_size(raw_value) == expected
+        assert parse_store_size(raw_value) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -608,7 +613,10 @@ class TestPlatformQuota:
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
     def test_allocation_state_excludes_virtual_tenants(self):
-        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.constants import (
+            ASSET_OWNER_TENANT_ID,
+            DEFAULT_TENANT_ID,
+        )
 
         with patch(
             "management.db.configuration.tenant.get_all_tenant_ids",
@@ -975,8 +983,8 @@ class TestUsageTracking:
 
         assert result["total_bytes"] == expected_bytes
         assert result["breakdown"][0]["actual_bytes"] == expected_bytes
-        assert result["es_physical_bytes"] == quota_service._parse_store_size(es_size)
-        assert result["breakdown"][0]["es_physical_bytes"] == quota_service._parse_store_size(es_size)
+        assert result["es_physical_bytes"] == parse_store_size(es_size)
+        assert result["breakdown"][0]["es_physical_bytes"] == parse_store_size(es_size)
         assert result["file_count"] == 4
         assert result["breakdown"][0]["file_count"] == 4
 
@@ -1585,7 +1593,7 @@ class TestPersonalKbCapacity:
             for index_name, store_size in stats.items()
         }
         source_bytes_by_kb = {
-            kb["knowledge_id"]: QuotaService._parse_store_size(store_size)
+            kb["knowledge_id"]: parse_store_size(store_size)
             for kb, store_size in zip(kbs, stats.values())
         }
         mock_knowledge_db["get_committed_bytes_by_kb"].return_value = source_bytes_by_kb

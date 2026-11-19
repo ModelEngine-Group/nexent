@@ -8,7 +8,7 @@ with mocked authentication and database dependencies.
 """
 
 from contextlib import ExitStack
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from contracts.errors.codes import ErrorCode
@@ -28,6 +28,7 @@ from management.api.knowledge_base.quota import (
 )
 
 from backend.http.server.app_factory import create_app
+from infrastructure.agentos_identity import ServicePrincipal
 
 GB = 1024 * 1024 * 1024
 
@@ -45,12 +46,11 @@ def _make_test_app() -> FastAPI:
     return app
 
 
-@pytest.fixture(autouse=True)
-def quota_managed_boundary(mocker):
-    async def blocking(name, action, *args, **kwargs):
-        kwargs.pop('lane'); kwargs.pop('owner')
-        return action(*args, **kwargs)
-    return mocker.patch.object(quota_app, 'run_blocking', side_effect=blocking)
+@pytest.fixture
+def mock_tenant_usage(mocker):
+    service = mocker.patch.object(quota_app, 'TenantQuotaUsage').return_value
+    service.read = AsyncMock()
+    return service.read
 
 
 @pytest.fixture
@@ -285,8 +285,8 @@ class TestPutTenantQuota:
 class TestGetTenantQuotaUsage:
     """Integration tests for GET /tenants/{id}/quota/usage."""
 
-    def test_returns_usage_structure(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_usage.return_value = {
+    def test_returns_usage_structure(self, client, mock_auth_admin, mock_tenant_usage):
+        mock_tenant_usage.return_value = (('ADMIN',), {
             "total_bytes": 50 * GB,
             "total_readable": "50.0 GB",
             "kb_count": 3,
@@ -300,7 +300,7 @@ class TestGetTenantQuotaUsage:
             "warning_enabled": True,
             "warning_threshold_pct": 80,
             "critical_threshold_pct": 95,
-        }
+        })
 
         resp = client.get("/api/tenants/test-tenant/quota/usage")
         assert resp.status_code == 200
@@ -310,10 +310,10 @@ class TestGetTenantQuotaUsage:
         assert data["tenant_warning_level"] == "normal"
 
     def test_returns_composite_values_without_component_fields(
-        self, client, mock_auth_admin, mock_quota_service
+        self, client, mock_auth_admin, mock_tenant_usage
     ):
         composite_bytes = 500 * 1024 * 1024
-        mock_quota_service.get_usage.return_value = {
+        mock_tenant_usage.return_value = (('ADMIN',), {
             "total_bytes": composite_bytes,
             "total_readable": "500.0 MB",
             "kb_count": 1,
@@ -339,7 +339,7 @@ class TestGetTenantQuotaUsage:
                 "file_count": 1,
                 "kb_warning_level": "normal",
             }],
-        }
+        })
 
         response = client.get("/api/tenants/test-tenant/quota/usage?detail=true")
 
@@ -351,9 +351,9 @@ class TestGetTenantQuotaUsage:
         assert "es_bytes" not in data
 
     def test_unlimited_tenant_preserves_null_limit_fields(
-        self, client, mock_auth_admin, mock_quota_service
+        self, client, mock_auth_admin, mock_tenant_usage
     ):
-        mock_quota_service.get_usage.return_value = {
+        mock_tenant_usage.return_value = (('ADMIN',), {
             "total_bytes": 300,
             "total_readable": "300 B",
             "kb_count": 1,
@@ -367,7 +367,7 @@ class TestGetTenantQuotaUsage:
             "warning_enabled": True,
             "warning_threshold_pct": 80,
             "critical_threshold_pct": 95,
-        }
+        })
 
         response = client.get("/api/tenants/test-tenant/quota/usage")
 
@@ -378,8 +378,8 @@ class TestGetTenantQuotaUsage:
         assert data["available_bytes"] is None
         assert data["usage_pct"] is None
 
-    def test_detail_includes_breakdown(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_usage.return_value = {
+    def test_detail_includes_breakdown(self, client, mock_auth_admin, mock_tenant_usage):
+        mock_tenant_usage.return_value = (('ADMIN',), {
             "total_bytes": 50 * GB,
             "total_readable": "50.0 GB",
             "kb_count": 2,
@@ -397,7 +397,7 @@ class TestGetTenantQuotaUsage:
             "soft_allocated_total_bytes": 30 * GB,
             "oversubscription_ratio": 0.3,
             "kbs_with_quota": 1,
-        }
+        })
 
         resp = client.get("/api/tenants/test-tenant/quota/usage?detail=true")
         assert resp.status_code == 200
@@ -405,8 +405,8 @@ class TestGetTenantQuotaUsage:
         assert "breakdown" in data
         assert len(data["breakdown"]) == 2
 
-    def test_force_refresh_param_accepted(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_usage.return_value = {
+    def test_force_refresh_param_accepted(self, client, mock_auth_admin, mock_tenant_usage):
+        mock_tenant_usage.return_value = (('ADMIN',), {
             "total_bytes": 50 * GB,
             "total_readable": "50.0 GB",
             "kb_count": 2,
@@ -417,17 +417,17 @@ class TestGetTenantQuotaUsage:
             "warning_enabled": True,
             "warning_threshold_pct": 80,
             "critical_threshold_pct": 95,
-        }
+        })
 
         resp = client.get("/api/tenants/test-tenant/quota/usage?force_refresh=true")
         assert resp.status_code == 200
         # verify force_refresh was passed as True
-        mock_quota_service.get_usage.assert_called_with(force_refresh=True, detail=False)
+        mock_tenant_usage.assert_awaited_once_with('test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'), force_refresh=True, detail=False, context=ANY)
 
     def test_user_detail_filters_inaccessible_knowledge_bases(
-        self, client, mock_auth_user, mock_quota_service
+        self, client, mock_auth_user, mock_tenant_usage
     ):
-        mock_quota_service.get_usage.return_value = {
+        mock_tenant_usage.return_value = (('USER',), {
             "total_bytes": 5 * GB,
             "total_readable": "5 GB",
             "kb_count": 2,
@@ -450,7 +450,7 @@ class TestGetTenantQuotaUsage:
                     "kb_warning_level": "exceeded",
                 },
             ],
-        }
+        })
 
         with patch(
             "management.api.knowledge_base.quota._get_manageable_index_names",
@@ -581,8 +581,11 @@ class TestPlatformEndpoints:
 class TestTenantIsolation:
     """Integration tests for tenant data isolation."""
 
-    def test_admin_cannot_access_other_tenant_usage(self, client, mock_auth_user):
+    def test_admin_cannot_access_other_tenant_usage(self, client, mock_auth_user, mock_tenant_usage):
         """Tenant A user cannot access Tenant B's usage."""
+        from nexent.storage.errors import ScopeDenied
+
+        mock_tenant_usage.side_effect = ScopeDenied()
         resp = client.get("/api/tenants/tenant-b/quota/usage")
         assert resp.status_code == 403
 
