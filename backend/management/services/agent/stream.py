@@ -310,6 +310,11 @@ class AssistantMessageProjection:
 
         return chunk, data
 
+    def record_execution_fact(self, payload):
+        content = {key: payload[key] for key in ("content", "summary") if isinstance(payload.get(key), str)}
+        self._buffer_unit("execution_result", json.dumps(content, ensure_ascii=False), payload, False)
+        return self.units[-1]
+
     def _buffer_unit(self, kind, content, data, mergeable):
         if kind == "final_answer":
             self.final_answer_content = content

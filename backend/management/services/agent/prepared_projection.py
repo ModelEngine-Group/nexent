@@ -57,6 +57,7 @@ def _parse_frame(frame: bytes, expected: str):
 async def _consume_projection(resume, reference, user_id, tenant_id, projection, files, checkpoints):
     cursor = None
     index = 0
+    facts = {}
     for _ in range(2):
         response = await resume(AgentResume(**reference.model_dump(), after_event_id=cursor), user_id, tenant_id)
         try:
@@ -67,9 +68,19 @@ async def _consume_projection(resume, reference, user_id, tenant_id, projection,
                     kind, data, payload = _parse_frame(frame, next_id)
                     if kind == "agentos_terminal" and payload.get("status") in ("completed", "failed", "stopped"):
                         return payload["status"], index - 1
-                    if kind != "agentos_observer":
+                    if kind == "agentos_observer":
+                        _project_event(projection, files, checkpoints, data, payload, reference.run_id, user_id)
+                    elif kind == "agentos_execution_fact" and isinstance(payload.get("content"), str):
+                        facts[index] = projection.record_execution_fact(payload)
+                    elif kind == "agentos_execution_summary" and type(payload.get("fact_sequence")) is int:
+                        unit = facts.get(payload["fact_sequence"])
+                        summary = payload.get("summary")
+                        if unit is not None and isinstance(summary, str):
+                            content = json.loads(unit["unit_content"])
+                            content["summary"] = summary
+                            unit["content"] = unit["unit_content"] = json.dumps(content, ensure_ascii=False)
+                    else:
                         raise RuntimeServiceUnavailableError("Unexpected AgentOS projection event")
-                    _project_event(projection, files, checkpoints, data, payload, reference.run_id, user_id)
                     cursor = next_id
         except httpx.TransportError:
             # The last full frame is safe to retain; an incomplete frame is read again.
@@ -93,6 +104,8 @@ def _collect_checkpoint(checkpoints, content):
 
 
 def _project_event(projection, files, checkpoints, data, payload, run_id, user_id):
+    if payload.get("type") == "execution_result":
+        return
     if payload.get("type") == "history_summary":
         _collect_checkpoint(checkpoints, payload.get("content"))
     if payload.get("type") == "skill_artifact":

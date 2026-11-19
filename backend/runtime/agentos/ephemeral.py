@@ -190,7 +190,7 @@ async def _open_ephemeral(payload, actor):
     info.thread_execution_id = execution.execution_id
     metadata = AgentRunMetadata(
         user_id=actor.user_id, tenant_id=actor.tenant_id, agent_id=agent_id,
-        query=payload.input.query, language=payload.language, is_debug=True, memory_enabled=False,
+        query=payload.input.trace_query, language=payload.language, is_debug=True, memory_enabled=False,
         history_count=len(payload.input.history), minio_files_count=len(payload.input.attachment_refs),
         extra_metadata={"agentos_run_id": payload.run_id},
     )

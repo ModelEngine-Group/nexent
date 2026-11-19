@@ -34,6 +34,7 @@ from contracts.conversation import (
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.agentos import RUN_ID_PATTERN
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.models import KnowledgeRecord
 
@@ -264,7 +265,7 @@ def create_conversation(
         if knowledge_scope is not None:
             data["knowledge_scope"] = knowledge_scope
         if runtime_metadata is not None:
-            data["runtime_metadata"] = deepcopy(runtime_metadata)
+            data["runtime_metadata"] = deepcopy(strip_reserved_runtime_metadata_fields(runtime_metadata))
             data["runtime_metadata_version"] = 1
         if workbench_config is not None:
             data["workbench_config"] = deepcopy(workbench_config)
@@ -307,7 +308,7 @@ def create_conversation(
             "target": record.target if isinstance(getattr(record, "target", None), dict) else None,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
-            "runtime_metadata": record.runtime_metadata or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(record.runtime_metadata),
             "runtime_metadata_version": record.runtime_metadata_version or 0,
             "workbench_config": (
                 record.workbench_config if isinstance(getattr(record, "workbench_config", None), dict) else None
@@ -863,7 +864,7 @@ def branch_conversation(
             "delete_flag": "N",
             "agent_id": conversation.agent_id,
             "chat_mode": conversation.chat_mode,
-            "runtime_metadata": deepcopy(conversation.runtime_metadata) or {},
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(conversation.runtime_metadata)),
             "runtime_metadata_version": 1,
         }
         # SQLAlchemy serializes Python None bound to a JSONB column as the JSON
@@ -1044,7 +1045,7 @@ def branch_conversation(
             "agent_id": new_conversation.agent_id,
             "chat_mode": new_conversation.chat_mode or "execution",
             "knowledge_scope": new_conversation.knowledge_scope,
-            "runtime_metadata": new_conversation.runtime_metadata or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(new_conversation.runtime_metadata),
             "runtime_metadata_version": new_conversation.runtime_metadata_version or 0,
             "workbench_config": (
                 new_conversation.workbench_config
@@ -1567,7 +1568,12 @@ def get_conversation(
             stmt = stmt.where(ConversationRecord.created_by == user_id)
         # Execute the query
         record = session.scalars(stmt).first()
-        return None if record is None else as_dict(record)
+        if record is None:
+            return None
+        conversation = as_dict(record)
+        if "runtime_metadata" in conversation:
+            conversation["runtime_metadata"] = strip_reserved_runtime_metadata_fields(conversation["runtime_metadata"])
+        return conversation
 
 
 def resolve_conversation_runtime_metadata(
@@ -1597,14 +1603,14 @@ def resolve_conversation_runtime_metadata(
         if update_requested:
             if expected_version is not None and expected_version != current_version:
                 raise RuntimeMetadataVersionConflict(current_version)
-            record.runtime_metadata = deepcopy(request_metadata or {})
+            record.runtime_metadata = deepcopy(strip_reserved_runtime_metadata_fields(request_metadata))
             record.runtime_metadata_version = current_version + 1
             record.updated_by = user_id
             record.update_time = func.current_timestamp()
             session.flush()
 
         return {
-            "runtime_metadata": deepcopy(record.runtime_metadata or {}),
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(record.runtime_metadata)),
             "runtime_metadata_version": int(record.runtime_metadata_version or 0),
         }
 
@@ -1716,7 +1722,7 @@ def replace_conversation_workbench_and_metadata(
         record.workbench_config = normalized
         record.workbench_config_version = current_config_version + int(config_changed)
         record.knowledge_scope = deepcopy(normalized.get("knowledge_scope"))
-        record.runtime_metadata = deepcopy(metadata)
+        record.runtime_metadata = deepcopy(strip_reserved_runtime_metadata_fields(metadata))
         record.runtime_metadata_version = current_metadata_version + 1
         record.updated_by = user_id
         record.update_time = func.current_timestamp()
@@ -1726,7 +1732,7 @@ def replace_conversation_workbench_and_metadata(
             "workbench_config_version": int(record.workbench_config_version),
             "agent_id": record.agent_id,
             "knowledge_scope": deepcopy(record.knowledge_scope),
-            "runtime_metadata": deepcopy(record.runtime_metadata),
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(record.runtime_metadata)),
             "runtime_metadata_version": int(record.runtime_metadata_version),
         }
 
@@ -2452,6 +2458,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
                 ConversationMessageUnit.message_id == ConversationMessage.message_id,
                 ConversationMessageUnit.delete_flag == "N",
                 ConversationMessageUnit.unit_type.is_not(None),
+                ConversationMessageUnit.unit_type != "execution_result",
             )
             .scalar_subquery()
         )
@@ -2527,7 +2534,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             "agent_system_key": conversation.get("agent_system_key"),
             "chat_mode": conversation.get("chat_mode") or "execution",
             "knowledge_scope": conversation.get("knowledge_scope"),
-            "runtime_metadata": conversation.get("runtime_metadata") or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(conversation.get("runtime_metadata")),
             "runtime_metadata_version": int(conversation.get("runtime_metadata_version") or 0),
             "workbench_config": conversation.get("workbench_config"),
             "workbench_config_version": int(conversation.get("workbench_config_version") or 0),

@@ -1,58 +1,51 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""The old background RPC delegates preparation without starting a local worker."""
+"""Management forwards scoped background work through the prepared AgentOS path."""
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
 
-from contracts.agentos import BackgroundRun, TrackedBackgroundResult
+from contracts.agent import AgentRequest
+from contracts.agentos import AgentRunLookup, TrackedBackgroundResult
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
 from infrastructure.agentos_identity import ServicePrincipal
-from runtime.agentos import management_dispatch
-from runtime.api.agent import execution
+from management.db.automation import repository
+from management.services.agent import background, runtime_client
+
+
+ACTOR = ServicePrincipal("actor", "tenant")
+RUN_ID = "a" * 32
+REQUEST = AgentRequest(query="hello", conversation_id=42, agent_id=7, model_id=11)
 
 
 @pytest.mark.asyncio
-async def test_default_background_dispatch_keeps_actor_request_and_run_id(mocker):
-    async def inline(_task, function, *args, **kwargs):
-        kwargs.pop("lane", None)
-        kwargs.pop("owner", None)
-        return function(*args, **kwargs)
+async def test_background_dispatch_keeps_actor_request_and_run_id(mocker):
+    result = TrackedBackgroundResult(run_id=RUN_ID, conversation_id=42, assistant_message_id=61, chunks=3)
+    dispatch = mocker.patch.object(background, "dispatch_background", return_value=result)
+    transport = mocker.patch.object(runtime_client, "_agentos_client").return_value
 
-    actor = ServicePrincipal("actor", "tenant")
-    payload = BackgroundRun(run_id="a" * 32, request={"query": "hello", "conversation_id": 42, "model_id": 7})
-    result = TrackedBackgroundResult(run_id=payload.run_id, conversation_id=42, assistant_message_id=61, chunks=3)
-    mocker.patch.object(execution, "run_blocking", side_effect=inline)
-    owned = mocker.patch.object(execution, "_require_owned_conversation")
-    mocker.patch.object(execution, "read_execution", return_value=None)
-    local = mocker.patch.object(execution, "run_agent_stream", side_effect=AssertionError("local business preparation"))
-    forward = AsyncMock(return_value=result)
-    mocker.patch.object(management_dispatch, "management_client", return_value=SimpleNamespace(dispatch_background=forward))
-    assert await execution.run_agentos_tracked_background(payload, actor) == result
-    owned.assert_called_once_with(42, actor)
-    sent, user, tenant = forward.await_args.args
-    assert (user, tenant, sent.run_id, sent.request) == (actor.user_id, actor.tenant_id, payload.run_id, payload.request)
-    assert sent.preparation == "management"
-    local.assert_not_called()
+    assert await runtime_client.forward_tracked_background(REQUEST, RUN_ID, ACTOR.user_id, ACTOR.tenant_id) == result
+
+    dispatch.assert_awaited_once()
+    request, actor = dispatch.await_args.args
+    assert actor == ACTOR
+    assert request.run_id == RUN_ID and request.request == REQUEST.model_dump(mode="json")
+    assert transport.mock_calls == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure,status", [(RuntimeServiceTimeoutError, 504), (RuntimeServiceUnavailableError, 503)])
-async def test_management_handoff_failure_cannot_start_a_local_background_worker(mocker, failure, status):
-    async def inline(_task, function, *args, **kwargs):
-        return function(*args)
+@pytest.mark.parametrize("failure", [RuntimeServiceTimeoutError, RuntimeServiceUnavailableError])
+async def test_transport_failure_checks_the_same_scope_without_redispatch(mocker, failure):
+    error = failure("controlled transport failure")
+    dispatch = mocker.patch.object(background, "dispatch_background", side_effect=error)
+    model = mocker.patch.object(repository, "get_run_by_runtime_id", return_value=None)
+    transport = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    transport.inspect_run = AsyncMock(return_value=None)
 
-    mocker.patch.object(execution, "run_blocking", side_effect=inline)
-    mocker.patch.object(execution, "_require_owned_conversation")
-    forward = mocker.patch.object(execution, "dispatch_signed_background", new=AsyncMock(side_effect=failure("unavailable")))
-    local = mocker.patch.object(execution, "run_agent_stream", side_effect=AssertionError("local fallback"))
-    with pytest.raises(HTTPException) as rejected:
-        await execution.run_agentos_tracked_background(
-            BackgroundRun(run_id="a" * 32, request={"query": "hello", "conversation_id": 42}),
-            ServicePrincipal("actor", "tenant"),
-        )
-    assert rejected.value.status_code == status
-    forward.assert_awaited_once()
-    local.assert_not_called()
+    with pytest.raises(failure) as caught:
+        await runtime_client.forward_tracked_background(REQUEST, RUN_ID, ACTOR.user_id, ACTOR.tenant_id)
+
+    assert caught.value is error
+    dispatch.assert_awaited_once()
+    model.assert_called_once_with(RUN_ID, "tenant", "actor", conversation_id=42)
+    transport.inspect_run.assert_awaited_once_with(AgentRunLookup(run_id=RUN_ID, conversation_id=42), "actor", "tenant")

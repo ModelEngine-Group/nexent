@@ -40,7 +40,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(prepared_run, "runtime_state_service", SimpleNamespace(enabled=True))
     info = SimpleNamespace(
         attempt_outcome="completed", thread_future=None, workspace_path=None,
-        agent_config=SimpleNamespace(pre_run_tool_events=[]),
+        agent_config=SimpleNamespace(pre_run_tool_events=[]), observer=SimpleNamespace(),
     )
     io = SimpleNamespace(
         begin=Mock(), track=Mock(), journal=Mock(), finish=Mock(return_value=True), mark=Mock(return_value=True),

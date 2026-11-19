@@ -4,6 +4,7 @@
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentRunReference, TrackedBackgroundResult
 from contracts.conversation import MessageSource
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.errors.exceptions import (
     AgentBackgroundError, RuntimeMetadataVersionConflict, RuntimeServiceUnavailableError, RuntimeUpstreamError,
     WorkbenchConfigVersionConflict, WorkbenchError,
@@ -58,7 +59,10 @@ async def _prepare(request, reference, actor):
     if snapshot.memory_enabled:
         user_turn["memory_agent_id"] = snapshot.resource.agent_id
     if request.metadata is not None:
-        user_turn["metadata_update"] = {"expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata}
+        user_turn["metadata_update"] = {
+            "expected_version": snapshot.runtime_metadata_version - 1,
+            "value": strip_reserved_runtime_metadata_fields(request.metadata),
+        }
     if workbench is not None:
         user_turn["workbench_update"] = {
             "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,

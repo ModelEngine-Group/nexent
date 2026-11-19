@@ -4,7 +4,6 @@
 
 import asyncio
 from contextlib import nullcontext
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -14,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb import agent_execution
 from runtime.agentos import prepared_run
+from test.backend.app.test_agentos_prepared_run import payload
 
 
 ACTOR = ServicePrincipal("owner", "tenant")
@@ -22,7 +22,7 @@ IDENTITY = agent_execution.RunIdentity("tenant", "owner", 42, RUN_ID)
 
 
 @pytest.mark.asyncio
-async def test_prepared_admission_tracks_the_same_identity_as_its_journal(mocker):
+async def test_prepared_admission_tracks_the_same_identity_as_its_journal(mocker, payload):
     async def inline(_task, function, *args):
         return function(*args)
 
@@ -33,7 +33,7 @@ async def test_prepared_admission_tracks_the_same_identity_as_its_journal(mocker
     producer = mocker.patch.object(prepared_run, "_produce", new_callable=AsyncMock)
     tasks = set()
     mocker.patch.object(prepared_run, "agent_stream_producer_tasks", tasks)
-    payload = SimpleNamespace(conversation_id=42, run_id=RUN_ID)
+    registry = mocker.patch.object(prepared_run, "agent_run_manager")
 
     result = await prepared_run._admit(payload, ACTOR)
     await asyncio.gather(*tasks)
@@ -43,7 +43,10 @@ async def test_prepared_admission_tracks_the_same_identity_as_its_journal(mocker
     track.assert_called_once_with(IDENTITY)
     journal.assert_called_once_with("tenant", "owner", 42, RUN_ID)
     journal.return_value.start.assert_called_once_with()
-    producer.assert_awaited_once_with(payload, ACTOR, IDENTITY, journal.return_value)
+    producer.assert_awaited_once()
+    assert producer.await_args.args[:4] == (payload, ACTOR, IDENTITY, journal.return_value)
+    registry.reserve_agent_capacity.assert_called_once_with(payload.resource.agent_id, prepared_run.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
+    registry.release_agent_capacity.assert_called_once_with(registry.reserve_agent_capacity.return_value)
     assert not tasks
 
 
@@ -63,7 +66,7 @@ def test_finishing_releases_live_registration_even_when_ledger_write_fails(mocke
 
 
 @pytest.mark.asyncio
-async def test_journal_start_failure_finishes_the_tracking_record_without_starting_a_producer(mocker):
+async def test_journal_start_failure_finishes_the_tracking_record_without_starting_a_producer(mocker, payload):
     async def inline(_task, function, *args):
         return function(*args)
 
@@ -74,7 +77,7 @@ async def test_journal_start_failure_finishes_the_tracking_record_without_starti
     journal.return_value.start.side_effect = RuntimeError("journal unavailable")
     finish = mocker.patch.object(prepared_run, "finish_execution")
     produce = mocker.patch.object(prepared_run, "_produce")
-    payload = SimpleNamespace(conversation_id=42, run_id=RUN_ID)
+    registry = mocker.patch.object(prepared_run, "agent_run_manager")
 
     with pytest.raises(HTTPException) as failure:
         await prepared_run._admit(payload, ACTOR)
@@ -82,3 +85,4 @@ async def test_journal_start_failure_finishes_the_tracking_record_without_starti
     assert failure.value.status_code == 503
     finish.assert_called_once_with(IDENTITY, "failed")
     produce.assert_not_called()
+    registry.release_agent_capacity.assert_called_once_with(registry.reserve_agent_capacity.return_value)

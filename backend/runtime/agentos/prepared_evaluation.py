@@ -66,6 +66,8 @@ from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_langchain import materialize_langchain_tools
 from runtime.agentos.prepared_local_tool import materialize_local_tools
 from runtime.agentos.prepared_mcp import PreparedMCP
+from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
@@ -413,6 +415,12 @@ def prepare_run_snapshot(
             raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
 
         models = [_materialize_model(binding, actor, payload.resource) for binding in bindings]
+        if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
+            header_metadata = payload.mcp_header_metadata if isinstance(payload, PreparedAgentRun) else None
+            apply_bound_mcp_headers(
+                list(mcp.hosts.values()), header_metadata, passthrough_allowed=header_metadata is not None,
+                agent_id=payload.resource.agent_id, run_id=workspace_run_id,
+            )
         user_context = None
         if mcp.hosts or payload.tool_caller is not None:
             user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
@@ -443,7 +451,7 @@ def prepare_run_snapshot(
             redis_client=get_redis_client() if agent_config.enable_planning and not debug else None,
         )
         if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
-            info.runtime_metadata = payload.runtime_metadata
+            info.runtime_metadata = strip_reserved_runtime_metadata_fields(payload.runtime_metadata)
         if isinstance(payload, PreparedAgentRun):
             info.runtime_metadata_version = payload.runtime_metadata_version
         info.context_input = build_authorized_context_input(info, historical_context)

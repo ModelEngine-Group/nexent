@@ -124,6 +124,7 @@ async def create_agent_run_info(
     authorized_knowledge_tools: dict | None = None,
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    user_query: str | None = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -134,6 +135,8 @@ async def create_agent_run_info(
     from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 
     run_input = build_evaluation_input(query, minio_files, history, user_id, tenant_id)
+    if user_query is not None and user_query != query:
+        run_input = run_input.model_copy(update={"user_query": user_query})
 
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)

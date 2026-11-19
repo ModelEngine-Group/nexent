@@ -4,7 +4,9 @@
 import asyncio
 import json
 import logging
+from concurrent.futures import Future
 from contextlib import aclosing
+from dataclasses import dataclass
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
@@ -13,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse
 
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentRunReference, PreparedAgentRun
-from contracts.constants.environment import RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import (
     ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
@@ -21,14 +23,30 @@ from infrastructure.rdb.agent_execution import (
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
+from nexent.core.agents.context.execution_history import ExecutionHistory
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.prepared_evaluation import (
     discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
 )
-from runtime.executions import agent_run_manager
+from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
 from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _AdmissionSlot:
+    """Hold one runtime slot for the lifetime of its worker."""
+
+    token: str
+    worker: Future | None = None
+
+    def release(self, _completed=None):
+        if self.worker is not None and not self.worker.done():
+            self.worker.add_done_callback(self.release)
+            return
+        agent_run_manager.release_agent_capacity(self.token)
 
 
 async def _control_io(task, function, *args):
@@ -48,7 +66,23 @@ async def _snapshot_chunks(info):
             yield chunk
 
 
-async def _run_snapshot(payload, actor, identity, journal):
+def _execution_record(history, event):
+    value = event.get("content")
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except ValueError:
+        return None, None
+    key = value.get("execution_key") if isinstance(value, dict) else None
+    record = history.get(key) if isinstance(key, str) else None
+    return (key, record) if record is not None and record.reference is None else (None, None)
+
+
+async def _append_event(journal, sequence, kind, payload):
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    await _control_io("agentos-prepared-event", journal.append, sequence, f"event: {kind}\ndata: {data}\n\n")
+
+
+async def _run_snapshot(payload, actor, identity, journal, slot=None):
     info = await load_prepared_run(payload, actor, prepare_run_snapshot)
     try:
         agent_run_manager.register_agent_run(identity.conversation_id, info, identity.user_id)
@@ -77,30 +111,71 @@ async def _run_snapshot(payload, actor, identity, journal):
         if not await _control_io("agentos-prepared-running", mark_running, identity, versions):
             status = "stopped"
             return status
+        metadata = AgentRunMetadata(
+            user_id=actor.user_id, tenant_id=actor.tenant_id, conversation_id=identity.conversation_id,
+            agent_id=payload.resource.agent_id, query=payload.input.trace_query, language=payload.language,
+            is_debug=False, memory_enabled=bool(payload.memory_enabled), history_count=len(payload.input.history),
+            minio_files_count=len(payload.input.attachment_refs), extra_metadata={"agentos_run_id": identity.run_id},
+        )
+        history = ExecutionHistory()
+        info.observer.execution_history = history
+        facts = {}
         index = 0
-        async with aclosing(_snapshot_chunks(info)) as chunks:
-            async for chunk in chunks:
-                # Re-encode JSON to keep each payload within one SSE data line.
-                observer_event = json.loads(chunk)
-                if observer_event.get("type") == "skill_artifact":
-                    raise ValueError("Prepared runs cannot journal local skill artifact paths")
-                event = json.dumps(observer_event, ensure_ascii=False, separators=(",", ":"))
+        with agent_monitoring_context(metadata):
+            async with aclosing(_snapshot_chunks(info)) as chunks:
+                async for chunk in chunks:
+                    # Re-encode JSON to keep each payload within one SSE data line.
+                    observer_event = json.loads(chunk)
+                    if observer_event.get("type") == "skill_artifact":
+                        raise ValueError("Prepared runs cannot journal local skill artifact paths")
+                    if observer_event.get("type") == "execution_result":
+                        key, record = _execution_record(history, observer_event)
+                        if record is None:
+                            continue
+                        index += 1
+                        fact = record.payload()
+                        for field in ("invocation_id", "tool_call_id"):
+                            if isinstance(observer_event.get(field), str):
+                                fact[field] = observer_event[field]
+                        await _append_event(journal, index, "agentos_execution_fact", fact)
+                        history.bind_run(key, identity.run_id, index)
+                        facts[index] = (record, fact.get("summary"))
+                        continue
+                    index += 1
+                    await _append_event(journal, index, "agentos_observer", observer_event)
+        for fact_index, (record, original_summary) in facts.items():
+            if record.summary and record.summary != original_summary:
                 index += 1
-                await _control_io(
-                    "agentos-prepared-event", journal.append, index, f"event: agentos_observer\ndata: {event}\n\n",
-                )
+                await _append_event(journal, index, "agentos_execution_summary", {
+                    "fact_sequence": fact_index, "summary": record.summary,
+                })
         status = info.attempt_outcome or "completed"
         return status
     except asyncio.CancelledError:
         status = "stopped"
         raise
     finally:
+        if slot is not None:
+            slot.worker = info.thread_future
         release_prepared_run(info, identity.conversation_id, identity.user_id, status)
 
 
-async def _produce(payload, actor, identity, journal):
+async def _finish_producer(runner, monitor, identity, journal, status):
+    for task in (runner, monitor):
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(runner, monitor, return_exceptions=True)
+    try:
+        finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
+        if finished:
+            await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
+    except (RedisError, SQLAlchemyError, RuntimeError):
+        logger.exception("Prepared AgentOS terminal will be reconciled run_id=%s", identity.run_id)
+
+
+async def _produce(payload, actor, identity, journal, slot=None):
     status = "failed"
-    runner = asyncio.create_task(_run_snapshot(payload, actor, identity, journal))
+    runner = asyncio.create_task(_run_snapshot(payload, actor, identity, journal, slot))
     monitor = asyncio.create_task(_wait_for_stop(identity))
     try:
         done, _ = await asyncio.wait((runner, monitor), return_when=asyncio.FIRST_COMPLETED)
@@ -115,20 +190,20 @@ async def _produce(payload, actor, identity, journal):
     except Exception:
         logger.exception("Prepared AgentOS run failed run_id=%s", identity.run_id)
     finally:
-        for task in (runner, monitor):
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(runner, monitor, return_exceptions=True)
-        try:
-            finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
-            if finished:
-                await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
-        except (RedisError, SQLAlchemyError, RuntimeError):
-            logger.exception("Prepared AgentOS terminal will be reconciled run_id=%s", identity.run_id)
+        # Keep joining the owned worker and terminal write during repeated shutdown cancellation.
+        cleanup = asyncio.create_task(_finish_producer(runner, monitor, identity, journal, status))
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
 
-async def _admit(payload, actor):
-    identity = RunIdentity(actor.tenant_id, actor.user_id, payload.conversation_id, payload.run_id)
+async def _start_journal(identity):
     try:
         await _control_io("agentos-prepared-begin", begin_execution, identity)
     except PermissionError as exc:
@@ -148,8 +223,22 @@ async def _admit(payload, actor):
         except (SQLAlchemyError, RuntimeError):
             logger.exception("Prepared AgentOS admission cleanup will be reconciled run_id=%s", identity.run_id)
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_EVENT_STORE_UNAVAILABLE"}) from exc
+    return journal
 
-    producer = asyncio.create_task(_produce(payload, actor, identity, journal), name=f"agentos-run:{identity.run_id}")
+
+async def _admit(payload, actor):
+    identity = RunIdentity(actor.tenant_id, actor.user_id, payload.conversation_id, payload.run_id)
+    key = payload.resource.agent_id
+    if payload.workbench_config_version is not None:
+        key = f"{actor.tenant_id}:workbench_main"
+    slot = _AdmissionSlot(agent_run_manager.reserve_agent_capacity(key, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS))
+    try:
+        journal = await _start_journal(identity)
+        producer = asyncio.create_task(_produce(payload, actor, identity, journal, slot), name=f"agentos-run:{identity.run_id}")
+    except BaseException:
+        slot.release()
+        raise
+    producer.add_done_callback(slot.release)
     agent_stream_producer_tasks.add(producer)
     producer.add_done_callback(agent_stream_producer_tasks.discard)
     return AgentRunReference(conversation_id=identity.conversation_id, run_id=identity.run_id)
@@ -180,6 +269,11 @@ def create_prepared_run_router() -> APIRouter:
             payload = PreparedAgentRun.model_validate_json(request.scope[BODY_KEY])
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-        return await start_prepared_run(payload, actor)
+        try:
+            return await start_prepared_run(payload, actor)
+        except AgentRunConcurrencyExceededError:
+            return JSONResponse({
+                "code": "RUNTIME_CAPACITY_FULL", "message": "Agent runtime is at capacity.", "retryable": True,
+            }, status_code=429, headers={"Retry-After": "1"})
 
     return router

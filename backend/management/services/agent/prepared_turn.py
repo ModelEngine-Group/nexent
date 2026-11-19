@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 from contracts.agentos import REPLAY_COUNT_HEADER, AgentMessageRunLookup, AgentResume, AgentRunLookup, AgentRunReference, AgentStop
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.conversation import MessageSource
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException, ForbiddenError, RunModelControlsError, RuntimeMetadataVersionConflict,
@@ -32,7 +33,7 @@ from nexent.core.concurrency import run_blocking
 logger = logging.getLogger(__name__)
 _STAGED_TIMEOUT = timedelta(minutes=1)
 _ACTIVE = {"starting", "running"}
-_REJECTED_STATUS = {400, 401, 403, 404, 409, 413, 422}
+_REJECTED_STATUS = {400, 401, 403, 404, 409, 413, 422, 429}
 
 
 async def _io(name, fn, *args, **kwargs):
@@ -109,6 +110,7 @@ async def start_turn(
     payload, request, user_id, tenant_id, client, *, include_journal_controls=True, metadata_from_northbound=False,
     saved_user: store.SavedUserTurn | None = None,
     omitted_user: bool = False,
+    complete_answer: bool = False,
 ):
     if omitted_user and (request.conversation_id is not None or request.is_debug or saved_user is not None):
         raise ValueError("Only an internal new conversation can omit its user message")
@@ -225,7 +227,8 @@ async def start_turn(
             user_turn["knowledge_update"] = {"expected": previous_scope, "value": desired_scope}
         if request.metadata is not None:
             user_turn["metadata_update"] = {
-                "expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata,
+                "expected_version": snapshot.runtime_metadata_version - 1,
+                "value": strip_reserved_runtime_metadata_fields(request.metadata),
             }
         turn = await _io("prepared-turn-stage", store.stage_turn, scope, reference, user_id, tenant_id, boundary,
                          user_turn, **creation)
@@ -277,6 +280,7 @@ async def start_turn(
     return await _stream_turn(
         confirmed, client, metadata_version=snapshot.runtime_metadata_version, created=initial_title is not None,
         include_journal_controls=include_journal_controls, workbench=workbench, knowledge=knowledge,
+        complete_answer=complete_answer,
     )
 
 
@@ -293,7 +297,7 @@ async def _cancel_unbound_turn(client, turn):
 
 async def _stream_turn(
     turn, client, *, metadata_version=None, resumed=False, created=False, include_journal_controls=True,
-    workbench=None, knowledge=None,
+    workbench=None, knowledge=None, complete_answer=False,
 ):
     reference = turn.reference
     cursor = AgentResume(**reference.model_dump())
@@ -305,6 +309,8 @@ async def _stream_turn(
         except Exception as exc:
             logger.warning("Deferred terminal conversation projection run_id=%s error=%s",
                            reference.run_id, type(exc).__name__)
+            return False
+        return True
 
     opening_events = []
     if workbench is not None:
@@ -319,6 +325,7 @@ async def _stream_turn(
     response = present_public_resume(
         upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created,
         include_journal_controls=include_journal_controls, opening_events=opening_events,
+        complete_answer=complete_answer,
     )
     if workbench is not None:
         response.headers["X-Workbench-Config-Version"] = str(workbench.version)

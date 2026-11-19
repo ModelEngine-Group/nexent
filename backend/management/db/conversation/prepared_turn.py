@@ -14,6 +14,7 @@ from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
@@ -381,6 +382,11 @@ def stage_turn(
     workbench = user_turn.get("workbench_update")
     knowledge = user_turn.get("knowledge_update")
     clarification = user_turn.get("clarification_response")
+    if (metadata := user_turn.get("metadata_update")) is not None:
+        user_turn = {
+            **user_turn,
+            "metadata_update": {**metadata, "value": strip_reserved_runtime_metadata_fields(metadata["value"])},
+        }
     with get_db_session() as session:
         if initial_title is None:
             if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
@@ -551,7 +557,7 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 conversation.updated_by = turn.user_id
                 conversation.update_time = func.now()
             if metadata_update is not None:
-                conversation.runtime_metadata = metadata_update["value"]
+                conversation.runtime_metadata = strip_reserved_runtime_metadata_fields(metadata_update["value"])
                 conversation.runtime_metadata_version = metadata_version + 1
                 conversation.updated_by = turn.user_id
                 conversation.update_time = func.now()
