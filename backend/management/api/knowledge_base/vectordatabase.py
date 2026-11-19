@@ -646,14 +646,14 @@ async def create_index_documents(
 @router.get("/{index_name}/files")
 async def get_index_files(
     index_name: str = Path(..., description="Name of the index"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Get all files from an index, including those that are not yet stored in ES"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_read_permission(index_name, user_id, tenant_id)
-        result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
+        from management.services.knowledge_base.file_listing import list_knowledge_files
+
+        result = await list_knowledge_files(index_name, ServicePrincipal(user_id, tenant_id))
 
         # The read permission check above authorized this page; project tags in
         # one batch so each row never issues its own assignment request.
@@ -664,6 +664,9 @@ async def get_index_files(
         )
         # Transform result to match frontend expectations
         return {"status": "success", "files": files}
+    except ScopeDenied as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                            detail="No permission to access this knowledge base") from error
     except HTTPException:
         raise
     except TokenExpiredError as e:

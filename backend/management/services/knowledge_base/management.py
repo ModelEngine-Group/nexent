@@ -29,9 +29,6 @@ from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
     logger,
 )
-from management.services.knowledge_base.files import (
-    KnowledgeBaseFileService,
-)
 from management.services.knowledge_base.permission import (
     CREATOR_PERMISSION,
     filter_accessible_indices,
@@ -44,7 +41,7 @@ from management.utils.serialization import (
 )
 
 
-class KnowledgeBaseManagementService(KnowledgeBaseFileService):
+class KnowledgeBaseManagementService:
     CREATOR_PERMISSION = CREATOR_PERMISSION
     resolve_knowledge_base_permission = staticmethod(resolve_knowledge_base_permission)
     require_knowledge_base_edit_permission = staticmethod(

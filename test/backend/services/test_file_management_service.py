@@ -395,11 +395,10 @@ class TestUploadFilesImpl:
         }
 
         with patch_import_context('management.services.file.service.upload_to_minio', AsyncMock(return_value=minio_return)) as mock_upload, \
-                patch_import_context('management.services.file.service.get_vector_db_core', MagicMock()) as mock_vdb_core, \
-                patch_import_context('management.services.file.service.ElasticSearchService.list_files', AsyncMock(return_value=existing)) as mock_list:
+                patch_import_context('management.services.knowledge_base.file_listing.list_knowledge_files', AsyncMock(return_value=existing)) as mock_list:
 
             errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="minio", file=[mock_file1, mock_file2], folder="folder", index_name="kb1")
+                destination="minio", file=[mock_file1, mock_file2], folder="folder", index_name="kb1", user_id="reader", uploader_tenant_id="tenant-a")
 
             assert errors == []
             assert uploaded_paths == ["folder/test.txt", "folder/doc.pdf"]
@@ -426,11 +425,10 @@ class TestUploadFilesImpl:
         existing = {"files": [{"file": "doc.pdf"}]}
 
         with patch_import_context('management.services.file.service.upload_to_minio', AsyncMock(return_value=minio_return)), \
-                patch_import_context('management.services.file.service.get_vector_db_core', MagicMock()), \
-                patch_import_context('management.services.file.service.ElasticSearchService.list_files', AsyncMock(return_value=existing)):
+                patch_import_context('management.services.knowledge_base.file_listing.list_knowledge_files', AsyncMock(return_value=existing)):
 
             errors, uploaded_paths, uploaded_names = await upload_files_impl(
-                destination="minio", file=[mock_file1, mock_file2], folder="folder", index_name="kb1")
+                destination="minio", file=[mock_file1, mock_file2], folder="folder", index_name="kb1", user_id="reader", uploader_tenant_id="tenant-a")
 
             assert errors == []
             assert uploaded_paths == ["folder/DOC.PDF", "folder/doc.pdf"]
@@ -458,8 +456,7 @@ class TestUploadFilesImpl:
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
                 patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=minio_results)), \
-                patch_import_context("management.services.file.service.get_vector_db_core", MagicMock()), \
-                patch_import_context("management.services.file.service.ElasticSearchService.list_files", AsyncMock(return_value=list_files_payload)), \
+                patch_import_context("management.services.knowledge_base.file_listing.list_knowledge_files", AsyncMock(return_value=list_files_payload)), \
                 patch.dict(sys.modules, {"management.services.knowledge_base.quota": quota_module}):
             yield
 
@@ -511,6 +508,7 @@ class TestUploadFilesImpl:
                 folder="folder",
                 index_name="kb-1",
                 user_id="user-1",
+                uploader_tenant_id="tenant-1",
             )
 
         assert result[2] == ["a_1.txt"]
@@ -577,8 +575,7 @@ class TestUploadFilesImpl:
         ]
 
         with patch_import_context('management.services.file.service.upload_to_minio', AsyncMock(return_value=minio_return)), \
-                patch_import_context('management.services.file.service.get_vector_db_core', MagicMock()), \
-                patch_import_context('management.services.file.service.ElasticSearchService.list_files', AsyncMock(side_effect=Exception("boom"))), \
+                patch_import_context('management.services.knowledge_base.file_listing.list_knowledge_files', AsyncMock(side_effect=Exception("boom"))), \
                 patch_import_context('management.services.file.service.logger') as mock_logger:
 
             errors, uploaded_paths, uploaded_names = await upload_files_impl(
@@ -600,8 +597,7 @@ class TestUploadFilesImpl:
         ]
 
         with patch_import_context('management.services.file.service.upload_to_minio', AsyncMock(return_value=minio_return)), \
-                patch_import_context('management.services.file.service.get_vector_db_core', MagicMock()), \
-                patch_import_context('management.services.file.service.ElasticSearchService.list_files', AsyncMock(return_value={"files": []})):
+                patch_import_context('management.services.knowledge_base.file_listing.list_knowledge_files', AsyncMock(return_value={"files": []})):
 
             errors, uploaded_paths, uploaded_names = await upload_files_impl(
                 destination="minio", file=[mock_file], folder="folder", index_name="kb1")

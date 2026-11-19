@@ -1085,7 +1085,10 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
         }
 
     es_service = MagicMock()
-    es_service.list_files.side_effect = fake_list_files
+    monkeypatch.setattr(
+        "management.services.knowledge_base.file_listing.list_knowledge_files",
+        fake_list_files,
+    )
     es_service.resolve_knowledge_base_permission.return_value = "READ"
     es_service.require_knowledge_base_edit_permission.return_value = None
     monkeypatch.setattr(

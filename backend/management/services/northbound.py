@@ -112,10 +112,13 @@ async def list_knowledge_indices_for_northbound(*, ctx, pattern='*'):
                                         pattern=pattern, include_stats=True)
 
 
-async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
+async def list_knowledge_files_for_northbound(*, ctx, index_name):
     """Keep the northbound file contract while supplying the current actor."""
-    return await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core,
-                                                user_id=ctx.user_id, tenant_id=ctx.tenant_id)
+    from management.services.knowledge_base.file_listing import list_knowledge_files
+
+    from infrastructure.agentos_identity import ServicePrincipal
+
+    return await list_knowledge_files(index_name, ServicePrincipal(ctx.user_id, ctx.tenant_id))
 
 
 async def list_knowledge_chunks_for_northbound(*, ctx, index_name, page=None, page_size=None, path_or_url=None):

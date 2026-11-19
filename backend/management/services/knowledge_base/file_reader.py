@@ -205,7 +205,3 @@ async def _read(phase, callback, *args, **kwargs):
 
 async def read_document_error(index_name, path, actor, *, file_id=None):
     return await _read("error-info", KnowledgeFileReader().error_info, index_name, path, actor, file_id=file_id)
-
-
-async def read_knowledge_files(index_name, actor):
-    return await _read("file-list", KnowledgeFileReader().files, index_name, actor)

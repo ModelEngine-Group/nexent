@@ -41,7 +41,7 @@ async def test_success_and_storage_failure_signal_owned_context(monkeypatch):
     assert contexts[1].cancelled.is_set()
 
 
-@pytest.mark.parametrize("phase", ["error-info", "file-list"])
+@pytest.mark.parametrize("phase", ["error-info"])
 async def test_timeout_cancels_once_and_logs_no_document_path(monkeypatch, caplog, phase):
     contexts = []
 
@@ -55,10 +55,7 @@ async def test_timeout_cancels_once_and_logs_no_document_path(monkeypatch, caplo
     monkeypatch.setattr(module, "run_blocking", blocking)
     monkeypatch.setattr(module, "OperationContext", context)
     with pytest.raises(TimeoutError):
-        if phase == "error-info":
-            await module.read_document_error("kb", "sensitive-document-path", ServicePrincipal("u", "t"))
-        else:
-            await module.read_knowledge_files("kb", ServicePrincipal("u", "t"))
+        await module.read_document_error("kb", "sensitive-document-path", ServicePrincipal("u", "t"))
     assert len(contexts) == 1 and contexts[0].cancelled.is_set()
     records = [r for r in caplog.records if "knowledge_file_read_timeout" in r.message]
     assert len(records) == 1 and records[0].levelname == "WARNING"
@@ -66,15 +63,16 @@ async def test_timeout_cancels_once_and_logs_no_document_path(monkeypatch, caplo
     assert "phase=" + phase in caplog.text
 
 
-async def test_public_list_service_propagates_timeout_before_querying_es(monkeypatch):
+async def test_public_list_service_propagates_timeout_before_querying_runtime(monkeypatch):
     from unittest.mock import AsyncMock, Mock
 
-    from management.services.knowledge_base import files
+    from management.services.knowledge_base import file_listing
     from nexent.storage.errors import DeadlineExceeded
 
-    read, core = AsyncMock(side_effect=DeadlineExceeded()), Mock()
-    monkeypatch.setattr(files, "read_knowledge_files", read)
+    read = AsyncMock(side_effect=DeadlineExceeded())
+    client = Mock(list_knowledge_sources=AsyncMock())
+    monkeypatch.setattr(file_listing, "run_blocking", read)
     with pytest.raises(DeadlineExceeded):
-        await files.KnowledgeBaseFileService.list_files("kb", include_chunks=False, vdb_core=core, user_id="u", tenant_id="t")
+        await file_listing.KnowledgeFileListing(client=client).list("kb", ServicePrincipal("u", "t"))
     assert read.await_count == 1
-    core.get_documents_detail.assert_not_called()
+    client.list_knowledge_sources.assert_not_awaited()

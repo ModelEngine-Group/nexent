@@ -1,7 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
-
-from management.services.file.preview import build_preview_pdf_object_key
 import os
 from datetime import datetime
 from io import BytesIO
@@ -9,30 +7,53 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import httpx
+from contracts.constants.constants import (
+    ASSET_OWNER_ATTACHMENTS_PREFIX,
+    ASSET_OWNER_TENANT_ID,
+    FILE_PREVIEW_SIZE_LIMIT,
+    MODEL_CONFIG_MAPPING,
+    OFFICE_MIME_TYPES,
+)
+from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import (
+    AppException,
+    FileTooLargeException,
+    NotFoundException,
+    OfficeConversionException,
+    UnsupportedFileTypeException,
+)
+from contracts.errors.ingestion import ingestion_error_fields
 from fastapi import UploadFile
+from management.db.file.attachment import (
+    copy_file,
+    delete_file,
+    file_exists,
+    generate_object_name,
+    get_content_type,
+    get_file_range,
+    get_file_size_from_minio,
+    get_file_size_from_minio_strict,
+    get_file_stream,
+    get_file_stream_raw,
+    get_file_url,
+    list_files,
+    upload_fileobj,
+)
+from management.db.knowledge_base.file_lifecycle import transition_file_record
+from management.db.model.repository import get_model_by_model_id
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.file.preview import build_preview_pdf_object_key
+from management.services.file.source_upload import upload_knowledge_source
+from management.services.file.upload_admission import admit_knowledge_uploads
+from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
 from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
-
-from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
-from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
-from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, OFFICE_MIME_TYPES
-from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
-from management.db.file.attachment import copy_file, delete_file, file_exists, generate_object_name, get_content_type, get_file_range, get_file_size_from_minio, get_file_size_from_minio_strict, get_file_stream, get_file_stream_raw, get_file_url, list_files, upload_fileobj
-from management.db.knowledge_base.file_lifecycle import transition_file_record
-from management.services.file.upload_admission import admit_knowledge_uploads
-from management.db.model.repository import get_model_by_model_id
-from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
-from management.services.configuration.tenant.settings import tenant_config_manager
-from management.services.model.names import get_model_name_from_config
-from contracts.errors.ingestion import ingestion_error_fields
-from infrastructure.trace.knowledge import trace_knowledge_operation
-from management.services.file.source_upload import upload_knowledge_source
 from nexent.storage.errors import OutcomeUnknown, ScopeDenied
 
+from infrastructure.trace.knowledge import trace_knowledge_operation
 
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)
@@ -440,8 +461,13 @@ async def upload_files_impl(
         # Resolve filename conflicts against existing KB documents by renaming (e.g., name -> name_1)
         if index_name:
             try:
-                vdb_core = get_vector_db_core()
-                existing = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core, user_id=user_id, tenant_id=uploader_tenant_id)
+                from management.services.knowledge_base.file_listing import (
+                    list_knowledge_files,
+                )
+
+                from infrastructure.agentos_identity import ServicePrincipal
+
+                existing = await list_knowledge_files(index_name, ServicePrincipal(user_id, uploader_tenant_id))
                 existing_files = existing.get(
                     "files", []) if isinstance(existing, dict) else []
                 # list_files merges durable lifecycle rows, including this
@@ -725,22 +751,20 @@ async def list_files_impl(prefix: str, limit: Optional[int] = None):
 
 
 
-from management.services.model.media import (
-    get_llm_model,
-)
-
 from management.services.file.access import (
     check_file_access,
     check_file_access_batch,
     validate_s3_url_access,
     validate_urls_access,
 )
-
 from management.services.file.preview import (
-    resolve_preview_file,
-    get_preview_stream,
-    _is_pdf_cache_valid,
-    _convert_office_to_cached_pdf,
     _conversion_locks,
     _conversion_locks_guard,
+    _convert_office_to_cached_pdf,
+    _is_pdf_cache_valid,
+    get_preview_stream,
+    resolve_preview_file,
+)
+from management.services.model.media import (
+    get_llm_model,
 )

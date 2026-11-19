@@ -5,14 +5,13 @@ from test.common.contract_stubs import install_business_constant_stubs, install_
 import asyncio
 import importlib
 import sys
-import os
 import time
 import types
 from management.services.knowledge_base import listing as listing_contract
 import unittest
 from enum import Enum
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, call
+from unittest.mock import MagicMock
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
 from types import ModuleType, SimpleNamespace
@@ -478,7 +477,6 @@ for module_name, functions in {
 # Apply patches AFTER loading the module (so patch targets resolve)
 with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
-    from management.services.knowledge_base.management import KnowledgeBaseManagementService
     from management.services.knowledge_base.service import ElasticSearchService, KnowledgeBaseNeedsModelConfigError
 
 
@@ -634,244 +632,14 @@ class TestElasticSearchService(unittest.TestCase):
 
 
 
-    @patch('management.services.knowledge_base.files.read_knowledge_files')
-    def test_list_files_without_chunks(self, mock_get_files_status):
-        """
-        Test listing files without including document chunks.
-
-        This test verifies that:
-        1. Files indexed in Elasticsearch are retrieved correctly
-        2. Files being processed (from Redis) are included in the results
-        3. Files from both sources are combined in the response
-        4. The status of each file is correctly set (COMPLETED or PROCESSING)
-        """
-        # Setup
-        self.mock_vdb_core.get_documents_detail.return_value = [
-            {
-                "path_or_url": "file1",
-                "filename": "file1.txt",
-                "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00"
-            }
-        ]
-        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'file2', 'status': 'PROCESSING', 'error_stage': 'PROCESS', 'forward_task_id': 'task123'}]
-
-        # Execute
-        async def run_test():
-            return await ElasticSearchService.list_files(
-                index_name="test_index",
-                include_chunks=False,
-                vdb_core=self.mock_vdb_core
-            , user_id="user-1", tenant_id="tenant-1")
-
-        result = asyncio.run(run_test())
-
-        # Assert
-        self.assertEqual(len(result["files"]), 2)
-        self.assertEqual(result["files"][0]["status"], "COMPLETED")
-        self.assertEqual(result["files"][1]["status"], "PROCESSING")
-        self.mock_vdb_core.get_documents_detail.assert_called_once_with(
-            "test_index")
-
-    @patch('management.services.knowledge_base.task_state.get_redis_service')
-    @patch('management.services.knowledge_base.files.get_file_size', return_value=12)
-    @patch('management.services.knowledge_base.files.read_knowledge_files', new_callable=AsyncMock)
-    def test_list_files_merges_lifecycle_rows_and_hides_tombstones(
-        self, mock_get_files_status, mock_get_size, mock_redis
-    ):
-        """PG lifecycle rows should override legacy status and hide deleted paths."""
-        self.mock_vdb_core.get_documents_detail.return_value = []
-        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'legacy-ms', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-legacy', 'uploaded_at': '2023-11-14T22:13:20+00:00', 'original_filename': 'legacy.txt'}]
-        lifecycle_rows = [
-            {"file_id": "deleted", "object_name": "deleted.txt", "status": "DELETED"},
-            {
-                "file_id": "failed",
-                "object_name": "failed.txt",
-                "original_filename": "failed.txt",
-                "file_size": 4,
-                "uploaded_at": "2024-01-01T00:00:00",
-                "status": "FAILED",
-                "stage": "FORWARD",
-                "error_code": "FORWARD_FAILED",
-                "error_message": "forward unavailable",
-                "process_task_id": "task-failed",
-                "failed_at": "2024-01-01T00:00:01",
-            },
-            {
-                "file_id": "uploading",
-                "object_name": "uploading.txt",
-                "original_filename": "uploading.txt",
-                "file_size": 2,
-                "uploaded_at": "not-a-timestamp",
-                "status": "UPLOADED",
-            },
-        ]
-        mock_redis.return_value.get_error_info.return_value = "legacy parse error"
-
-        mock_get_files_status.return_value += lifecycle_rows
-
-        result = asyncio.run(
-            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core, user_id="user-1", tenant_id="tenant-1")
-        )
-
-        by_path = {item["path_or_url"]: item for item in result["files"]}
-        assert "deleted.txt" not in by_path
-        assert by_path["failed.txt"]["status"] == "FORWARD_FAILED"
-        assert by_path["failed.txt"]["error_reason"] == "forward unavailable"
-        assert by_path["failed.txt"]["file_id"] == "failed"
-        assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
-        assert by_path["legacy-ms"]["create_time"] == 1700000000000
-
-    @patch('management.services.knowledge_base.task_state.get_redis_service')
-    @patch('management.services.knowledge_base.files.read_knowledge_files', new_callable=AsyncMock)
-    def test_list_files_keeps_legacy_effective_filename_over_lifecycle_name(
-        self, mock_get_files_status, mock_redis
-    ):
-        """Existing ES/Redis effective names keep the old UI display contract."""
-        self.mock_vdb_core.get_documents_detail.return_value = [{
-            "path_or_url": "folder/data.txt",
-            "filename": "data_1.txt",
-            "file_size": 5,
-            "create_time": "2024-01-01T00:00:00",
-        }]
-        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'folder/data.txt', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-1', 'original_filename': 'data_1.txt'}]
-        lifecycle_rows = [{
-            "file_id": "fid-1",
-            "object_name": "folder/data.txt",
-            "original_filename": "data.txt",
-            "status": "FAILED",
-            "stage": "PROCESS",
-            "error_code": "PARSE_FAILED",
-        }]
-        mock_redis.return_value.get_error_info.return_value = None
-
-        mock_get_files_status.return_value += lifecycle_rows
-
-        result = asyncio.run(
-            ElasticSearchService.list_files("test_index", include_chunks=False, vdb_core=self.mock_vdb_core, user_id="user-1", tenant_id="tenant-1")
-        )
-
-        assert result["files"][0]["file"] == "data_1.txt"
 
 
-    @patch('management.services.knowledge_base.files.read_knowledge_files')
-    def test_list_files_with_chunks(self, mock_get_files_status):
-        """
-        Test listing files with document chunks included.
-
-        This test verifies that:
-        1. Files indexed in Elasticsearch are retrieved correctly
-        2. Document chunks for each file are retrieved using msearch
-        3. The chunks are included in the file details
-        4. The chunk count comes from aggregation (chunk_count field)
-        """
-        # Setup - chunk_count from aggregation
-        self.mock_vdb_core.get_documents_detail.return_value = [
-            {
-                "path_or_url": "file1",
-                "filename": "file1.txt",
-                "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00",
-                "chunk_count": 1
-            }
-        ]
-        mock_get_files_status.return_value = {}
-        # Note: count() is no longer called - chunk_count comes from aggregation
-
-        # Mock multi_search response
-        msearch_response = {
-            'responses': [
-                {
-                    'hits': {
-                        'hits': [
-                            {
-                                '_source': {
-                                    'id': 'doc1',
-                                    'title': 'Title 1',
-                                    'content': 'Content 1',
-                                    'create_time': '2023-01-01T12:00:00'
-                                }
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
-        self.mock_vdb_core.multi_search.return_value = msearch_response
-
-        # Execute
-        async def run_test():
-            return await ElasticSearchService.list_files(
-                index_name="test_index",
-                include_chunks=True,
-                vdb_core=self.mock_vdb_core
-            , user_id="user-1", tenant_id="tenant-1")
-
-        result = asyncio.run(run_test())
-
-        # Assert
-        self.assertEqual(len(result["files"]), 1)
-        self.assertEqual(len(result["files"][0]["chunks"]), 1)
-        self.assertEqual(result["files"][0]["chunk_count"], 1)
-        self.mock_vdb_core.multi_search.assert_called_once()
-
-    @patch('management.services.knowledge_base.files.read_knowledge_files')
-    def test_list_files_msearch_error(self, mock_get_files_status):
-        """
-        Test listing files when msearch encounters an error.
-
-        This test verifies that:
-        1. When msearch fails, the method handles the error gracefully
-        2. Files are still returned without chunks
-        3. Chunk count is set to 0 for affected files
-        4. The overall operation doesn't fail due to msearch errors
-        """
-        # Setup - chunk_count from aggregation
-        self.mock_vdb_core.get_documents_detail.return_value = [
-            {
-                "path_or_url": "file1",
-                "filename": "file1.txt",
-                "file_size": 1024,
-                "create_time": "2023-01-01T12:00:00",
-                "chunk_count": 1
-            }
-        ]
-        mock_get_files_status.return_value = {}
-        # Note: count() is no longer called
-
-        # Mock msearch error
-        self.mock_vdb_core.multi_search.side_effect = Exception("MSSearch Error")
-
-        # Execute
-        async def run_test():
-            return await ElasticSearchService.list_files(
-                index_name="test_index",
-                include_chunks=True,
-                vdb_core=self.mock_vdb_core
-            , user_id="user-1", tenant_id="tenant-1")
-
-        result = asyncio.run(run_test())
-
-        # Assert
-        self.assertEqual(len(result["files"]), 1)
-        self.assertEqual(len(result["files"][0]["chunks"]), 0)
-        self.assertEqual(result["files"][0]["chunk_count"], 1)
 
 
-    @patch('management.services.knowledge_base.files.file_exists', return_value=False)
-    def test_compute_source_available_completed_missing_minio(self, _mock_exists):
-        available = ElasticSearchService._compute_source_available({
-            "path_or_url": "knowledge_base/doc.pdf",
-            "status": "COMPLETED",
-        })
-        self.assertFalse(available)
 
-    def test_compute_source_available_processing_defaults_true(self):
-        available = ElasticSearchService._compute_source_available({
-            "path_or_url": "knowledge_base/doc.pdf",
-            "status": "PROCESSING",
-        })
-        self.assertTrue(available)
+
+
+
 
 
     def test_accurate_search(self):
@@ -1837,7 +1605,6 @@ class TestRethrowOrPlain(unittest.TestCase):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
         from management.services.knowledge_base.service import get_vector_db_core
         from contracts.knowledge import VectorDatabaseType
-        from contracts.constants.constants import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.return_value = "https://datamate.example.com"
@@ -1926,126 +1693,8 @@ class TestRethrowOrPlain(unittest.TestCase):
 
 
 
-    @patch('management.services.knowledge_base.files.read_knowledge_files')
-    def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_files_status):
-        """list_files handles invalid timestamps, progress from read_knowledge_files, and error info."""
-        # ES file with invalid timestamp and chunk_count from aggregation
-        self.mock_vdb_core.get_documents_detail.return_value = [
-            {
-                "path_or_url": "file1",
-                "filename": "file1.txt",
-                "file_size": 10,
-                "create_time": "invalid",
-                "chunk_count": 1
-            }
-        ]
-        # Note: count() is no longer called - chunk_count comes from aggregation
 
-        # Progress and error info now come from read_knowledge_files (durable snapshot)
-        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'file1', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-1', 'processed_chunks': 2, 'total_chunks': 5, 'source_type': 'minio', 'original_filename': 'file1.txt'}]
 
-        async def run_test():
-            return await ElasticSearchService.list_files(
-                index_name="idx",
-                include_chunks=False,
-                vdb_core=self.mock_vdb_core
-            , user_id="user-1", tenant_id="tenant-1")
-
-        result = asyncio.run(run_test())
-        self.assertEqual(len(result["files"]), 1)
-        file_info = result["files"][0]
-        # chunk_count from aggregation (no longer uses count())
-        self.assertEqual(file_info["chunk_count"], 1)
-        self.assertEqual(file_info["file_size"], 10)
-        self.assertEqual(file_info["status"], "PROCESS_FAILED")
-        # Progress from read_knowledge_files
-        self.assertEqual(file_info["processed_chunk_num"], 2)
-        self.assertEqual(file_info["total_chunk_num"], 5)
-        self.assertIsInstance(file_info["create_time"], int)
-
-    @patch('management.services.knowledge_base.files.read_knowledge_files')
-    def test_list_files_warning_and_progress_error_branches(self, mock_get_files_status):
-        """list_files: chunk_count from aggregation, progress from read_knowledge_files, error handling."""
-        # ES file - chunk_count from aggregation (no longer uses count())
-        self.mock_vdb_core.get_documents_detail.return_value = [
-            {
-                "path_or_url": "file-es",
-                "filename": "file-es.txt",
-                "file_size": 5,
-                "create_time": "2024-01-01T00:00:00",
-                "chunk_count": 1
-            }
-        ]
-        # Note: count() is no longer called - chunk_count comes from aggregation
-
-        # Persisted lifecycle rows - progress already included (durable snapshot via read_knowledge_files)
-        mock_get_files_status.return_value = [{'file_id': 'fixture-0', 'object_name': 'file-processing', 'status': 'PROCESSING', 'error_stage': 'PROCESS', 'forward_task_id': 't1', 'source_type': 'minio', 'original_filename': 'fp.txt', 'processed_chunks': 2, 'total_chunks': 4}, {'file_id': 'fixture-1', 'object_name': 'file-failed', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 't2', 'source_type': 'minio', 'original_filename': 'ff.txt'}]
-
-        async def run_test():
-            return await ElasticSearchService.list_files(
-                index_name="idx",
-                include_chunks=False,
-                vdb_core=self.mock_vdb_core
-            , user_id="user-1", tenant_id="tenant-1")
-
-        result = asyncio.run(run_test())
-
-        # Ensure both ES file and processing files are returned
-        paths = {f["path_or_url"] for f in result["files"]}
-        self.assertIn("file-es", paths)
-        self.assertIn("file-processing", paths)
-        self.assertIn("file-failed", paths)
-        # Processing file gets progress from read_knowledge_files
-        proc_file = next(
-            f for f in result["files"] if f["path_or_url"] == "file-processing")
-        self.assertEqual(proc_file["processed_chunk_num"], 2)
-        self.assertEqual(proc_file["total_chunk_num"], 4)
-        # ES file chunk_count from aggregation
-        es_file = next(
-            f for f in result["files"] if f["path_or_url"] == "file-es")
-        self.assertEqual(es_file["chunk_count"], 1)
-
-    @patch('management.services.knowledge_base.files.read_knowledge_files', return_value={})
-    def test_list_files_with_chunks_updates_chunk_count(self, mock_get_files_status):
-        """list_files include_chunks: chunk_count from aggregation, no extra count() calls."""
-        self.mock_vdb_core.get_documents_detail.return_value = [
-            {
-                "path_or_url": "file1",
-                "filename": "file1.txt",
-                "file_size": 10,
-                "create_time": "2024-01-01T00:00:00",
-                "chunk_count": 2
-            }
-        ]
-        self.mock_vdb_core.multi_search.return_value = {
-            "responses": [
-                {
-                    "hits": {
-                        "hits": [
-                            {"_source": {
-                                "id": "doc1",
-                                "title": "t",
-                                "content": "c",
-                                "create_time": "2024-01-01T00:00:00"
-                            }}
-                        ]
-                    }
-                }
-            ]
-        }
-        # Note: count() is no longer called - chunk_count comes from aggregation
-
-        async def run_test():
-            return await ElasticSearchService.list_files(
-                index_name="idx",
-                include_chunks=True,
-                vdb_core=self.mock_vdb_core
-            , user_id="user-1", tenant_id="tenant-1")
-
-        result = asyncio.run(run_test())
-        file_info = result["files"][0]
-        self.assertEqual(file_info["chunk_count"], 2)
-        self.assertEqual(len(file_info["chunks"]), 1)
 
 
     # Tests for get_rerank_model function
@@ -3008,100 +2657,12 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for index_documents - progress save returns False (lines 1169-1170)
 
     # Tests for list_files - file count exception (lines 1264-1267)
-    @pytest.mark.asyncio
-    async def test_list_files_file_count_exception(self):
-        """Test list_files handles exception during file count query (lines 1264-1267)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = [
-            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100, "create_time": "2024-01-01T00:00:00"}
-        ]
-        mock_vdb_core.client.count.side_effect = Exception("Count query failed")
-        # Return a file that's still being processed (not in ES yet)
-        with patch('management.services.knowledge_base.files.read_knowledge_files',
-                   new_callable=AsyncMock, return_value={}):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=False,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        # Should return the file with count from aggregation fallback
-        self.assertEqual(len(result["files"]), 1)
 
     # Tests for list_files with chunks - msearch exception (lines 1431-1433)
-    @pytest.mark.asyncio
-    async def test_list_files_with_chunks_msearch_exception(self):
-        """Test list_files handles exception during msearch (lines 1431-1433)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = [
-            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
-             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED"}
-        ]
-        mock_vdb_core.client.count.return_value = {"count": 1}
-        mock_vdb_core.multi_search.side_effect = Exception("Msearch failed")
-        with patch('management.services.knowledge_base.files.read_knowledge_files',
-                   new_callable=AsyncMock, return_value={}):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=True,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        # Should return files even when msearch fails
-        self.assertEqual(len(result["files"]), 1)
-        self.assertEqual(result["files"][0]["chunks"], [])
 
     # Tests for list_files with chunks - count exception (lines 1426-1428)
-    @pytest.mark.asyncio
-    async def test_list_files_with_chunks_count_exception(self):
-        """Test list_files handles exception during chunk count query (lines 1426-1428)."""
-        mock_vdb_core = MagicMock()
-
-        def count_side_effect(index, body):
-            if "term" in str(body):
-                raise Exception("Count query failed")
-            return {"count": 1}
-
-        mock_vdb_core.get_documents_detail.return_value = [
-            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
-             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 1}
-        ]
-        mock_vdb_core.client.count.side_effect = count_side_effect
-        mock_vdb_core.multi_search.return_value = {
-            "responses": [
-                {"hits": {"hits": [{"_source": {"id": "1", "title": "t", "content": "c"}}]}}
-            ]
-        }
-        with patch('management.services.knowledge_base.files.read_knowledge_files',
-                   new_callable=AsyncMock, return_value={}):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=True,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        self.assertEqual(len(result["files"]), 1)
 
     # Tests for list_files without chunks - count exception (lines 1448-1450)
-    @pytest.mark.asyncio
-    async def test_list_files_without_chunks_count_exception(self):
-        """Test list_files handles exception during count query without chunks (lines 1448-1450)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = [
-            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
-             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 5}
-        ]
-        mock_vdb_core.client.count.side_effect = Exception("Count failed")
-        with patch('management.services.knowledge_base.files.read_knowledge_files',
-                   new_callable=AsyncMock, return_value={}):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=False,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        # Should return file with fallback chunk_count from aggregation
-        self.assertEqual(len(result["files"]), 1)
 
     # Tests for change_summary exception (lines 1705-1706)
 
@@ -3123,7 +2684,7 @@ class TestCoverageImprovement(unittest.TestCase):
     def test_search_hybrid_needs_model_config_error(self, mock_get_model):
         """Test search_hybrid raises KnowledgeBaseNeedsModelConfigError (lines 1955, 1962)."""
         from management.services.knowledge_base.service import (
-            KnowledgeBaseNeedsModelConfigError, get_embedding_model_by_index_name
+            KnowledgeBaseNeedsModelConfigError
         )
         mock_get_model.return_value = (None, None, {"status": "needs_config"})
         with self.assertRaises(KnowledgeBaseNeedsModelConfigError) as ctx:
@@ -3190,30 +2751,6 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for index_documents - index creation exception (lines 1078-1079)
 
     # Tests for list_files - msearch response error (lines 1401-1403)
-    @pytest.mark.asyncio
-    async def test_list_files_msearch_response_error(self):
-        """Test list_files handles error in msearch response (lines 1401-1403)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = [
-            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
-             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 1}
-        ]
-        mock_vdb_core.client.count.return_value = {"count": 1}
-        # Return error in first response
-        mock_vdb_core.multi_search.return_value = {
-            "responses": [{"error": "Search failed"}]
-        }
-        with patch('management.services.knowledge_base.files.read_knowledge_files',
-                   new_callable=AsyncMock, return_value={}):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=True,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        # Should still return the file with empty chunks
-        self.assertEqual(len(result["files"]), 1)
-        self.assertEqual(result["files"][0]["chunks"], [])
 
     # Tests for get_random_documents - outer exception (lines 1670-1671)
 
@@ -3311,95 +2848,12 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for index_documents - image bytes fetch exception and raise (lines 1206-1214)
 
     # Tests for list_files - file_size exception (lines 1382-1386)
-    @pytest.mark.asyncio
-    async def test_list_files_file_size_exception(self):
-        """Test list_files handles exception when getting file size (lines 1382-1386)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = []
-        mock_vdb_core.multi_search.return_value = {"responses": []}
-
-        async def mock_get_files(index_name):
-            return [{'file_id': 'fixture-0', 'object_name': 'file1.txt', 'status': 'COMPLETED', 'error_stage': 'PROCESS', 'source_type': 'minio'}]
-
-        with patch('management.services.knowledge_base.files.read_knowledge_files', mock_get_files), \
-                patch('management.services.knowledge_base.files.get_file_size',
-                      side_effect=Exception("Storage error")):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=False,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        self.assertIn("files", result)
-        self.assertGreater(len(result["files"]), 0)
-        # file_size should be 0 due to exception
-        self.assertEqual(result["files"][0].get("file_size"), 0)
 
     # Tests for list_files - redis error info exception (lines 1414-1421)
-    @pytest.mark.asyncio
-    async def test_list_files_redis_error_info_exception(self):
-        """Test list_files handles exception when getting error info from Redis (lines 1414-1421)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = []
-
-        async def mock_get_files(index_name):
-            return [{'file_id': 'fixture-0', 'object_name': 'failed_file.txt', 'status': 'FAILED', 'error_stage': 'PROCESS', 'forward_task_id': 'task-42', 'source_type': 'minio'}]
-
-        with patch('management.services.knowledge_base.files.read_knowledge_files', mock_get_files), \
-                patch('management.services.knowledge_base.task_state.get_redis_service') as mock_get_redis:
-            mock_redis_instance = MagicMock()
-            mock_redis_instance.get_error_info.side_effect = Exception("Redis error")
-            mock_get_redis.return_value = mock_redis_instance
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=False,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        self.assertIn("files", result)
 
     # Tests for list_files - msearch response error (lines 1459-1462)
-    @pytest.mark.asyncio
-    async def test_list_files_msearch_response_error(self):
-        """Test list_files handles error in msearch response (lines 1459-1462)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.return_value = [
-            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
-             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 1}
-        ]
-        mock_vdb_core.multi_search.return_value = {
-            "responses": [{"error": "Search failed"}]  # Error in response
-        }
-
-        async def mock_get_files(index_name):
-            return [{'file_id': 'fixture-0', 'object_name': 'file1.txt', 'status': 'COMPLETED', 'error_stage': 'PROCESS', 'source_type': 'minio'}]
-
-        with patch('management.services.knowledge_base.files.read_knowledge_files', mock_get_files):
-            result = await ElasticSearchService.list_files(
-                index_name="test-index",
-                include_chunks=True,
-                vdb_core=mock_vdb_core,
-             user_id="user-1", tenant_id="tenant-1")
-
-        self.assertEqual(len(result["files"]), 1)
-        self.assertEqual(result["files"][0]["chunks"], [])
 
     # Tests for list_files - outer exception (lines 1497-1498)
-    @pytest.mark.asyncio
-    async def test_list_files_outer_exception(self):
-        """Test list_files raises exception from get_documents_detail (lines 1497-1498)."""
-        mock_vdb_core = MagicMock()
-        mock_vdb_core.get_documents_detail.side_effect = Exception("Elasticsearch unavailable")
-
-        with patch('management.services.knowledge_base.files.read_knowledge_files',
-                   new_callable=AsyncMock, return_value={}):
-            with self.assertRaises(Exception) as ctx:
-                await ElasticSearchService.list_files(
-                    index_name="test-index",
-                    include_chunks=False,
-                    vdb_core=mock_vdb_core,
-                 user_id="user-1", tenant_id="tenant-1")
-        self.assertIn("Elasticsearch unavailable", str(ctx.exception))
 
     # Tests for search_hybrid - outer exception (lines 2038-2043)
     @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')

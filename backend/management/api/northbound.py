@@ -872,14 +872,13 @@ async def get_index_files(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
         logger.debug(
             "Listing files for index %s, tenant_id=%s, user_id=%s",
             index_name,
             ctx.tenant_id,
             ctx.user_id,
         )
-        result = await list_knowledge_files_for_northbound(ctx=ctx, index_name=index_name, vdb_core=vdb_core)
+        result = await list_knowledge_files_for_northbound(ctx=ctx, index_name=index_name)
         return {
             "status": "success",
             "files": result.get("files", []),

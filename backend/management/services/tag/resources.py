@@ -53,7 +53,6 @@ from management.db.tool.repository import query_all_tools
 from management.services.knowledge_base.service import (
     ElasticSearchService as service,
 )
-from management.services.knowledge_base.service import get_vector_db_core
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.permission.asset_owner import resolve_agent_list_permission
 from management.services.tag.identity import (
@@ -167,12 +166,11 @@ async def _resolve_provider_document(
     normalized_provider = provider.strip().lower()
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
 
-        files = await _get_elasticsearch_service().list_files(
-            knowledge_base_id,
-            include_chunks=False,
-            vdb_core=get_vector_db_core(),
-            user_id=user_id, tenant_id=tenant_id,
-        )
+        from management.services.knowledge_base.file_listing import list_knowledge_files
+
+        from infrastructure.agentos_identity import ServicePrincipal
+
+        files = await list_knowledge_files(knowledge_base_id, ServicePrincipal(user_id, tenant_id))
         for file_info in files.get("files", []):
             if str(file_info.get("path_or_url") or "") == provider_document_id:
                 return {

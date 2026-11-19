@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from nexent.storage.errors import DeadlineExceeded, InvalidInput, NotFound, ScopeDenied
 from pydantic import BaseModel, Field
 
+from infrastructure.agentos_identity import ServicePrincipal
 from test.common.contract_stubs import install_business_contract_stubs
 
 # Dynamically determine the backend path and add it to sys.path
@@ -425,7 +426,7 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
             patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base") as cleanup_documents:
@@ -552,7 +553,7 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files, \
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
             patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
@@ -845,7 +846,7 @@ async def test_get_index_files_success(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files:
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files:
 
         index_name = "test_index"
         expected_files = {
@@ -877,7 +878,7 @@ async def test_get_index_files_exception(vdb_core_mock, auth_data):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files:
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files:
 
         index_name = "test_index"
 
@@ -898,7 +899,7 @@ async def test_get_index_files_exception(vdb_core_mock, auth_data):
         # Verify list_files was called with correct parameters
         # Use ANY for the vdb_core parameter because the actual object may differ
         mock_list_files.assert_called_once_with(
-            index_name, include_chunks=False, vdb_core=ANY, user_id=auth_data["user_id"], tenant_id=auth_data["tenant_id"])
+            index_name, ServicePrincipal(auth_data["user_id"], auth_data["tenant_id"]))
 
 
 @pytest.mark.asyncio
@@ -909,7 +910,7 @@ async def test_get_index_files_validation_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files:
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files:
 
         index_name = "test_index"
 
@@ -938,7 +939,7 @@ async def test_get_index_files_timeout_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files:
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files:
 
         index_name = "test_index"
 
@@ -967,7 +968,7 @@ async def test_get_index_files_permission_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files") as mock_list_files:
+            patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files:
 
         index_name = "test_index"
 
@@ -2696,10 +2697,8 @@ async def test_get_index_files_preserves_read_permission_error(vdb_core_mock, au
         "management.api.knowledge_base.vectordatabase.get_vector_db_core",
         return_value=vdb_core_mock,
     ), patch(
-        "management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission",
-        side_effect=HTTPException(status_code=403, detail="private KB"),
-    ), patch(
-        "management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files"
+        "management.services.knowledge_base.file_listing.list_knowledge_files",
+        side_effect=ScopeDenied(),
     ) as mock_list_files:
         response = client.get(
             f"/indices/{auth_data['index_name']}/files",
@@ -2707,8 +2706,8 @@ async def test_get_index_files_preserves_read_permission_error(vdb_core_mock, au
         )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "private KB"
-    mock_list_files.assert_not_called()
+    assert response.json()["detail"] == "No permission to access this knowledge base"
+    mock_list_files.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2723,9 +2722,8 @@ async def test_get_index_files_projects_document_tags_in_one_batch(
         vdb_app, "get_current_user_id", return_value=("user-1", "tenant-1")
     )
     mocker.patch.object(vdb_app, "require_knowledge_base_read_permission")
-    mocker.patch.object(
-        vdb_app.ElasticSearchService,
-        "list_files",
+    mocker.patch(
+        "management.services.knowledge_base.file_listing.list_knowledge_files",
         new=AsyncMock(
             return_value={
                 "files": [
@@ -2759,7 +2757,7 @@ async def test_get_index_files_projects_document_tags_in_one_batch(
     )
 
     response = await vdb_app.get_index_files(
-        "kb-index", vdb_core_mock, "Bearer token"
+        "kb-index", "Bearer token"
     )
 
     assert response["status"] == "success"
@@ -2967,7 +2965,7 @@ class TestVectordatabaseAuditEntries:
 
 @pytest.mark.parametrize("error_type", [TimeoutError, DeadlineExceeded])
 def test_file_list_timeout_preserves_failure_envelope_without_duplicate_error_log(auth_data, caplog, error_type):
-    with patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_files", new=AsyncMock(side_effect=error_type())) as listing:
+    with patch("management.services.knowledge_base.file_listing.list_knowledge_files", new=AsyncMock(side_effect=error_type())) as listing:
         response = client.get(f"/indices/{auth_data['index_name']}/files", headers=auth_data["auth_header"])
     assert response.status_code == 500
     assert response.json() == {"detail": f"Error indexing documents: {error_type()}"}
