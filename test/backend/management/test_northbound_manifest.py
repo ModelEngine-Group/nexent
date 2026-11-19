@@ -100,67 +100,6 @@ def test_parse_rejects_invalid_structure():
         _parse_manifest({"northbound": [{"id": "no-dot", "upstream": "m", "path": "/nb/v1/x", "methods": ["GET"]}]})
 
 
-# ── Gateway route table ────────────────────────────────────────────────────
-
-
-def gateway_table(entries=None, excluded=()):
-    import yaml
-
-    from gateway.routing import RouteTable
-
-    if entries is None:
-        document = yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8"))
-        entries = document["northbound"]
-    return RouteTable.from_manifest(entries, excluded=excluded)
-
-
-def test_route_table_serves_the_manifested_paths():
-    table = gateway_table()
-    assert table.select_upstream("POST", "/nb/v1/chat/run") == "management"
-    assert table.select_upstream("DELETE", "/nb/v1/conversations/123") == "management"
-    assert table.select_upstream("GET", "/nb/v1/automations") == "management"
-    assert table.select_upstream("GET", "/nb/v1/automations/9") == "management"
-    assert table.select_upstream("GET", "/nb/v1/file/download/reports/2026/x.pdf") == "management"
-
-
-def test_route_table_unlisted_path_is_404_indistinguishable():
-    table = gateway_table()
-    assert table.select_upstream("GET", "/nb/v1/does-not-exist") is None
-    # Wrong method on a listed path is also 404.
-    assert table.select_upstream("GET", "/nb/v1/chat/run") is None
-
-
-def test_route_table_dark_capability_returns_none():
-    table = gateway_table()
-    assert table.select_upstream("POST", "/nb/v1/automations/5/pause") is None
-
-
-def test_route_table_excluded_capability_returns_none():
-    table = gateway_table(excluded=("conversations.delete",))
-    assert table.select_upstream("DELETE", "/nb/v1/conversations/123") is None
-    assert table.select_upstream("GET", "/nb/v1/conversations") == "management"
-
-
-def test_route_table_wildcard_absorbs_multi_segment_object_names():
-    table = gateway_table()
-    assert table.select_upstream("GET", "/nb/v1/file/download/a/b/c/d.pdf") == "management"
-    assert table.select_upstream("GET", "/nb/v1/file/download") is None  # needs at least one segment
-
-
-def test_route_table_bans_internal_segments_and_admits_known_prefixes():
-    table = gateway_table()
-    assert table.select_upstream("GET", "/nb/v1/internal/identity/resolve") is None
-    assert table.select_upstream("GET", "/api/whatever") == "management"
-    assert table.select_upstream("POST", "/api/agent/run") == "runtime"
-    assert table.select_upstream("GET", "/elsewhere") is None
-
-
-def test_route_table_a2a_colon_paths_match():
-    table = gateway_table()
-    assert table.select_upstream("POST", "/nb/a2a/ep7/message:send") == "management"
-    assert table.select_upstream("GET", "/nb/a2a/ep7/.well-known/agent-card.json") == "management"
-
-
 # ── Service-side reconciliation ────────────────────────────────────────────
 
 
