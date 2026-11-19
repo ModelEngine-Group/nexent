@@ -7,7 +7,6 @@ import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
   AgentRepositoryListingListParams,
-  MyEditableAgentListParams,
 } from "@/types/agentRepository";
 import type {
   MyEditableSkillListParams,
@@ -626,9 +625,6 @@ export const API_ENDPOINTS = {
     communityStatus: (id: number) =>
       `${API_BASE_URL}/mcp-tools/community/${id}/status`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
-    communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
-    communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
-    communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
     communityDownload: (marketId: number) =>
       `${API_BASE_URL}/mcp-tools/community/${marketId}/download`,
@@ -721,41 +717,6 @@ export const API_ENDPOINTS = {
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
-    },
-    mineAgents: (params?: MyEditableAgentListParams) => {
-      const queryParams = new URLSearchParams();
-      if (params?.ownership) {
-        queryParams.append("ownership", params.ownership);
-      }
-      if (params?.page != null) {
-        queryParams.append("page", String(params.page));
-      }
-      if (params?.page_size != null) {
-        queryParams.append("page_size", String(params.page_size));
-      }
-      if (params?.search?.trim()) {
-        queryParams.append("search", params.search.trim());
-      }
-      if (params?.new_agent_padding) {
-        queryParams.append("new_agent_padding", "true");
-      }
-      if (params?.agent_id != null) {
-        queryParams.append("agent_id", String(params.agent_id));
-      }
-      if (params?.tag_predicates?.length) {
-        queryParams.append(
-          "tag_predicates",
-          JSON.stringify(params.tag_predicates)
-        );
-      }
-      if (params?.search_tag_predicates?.length) {
-        queryParams.append(
-          "search_tag_predicates",
-          JSON.stringify(params.search_tag_predicates)
-        );
-      }
-      const queryString = queryParams.toString();
-      return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,

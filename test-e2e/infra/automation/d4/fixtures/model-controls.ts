@@ -145,8 +145,7 @@ export async function enter(page: Page, entry: Entry) {
   } else if (entry === "nl2agent") {
     await page.goto(`${root}/zh/agents/42`);
   } else if (entry === "nl2skill") {
-    await page.goto(`${root}/zh/skill-space`);
-    await page.getByRole("tab", { name: /^我的 Skill/ }).click();
+    await page.goto(`${root}/zh/resource-space?tab=skill&view=mine`);
     await page.getByRole("button", { name: "添加Skill服务", exact: true }).click();
   } else {
     await page.goto(`${root}/zh/newchat`);

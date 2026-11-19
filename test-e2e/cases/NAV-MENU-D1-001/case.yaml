@@ -26,7 +26,7 @@ case:
     - /agents
     - /newchat
     - /workbench
-    - /agent-space
+    - /resource-space
     locales:
     - zh
     - en
@@ -36,7 +36,8 @@ case:
     expected: Both inert section buttons are absent; authorized children remain and
       denied routes stay hidden.
   - order: 2
-    action: Click chat and agent child menus; inspect account and notification controls.
+    action: Click chat and unified repository menus; inspect account and notification
+      controls.
     expected: Localized pages open and only functional controls are available.
   - order: 3
     action: Enable workbench and grant Home and Chat routes; inspect both locales

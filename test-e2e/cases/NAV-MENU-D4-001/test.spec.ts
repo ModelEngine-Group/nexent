@@ -43,7 +43,7 @@ scenario("[NAV-MENU-D4-001] permitted children retain actual navigation without 
     return json(route, defaultApiBody(route));
   });
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "test", status: "success", enable_agent_workbench: false }));
-  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/agent-space"] } } }));
+  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/resource-space"] } } }));
   await page.route("**/api/memory/config/load", (route) => json(route, { MEMORY_SWITCH: "N" }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
   await page.route("**/api/agent/list/page?*", (route) => json(route, { items: [], pagination: { page: 1, page_size: 10, total: 0, total_pages: 0 } }));
@@ -53,9 +53,11 @@ scenario("[NAV-MENU-D4-001] permitted children retain actual navigation without 
   await expect(agents).toBeVisible();
   await expect(agents).toHaveAttribute("aria-current", "page");
   await expect(nav.getByRole("button", { name: labels["sidebar.agentDev"], exact: true })).toHaveCount(0);
-  await expect(nav.getByRole("button", { name: labels["sidebar.resourceSpace"], exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("button", { name: labels["sidebar.resourceSpace"], exact: true })).toBeVisible();
   await expect(nav.getByRole("button", { name: labels["sidebar.modelConfig"], exact: true })).toHaveCount(0);
-  await expect(nav.getByRole("button", { name: labels["sidebar.agentSpace"], exact: true })).toBeVisible();
+  // The retired personal agent view renders no sidebar button for a stale
+  // authorized /agent-space entry.
+  await expect(nav.getByRole("button", { name: labels["sidebar.agentSpace"], exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: labels["notifications.bell.label"], exact: true })).toHaveCount(0);
   const footer = nav.locator("xpath=following-sibling::div");
   await expect(footer.locator(".ant-dropdown-trigger")).toBeVisible();
@@ -104,14 +106,14 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
     return json(route, { ...await response.json(), aboutConfig: "open" });
   });
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "v2.6.0", status: "success", enable_agent_workbench: false }));
-  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/agent-space"] } } }));
+  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/resource-space"] } } }));
   await page.route("**/api/memory/config/load", (route) => json(route, { MEMORY_SWITCH: "N" }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
   await page.route("**/api/monitoring/status", (route) => json(route, { code: 0, data: { telemetry_enabled: true, dashboard_url: "https://monitoring.nexent.test", dashboard_allowed_roles: ["SPEED"] } }));
   await page.route("**/api/repository/**", (route) => json(route, { items: [], pagination: { page: 1, page_size: 10, total: 0, total_pages: 0 } }));
   await page.route("**/api/tag-libraries**", (route) => json(route, []));
   await page.route("**/api/agent/list/page?*", (route) => json(route, { items: [], pagination: { page: 1, page_size: 10, total: 0, total_pages: 0 } }));
-  await page.goto(`${baseUrl}/zh/agent-space`);
+  await page.goto(`${baseUrl}/zh/resource-space`);
   await expect(page.locator(".ant-layout-header, .ant-layout-footer")).toHaveCount(0);
   const button = page.getByRole("button", { name: text["accountMenu.open"], exact: true });
   await button.click();
@@ -187,7 +189,7 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
   await english.hover();
   await expectReferenceColor(english.locator('xpath=ancestor::li[1]'), 'background-color', 'lab(94.1288% -2.23359 -10.9012)');
   await english.click();
-  await expect(page).toHaveURL(/\/en\/agent-space$/);
+  await expect(page).toHaveURL(/\/en\/resource-space$/);
   expect((await page.context().cookies()).find(cookie => cookie.name === "NEXT_LOCALE")?.value).toBe("en");
   await expect(page.locator(".ant-layout-header, .ant-layout-footer")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 720 });
@@ -213,7 +215,7 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   await page.route("**/locales/en/common.json", (route) => json(route, { ...text, "sidebar.knowledgeBaseConfig": longLabel }));
   await page.route("**/locales/*/custom.json", (route) => json(route, { ...brandConfig, productName: longBrand }));
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "v2.6.0", status: "success" }));
-  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "hover-fixture", tenant_id: "hover-tenant", user_email: "hover@nexent.test", user_role: "SPEED", role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/models", "/knowledges", "/agent-space", "/skill-space", "/resource-manage"] } } }));
+  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "hover-fixture", tenant_id: "hover-tenant", user_email: "hover@nexent.test", user_role: "SPEED", role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/models", "/knowledges", "/resource-space", "/skill-space", "/resource-manage"] } } }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
   await page.route("**/api/tag-libraries**", (route) => json(route, []));
   await page.route("**/api/monitoring/status", (route) => {
@@ -222,7 +224,7 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   });
   await page.route("**/api/repository/**", (route) => json(route, { items: [], pagination: { total: 0, page: 1, page_size: 10, total_pages: 0 } }));
   await page.route("**/api/agent/list/page?*", (route) => json(route, { items: [], pagination: { total: 0, page: 1, page_size: 10, total_pages: 0 } }));
-  await page.goto(`${baseUrl}/en/agent-space`);
+  await page.goto(`${baseUrl}/en/knowledges`);
   const rail = page.locator('[data-sidebar-expanded]');
   const divider = rail.locator('[data-sidebar-divider]');
   const checkDivider = async () => {
@@ -285,7 +287,7 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
     expect(gap).toBe(8);
   }
   await expect(rail.locator('[aria-current="page"] svg')).toHaveCSS('color', 'rgb(38, 115, 229)');
-  await expect(rail.getByRole('button', { name: text['sidebar.skillSpace'], exact: true }).locator('svg')).toHaveClass(/lucide-sparkles/);
+  await expect(rail.getByRole('button', { name: text['sidebar.resourceSpace'], exact: true }).locator('svg')).toHaveClass(/lucide-globe/);
   await expect(rail.getByRole('button', { name: text['sidebar.resourceManage'], exact: true }).locator('svg')).toHaveClass(/lucide-folder-cog/);
   const account = page.getByRole('button', { name: text['accountMenu.open'], exact: true });
   await expect(account).toHaveCSS('cursor', 'pointer');

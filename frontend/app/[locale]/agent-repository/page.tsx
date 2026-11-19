@@ -2,8 +2,8 @@
 
 "use client";
 
-import LegacyRepositoryEntry from "@/components/repository/LegacyRepositoryEntry";
+import LegacyRepositoryEntry from "./LegacyRepositoryEntry";
 
 export default function Page() {
-  return <LegacyRepositoryEntry resourceType="agent" />;
+  return <LegacyRepositoryEntry />;
 }

@@ -48,7 +48,7 @@ case:
       的 tags 等于继承标签而非可编辑覆盖。
     expected: 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
   - order: 8
-    action: 在 mcp-space page 组合中构造 tagPredicates/searchTagPredicates：断言 filterResourceIds("mcp_service", ...) 被调用并按 matched_resource_ids
+    action: 在资源仓库 MCP Tab（frontend/app/[locale]/resource-space/components/mcp）组合中构造 tagPredicates/searchTagPredicates：断言 filterResourceIds("mcp_service", ...) 被调用并按 matched_resource_ids
       过滤 Mine 列表，结构化标签搜索命中由 matchedSearchTagIds 补充。
     expected: 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
   - order: 9

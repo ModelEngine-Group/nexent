@@ -32,8 +32,8 @@ case:
     action: 刷新合法深链、切四Tab、输入无效tab和同ID不同类型记录，切角色/租户
     expected: Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。
   - order: 4
-    action: 在/zh与/en直接访问/agent-space、/skill-space、/mcp-space、/agent-repository及旧查询串，检查页面路由、redirect/rewrite和URL构造清单
-    expected: 侧栏仅保留资源仓库菜单；旧仓库首页及别名跳转对应新Tab，旧review跳转统一审核中心并保留资源类型，MCP/Skill的mine保留筛选和详情参数；Agent的mine保留个人管理和使用指引，不展示旧Tab外壳；旧URL角色登记不删除。
+    action: 在/zh与/en直接访问/agent-repository及旧查询串，检查页面路由、redirect/rewrite和URL构造清单；确认已删除的/agent-space、/skill-space、/mcp-space不再提供入口
+    expected: 侧栏仅保留资源仓库菜单；旧仓库别名/agent-repository跳转对应新Tab的仓库视图，旧review跳转统一审核中心并保留资源类型，MCP/Skill的mine保留筛选和详情参数；/agent-space、/skill-space、/mcp-space三条旧路由已随个人/旧版视图一并删除，旧链接直接404且侧栏无入口；旧URL角色登记不删除。
   - order: 5
     action: 用独立新浏览器上下文从外部直接打开四种tab及skill&view=mine，刷新、复制新窗口并执行浏览器前进/后退
     expected: 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。
@@ -47,13 +47,13 @@ case:
   - 授权用户均显示四Tab；DEV可读本人申请且无审核操作；ADMIN审核列表包含本人及他人，按原有资格操作；无URL登记角色无页面。
   - 新版活动入口直接访问新URL且按设计映射目标Tab/view；旧版链接通过兼容入口到达对应目标；MCP/Skill依赖进对应仓库，工作台Skill进mine，Agent引导保留agent_id/onboarding，待审通知进review，结果通知进对应资源mine并显示目标申请；不混用本地ID和仓库ID。
   - Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。
-  - 侧栏仅保留资源仓库菜单；旧仓库首页及别名跳转对应新Tab，旧review跳转统一审核中心并保留资源类型，MCP/Skill的mine保留筛选和详情参数；Agent的mine保留个人管理和使用指引，不展示旧Tab外壳；旧URL角色登记不删除。
+  - 侧栏仅保留资源仓库菜单；旧仓库别名/agent-repository跳转对应新Tab的仓库视图，旧review跳转统一审核中心并保留资源类型，MCP/Skill的mine保留筛选和详情参数；/agent-space、/skill-space、/mcp-space三条旧路由已随个人/旧版视图一并删除，旧链接直接404且侧栏无入口；旧URL角色登记不删除。
   - 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。
   - 登录后保留原受支持站内目标和查询串，不丢到首页/默认Tab；无权限拒绝，不可见记录明确提示，不换开同数值ID其他资源。
   - 通知按业务目标定位到正确申请；审核列表包含本人和他人，不因自己提交返回404或额外隐藏；操作规则沿用现有实现。
   forbidden_side_effects:
   - 不得对有仓库权限的普通用户隐藏审核Tab。
-  - 不得删除旧入口或引入空入口；新页面不得误跳旧页面或错误Tab。
+  - 不得删除旧URL角色登记或引入空入口；新页面不得误跳旧页面或错误Tab。
   tags:
   - resource-center
   - design-only
@@ -139,7 +139,7 @@ case:
   - 以有新URL登记的ADMIN、DEV及无新URL登记角色打开资源仓库
   - 依次从侧栏、首页、通知、使用引导、Agent依赖资源入口、创建弹窗及工作台Skill结果进入仓库，并测试语言/Tab/view/资源身份参数
   - 刷新合法深链、切四Tab、输入无效tab和同ID不同类型记录，切角色/租户
-  - 在/zh与/en直接访问/agent-space、/skill-space、/mcp-space、/agent-repository及旧查询串，检查页面路由、redirect/rewrite和URL构造清单
+  - 在/zh与/en直接访问/agent-repository及旧查询串，检查页面路由、redirect/rewrite和URL构造清单；确认已删除的/agent-space、/skill-space、/mcp-space不再提供入口
   - 用独立新浏览器上下文从外部直接打开四种tab及skill&view=mine，刷新、复制新窗口并执行浏览器前进/后退
   - 在未登录状态打开带tab/type/repository_id的新深链，登录成功后进入；另测试无权限和不可见记录
   - 审核者分别打开本人审核结果通知及他人待审通知，并从审核Tab读取本人申请
@@ -147,7 +147,7 @@ case:
   - 授权用户均显示四Tab；DEV可读本人申请且无审核操作；ADMIN审核列表包含本人及他人，按原有资格操作；无URL登记角色无页面。
   - 新版活动入口直接访问新URL且按设计映射目标Tab/view；旧版链接通过兼容入口到达对应目标；MCP/Skill依赖进对应仓库，工作台Skill进mine，Agent引导保留agent_id/onboarding，待审通知进review，结果通知进对应资源mine并显示目标申请；不混用本地ID和仓库ID。
   - Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。
-  - 侧栏仅保留资源仓库菜单；旧仓库首页及别名跳转对应新Tab，旧review跳转统一审核中心并保留资源类型，MCP/Skill的mine保留筛选和详情参数；Agent的mine保留个人管理和使用指引，不展示旧Tab外壳；旧URL角色登记不删除。
+  - 侧栏仅保留资源仓库菜单；旧仓库别名/agent-repository跳转对应新Tab的仓库视图，旧review跳转统一审核中心并保留资源类型，MCP/Skill的mine保留筛选和详情参数；/agent-space、/skill-space、/mcp-space三条旧路由已随个人/旧版视图一并删除，旧链接直接404且侧栏无入口；旧URL角色登记不删除。
   - 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。
   - 登录后保留原受支持站内目标和查询串，不丢到首页/默认Tab；无权限拒绝，不可见记录明确提示，不换开同数值ID其他资源。
   - 通知按业务目标定位到正确申请；审核列表包含本人和他人，不因自己提交返回404或额外隐藏；操作规则沿用现有实现。

@@ -86,7 +86,7 @@ export async function fulfillEditorReadFixture(route, endpoint) {
           permissions: [],
           accessibleRoutes: [
             "/agents",
-            "/mcp-space",
+            "/resource-space",
             "/knowledges",
             "/newchat",
           ],

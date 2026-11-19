@@ -188,7 +188,7 @@ export function SkillCreationResultCard({
       </p>
       {isSaved ? (
         <Button asChild size="sm" variant="outline">
-          <Link href={`/${locale}/skill-space?tab=mine`}>
+          <Link href={`/${locale}/resource-space?tab=skill&view=mine`}>
             {t("workbench.creation.openSkills", "查看我的 Skills")}
           </Link>
         </Button>

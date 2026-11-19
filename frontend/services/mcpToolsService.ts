@@ -383,10 +383,6 @@ type CommunityMcpListPayload = {
   limit?: number;
 };
 
-type CommunityMcpReviewListPayload = CommunityMcpListPayload & {
-  status?: string;
-};
-
 export const listCommunityMcpTools = async (
   payload: CommunityMcpListPayload
 ) => {
@@ -431,36 +427,9 @@ export const incrementCommunityMcpDownloadCount = async (marketId: number) => {
   }
 };
 
-export const listCommunityMcpReviewTools = async (
-  payload: CommunityMcpReviewListPayload
-) => {
-  try {
-    const response = await fetchWithAuth(
-      buildCommunityMcpListUrl(
-        API_ENDPOINTS.mcpTools.communityReviewList,
-        payload
-      )
-    );
-    const data =
-      await parseJson<
-        ApiEnvelope<{ items: CommunityMcpCard[]; nextCursor: string | null }>
-      >(response);
-    if (data.status !== "success") {
-      throw new Error("Failed to load community mcp review list");
-    }
-    return { success: true, data: data.data } as McpToolsApiResult<{
-      items: CommunityMcpCard[];
-      nextCursor: string | null;
-    }>;
-  } catch (error) {
-    log.error("listCommunityMcpReviewTools failed", error);
-    throw error;
-  }
-};
-
 const buildCommunityMcpListUrl = (
   endpoint: string,
-  payload: CommunityMcpReviewListPayload
+  payload: CommunityMcpListPayload
 ) => {
   const query = new URLSearchParams();
   if (payload.sort_by_published_time)
@@ -469,7 +438,6 @@ const buildCommunityMcpListUrl = (
   if (payload.tag) query.set("tag", payload.tag);
   if (payload.transport_type)
     query.set("transport_type", payload.transport_type.toString());
-  if (payload.status) query.set("status", payload.status);
   if (payload.cursor) query.set("cursor", payload.cursor);
   if (typeof payload.page === "number") query.set("page", String(payload.page));
   if (typeof payload.limit === "number")
@@ -492,58 +460,6 @@ export const cancelCommunityMcpReview = async (reviewId: number) => {
     return { success: true, data: null } as McpToolsApiResult<null>;
   } catch (error) {
     log.error("cancelCommunityMcpReview failed", error);
-    throw error;
-  }
-};
-
-export const approveCommunityMcpTool = async (
-  reviewId: number,
-  content?: string
-) => {
-  try {
-    const response = await fetchWithAuth(
-      API_ENDPOINTS.mcpTools.communityReviewApprove,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          review_id: reviewId,
-          ...(content ? { content } : {}),
-        }),
-      }
-    );
-    const data = await parseJson<ApiEnvelope>(response);
-    if (data.status !== "success") {
-      throw new Error("Failed to approve community mcp");
-    }
-    return { success: true, data: null } as McpToolsApiResult<null>;
-  } catch (error) {
-    log.error("approveCommunityMcpTool failed", error);
-    throw error;
-  }
-};
-
-export const rejectCommunityMcpTool = async (
-  reviewId: number,
-  content?: string
-) => {
-  try {
-    const response = await fetchWithAuth(
-      API_ENDPOINTS.mcpTools.communityReviewReject,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          review_id: reviewId,
-          ...(content ? { content } : {}),
-        }),
-      }
-    );
-    const data = await parseJson<ApiEnvelope>(response);
-    if (data.status !== "success") {
-      throw new Error("Failed to reject community mcp");
-    }
-    return { success: true, data: null } as McpToolsApiResult<null>;
-  } catch (error) {
-    log.error("rejectCommunityMcpTool failed", error);
     throw error;
   }
 };

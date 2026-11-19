@@ -4,12 +4,12 @@ module:
   name: Migrated V5 baseline
 feature:
   feature_id: V5-PW-MARKET-AGENT-01
-  name: Mine申请上架→Admin Review→Repository→同租户其他用户Copy
+  name: 智能体管理页申请上架→Admin审核中心→资源仓库→同租户其他用户Copy
   status: active
-  description: 按/agent-space Repository/Mine/Review三Tab验证租户内共享、不同用户复制闭环；复制必须产生独立可编辑副本，同租户重名使用产品自动数字后缀。
+  description: 按智能体管理页申请上架、资源仓库审核中心批准、仓库Tab发现、同租户其他用户复制验证租户内共享与复制闭环；复制必须产生独立可编辑副本，同租户重名使用产品自动数字后缀。
   business_rules:
   - rule_id: V5-PW-MARKET-AGENT-01-RULE-01
-    description: Mine申请上架→Admin Review→Repository→同租户其他用户Copy
+    description: 智能体管理页申请上架→Admin审核中心批准→仓库Tab可见→同租户其他用户Copy；开发者可通过仓库卡片下架自己发布的记录。
   required_test_stages:
   - D4
   source:

@@ -26,6 +26,7 @@ export interface MyAgentDetailView {
     createdAt: string | null;
     publishedAt?: string | null;
     updatedAt?: string | null;
+    isMainAgent?: boolean;
     modelNames?: string[];
     models?: ModelOption[];
     knowledgeDetails?: Map<string, KnowledgeBase>;
@@ -161,6 +162,7 @@ export function mapRepositoryAgentDetail(
   );
   return {
     ...detail,
+    versionLabel: listingDetail.version_label?.trim() || detail.versionLabel,
     knowledgeBases: uniqueNames([
       ...detail.knowledgeBases,
       ...knowledgeDetails.keys(),
@@ -179,6 +181,7 @@ export function mapRepositoryAgentDetail(
       createdAt: listingDetail.created_at ?? null,
       publishedAt: listingDetail.published_at ?? null,
       updatedAt: versionDetail.version?.update_time ?? null,
+      isMainAgent: listingDetail.is_main_agent ?? true,
       modelNames: uniqueNames(versionDetail.model_names ?? []),
       knowledgeDetails,
       skillTags: new Map(
@@ -236,6 +239,8 @@ export function mapOfficialRepositoryDetail(
     repositoryInfo: {
       downloads: detail.downloads ?? 0,
       createdAt: detail.created_at ?? null,
+      publishedAt: detail.published_at ?? null,
+      isMainAgent: detail.is_main_agent ?? true,
     },
   };
 }

@@ -2,7 +2,7 @@
 
 "use client";
 
-import ResourceRepositoryPage from "@/components/repository/ResourceRepositoryPage";
+import ResourceRepositoryPage from "./components/ResourceRepositoryPage";
 
 export default function Page() {
   return <ResourceRepositoryPage />;

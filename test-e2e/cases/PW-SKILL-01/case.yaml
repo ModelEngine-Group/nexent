@@ -19,7 +19,7 @@ case:
     legacy_asset_declaration: assets/skills/test_skill/；config/models.yaml
   steps:
   - order: 1
-    action: 打开/skill-space→Mine。
+    action: 打开资源仓库 Skill Tab（/resource-space?tab=skill）→ 我的 Skill 视图。
     expected: Skill真实创建/编辑且刷新存在。
   - order: 2
     action: 点击创建/上传Skill，使用run_id名称并上传固定Skill资产或按当前表单创建。
@@ -56,7 +56,7 @@ case:
     legacy_row: 26
   actor: Nexent browser user
   journey:
-  - 打开/skill-space→Mine。
+  - 打开资源仓库 Skill Tab（/resource-space?tab=skill）→ 我的 Skill 视图。
   - 点击创建/上传Skill，使用run_id名称并上传固定Skill资产或按当前表单创建。
   - 等待创建成功，打开编辑并修改允许字段后保存。
   - 刷新Mine搜索run_id Skill。

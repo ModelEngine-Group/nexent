@@ -23,7 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 
-import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
+import A2AServerSettingsPanel from "@/components/agent/A2AServerSettingsPanel";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
@@ -44,8 +44,8 @@ import { RESOURCE_REPOSITORY_PERMISSION_ROUTE } from "@/const/resourceRepository
 import { buildResourceRepositoryHref } from "@/lib/resourceRepositoryRoutes";
 import { getAgentUsageGuideAccess } from "@/lib/agentUsageGuide";
 import { useCreateAgentRepositoryListing } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { MineApplyListingModal } from "@/components/repository/agent/components/MineApplyListingModal";
-import { AgentUsageGuideModal } from "@/components/repository/agent/components/AgentUsageGuideModal";
+import { AgentApplyListingModal } from "@/components/agent/AgentApplyListingModal";
+import { AgentUsageGuideModal } from "@/components/agent/AgentUsageGuideModal";
 import type { Agent } from "@/types/agentConfig";
 
 export default function AgentConfigActions({
@@ -467,7 +467,7 @@ export default function AgentConfigActions({
   return (
     <>
       {repositoryAgent && repositoryDialog === "apply" && canApply && (
-        <MineApplyListingModal
+        <AgentApplyListingModal
           open
           agent={repositoryAgent}
           isSubmitting={createListing.isPending}

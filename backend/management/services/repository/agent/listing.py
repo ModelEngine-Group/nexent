@@ -236,6 +236,7 @@ def list_agent_repository_listings_impl(
         "items": [
             _to_summary_item(
                 record,
+                viewer_user_id=user_id,
                 download_total=download_totals.get(int(record["agent_id"]), 0)
                 if record.get("agent_id") is not None
                 else 0,

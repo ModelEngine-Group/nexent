@@ -3,8 +3,8 @@
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
-import RepositoryMcpCard from "@/components/repository/mcp/components/RepositoryMcpCard";
-import { SkillRepositoryCard } from "@/components/repository/skill/components/SkillRepositoryCard";
+import RepositoryMcpCard from "@/app/resource-space/components/mcp/components/RepositoryMcpCard";
+import { SkillRepositoryCard } from "@/app/resource-space/components/skill/components/SkillRepositoryCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import { McpTransportType } from "@/const/mcpTools";

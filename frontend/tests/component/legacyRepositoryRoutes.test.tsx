@@ -2,7 +2,7 @@
 
 import { render } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import LegacyRepositoryEntry from "@/components/repository/LegacyRepositoryEntry";
+import LegacyRepositoryEntry from "@/app/agent-repository/LegacyRepositoryEntry";
 import { buildLegacyRepositoryRedirect } from "@/lib/legacyRepositoryRoutes";
 
 vi.mock("@/base-path.mjs", () => ({ BASE_PATH: "/nexent" }));
@@ -12,65 +12,42 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: navigation.replace }),
   useSearchParams: () => new URLSearchParams(navigation.search),
 }));
-vi.mock("next/dynamic", () => ({
-  default: () => () => <div>personal agents</div>,
-}));
 
 beforeEach(() => {
   navigation.replace.mockReset();
   navigation.search = "";
 });
 
-test.each(["agent", "mcp", "skill"] as const)(
-  "redirects the retired %s landing page",
-  (type) => {
-    render(<LegacyRepositoryEntry resourceType={type} />);
-    expect(navigation.replace).toHaveBeenCalledWith(
-      `/nexent/zh/resource-space?tab=${type}&view=repository`
-    );
-  }
-);
+test("redirects the retired agent repository alias to the agent repository tab", () => {
+  render(<LegacyRepositoryEntry />);
+  expect(navigation.replace).toHaveBeenCalledWith(
+    `/nexent/zh/resource-space?tab=agent&view=repository`
+  );
+});
 
-test.each(["agent", "mcp", "skill"] as const)(
-  "routes %s reviews to the unified review center",
-  (type) => {
-    const href = buildLegacyRepositoryRedirect(
-      "en",
-      type,
-      "tab=review&review_id=42"
-    );
-    expect(href).toBe(
-      `/nexent/en/resource-space?tab=review&review_id=42&resource_type=${type}`
-    );
-  }
-);
+test("routes agent reviews to the unified review center", () => {
+  const href = buildLegacyRepositoryRedirect("en", "tab=review&review_id=42");
+  expect(href).toBe(
+    `/nexent/en/resource-space?tab=review&review_id=42&resource_type=agent`
+  );
+});
 
-test.each(["mcp", "skill"] as const)(
-  "preserves personal %s filters and detail IDs",
-  (type) => {
-    const href = buildLegacyRepositoryRedirect(
-      "zh",
-      type,
-      "tab=mine&page=2&skill_id=42&keyword=a%26b"
-    );
-    const params = new URL(href!, "http://localhost").searchParams;
-    expect(params.get("tab")).toBe(type);
-    expect(params.get("view")).toBe("mine");
-    expect(params.get("skill_id")).toBe("42");
-    expect(params.get("keyword")).toBe("a&b");
-    expect(params.get("page")).toBe("2");
-  }
-);
-
-test("keeps published-agent usage guide links working without the old tab shell", () => {
+test("retires the personal agent view by landing on the agent repository", () => {
   navigation.search = "tab=mine&agent_id=42&onboarding=usage-menu";
-  const { getByText } = render(<LegacyRepositoryEntry resourceType="agent" />);
-  expect(getByText("personal agents")).toBeTruthy();
-  expect(navigation.replace).not.toHaveBeenCalled();
+  render(<LegacyRepositoryEntry />);
+  const params = new URL(
+    navigation.replace.mock.calls[0][0] as string,
+    "http://localhost"
+  ).searchParams;
+  expect(navigation.replace).toHaveBeenCalledTimes(1);
+  expect(params.get("tab")).toBe("agent");
+  expect(params.get("view")).toBe("repository");
+  // The unified repository rejects the retired onboarding marker outright.
+  expect(params.get("onboarding")).toBeNull();
 });
 
 test("does not allow stale view and resource type to override the destination", () => {
   expect(
-    buildLegacyRepositoryRedirect("en", "mcp", "view=mine&resource_type=skill")
-  ).toBe("/nexent/en/resource-space?tab=mcp&view=repository");
+    buildLegacyRepositoryRedirect("en", "view=mine&resource_type=skill")
+  ).toBe("/nexent/en/resource-space?tab=agent&view=repository");
 });

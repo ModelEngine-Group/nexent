@@ -5,33 +5,19 @@ import test from "node:test";
 
 import {
   buildAgentShareUrl,
-  buildAuthenticationReturnPath,
   buildCopyAriaLabel,
-  buildAgentUsageGuidePath,
   buildNorthboundDocsUrl,
   buildNorthboundCurl,
   buildNorthboundRunUrl,
   buildUserApiKeyPath,
-  clearAgentUsageGuidePath,
-  getAgentUsageGuideOpenAction,
   getAgentUsageGuideAccess,
   getAgentPublishCompletion,
   getA2AGuideState,
   resolveAgentDeepLinkAction,
   buildDefaultAgentVersionName,
-  resolveAgentUsageGuideTarget,
-  parseAgentUsageGuideTargetParams,
-  parseAgentUsageGuideParams,
   isAnonymousConversationSharePath,
   // @ts-ignore -- Node's built-in TypeScript runner needs the extension.
 } from "../lib/agentUsageGuide.ts";
-
-test("builds the published Agent repository menu onboarding URL", () => {
-  assert.equal(
-    buildAgentUsageGuidePath("zh", 41),
-    "/zh/agent-space?tab=mine&agent_id=41&onboarding=usage-menu"
-  );
-});
 
 test("completes ordinary and A2A publishes but keeps failed publishes in the editor", () => {
   assert.equal(getAgentPublishCompletion({ success: true }), "complete");
@@ -47,114 +33,6 @@ test("completes ordinary and A2A publishes but keeps failed publishes in the edi
 
 test("keeps conversation snapshot shares anonymous", () => {
   assert.equal(isAnonymousConversationSharePath("/share/snapshot-id"), true);
-});
-
-test("separates persistent Agent targeting from one-time menu onboarding", () => {
-  assert.deepEqual(
-    parseAgentUsageGuideParams(
-      new URLSearchParams("tab=mine&agent_id=41&onboarding=usage-menu")
-    ),
-    { agentId: 41 }
-  );
-  assert.equal(
-    parseAgentUsageGuideParams(new URLSearchParams("agent_id=41")),
-    null
-  );
-  assert.equal(
-    parseAgentUsageGuideParams(
-      new URLSearchParams("agent_id=nope&onboarding=usage-menu")
-    ),
-    null
-  );
-  assert.deepEqual(
-    parseAgentUsageGuideTargetParams(new URLSearchParams("agent_id=41")),
-    { agentId: 41 }
-  );
-  assert.equal(
-    parseAgentUsageGuideTargetParams(new URLSearchParams("agent_id=nope")),
-    null
-  );
-  assert.equal(
-    clearAgentUsageGuidePath("zh", 41),
-    "/zh/agent-space?tab=mine&agent_id=41"
-  );
-});
-
-test("resolves a published Agent outside the current repository page", () => {
-  const currentPageAgents = [{ agent_id: 7, name: "current" }];
-  const targetedAgent = { agent_id: 41, name: "target" };
-
-  assert.deepEqual(
-    resolveAgentUsageGuideTarget({
-      agentId: 41,
-      agents: currentPageAgents,
-      fallbackAgent: targetedAgent,
-      isListLoading: false,
-      isFallbackLoading: false,
-      getAgentId: (agent) => agent.agent_id,
-    }),
-    { state: "found", agent: targetedAgent }
-  );
-});
-
-test("waits for guide target queries and rejects a mismatched fallback", () => {
-  assert.deepEqual(
-    resolveAgentUsageGuideTarget({
-      agentId: 41,
-      agents: [] as Array<{ agent_id: number }>,
-      fallbackAgent: null,
-      isListLoading: true,
-      isFallbackLoading: true,
-      getAgentId: (agent) => agent.agent_id,
-    }),
-    { state: "loading" }
-  );
-  assert.deepEqual(
-    resolveAgentUsageGuideTarget({
-      agentId: 41,
-      agents: [] as Array<{ agent_id: number }>,
-      fallbackAgent: { agent_id: 42 },
-      isListLoading: false,
-      isFallbackLoading: false,
-      getAgentId: (agent) => agent.agent_id,
-    }),
-    { state: "missing" }
-  );
-});
-
-test("waits while the mine tab and guide target queries are inactive", () => {
-  assert.deepEqual(
-    resolveAgentUsageGuideTarget({
-      agentId: 41,
-      agents: [] as Array<{ agent_id: number }>,
-      fallbackAgent: null,
-      isListLoading: false,
-      isFallbackLoading: false,
-      isActive: false,
-      getAgentId: (agent) => agent.agent_id,
-    }),
-    { state: "loading" }
-  );
-});
-
-test("opens a repository guide target only once", () => {
-  const target = { agent_id: 41, name: "target" };
-  assert.deepEqual(
-    getAgentUsageGuideOpenAction({
-      agentId: 41,
-      consumedAgentId: null,
-      target: { state: "found", agent: target },
-    }),
-    { action: "open", agent: target }
-  );
-  assert.deepEqual(
-    getAgentUsageGuideOpenAction({
-      agentId: 41,
-      consumedAgentId: 41,
-      target: { state: "found", agent: target },
-    }),
-    { action: "ignore" }
-  );
 });
 
 test("resolves an Agent chat deep link only once", () => {

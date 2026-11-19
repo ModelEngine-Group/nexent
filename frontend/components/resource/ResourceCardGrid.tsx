@@ -17,11 +17,11 @@ import {
 } from "antd";
 import type { TableColumnType } from "antd";
 import { useTranslation } from "react-i18next";
-import { AgentCardTags } from "@/components/repository/agent/components/AgentCardTags";
+import { AgentCardTags } from "@/components/resource/AgentCardTags";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
-import { Search } from "lucide-react";
+import { PackageMinus, PackagePlus, Search, Trash2, X } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 
 import CreateResourceCard from "./CreateResourceCard";
@@ -80,6 +80,13 @@ export interface ResourceCardGridProps<T> {
   renderListActions?: (item: T) => ReactNode;
   batchDelete?: (item: T) => Promise<void>;
   batchDeleteItems?: (items: T[]) => Promise<Map<string, string>>;
+  floatingBatch?: {
+    onExit: () => void;
+    canApply: (item: T) => boolean;
+    apply: (items: T[]) => void;
+    canTakeDown: (item: T) => boolean;
+    takeDown: (items: T[]) => Promise<Map<string, string>>;
+  };
   canBatchDelete?: (item: T) => boolean;
   getItemKey?: (item: T) => string;
   selectionKey?: string;
@@ -118,6 +125,7 @@ export default function ResourceCardGrid<T>({
   renderListActions,
   batchDelete,
   batchDeleteItems,
+  floatingBatch,
   canBatchDelete,
   getItemKey,
   selectionKey,
@@ -195,10 +203,19 @@ export default function ResourceCardGrid<T>({
   const selectable = batching
     ? visibleItems.filter((item) => canBatchDelete!(item))
     : [];
-  const removeSelected = () =>
+  const selectedItems = selectable.filter((item) => selected.includes(keyOf(item)));
+  const applyItems = floatingBatch ? selectedItems.filter(floatingBatch.canApply) : [];
+  const takeDownItems = floatingBatch ? selectedItems.filter(floatingBatch.canTakeDown) : [];
+  const takeDownLabel = t(presentation?.resourceType === "skill"
+    ? "skillRepository.action.status.notShared" : "mcpTools.repository.offline");
+  const batchLabel = t(presentation?.resourceType === "skill"
+    ? "skillRepository.mine.batchManage" : "mcpTools.mine.batchActions");
+  const exitBatchLabel = t(presentation?.resourceType === "skill"
+    ? "skillRepository.mine.exitManagement" : "mcpTools.mine.exitBatch");
+  const removeSelected = (takingDown = false) =>
     modal.confirm({
-      title: t("resourceCenter.deleteSelected"),
-      content: t("resourceCenter.selectedCount", { count: selected.length }),
+      title: takingDown ? takeDownLabel : t("resourceCenter.deleteSelected"),
+      content: t("resourceCenter.selectedCount", { count: takingDown ? takeDownItems.length : selectedItems.length }),
       centered: true,
       okButtonProps: { danger: true },
       okText: t("common.confirm"),
@@ -207,12 +224,11 @@ export default function ResourceCardGrid<T>({
         setDeleting(true);
         const failed: string[] = [];
         const errors: string[] = [];
-        const targets = selectable.filter((item) =>
-          selected.includes(keyOf(item))
-        );
-        if (batchDeleteItems && targets.length) {
+        const targets = takingDown ? takeDownItems : selectedItems;
+        const runBatch = takingDown ? floatingBatch?.takeDown : batchDeleteItems;
+        if (runBatch && targets.length) {
           try {
-            const failures = await batchDeleteItems(targets);
+            const failures = await runBatch(targets);
             failed.push(...failures.keys());
             errors.push(...failures.values());
           } catch (error) {
@@ -285,7 +301,7 @@ export default function ResourceCardGrid<T>({
         danger
         disabled={!selected.length}
         loading={deleting}
-        onClick={removeSelected}
+        onClick={() => removeSelected()}
       >
         {t("resourceCenter.deleteSelected")} ({selected.length})
       </Button>
@@ -295,7 +311,7 @@ export default function ResourceCardGrid<T>({
   return (
     <>
       {renderBatchToolbar
-        ? renderBatchToolbar(batchControls, {
+        ? renderBatchToolbar(floatingBatch ? null : batchControls, {
             selectedCount: selected.length,
             deleting,
             selectPageControl,
@@ -304,7 +320,7 @@ export default function ResourceCardGrid<T>({
               if (selected.length && !deleting) removeSelected();
             },
           })
-        : batchControls && <div className="mb-3">{batchControls}</div>}
+        : !floatingBatch && batchControls && <div className="mb-3">{batchControls}</div>}
       {batchErrors.length > 0 && (
         <Alert
           type="error"
@@ -383,6 +399,14 @@ export default function ResourceCardGrid<T>({
                 }
               : undefined
           }
+          onRow={batching && floatingBatch ? (item) => ({
+            onClick: (event) => {
+              if (deleting || !canBatchDelete!(item) ||
+                (event.target as Element).closest("button, label, input, .ant-checkbox-wrapper")) return;
+              const key = keyOf(item);
+              setSelected((keys) => keys.includes(key) ? keys.filter((entry) => entry !== key) : [...keys, key]);
+            },
+          }) : undefined}
           rowKey={keyOf}
           columns={[
             {
@@ -394,7 +418,7 @@ export default function ResourceCardGrid<T>({
                 const name = String(
                   row.display_name || row.name || row.skill_name || "—"
                 );
-                return onListSelect ? (
+                return onListSelect && !(floatingBatch && batching) ? (
                   <Button
                     type="link"
                     className="!h-auto max-w-full !px-0 !py-0 !text-[#0067D1] [&>span]:truncate"
@@ -508,7 +532,7 @@ export default function ResourceCardGrid<T>({
                   : t("resourceCenter.notRecorded");
               },
             },
-            ...(presentation
+            ...(presentation && !(floatingBatch && batching)
               ? [
                   {
                     title: t("resourceCenter.actions"),
@@ -566,6 +590,28 @@ export default function ResourceCardGrid<T>({
             ) : (
               visibleItems.map((item, index) => {
                 if (!batching) return renderItem(item, index);
+                if (floatingBatch) {
+                  const key = keyOf(item);
+                  const checked = selected.includes(key);
+                  const disabled = deleting || !canBatchDelete!(item);
+                  return (
+                    <div key={key} className="relative rounded-xl">
+                      <div inert className="h-full [&>.group]:h-full">
+                        {renderItem(item, index, <span />)}
+                      </div>
+                      <label className={`absolute inset-0 z-10 flex items-start justify-end rounded-xl px-6 py-4 focus-within:ring-2 focus-within:ring-primary ${
+                        checked ? "bg-primary/5 ring-2 ring-inset ring-primary" : ""
+                      } ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                        <input type="checkbox" className="mt-1 size-4 accent-primary"
+                          aria-label={String(resourceValues(item).name ?? "")}
+                          checked={checked} disabled={disabled}
+                          onChange={() => setSelected((keys) => keys.includes(key)
+                            ? keys.filter((value) => value !== key) : [...keys, key])}
+                        />
+                      </label>
+                    </div>
+                  );
+                }
                 const selection = (
                   <Checkbox
                     className={
@@ -627,6 +673,20 @@ export default function ResourceCardGrid<T>({
           />
         </div>
       ) : null}
+      {batching && floatingBatch && (
+        <div role="toolbar" aria-label={batchLabel}
+          className="sticky bottom-3 z-20 mx-auto my-3 flex w-fit max-w-full shrink-0 flex-wrap items-center justify-center gap-2 rounded-xl border bg-white px-3 py-2 shadow-lg dark:bg-slate-900">
+          {selectPageControl}
+          <span className="border-r pr-3 text-sm text-slate-500">{t("resourceCenter.selectedCount", { count: selectedItems.length })}</span>
+          <Button type="text" icon={<PackagePlus size={16} />} disabled={deleting || !applyItems.length}
+            onClick={() => floatingBatch.apply(applyItems)}>{t("repository.mine.applyForListing")} ({applyItems.length})</Button>
+          <Button type="text" icon={<PackageMinus size={16} />} disabled={deleting || !takeDownItems.length}
+            onClick={() => removeSelected(true)}>{takeDownLabel} ({takeDownItems.length})</Button>
+          <Button type="text" danger icon={<Trash2 size={16} />} disabled={deleting || !selectedItems.length}
+            onClick={() => removeSelected()}>{t("resourceCenter.deleteSelected")} ({selectedItems.length})</Button>
+          <Button type="text" icon={<X size={16} />} disabled={deleting} aria-label={exitBatchLabel} onClick={floatingBatch.onExit} />
+        </div>
+      )}
     </>
   );
 }

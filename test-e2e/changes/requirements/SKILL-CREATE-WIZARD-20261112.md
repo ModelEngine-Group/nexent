@@ -3,7 +3,7 @@
 ## Scope and reference
 
 User-provided screenshots define the import creation layout. The owning
-entry is `frontend/components/repository/skill/my-skill.tsx`. Existing edit and
+entry is `frontend/app/[locale]/resource-space/components/skill/my-skill.tsx`. Existing edit and
 non-repository `SkillBuildModal` flows remain in place; the new wizard is used
 only for creation in the unified resource repository. Workbench creation remains
 available through its existing entry. No backend endpoints, SQL or dependency

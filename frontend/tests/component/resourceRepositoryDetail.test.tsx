@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import { Drawer, Button } from "antd";
@@ -9,7 +9,13 @@ import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, params?: { count?: number }) =>
+      key === "resourceCenter.agentDetail.copyCount"
+        ? `${params?.count} 次`
+        : key,
+    i18n: { language: "zh" },
+  }),
 }));
 
 vi.mock("@/hooks/auth/useUserDisplayName", () => ({
@@ -45,37 +51,67 @@ function renderAgentDetail(overrides: Partial<MyAgentDetailView> = {}) {
 }
 
 describe("agent repository detail", () => {
-  it("hides empty tags while retaining the other section empty states", () => {
+  it("uses one empty message for related resources and hides empty tags", () => {
     renderAgentDetail();
     const headings = screen.getAllByRole("heading", { level: 3 });
     expect(headings.map((heading) => heading.textContent)).toEqual([
-      "common.description",
-      "agentRepository.mine.detail.author",
-      "resourceCenter.publishedAt",
-      "agentRepository.mine.detail.model",
-      "agentRepository.mine.detail.knowledgeBases",
-      "agentRepository.mine.detail.skills",
-      "agentRepository.mine.detail.tools",
-      "resourceCenter.subAgents",
+      "resourceCenter.agentDetail.basicInfo",
+      "resourceCenter.agentDetail.model",
+      "resourceCenter.agentDetail.relatedResources",
     ]);
-    for (const heading of headings) {
-      if (heading.textContent === "resourceCenter.publishedAt") continue;
-      expect(
-        heading.closest("section")?.querySelector(".ant-empty")
-      ).toBeTruthy();
-    }
-    expect(screen.getByText("resourceCenter.notRecorded")).toBeTruthy();
+    const relatedResources = headings[2].closest("section")!;
+    expect(
+      within(relatedResources).getByText(
+        "resourceCenter.agentDetail.noRelatedResources"
+      )
+    ).toBeVisible();
+    expect(
+      within(relatedResources).queryByRole("heading", { level: 4 })
+    ).toBeNull();
+    expect(screen.getByRole("dialog").querySelector(".ant-empty")).toBeNull();
+    expect(
+      screen.getAllByText("resourceCenter.notRecorded").length
+    ).toBeGreaterThan(0);
     expect(screen.queryByText("agentRepository.mine.detail.tags")).toBeNull();
   });
 
-  it("retains nonempty tags in the detail header", () => {
-    renderAgentDetail({ tags: ["medical", "reports"] });
-    const tags = screen.getByRole("list", {
+  it("groups tags, published version, dates, and zero copies under basic information", () => {
+    renderAgentDetail({
+      tags: ["medical", "reports"],
+      versionLabel: "v2.0",
+      repositoryInfo: {
+        downloads: 0,
+        createdAt: null,
+        publishedAt: "2026-10-12T06:20:00Z",
+        updatedAt: "2026-10-13T06:20:00Z",
+        isMainAgent: true,
+      },
+    });
+    const basicInfo = within(
+      screen
+        .getByRole("heading", {
+          name: "resourceCenter.agentDetail.basicInfo",
+        })
+        .closest("section")!
+    );
+    const tags = basicInfo.getByRole("list", {
       name: "agentRepository.mine.detail.tags",
     });
     expect(tags.textContent).toContain("medical");
     expect(tags.textContent).toContain("reports");
-    expect(tags.querySelector(".ant-empty")).toBeNull();
+    expect(basicInfo.getByText("v2.0")).toBeVisible();
+    expect(basicInfo.getByText("0 次")).toBeVisible();
+    expect(
+      basicInfo
+        .getByText("agentConfig.list.column.updatedAt")
+        .parentElement?.querySelector("time")
+    ).toHaveAttribute("datetime", "2026-10-13T06:20:00Z");
+    expect(
+      basicInfo
+        .getByText("resourceCenter.publishedAt")
+        .parentElement?.querySelector("time")
+    ).toHaveAttribute("datetime", "2026-10-12T06:20:00Z");
+    expect(screen.getByText("agentRepository.card.mainAgent")).toBeVisible();
   });
 
   it("renders four separate models initially and lets users show and hide the rest", () => {
@@ -107,6 +143,12 @@ describe("agent repository detail", () => {
     const [expandSkills, expandTools] = screen.getAllByRole("button", {
       name: "resourceCenter.expandMore",
     });
+    expect(
+      screen.getByRole("heading", { level: 4, name: /detail.skills/ })
+    ).toHaveTextContent("5");
+    expect(
+      screen.queryByText("resourceCenter.agentDetail.noRelatedResources")
+    ).toBeNull();
     fireEvent.click(expandSkills);
     expect(screen.getByText("Skill 5")).toBeTruthy();
     expect(screen.queryByText("Tool 5")).toBeNull();

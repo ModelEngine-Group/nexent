@@ -29,6 +29,7 @@ export interface AgentRepositoryListingItem {
   submitted_by?: string | null;
   submitted_by_cas_username?: string | null;
   publisher_tenant_id?: string | null;
+  is_publisher?: boolean;
   content?: string | null;
   /** Platform-provided template; readable/copyable but not tenant-editable. */
   is_official?: boolean;
@@ -122,51 +123,6 @@ export interface MyEditableAgentItem {
   downloads?: number;
   tags?: string[];
   repository_info: MyAgentRepositoryInfoItem[];
-}
-
-export interface MyEditableAgentPaddingItem {
-  new_agent_padding: true;
-}
-
-export type MyEditableAgentListItem =
-  MyEditableAgentItem | MyEditableAgentPaddingItem;
-
-export function isNewAgentPaddingItem(
-  item: MyEditableAgentListItem
-): item is MyEditableAgentPaddingItem {
-  return "new_agent_padding" in item && item.new_agent_padding === true;
-}
-
-export type MineOwnershipFilter = "all" | "created" | "others";
-
-export interface MyEditableAgentOwnershipCounts {
-  all: number;
-  created: number;
-  others: number;
-}
-
-export interface MyEditableAgentListParams {
-  ownership?: MineOwnershipFilter;
-  page?: number;
-  page_size?: number;
-  search?: string;
-  new_agent_padding?: boolean;
-  agent_id?: number;
-  tag_predicates?: TagResourcePredicate[];
-  search_tag_predicates?: TagResourcePredicate[];
-}
-
-export interface MyEditableAgentPagination {
-  page: number;
-  page_size: number;
-  total: number;
-  total_pages: number;
-}
-
-export interface MyEditableAgentListResponse {
-  items: MyEditableAgentListItem[];
-  counts: MyEditableAgentOwnershipCounts;
-  pagination: MyEditableAgentPagination;
 }
 
 export interface AgentRepositoryListingCreatePayload {

@@ -145,7 +145,7 @@ export function buildAgentRepositoryReviewDeepLink(
   eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
-    return `/${locale}/agent-space?tab=review`;
+    return `/${locale}/resource-space?tab=review&resource_type=agent`;
   }
 
   const ids = extractReviewDeepLinkIds(details);
@@ -161,7 +161,7 @@ export function buildSkillRepositoryReviewDeepLink(
   eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
-    return `/${locale}/skill-space?tab=review`;
+    return `/${locale}/resource-space?tab=review&resource_type=skill`;
   }
 
   const ids = extractSkillReviewDeepLinkIds(details);
@@ -169,11 +169,12 @@ export function buildSkillRepositoryReviewDeepLink(
     return null;
   }
   const params = new URLSearchParams({
-    tab: "mine",
+    tab: "skill",
+    view: "mine",
     skill_repository_id: String(ids.skillRepositoryId),
     skill_id: String(ids.skillId),
   });
-  return `/${locale}/skill-space?${params.toString()}`;
+  return `/${locale}/resource-space?${params.toString()}`;
 }
 
 export function buildMcpRepositoryReviewDeepLink(
@@ -182,7 +183,7 @@ export function buildMcpRepositoryReviewDeepLink(
   eventType?: string,
 ): string | null {
   if (eventType === NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING) {
-    return `/${locale}/mcp-space?tab=review`;
+    return `/${locale}/resource-space?tab=review&resource_type=mcp`;
   }
 
   const ids = extractMcpReviewDeepLinkIds(details);
@@ -190,11 +191,12 @@ export function buildMcpRepositoryReviewDeepLink(
     return null;
   }
   const params = new URLSearchParams({
-    tab: "mine",
+    tab: "mcp",
+    view: "mine",
     market_id: String(ids.marketId),
     source_mcp_id: String(ids.sourceMcpId),
   });
-  return `/${locale}/mcp-space?${params.toString()}`;
+  return `/${locale}/resource-space?${params.toString()}`;
 }
 
 export function buildRepositoryReviewDeepLink(

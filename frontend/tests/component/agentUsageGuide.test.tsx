@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+﻿// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import React from "react";
 import { App } from "antd";
@@ -8,12 +8,10 @@ import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentUsageGuideModal } from "../../app/[locale]/agent-space/components/AgentUsageGuideModal";
-import { MyAgentCard } from "../../app/[locale]/agent-space/components/MyAgentCard";
+import { AgentUsageGuideModal } from "@/components/agent/AgentUsageGuideModal";
 import { a2aClientService } from "@/services/a2aService";
 import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import { configService } from "@/services/configService";
-import agentRepositoryService from "@/services/agentRepositoryService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
 vi.mock("next/navigation", () => ({ useParams: () => ({ locale: "zh" }) }));
@@ -33,7 +31,7 @@ vi.mock("@/services/configService", () => ({
 vi.mock("@/services/agentConfigService", () => ({
   fetchPublishedAgentList: vi.fn(),
 }));
-vi.mock("@/app/agents/components/a2a/A2AServerSettingsPanel", () => ({
+vi.mock("@/components/agent/A2AServerSettingsPanel", () => ({
   default: ({ endpointId }: { endpointId: string }) => (
     <section aria-label="a2a-settings">{endpointId}</section>
   ),
@@ -57,28 +55,6 @@ function renderWithProviders(node: React.ReactNode) {
       <App>{node}</App>
     </QueryClientProvider>
   );
-}
-
-function renderCard(
-  agent: MyEditableAgentItem,
-  onUsageGuide = vi.fn(),
-  guideMenuProps: Pick<
-    React.ComponentProps<typeof MyAgentCard>,
-    "guideMenuOpen" | "onGuideMenuOpenChange"
-  > = {}
-) {
-  renderWithProviders(
-    <MyAgentCard
-      agent={agent}
-      onEdit={vi.fn()}
-      onView={vi.fn()}
-      onViewReview={vi.fn()}
-      onDelete={vi.fn()}
-      onUsageGuide={onUsageGuide}
-      {...guideMenuProps}
-    />
-  );
-  return onUsageGuide;
 }
 
 async function openTab(user: ReturnType<typeof userEvent.setup>, key: string) {
@@ -110,165 +86,6 @@ beforeEach(() => {
 });
 
 describe("Agent usage guide component coverage", () => {
-  it("omits migrated listing and evaluation entries without another request", async () => {
-    const fetchListings = vi
-      .spyOn(agentRepositoryService, "fetchAgentRepositoryListings")
-      .mockResolvedValue({ items: [] });
-    const onGuideMenuOpenChange = vi.fn();
-    renderWithProviders(
-      <MyAgentCard
-        agent={editableAgent}
-        onEdit={vi.fn()}
-        onView={vi.fn()}
-        onViewReview={vi.fn()}
-        onDelete={vi.fn()}
-        onUsageGuide={vi.fn()}
-        onGuideMenuOpenChange={onGuideMenuOpenChange}
-      />
-    );
-
-    await userEvent
-      .setup()
-      .click(
-        screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
-      );
-    await screen.findByRole("menu");
-    expect(
-      screen.queryByRole("menuitem", {
-        name: "agentRepository.mine.menu.apply",
-      })
-    ).toBeNull();
-    expect(
-      screen.queryByRole("menuitem", { name: "agentRepository.mine.evaluate" })
-    ).toBeNull();
-    expect(fetchListings).not.toHaveBeenCalled();
-    expect(onGuideMenuOpenChange.mock.calls[0]?.[0]).toBe(true);
-    fetchListings.mockRestore();
-  });
-
-  it("shows review status from the paged agent data", async () => {
-    const fetchListings = vi
-      .spyOn(agentRepositoryService, "fetchAgentRepositoryListings")
-      .mockResolvedValue({
-        items: [
-          {
-            agent_repository_id: 12,
-            agent_id: 41,
-            name: "Demo Agent",
-            status: "shared",
-            version_no: 3,
-          },
-        ],
-      });
-    renderCard(
-      {
-        ...editableAgent,
-        repository_info: [
-          {
-            agent_repository_id: 12,
-            status: "shared",
-            version_no: 3,
-          },
-        ],
-      },
-      vi.fn(),
-      {
-        onGuideMenuOpenChange: vi.fn(),
-      }
-    );
-
-    await userEvent
-      .setup()
-      .click(
-        screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
-      );
-    expect(
-      await screen.findByRole("menuitem", {
-        name: "agentRepository.mine.menu.review",
-      })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("repository.status.listed · v3")
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("menuitem", {
-        name: "agentRepository.mine.menu.apply",
-      })
-    ).not.toBeInTheDocument();
-    expect(fetchListings).not.toHaveBeenCalled();
-    fetchListings.mockRestore();
-  });
-
-  it("shows update review when an older version is listed", async () => {
-    renderCard({
-      ...editableAgent,
-      repository_info: [
-        { agent_repository_id: 12, status: "pending_review", version_no: 3 },
-        { agent_repository_id: 10, status: "shared", version_no: 1 },
-      ],
-    });
-
-    expect(
-      screen.getByText("agentRepository.mine.status.updateReviewing · v3")
-    ).toBeInTheDocument();
-    await userEvent
-      .setup()
-      .click(
-        screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
-      );
-    expect(
-      screen.getByRole("menuitem", {
-        name: "agentRepository.mine.menu.reviewUpdate",
-      })
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("menuitem", {
-        name: "agentRepository.mine.menu.apply",
-      })
-    ).not.toBeInTheDocument();
-  });
-
-  it("UT-FE-AGUG-004 opens the selected published Agent guide from the keyboard-accessible card menu", async () => {
-    const user = userEvent.setup();
-    const onUsageGuide = renderCard(editableAgent);
-    screen
-      .getByRole("button", { name: "agentRepository.mine.menu.more" })
-      .focus();
-    await user.keyboard("{Enter}");
-    const usageGuideItem = await screen.findByRole("menuitem", {
-      name: "agentRepository.mine.menu.usageGuide",
-    });
-    await user.click(usageGuideItem);
-    expect(onUsageGuide).toHaveBeenCalledOnce();
-  });
-
-  it("opens a published target card menu without opening the usage guide modal", async () => {
-    const onUsageGuide = renderCard(editableAgent, vi.fn(), {
-      guideMenuOpen: true,
-      onGuideMenuOpenChange: vi.fn(),
-    });
-
-    const usageGuideItem = await screen.findByRole("menuitem", {
-      name: "agentRepository.mine.menu.usageGuide",
-    });
-    expect(usageGuideItem.className).toContain("font-semibold");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
-    await userEvent.setup().click(usageGuideItem);
-    expect(onUsageGuide).toHaveBeenCalledOnce();
-  });
-
-  it("UT-FE-AGUG-005 hides the usage guide action for a draft", async () => {
-    const user = userEvent.setup();
-    renderCard({ ...editableAgent, current_version_no: null });
-    await user.click(
-      screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
-    );
-    expect(
-      screen.queryByText("agentRepository.mine.menu.usageGuide")
-    ).not.toBeInTheDocument();
-  });
-
   it("UT-FE-AGUG-006 keeps northbound and A2A visible but performs no share request for read-only users", async () => {
     const user = userEvent.setup();
     renderWithProviders(

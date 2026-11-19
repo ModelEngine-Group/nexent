@@ -2,7 +2,7 @@
 
 "use client";
 
-import { Button, Empty, Spin } from "antd";
+import { Button, Spin } from "antd";
 import Image from "next/image";
 import {
   BookOpen,
@@ -26,6 +26,7 @@ import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
 import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
 import { formatModelTokenLabel } from "@/lib/modelTokenLabel";
+import { formatDateTimeLocale } from "@/lib/date";
 import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
 
 interface AgentDetailProps {
@@ -109,28 +110,17 @@ function RepositoryAgentDetailContent({
     : detail.modelName
       ? [detail.modelName]
       : [];
-  const empty = (
-    <Empty
-      image={Empty.PRESENTED_IMAGE_SIMPLE}
-      className="!m-0 !text-[#777777]"
-      styles={{ image: { height: 24, marginBottom: 4 } }}
-    />
-  );
   const sections = [
     {
-      title: t("agentRepository.mine.detail.model"),
-      items: models,
-      Icon: Cpu,
-      isModel: true,
-    },
-    {
-      title: t("agentRepository.mine.detail.knowledgeBases"),
+      sectionKey: "knowledge",
+      title: t("agentRepository.copy.type.knowledgeBase"),
       items: detail.knowledgeBases,
       Icon: BookOpen,
       iconColor: "bg-[#EEE7FF] text-[#765CEB]",
       knowledge: repository?.knowledgeDetails,
     },
     {
+      sectionKey: "skills",
       title: t("agentRepository.mine.detail.skills"),
       items: detail.skills,
       Icon: Sparkles,
@@ -138,6 +128,7 @@ function RepositoryAgentDetailContent({
       tags: repository?.skillTags,
     },
     {
+      sectionKey: "tools",
       title: t("agentRepository.mine.detail.tools"),
       items: detail.tools,
       Icon: Wrench,
@@ -145,6 +136,7 @@ function RepositoryAgentDetailContent({
       tags: repository?.toolTags,
     },
     {
+      sectionKey: "sub-agents",
       title: t("resourceCenter.subAgents"),
       items: detail.subAgents,
       Icon: Bot,
@@ -153,219 +145,295 @@ function RepositoryAgentDetailContent({
     },
   ];
 
+  const renderResourceList = ({
+    sectionKey,
+    title,
+    items,
+    Icon,
+    iconColor,
+    knowledge,
+    tags,
+    isModel = false,
+  }: {
+    sectionKey: string;
+    title: string;
+    items: string[];
+    Icon: typeof Cpu;
+    iconColor?: string;
+    knowledge?: NonNullable<
+      MyAgentDetailView["repositoryInfo"]
+    >["knowledgeDetails"];
+    tags?: Map<string, string[]>;
+    isModel?: boolean;
+  }) => {
+    const id = `${sectionId}-${sectionKey}`;
+    const expanded = Boolean(expandedSections[id]);
+    const canExpand = items.length > 4;
+    const visibleItems = canExpand && !expanded ? items.slice(0, 4) : items;
+    return (
+      <div key={sectionKey} className="space-y-2">
+        {!isModel ? (
+          <h4 className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+            {title}
+            <span>{items.length}</span>
+          </h4>
+        ) : null}
+        {items.length > 0 ? (
+          <ul id={id} className="space-y-2">
+            {visibleItems.map((item) => {
+              const model = isModel
+                ? repository?.models?.find(
+                    (candidate) =>
+                      (candidate.displayName || candidate.name).trim() === item
+                  )
+                : undefined;
+              const provider = String(
+                model?.modelFactory || model?.source || ""
+              ).toLowerCase();
+              const logo =
+                MODEL_PROVIDER_LOGOS[provider] ??
+                (isModel && /^deepseek(?:[- /]|$)/i.test(item)
+                  ? MODEL_PROVIDER_LOGOS.deepseek
+                  : undefined);
+              const badges = model
+                ? [
+                    formatModelTokenLabel(
+                      model.contextWindowTokens ?? model.maxInputTokens
+                    ),
+                    model.type === "llm" &&
+                      t("agent.highFidelity.modelCapability.text"),
+                    model.reasoningCapability?.status === "supported" &&
+                      t("agent.highFidelity.modelCapability.reasoning"),
+                    model.supportToolCalls === true &&
+                      t("agent.highFidelity.modelCapability.tools"),
+                  ].filter((label): label is string => Boolean(label))
+                : (tags?.get(item) ?? []);
+              const base = knowledge?.get(item);
+              return (
+                <li
+                  key={item}
+                  className="flex min-h-9 items-center gap-3 rounded-md border border-border bg-background px-3 py-2 leading-[18px]"
+                >
+                  {logo ? (
+                    <Image
+                      src={logo}
+                      alt=""
+                      width={16}
+                      height={16}
+                      className="size-4 shrink-0 object-contain"
+                    />
+                  ) : (
+                    <Icon
+                      size={16}
+                      className={`shrink-0 rounded ${iconColor ?? "text-[#777777]"}`}
+                      aria-hidden
+                    />
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="min-w-0 break-words">{item}</span>
+                    {base ? (
+                      <span className="flex flex-wrap items-center gap-2 text-xs leading-5 text-[#777777]">
+                        {typeof base.updatedAt === "string" &&
+                        base.updatedAt ? (
+                          <span className="border-r border-[#DFDFDF] pr-2">
+                            {t("knowledgeBase.tag.updatedAt", {
+                              date: formatCreatedAt(base.updatedAt),
+                            })}
+                          </span>
+                        ) : null}
+                        {Number.isFinite(base.documentCount) ? (
+                          <span>
+                            {t("resourcePicker.knowledge.documents", {
+                              count: base.documentCount,
+                            })}
+                          </span>
+                        ) : null}
+                        {Number.isFinite(base.chunkCount) ? (
+                          <span>
+                            {t("resourcePicker.knowledge.chunks", {
+                              count: base.chunkCount,
+                            })}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    {badges.length > 0 ? (
+                      <span
+                        className={`flex flex-wrap gap-1 ${isModel ? "ml-auto" : ""}`}
+                      >
+                        {badges.map((badge) => (
+                          <span
+                            key={badge}
+                            className="rounded bg-primary/5 px-2 text-xs leading-5 text-muted-foreground"
+                          >
+                            {badge}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        {canExpand ? (
+          <Button
+            type="link"
+            className="!inline-flex !h-[22px] !items-center !gap-1 !p-0 !text-[#0067D1]"
+            aria-expanded={expanded}
+            aria-controls={id}
+            onClick={() =>
+              setExpandedSections((current) => ({
+                ...current,
+                [id]: !expanded,
+              }))
+            }
+          >
+            {expanded ? (
+              <ChevronUp size={14} aria-hidden />
+            ) : (
+              <ChevronDown size={14} aria-hidden />
+            )}
+            {t(
+              expanded
+                ? "mcpConfig.toolsList.button.collapse"
+                : "resourceCenter.expandMore"
+            )}
+          </Button>
+        ) : null}
+      </div>
+    );
+  };
+  const notRecorded = t("resourceCenter.notRecorded");
+  const publishedAt = formatDateTimeLocale(
+    repository?.publishedAt,
+    i18n?.language
+  );
+  const updatedAt = repository?.updatedAt
+    ? formatDateTimeLocale(repository.updatedAt, i18n?.language)
+    : null;
+  const metadata = [
+    {
+      label: t("agentRepository.mine.detail.author"),
+      value: author || notRecorded,
+    },
+    {
+      label: t("resourceCenter.publishedVersion"),
+      value: detail.versionLabel || notRecorded,
+    },
+    {
+      label: t("resourceCenter.publishedAt"),
+      value:
+        repository?.publishedAt && publishedAt !== "-" ? (
+          <time dateTime={repository.publishedAt}>{publishedAt}</time>
+        ) : (
+          notRecorded
+        ),
+    },
+    ...(repository?.updatedAt && updatedAt && updatedAt !== "-"
+      ? [
+          {
+            label: t("agentConfig.list.column.updatedAt"),
+            value: <time dateTime={repository.updatedAt}>{updatedAt}</time>,
+          },
+        ]
+      : []),
+    ...(repository
+      ? [
+          {
+            label: t("resourceCenter.agentDetail.copied"),
+            value: t("resourceCenter.agentDetail.copyCount", {
+              count: repository.downloads,
+            }),
+          },
+        ]
+      : []),
+  ];
+  const relatedResources = sections.filter(({ items }) => items.length > 0);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col font-['HarmonyOS_Sans_SC',sans-serif] text-sm leading-[22px] tracking-normal text-[#191919]">
-      <header className="shrink-0 space-y-2 pb-2">
-        <div className="flex min-h-16 items-center gap-3 pr-6">
-          <div className="shrink-0">{agentIcon}</div>
-          <div className="min-w-0 flex-1">
-            <h2 className="break-words text-xl font-medium leading-7">
-              {detail.title || t("agentRepository.card.untitled")}
-            </h2>
-            {detail.tags.length > 0 ? (
-              <ul
-                aria-label={t("agentRepository.mine.detail.tags")}
-                className="mt-1.5 flex flex-wrap gap-2"
-              >
-                {detail.tags.map((tag) => (
-                  <li
-                    key={tag}
-                    className="max-w-full break-words rounded bg-[#191919]/5 px-2 text-xs leading-5 text-[#393939]"
-                  >
-                    {tag}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
+    <div className="-mx-6 flex min-h-0 flex-1 flex-col text-sm leading-[22px] text-foreground">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 pb-4 pr-14">
+        <div className="shrink-0">{agentIcon}</div>
+        <div className="min-w-0 flex-1">
+          <h2 className="break-words text-xl font-medium leading-7">
+            {detail.title || t("agentRepository.card.untitled")}
+          </h2>
+          {repository?.isMainAgent !== undefined ? (
+            <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 text-xs text-primary">
+              {t(
+                repository.isMainAgent
+                  ? "agentRepository.card.mainAgent"
+                  : "space.detail.tabs.subAgents"
+              )}
+            </span>
+          ) : null}
         </div>
       </header>
-      <div className="repository-detail-body min-h-0 flex-1 space-y-4 overflow-y-auto pb-4">
-        <div className="space-y-2">
-          {repository ? (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs leading-5 text-[#777777]">
-              <span>
-                {t("resourceCenter.agentCardCopies", {
-                  count: repository.downloads,
-                  formattedCount: new Intl.NumberFormat(
-                    i18n?.language || undefined
-                  ).format(repository.downloads),
-                })}
-              </span>
-              {repository.updatedAt ? (
-                <span className="inline-flex items-center gap-1">
-                  <Calendar size={14} aria-hidden />
-                  {t("agentConfig.list.updatedAt", {
-                    date: formatCreatedAt(repository.updatedAt),
-                  })}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-          {detail.description ? (
-            <p className="whitespace-pre-wrap break-words">
-              {detail.description}
-            </p>
-          ) : (
-            <section className="space-y-2">
-              <h3 className="font-medium">{t("common.description")}</h3>
-              {empty}
-            </section>
-          )}
-        </div>
-        <section className="space-y-2">
-          <h3 className="font-medium">
-            {t("agentRepository.mine.detail.author")}
+      <div className="repository-detail-body min-h-0 flex-1 overflow-y-auto">
+        <section className="space-y-3 border-b border-border px-6 py-5">
+          <h3 className="font-semibold">
+            {t("resourceCenter.agentDetail.basicInfo")}
           </h3>
-          {author ? <p className="break-words">{author}</p> : empty}
-        </section>
-        <section className="space-y-2">
-          <h3 className="font-medium">{t("resourceCenter.publishedAt")}</h3>
-          <p>
-            {repository?.publishedAt
-              ? formatCreatedAt(repository.publishedAt)
-              : t("resourceCenter.notRecorded")}
+          <p
+            className={`whitespace-pre-wrap break-words ${detail.description ? "" : "text-muted-foreground"}`}
+          >
+            {detail.description || t("agentRepository.card.noDescription")}
           </p>
+          {detail.tags.length > 0 ? (
+            <ul
+              aria-label={t("agentRepository.mine.detail.tags")}
+              className="flex flex-wrap gap-1.5"
+            >
+              {detail.tags.map((tag) => (
+                <li
+                  key={tag}
+                  className="max-w-full break-words rounded bg-primary/5 px-2 text-xs leading-5 text-muted-foreground"
+                >
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <dl className="grid grid-cols-[minmax(5rem,max-content)_minmax(0,1fr)] gap-x-3 gap-y-1">
+            {metadata.map(({ label, value }) => (
+              <div key={label} className="contents">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="min-w-0 [overflow-wrap:anywhere]">{value}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
-        {sections.map(
-          (
-            { title, items, Icon, isModel, iconColor, knowledge, tags },
-            index
-          ) => {
-            const id = `${sectionId}-${index}`;
-            const expanded = Boolean(expandedSections[id]);
-            const canExpand = items.length > 4;
-            const visibleItems =
-              canExpand && !expanded ? items.slice(0, 4) : items;
-            return (
-              <section key={title} className="space-y-2">
-                <h3 className="font-medium">{title}</h3>
-                {items.length > 0 ? (
-                  <ul id={id} className="space-y-2">
-                    {visibleItems.map((item) => {
-                      const model = isModel
-                        ? repository?.models?.find(
-                            (candidate) =>
-                              (
-                                candidate.displayName || candidate.name
-                              ).trim() === item
-                          )
-                        : undefined;
-                      const provider = String(
-                        model?.modelFactory || model?.source || ""
-                      ).toLowerCase();
-                      const logo =
-                        MODEL_PROVIDER_LOGOS[provider] ??
-                        (isModel && /^deepseek(?:[- /]|$)/i.test(item)
-                          ? MODEL_PROVIDER_LOGOS.deepseek
-                          : undefined);
-                      const badges = model
-                        ? [
-                            formatModelTokenLabel(
-                              model.contextWindowTokens ?? model.maxInputTokens
-                            ),
-                            model.type === "llm" &&
-                              t("agent.highFidelity.modelCapability.text"),
-                            model.reasoningCapability?.status === "supported" &&
-                              t("agent.highFidelity.modelCapability.reasoning"),
-                            model.supportToolCalls === true &&
-                              t("agent.highFidelity.modelCapability.tools"),
-                          ].filter((label): label is string => Boolean(label))
-                        : (tags?.get(item) ?? []);
-                      const base = knowledge?.get(item);
-                      return (
-                        <li
-                          key={item}
-                          className="flex min-h-9 items-center gap-3 rounded bg-white px-4 py-2 leading-[18px] shadow-[inset_0_0_0_1px_#DFDFDF]"
-                        >
-                          {logo ? (
-                            <Image
-                              src={logo}
-                              alt=""
-                              width={16}
-                              height={16}
-                              className="size-4 shrink-0 object-contain"
-                            />
-                          ) : (
-                            <Icon
-                              size={16}
-                              className={`shrink-0 rounded ${iconColor ?? "text-[#777777]"}`}
-                              aria-hidden
-                            />
-                          )}
-                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                            <span className="min-w-0 break-words">{item}</span>
-                            {base ? (
-                              <span className="flex flex-wrap items-center gap-2 text-xs leading-5 text-[#777777]">
-                                {typeof base.updatedAt === "string" &&
-                                base.updatedAt ? (
-                                  <span className="border-r border-[#DFDFDF] pr-2">
-                                    {t("knowledgeBase.tag.updatedAt", {
-                                      date: formatCreatedAt(base.updatedAt),
-                                    })}
-                                  </span>
-                                ) : null}
-                                {Number.isFinite(base.documentCount) ? (
-                                  <span>
-                                    {t("resourcePicker.knowledge.documents", {
-                                      count: base.documentCount,
-                                    })}
-                                  </span>
-                                ) : null}
-                                {Number.isFinite(base.chunkCount) ? (
-                                  <span>
-                                    {t("resourcePicker.knowledge.chunks", {
-                                      count: base.chunkCount,
-                                    })}
-                                  </span>
-                                ) : null}
-                              </span>
-                            ) : null}
-                            {badges.map((badge) => (
-                              <span
-                                key={badge}
-                                className="rounded-sm bg-[#F5F5F5] px-2 text-xs leading-5 text-[#393939]"
-                              >
-                                {badge}
-                              </span>
-                            ))}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  empty
-                )}
-                {canExpand ? (
-                  <Button
-                    type="link"
-                    className="!inline-flex !h-[22px] !items-center !gap-1 !p-0 !text-[#0067D1]"
-                    aria-expanded={expanded}
-                    aria-controls={id}
-                    onClick={() =>
-                      setExpandedSections((current) => ({
-                        ...current,
-                        [id]: !expanded,
-                      }))
-                    }
-                  >
-                    {expanded ? (
-                      <ChevronUp size={14} aria-hidden />
-                    ) : (
-                      <ChevronDown size={14} aria-hidden />
-                    )}
-                    {t(
-                      expanded
-                        ? "mcpConfig.toolsList.button.collapse"
-                        : "resourceCenter.expandMore"
-                    )}
-                  </Button>
-                ) : null}
-              </section>
-            );
-          }
-        )}
+        <section className="space-y-3 border-b border-border px-6 py-5">
+          <h3 className="font-semibold">
+            {t("resourceCenter.agentDetail.model")}
+          </h3>
+          {models.length ? (
+            renderResourceList({
+              sectionKey: "models",
+              title: t("resourceCenter.agentDetail.model"),
+              items: models,
+              Icon: Cpu,
+              iconColor: "text-primary",
+              isModel: true,
+            })
+          ) : (
+            <p className="text-muted-foreground">{notRecorded}</p>
+          )}
+        </section>
+        <section className="space-y-3 px-6 py-5">
+          <h3 className="font-semibold">
+            {t("resourceCenter.agentDetail.relatedResources")}
+          </h3>
+          {relatedResources.length ? (
+            relatedResources.map(renderResourceList)
+          ) : (
+            <p className="text-muted-foreground">
+              {t("resourceCenter.agentDetail.noRelatedResources")}
+            </p>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -401,7 +469,7 @@ export function AgentDetail({
       <div
         className={
           presentation
-            ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+            ? "flex min-h-0 flex-1 flex-col"
             : "flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden"
         }
       >
@@ -412,7 +480,7 @@ export function AgentDetail({
             showRepositoryInfo &&
             !isLoading &&
             !isError
-              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+              ? "flex min-h-0 flex-1 flex-col"
               : presentation
                 ? "min-h-0 flex-1 overflow-y-auto pb-4"
                 : "min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4"
@@ -578,18 +646,14 @@ export function AgentDetail({
             </>
           ) : null}
         </div>
-        <div
+        <footer
           className={
-            presentation
-              ? "flex shrink-0 items-center justify-end gap-2 bg-white pt-4"
+            presentation && showRepositoryInfo
+              ? "-mx-6 flex shrink-0 items-center justify-between gap-4 border-t border-border bg-background px-6 py-3"
               : "flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/60 sm:px-4"
           }
         >
-          {presentation && showRepositoryInfo ? (
-            <Button className="min-w-[88px] max-w-[200px]" onClick={onClose}>
-              {t("common.close")}
-            </Button>
-          ) : (
+          {presentation && showRepositoryInfo ? null : (
             <Button onClick={onClose}>{t("common.close")}</Button>
           )}
           {footerActions}
@@ -602,7 +666,7 @@ export function AgentDetail({
               {t("agentRepository.mine.edit")}
             </Button>
           ) : null}
-        </div>
+        </footer>
       </div>
     </ResourceDetail>
   );

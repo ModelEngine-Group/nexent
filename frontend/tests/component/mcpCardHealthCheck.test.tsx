@@ -3,7 +3,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { expect, test, vi } from "vitest";
-import MineMcpServiceCard from "@/components/repository/mcp/components/MineMcpServiceCard";
+import MineMcpServiceCard from "@/app/resource-space/components/mcp/components/MineMcpServiceCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import {
   McpHealthStatus,
@@ -16,7 +16,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("@/components/tag/ResourceTagChips", () => ({ default: () => null }));
-vi.mock("@/components/repository/ResourceReviewLink", () => ({
+vi.mock("@/app/resource-space/components/ResourceReviewLink", () => ({
   default: () => null,
 }));
 

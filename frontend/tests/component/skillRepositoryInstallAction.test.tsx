@@ -3,14 +3,14 @@
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { RepositoryView } from "@/components/repository/skill/components/RepositoryView";
+import { RepositoryView } from "@/app/resource-space/components/skill/components/RepositoryView";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("@/components/repository/RepositoryDisplayControls", () => ({
+vi.mock("@/app/resource-space/components/RepositoryDisplayControls", () => ({
   default: () => null,
 }));
 vi.mock("@/components/tag/TagFilterPopover", () => ({ default: () => null }));
@@ -23,11 +23,11 @@ vi.mock("@/components/resource/ResourceCardGrid", () => ({
     renderItem: (item: SkillRepositoryListingItem) => ReactNode;
   }) => <>{items.map(renderItem)}</>,
 }));
-vi.mock("@/components/repository/skill/components/SkillRepositoryCard", () => ({
+vi.mock("@/app/resource-space/components/skill/components/SkillRepositoryCard", () => ({
   SkillRepositoryCard: ({ action }: { action: ReactNode }) => <>{action}</>,
 }));
 vi.mock(
-  "@/components/repository/skill/components/SkillRepositoryControls",
+  "@/app/resource-space/components/skill/components/SkillRepositoryControls",
   () => ({
     AsyncContent: ({ children }: { children: ReactNode }) => <>{children}</>,
   })

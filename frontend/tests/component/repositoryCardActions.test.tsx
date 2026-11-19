@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
-import RepositoryCardActions from "@/components/repository/RepositoryCardActions";
+import RepositoryCardActions from "@/app/resource-space/components/RepositoryCardActions";
 
 test("renders two accessible icon actions and does not open card details", () => {
   const create = vi.fn();

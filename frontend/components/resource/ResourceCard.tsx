@@ -24,7 +24,6 @@ export interface ResourceCardProps {
   statusRow?: ReactNode;
   /** Resource tags displayed below the description. */
   tags?: ReactNode;
-  tagsPlacement?: "header" | "body";
   meta?: ReactNode;
   /** Display footer actions below metadata instead of beside it. */
   footerLayout?: "inline" | "stacked";
@@ -58,7 +57,6 @@ export default function ResourceCard({
   badge,
   statusRow,
   tags,
-  tagsPlacement = "body",
   meta,
   footerLayout = "stacked",
   headerActions,
@@ -195,18 +193,6 @@ export default function ResourceCard({
                 {badge ? (
                   <div className="mt-1 flex flex-wrap gap-2">{badge}</div>
                 ) : null}
-                {tags && tagsPlacement === "header" ? (
-                  <div
-                    className={cn(
-                      "mt-1 flex flex-wrap gap-1 text-xs",
-                      (measuredMcp || measuredMineMcp) && "mt-0",
-                      measuredSkill &&
-                        "max-h-5 flex-nowrap gap-2 overflow-hidden [&>*]:shrink-0"
-                    )}
-                  >
-                    {tags}
-                  </div>
-                ) : null}
               </div>
               {headerActions ||
               (!actionsInFooter && actions) ||
@@ -216,6 +202,7 @@ export default function ResourceCard({
                   className={cn(
                     "flex shrink-0 items-start gap-1",
                     fixedHeaderLayout && "self-center",
+                    (measuredSkill || measuredMcp) && "self-start",
                     measuredAgent &&
                       (subtitle ? "mb-[22px] self-end" : "-mb-1 self-end"),
                     actionClassName
@@ -260,7 +247,7 @@ export default function ResourceCard({
                             ? "mt-3"
                             : "mt-4"),
                       (measuredAgent || measuredMcp || measuredMineMcp) &&
-                        "font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]",
+                        "min-h-10 font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]",
                       measuredSkill &&
                         "min-h-9 font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-[18px] tracking-normal text-[#777777]"
                     )}
@@ -276,7 +263,7 @@ export default function ResourceCard({
                   </div>
                 </div>
               ) : null}
-              {tags && tagsPlacement === "body" ? (
+              {tags ? (
                 <div
                   className={cn(
                     "flex flex-wrap gap-2 text-xs [&>*]:max-w-full [&>*]:[overflow-wrap:anywhere]",

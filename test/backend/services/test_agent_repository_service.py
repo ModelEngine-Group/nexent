@@ -258,6 +258,24 @@ def test_list_repository_listings_passes_agent_id_to_db():
     }
 
 
+@pytest.mark.parametrize(
+    ("viewer_user_id", "expected"),
+    [("user_a", True), ("other_user", False), (None, False)],
+)
+def test_list_repository_listings_marks_only_the_viewer_as_publisher(viewer_user_id, expected):
+    record = _repository_record(status="shared")
+    with (
+        patch_import_object_context(ars, "list_agent_repository_summaries", return_value=[record]),
+        patch_import_object_context(ars, "_get_user_role", return_value="DEV"),
+    ):
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", agent_id=10, user_id=viewer_user_id,
+        )
+
+    assert result["items"][0]["is_publisher"] is expected
+    assert "publisher_user_id" not in result["items"][0]
+
+
 def test_list_repository_listings_filters_by_search_before_pagination():
     records = [
         {

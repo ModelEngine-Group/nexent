@@ -2,30 +2,9 @@
 
 // @ts-nocheck
 /**
- * D4 browser acceptance for three merged but independently observable
- * behaviours of the agent repository / agent management surfaces:
- *
- *  1. Agent repository listings can be ordered by publish time (latest first).
- *  2. Each repository listing card is marked as a main or an ordinary agent.
- *  3. The agent management page matches agents by tag on top of its name and
- *     description search, and a tag persisted as a stringified array renders
- *     as an individual tag instead of crashing the page.
- *  4. The agent repository "my agents" tab reuses the same latest-published
- *     sort and marks its main agents with the same badge.
- *  5. The agent management page's tag filter narrows the list to the selected
- *     tag, combines with the text query so only agents matching both criteria
- *     remain, and clears back to the query result.
- *  6. Changing the my-agents sort option while the list sits on a later page
- *     returns the list to the first page under the newly selected order.
- *
- * Product surface exercised:
- *   - frontend/app/[locale]/agent-space/agent-space.tsx   (sort control + badge)
- *   - frontend/app/[locale]/agent-space/my-agent.tsx      (sort control + badge)
- *   - frontend/app/[locale]/agents/page.tsx               (tag search + filter)
- *   - frontend/components/tag/TagFilterPopover.tsx        (tag filter control)
- *
- * Every HTTP response is fulfilled with deterministic fixtures, so the journey
- * never depends on a live tenant, provider or database.
+ * Verifies the default agent repository view, listing markers, pagination,
+ * and tag search and filtering on the agent management page.
+ * HTTP fixtures isolate the journey from live tenant data.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -44,16 +23,24 @@ const messages = JSON.parse(
     "utf8"
   )
 );
+// The locale file mixes flat dotted keys with nested objects (for example
+// resourceCenter), so resolve a key directly first and by path afterwards.
 const label = (key) => {
-  const value = messages[key];
+  const value =
+    key in messages
+      ? messages[key]
+      : key.split(".").reduce(
+          (node, part) =>
+            node && typeof node === "object" ? node[part] : undefined,
+          messages
+        );
   if (typeof value !== "string") throw new Error(`Missing zh test label: ${key}`);
   return value;
 };
 
 const SORT_LABEL = label("agentRepository.sort.label");
-const SORT_DEFAULT_LABEL = label("agentRepository.sort.default");
-const SORT_LATEST_LABEL = label("agentRepository.sort.latest");
 const MAIN_AGENT_LABEL = label("agentRepository.card.mainAgent");
+const SUB_AGENT_LABEL = label("space.detail.tabs.subAgents");
 const AGENT_SEARCH_PLACEHOLDER = label("agentSelector.searchPlaceholder");
 const TAG_FILTER_BUTTON = label("repository.tagFilter.button");
 const TAG_FILTER_CLEAR = label("repository.tagFilter.clear");
@@ -124,25 +111,36 @@ const REPOSITORY_LISTINGS = [
   },
 ];
 
+/**
+ * Undated filler listings that only exist to make the repository span more
+ * than one page at the frozen test viewport (twelve cards per page). They stay
+ * undated so the three tracked listings remain together on page one.
+ */
+const FILLER_LISTINGS = Array.from({ length: 10 }, (_, index) => {
+  const sequence = index + 1;
+  const suffix = String(sequence).padStart(2, "0");
+  return {
+    agent_repository_id: sequence,
+    agent_id: 400 + sequence,
+    name: `filler_repository_agent_${suffix}`,
+    display_name: `填充仓库条目${suffix}`,
+    description: "仅用于让仓库列表跨页的填充条目。",
+    tags: [],
+    create_time: null,
+    tool_count: 0,
+    downloads: 0,
+    is_official: false,
+    is_main_agent: false,
+  };
+});
+
+const ALL_LISTINGS = [...REPOSITORY_LISTINGS, ...FILLER_LISTINGS];
+
 /** Default order: newest repository id first, independent of publish time. */
 const defaultOrderedListings = () =>
-  [...REPOSITORY_LISTINGS].sort(
+  [...ALL_LISTINGS].sort(
     (left, right) => right.agent_repository_id - left.agent_repository_id
   );
-
-/** Latest-published order: dated listings newest first, undated listings last. */
-const latestOrderedListings = () => {
-  const dated = REPOSITORY_LISTINGS.filter((listing) => listing.create_time);
-  const undated = REPOSITORY_LISTINGS.filter((listing) => !listing.create_time);
-  const sorted = [...dated].sort((left, right) =>
-    left.create_time === right.create_time
-      ? right.agent_repository_id - left.agent_repository_id
-      : left.create_time < right.create_time
-        ? 1
-        : -1
-  );
-  return [...sorted, ...undated];
-};
 
 const AGENT_ROWS = [
   {
@@ -155,9 +153,6 @@ const AGENT_ROWS = [
     create_time: "2026-02-01T09:00:00",
     update_time: "2026-02-02T09:00:00",
     current_version_no: 1,
-    // The main agent publishes earlier, so latest-first ranks it after the
-    // ordinary agent on the "my agents" tab.
-    publish_time: "2026-01-20T09:00:00",
     is_main_agent: true,
     permission: "EDIT",
   },
@@ -170,52 +165,10 @@ const AGENT_ROWS = [
     create_time: "2026-02-03T09:00:00",
     update_time: "2026-02-04T09:00:00",
     current_version_no: 1,
-    publish_time: "2026-02-05T09:00:00",
     is_main_agent: false,
     permission: "EDIT",
   },
 ];
-
-/**
- * Filler agents that only exist to make the my-agents list span more than one
- * page at the frozen test viewport (twelve cards per page). They publish
- * earlier than both tracked agents, so the tracked pair stays on page one in
- * both the default and the latest-published order.
- */
-const FILLER_AGENT_ROWS = Array.from({ length: 13 }, (_, index) => {
-  const sequence = index + 1;
-  const suffix = String(sequence).padStart(2, "0");
-  return {
-    agent_id: 300 + sequence,
-    name: `filler_agent_${suffix}`,
-    display_name: `批量智能体${suffix}`,
-    description: "仅用于让我的智能体列表跨页的填充智能体。",
-    tags: ["批量标签"],
-    create_time: "2025-10-01T09:00:00",
-    update_time: "2025-10-02T09:00:00",
-    current_version_no: 1,
-    publish_time: `2025-11-${suffix}T09:00:00`,
-    is_main_agent: false,
-    permission: "EDIT",
-  };
-});
-
-/** Every agent row the list endpoint may return. */
-const AGENT_LIST_ROWS = [...AGENT_ROWS, ...FILLER_AGENT_ROWS];
-
-/** My-agents order: latest publish time first, undated agents last. */
-const publishOrderedAgentRows = () => {
-  const dated = AGENT_LIST_ROWS.filter((agent) => agent.publish_time);
-  const undated = AGENT_LIST_ROWS.filter((agent) => !agent.publish_time);
-  const sorted = [...dated].sort((left, right) =>
-    left.publish_time === right.publish_time
-      ? right.agent_id - left.agent_id
-      : left.publish_time < right.publish_time
-        ? 1
-        : -1
-  );
-  return [...sorted, ...undated];
-};
 
 async function mockNexent(page) {
   const fixture = {
@@ -268,7 +221,7 @@ async function mockNexent(page) {
             auth_provider: "local",
             group_ids: [],
             permissions: [],
-            accessibleRoutes: ["/agents", "/agent-space"],
+            accessibleRoutes: ["/agents", "/resource-space"],
           },
         },
       });
@@ -310,21 +263,17 @@ async function mockNexent(page) {
         },
       ]);
     if (endpoint === "/repository/agent/tags") return json(route, { items: [] });
-    if (endpoint === "/repository/agent/mine")
-      return json(route, {
-        items: [],
-        pagination: { page: 1, page_size: 20, total: 0, total_pages: 0 },
-      });
     if (endpoint === "/repository/agent") {
-      const latest = url.searchParams.get("sort_by_update_time") === "true";
-      const items = latest ? latestOrderedListings() : defaultOrderedListings();
+      const items = defaultOrderedListings();
+      const current = Number(url.searchParams.get("page") ?? 1);
+      const size = Number(url.searchParams.get("page_size") ?? 12);
       return json(route, {
-        items,
+        items: items.slice((current - 1) * size, current * size),
         pagination: {
-          page: 1,
-          page_size: items.length,
+          page: current,
+          page_size: size,
           total: items.length,
-          total_pages: 1,
+          total_pages: Math.ceil(items.length / size),
         },
       });
     }
@@ -333,7 +282,6 @@ async function mockNexent(page) {
       const searchPredicates =
         url.searchParams.get("search_tag_predicates") ?? "";
       const filterPredicates = url.searchParams.get("tag_predicates") ?? "";
-      const latest = url.searchParams.get("sort_by_update_time") === "true";
       // "search_tag_predicates" widens the free-text search to tag matches,
       // while "tag_predicates" restricts the list to the tagged agents, so the
       // fixture models the two parameters with the semantics the page relies on.
@@ -341,9 +289,7 @@ async function mockNexent(page) {
         value.includes(`"definition_id":${TAG_DEFINITION_ID}`) &&
         value.includes(`${TAG_VALUE_ID}`);
       const searchTagMatched = matchesFixtureTag(searchPredicates);
-      // The default order keeps the fixture order; the latest-published order
-      // returns the same rows sorted by publish time with undated rows last.
-      let source = latest ? publishOrderedAgentRows() : AGENT_LIST_ROWS;
+      let source = AGENT_ROWS;
       if (matchesFixtureTag(filterPredicates))
         source = source.filter((agent) => agent.agent_id === TAG_AGENT_ID);
       const matching = source.filter((agent) => {
@@ -383,17 +329,7 @@ journey(ID, async (context) => {
   const repositoryTitleOrder = async () =>
     (await repositoryTitles().allInnerTexts()).map((value) => value.trim());
 
-  /** Visible "my agents" card headings, in rendered order. */
-  const mineTitles = () =>
-    page
-      .getByRole("heading", { level: 2 })
-      .filter({
-        hasText: new RegExp(`^(${TAG_AGENT_TITLE}|${ORDINARY_AGENT_TITLE})$`),
-      });
-  const mineTitleOrder = async () =>
-    (await mineTitles().allInnerTexts()).map((value) => value.trim());
-
-  /** The card group element that owns a heading, shared by both tabs. */
+  /** The card group element that owns a heading. */
   const resourceCard = (title) =>
     page
       .getByRole("heading", { level: 2, name: title, exact: true })
@@ -406,21 +342,40 @@ journey(ID, async (context) => {
       .locator("article")
       .filter({ has: page.getByRole("button", { name: title, exact: true }) });
 
-  const selectSortOption = async (optionLabel) => {
-    // Both agent-space tabs stay mounted, so target the rendered panel's
-    // control rather than every control that shares the same label.
-    await page
-      .getByRole("combobox", { name: SORT_LABEL, exact: true })
-      .filter({ visible: true })
-      .click();
-    await page
-      .locator(".ant-select-item-option:visible")
-      .filter({ hasText: optionLabel })
-      .click();
-  };
-
   const queryParam = (request, name) =>
     new URLSearchParams(request?.query ?? "").get(name);
+
+  const hasSortFlag = (request) =>
+    ["sort_by_downloads", "sort_by_published_time", "sort_by_update_time"].some(
+      (key) => queryParam(request, key) !== null
+    );
+
+  const expectDefaultRepository = async (baseline = 0) => {
+    await expect.poll(() => fixture.repositoryListings.length).toBeGreaterThan(baseline);
+    await expect.poll(repositoryTitleOrder).toEqual([
+      UNDATED_TITLE,
+      MAIN_TITLE,
+      ORDINARY_TITLE,
+    ]);
+    await expect(page.getByRole("combobox", { name: SORT_LABEL, exact: true })).toHaveCount(0);
+    expect(fixture.repositoryListings.slice(baseline).some(hasSortFlag)).toBe(false);
+  };
+
+  const expectDefaultPagination = async () => {
+    const baseline = fixture.repositoryListings.length;
+    await page.goto(`${baseUrl}/zh/resource-space?tab=agent&sort=downloads`);
+    await expectDefaultRepository(baseline);
+    const pagingBaseline = fixture.repositoryListings.length;
+    await page.locator(".ant-pagination-item-2:visible").click();
+    await expect(page.getByRole("heading", { name: "填充仓库条目01", exact: true })).toBeVisible();
+    await expect.poll(() =>
+      fixture.repositoryListings.slice(pagingBaseline).some(
+        (request) => queryParam(request, "page") === "2" && !hasSortFlag(request)
+      )
+    ).toBe(true);
+    expect(fixture.writes).toEqual([]);
+    expect(fixture.providerCalls).toEqual([]);
+  };
 
   /** Open the agent management page's tag filter popover. */
   const openTagFilter = async () => {
@@ -468,7 +423,7 @@ journey(ID, async (context) => {
       async () => {
         await page.setViewportSize({ width: 1920, height: 1080 });
         fixture = await mockNexent(page);
-        await page.goto(`${baseUrl}/zh/agent-space`);
+        await page.goto(`${baseUrl}/zh/resource-space?tab=agent`);
         await expect(
           page.getByRole("heading", {
             level: 2,
@@ -480,70 +435,35 @@ journey(ID, async (context) => {
         await expect
           .poll(() => fixture.repositoryListings.length)
           .toBeGreaterThan(0);
-        return "agent repository rendered three deterministic listings";
+        return "unified agent repository rendered three deterministic tracked listings";
       },
     ],
     steps: [
       async () => {
-        // The untouched default order must not request publish-time sorting.
-        expect(
-          fixture.repositoryListings.every(
-            (request) => !request.query.includes("sort_by_update_time")
-          )
-        ).toBe(true);
-        await expect.poll(repositoryTitleOrder).toEqual([
-          UNDATED_TITLE,
-          MAIN_TITLE,
-          ORDINARY_TITLE,
-        ]);
-
-        const latestBaseline = fixture.repositoryListings.length;
-        await selectSortOption(SORT_LATEST_LABEL);
-        await expect
-          .poll(() =>
-            requestsSince(
-              "repositoryListings",
-              latestBaseline,
-              (request) => request.query.includes("sort_by_update_time=true")
-            ).length
-          )
-          .toBeGreaterThan(0);
-        await expect.poll(repositoryTitleOrder).toEqual([
-          MAIN_TITLE,
-          ORDINARY_TITLE,
-          UNDATED_TITLE,
-        ]);
-
-        const defaultBaseline = fixture.repositoryListings.length;
-        await selectSortOption(SORT_DEFAULT_LABEL);
-        await expect
-          .poll(() =>
-            requestsSince(
-              "repositoryListings",
-              defaultBaseline,
-              (request) => request.query.includes("sort_by_update_time")
-            ).length
-          )
-          .toBe(0);
-        await expect.poll(repositoryTitleOrder).toEqual([
-          UNDATED_TITLE,
-          MAIN_TITLE,
-          ORDINARY_TITLE,
-        ]);
-        return "latest-published order forwarded, default order left untouched";
+        await expectDefaultRepository();
+        return "the default repository has no sort control and uses the default API order";
       },
       async () => {
+        // The unified repository card marks each listing as a main agent or
+        // an ordinary agent in its meta line.
         await expect(
-          resourceCard(MAIN_TITLE).locator("span.bg-amber-50")
-        ).toHaveText(MAIN_AGENT_LABEL);
+          resourceCard(MAIN_TITLE).getByText(MAIN_AGENT_LABEL, { exact: true })
+        ).toBeVisible();
         await expect(
-          resourceCard(ORDINARY_TITLE).locator("span.bg-amber-50")
+          resourceCard(MAIN_TITLE).getByText(SUB_AGENT_LABEL, { exact: true })
         ).toHaveCount(0);
+        await expect(
+          resourceCard(ORDINARY_TITLE).getByText(SUB_AGENT_LABEL, {
+            exact: true,
+          })
+        ).toBeVisible();
         await expect(resourceCard(ORDINARY_TITLE)).not.toContainText(
           MAIN_AGENT_LABEL
         );
-        await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
-        return "main agent badged, ordinary listing unbadged";
+        await expect(
+          page.getByText(MAIN_AGENT_LABEL, { exact: true })
+        ).toHaveCount(1);
+        return "main agent marked, ordinary listing marked as an ordinary agent";
       },
       async () => {
         const baseline = fixture.agentList.length;
@@ -565,46 +485,6 @@ journey(ID, async (context) => {
         await expect(card).not.toContainText("['d4_value");
         await expect(card).not.toContainText("d4_extra");
         return "tag keyword narrowed the list to the tag-matched agent";
-      },
-      async () => {
-        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
-        await expect(resourceCard(ORDINARY_AGENT_TITLE)).toBeVisible();
-        // The untouched default order keeps the fixture order and must not ask
-        // for publish-time sorting.
-        expect(
-          fixture.agentList.every(
-            (request) => !request.query.includes("sort_by_update_time")
-          )
-        ).toBe(true);
-        await expect.poll(mineTitleOrder).toEqual([
-          TAG_AGENT_TITLE,
-          ORDINARY_AGENT_TITLE,
-        ]);
-
-        const baseline = fixture.agentList.length;
-        await selectSortOption(SORT_LATEST_LABEL);
-        await expect
-          .poll(() =>
-            requestsSince(
-              "agentList",
-              baseline,
-              (request) => request.query.includes("sort_by_update_time=true")
-            ).length
-          )
-          .toBeGreaterThan(0);
-        await expect.poll(mineTitleOrder).toEqual([
-          ORDINARY_AGENT_TITLE,
-          TAG_AGENT_TITLE,
-        ]);
-
-        await expect(
-          resourceCard(TAG_AGENT_TITLE).locator("span.bg-amber-50")
-        ).toHaveText(MAIN_AGENT_LABEL);
-        await expect(
-          resourceCard(ORDINARY_AGENT_TITLE).locator("span.bg-amber-50")
-        ).toHaveCount(0);
-        await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
-        return "my-agents tab forwards latest-published order and badges only the main agent";
       },
       async () => {
         await page.goto(`${baseUrl}/zh/agents`);
@@ -666,74 +546,19 @@ journey(ID, async (context) => {
         return "tag filter and query combined as an intersection and cleared back to the query result";
       },
       async () => {
-        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
-        await expect(resourceCard(TAG_AGENT_TITLE)).toBeVisible();
-
-        const pagingBaseline = fixture.agentList.length;
-        await page.locator(".ant-pagination-item-2:visible").click();
-        await expect
-          .poll(
-            () =>
-              requestsSince(
-                "agentList",
-                pagingBaseline,
-                (request) => queryParam(request, "page") === "2"
-              ).length
-          )
-          .toBeGreaterThan(0);
-
-        const sortBaseline = fixture.agentList.length;
-        await selectSortOption(SORT_LATEST_LABEL);
-        await expect
-          .poll(
-            () =>
-              requestsSince(
-                "agentList",
-                sortBaseline,
-                (request) =>
-                  queryParam(request, "page") === "1" &&
-                  queryParam(request, "sort_by_update_time") === "true"
-              ).length
-          )
-          .toBeGreaterThan(0);
-        await expect
-          .poll(mineTitleOrder)
-          .toEqual([ORDINARY_AGENT_TITLE, TAG_AGENT_TITLE]);
-        return "a sort change from a later page returned the list to the first page under the new order";
+        await expectDefaultPagination();
+        return "pagination still works in the default order, even with a stale copies sort link";
       },
     ],
     assertions: [
       async () => {
-        await page.goto(`${baseUrl}/zh/agent-space`);
-        await expect(
-          page.getByRole("heading", {
-            level: 2,
-            name: MAIN_TITLE,
-            exact: true,
-          })
-        ).toBeVisible();
         const baseline = fixture.repositoryListings.length;
-        await selectSortOption(SORT_LATEST_LABEL);
-        await expect
-          .poll(() =>
-            requestsSince(
-              "repositoryListings",
-              baseline,
-              (request) => request.query.includes("sort_by_update_time=true")
-            ).length
-          )
-          .toBeGreaterThan(0);
-        expect(await repositoryTitleOrder()).toEqual([
-          MAIN_TITLE,
-          ORDINARY_TITLE,
-          UNDATED_TITLE,
-        ]);
-        const ordered = latestOrderedListings();
-        expect(ordered.at(-1).display_name).toBe(UNDATED_TITLE);
-        return "latest-published order carries the flag and lists the undated listing last";
+        await page.goto(`${baseUrl}/zh/resource-space?tab=agent&sort=latest`);
+        await expectDefaultRepository(baseline);
+        return "a stale latest sort link does not affect the repository";
       },
       async () => {
-        await page.goto(`${baseUrl}/zh/agent-space`);
+        await page.goto(`${baseUrl}/zh/resource-space?tab=agent`);
         await expect(
           page.getByRole("heading", {
             level: 2,
@@ -742,13 +567,17 @@ journey(ID, async (context) => {
           })
         ).toBeVisible();
         await expect(
-          resourceCard(MAIN_TITLE).locator("span.bg-amber-50")
-        ).toHaveText(MAIN_AGENT_LABEL);
+          resourceCard(MAIN_TITLE).getByText(MAIN_AGENT_LABEL, { exact: true })
+        ).toBeVisible();
         await expect(
-          resourceCard(ORDINARY_TITLE).locator("span.bg-amber-50")
-        ).toHaveCount(0);
-        await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
-        return "exactly the main-agent listing shows the amber main-agent badge";
+          resourceCard(ORDINARY_TITLE).getByText(SUB_AGENT_LABEL, {
+            exact: true,
+          })
+        ).toBeVisible();
+        await expect(
+          page.getByText(MAIN_AGENT_LABEL, { exact: true })
+        ).toHaveCount(1);
+        return "exactly the main-agent listing carries the main-agent marker";
       },
       async () => {
         const baseline = fixture.agentList.length;
@@ -775,32 +604,6 @@ journey(ID, async (context) => {
         expect(fixture.writes).toEqual([]);
         expect(fixture.providerCalls).toEqual([]);
         return "tag predicates forwarded, recovered tag rendered, no unrelated write or execution";
-      },
-      async () => {
-        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
-        await expect(resourceCard(TAG_AGENT_TITLE)).toBeVisible();
-        const baseline = fixture.agentList.length;
-        await selectSortOption(SORT_LATEST_LABEL);
-        await expect
-          .poll(() =>
-            requestsSince(
-              "agentList",
-              baseline,
-              (request) => request.query.includes("sort_by_update_time=true")
-            ).length
-          )
-          .toBeGreaterThan(0);
-        expect(await mineTitleOrder()).toEqual([
-          ORDINARY_AGENT_TITLE,
-          TAG_AGENT_TITLE,
-        ]);
-        const ordered = publishOrderedAgentRows();
-        expect(ordered[0].display_name).toBe(ORDINARY_AGENT_TITLE);
-        await expect(
-          resourceCard(TAG_AGENT_TITLE).locator("span.bg-amber-50")
-        ).toHaveText(MAIN_AGENT_LABEL);
-        await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
-        return "my-agents tab renders newest-published first and badges exactly the main agent";
       },
       async () => {
         const baseline = fixture.agentList.length;
@@ -864,40 +667,8 @@ journey(ID, async (context) => {
         return "only agents satisfying both the query and the selected tag remained, and clearing the filter restored the query result";
       },
       async () => {
-        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
-        await expect(resourceCard(TAG_AGENT_TITLE)).toBeVisible();
-        const pagingBaseline = fixture.agentList.length;
-        await page.locator(".ant-pagination-item-2:visible").click();
-        await expect
-          .poll(
-            () =>
-              requestsSince(
-                "agentList",
-                pagingBaseline,
-                (request) => queryParam(request, "page") === "2"
-              ).length
-          )
-          .toBeGreaterThan(0);
-
-        const sortBaseline = fixture.agentList.length;
-        await selectSortOption(SORT_LATEST_LABEL);
-        await expect
-          .poll(
-            () =>
-              requestsSince(
-                "agentList",
-                sortBaseline,
-                (request) =>
-                  queryParam(request, "page") === "1" &&
-                  queryParam(request, "sort_by_update_time") === "true"
-              ).length
-          )
-          .toBeGreaterThan(0);
-        await expect
-          .poll(mineTitleOrder)
-          .toEqual([ORDINARY_AGENT_TITLE, TAG_AGENT_TITLE]);
-        expect(fixture.writes).toEqual([]);
-        return "a sort change on a later page requested page one under the latest-published order";
+        await expectDefaultPagination();
+        return "pagination still works in the default order, even with a stale copies sort link";
       },
     ],
   });

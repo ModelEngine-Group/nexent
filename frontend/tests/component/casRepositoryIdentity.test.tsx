@@ -1,12 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ReviewAgentList } from "../../app/[locale]/agent-space/components/ReviewAgentList";
-import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { AgentDetail } from "@/components/agent/agent-detail";
 import { SkillDetail } from "@/components/skill/skill-detail";
-import { SkillRepositoryCard } from "../../app/[locale]/skill-space/components/SkillRepositoryCard";
-import RepositoryMcpCard from "../../app/[locale]/mcp-space/components/RepositoryMcpCard";
+import { SkillRepositoryCard } from "@/app/resource-space/components/skill/components/SkillRepositoryCard";
+import RepositoryMcpCard from "@/app/resource-space/components/mcp/components/RepositoryMcpCard";
 import {
   mapOfficialRepositoryDetail,
   mapMyAgentDetail,
@@ -113,33 +111,6 @@ describe("platform author presentation", () => {
     expect(screen.getByText("Imported Author")).toBeInTheDocument();
     expect(screen.queryByText("提交人")).not.toBeInTheDocument();
   });
-  it.each(["cas", "local"])(
-    "formats the submitter after the existing self comparison for %s",
-    (provider) => {
-      session.provider = provider;
-      render(
-        <ReviewAgentList
-          listings={[
-            {
-              agent_repository_id: 1,
-              name: "Agent",
-              status: "pending_review",
-              submitted_by: "me@test",
-              submitted_by_cas_username: "提交人",
-            } as AgentRepositoryListingItem,
-          ]}
-          currentUserEmail="me@test"
-          updatingRepositoryId={null}
-          onDetailClick={vi.fn()}
-          onApprove={vi.fn()}
-          onReject={vi.fn()}
-        />
-      );
-      expect(
-        screen.getByText(provider === "cas" ? "提交人" : "repository.review.me")
-      ).toBeInTheDocument();
-    }
-  );
   it("does not apply listing author metadata to a different version author", () => {
     const detail = mapRepositoryAgentDetail(
       { ...version, author: "Imported Author", author_cas_username: undefined },

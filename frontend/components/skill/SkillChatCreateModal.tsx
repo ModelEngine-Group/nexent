@@ -17,7 +17,7 @@ import {
   type SkillChatPayload,
 } from "@/lib/skillChatDraft";
 import SkillChatEditor from "./SkillChatEditor";
-import SkillTypeIcon from "@/components/repository/skill/components/SkillTypeIcon";
+import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import log from "@/lib/logger";
 
 const EMPTY_SKILL_DRAFT: SkillChatPayload = {

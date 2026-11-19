@@ -18,7 +18,7 @@ import { fetchMyEditableSkills } from "@/services/skillRepositoryService";
 import { tagManagementApi } from "@/services/tagManagementService";
 import SkillCreationFiles from "@/components/skill/SkillCreationFiles";
 import SkillGroupSelection from "@/components/skill/SkillGroupSelection";
-import SkillTypeIcon from "@/components/repository/skill/components/SkillTypeIcon";
+import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import { isValidSkillDraftPath } from "@/lib/skillCreationDraft";
 import type { SkillChatPayload } from "@/lib/skillChatDraft";
 import type { SkillFileContent } from "@/types/skill";

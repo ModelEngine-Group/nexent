@@ -26,13 +26,9 @@ change:
     decision: add
     test_selectors:
       - frontend/tests/component/agentCardTags.test.tsx
-      - frontend/tests/component/myAgentOwnershipRemoval.test.tsx
       - frontend/tests/component/repositoryPagination.test.tsx
-      - frontend/tests/component/myAgentMainBadge.test.tsx
     behaviors:
       - Fit tags on one line and recalculate overflow on resize and label changes.
       - Show complete long labels and all tags without triggering card navigation.
-      - Remove mine ownership controls and ownership query filters while retaining search and pagination.
-      - Keep the mine main-agent badge and optional version together in one subtitle row, retaining status rows.
     reason: Frontend DOM and local layout calculation use component UT. No backend or Python behavior changes; existing F-069 API and runtime cases do not prove this layout. No duplicate formal D1 needed.
-  notes: Design and verification in nexent-doc/nexent/agent-tag-layout/design.md. Browser pixel layout remains separately unverified if no local browser is available.
+  notes: Design and verification in nexent-doc/nexent/agent-tag-layout/design.md. Browser pixel layout remains separately unverified if no local browser is available. Reconciled by AGENT-SPACE-MY-AGENT-RETIRE-20261118 - the mine-view behaviors and their myAgentOwnershipRemoval/myAgentMainBadge suites were retired with the personal my-agents view; the surviving tag-layout and pagination obligations keep agentCardTags.test.tsx and repositoryPagination.test.tsx.

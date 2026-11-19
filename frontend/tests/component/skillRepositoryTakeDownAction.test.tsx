@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Button } from "antd";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SkillRepositoryCard } from "@/components/repository/skill/components/SkillRepositoryCard";
+import { SkillRepositoryCard } from "@/app/resource-space/components/skill/components/SkillRepositoryCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { SkillRepositoryListingStatus } from "@/types/skillRepository";
 
@@ -14,10 +14,10 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/hooks/auth/useUserDisplayName", () => ({
   useUserDisplayName: () => (_name: string, fallback: string) => fallback,
 }));
-vi.mock("@/components/repository/ResourcePublishedAt", () => ({
+vi.mock("@/app/resource-space/components/ResourcePublishedAt", () => ({
   default: () => null,
 }));
-vi.mock("@/components/repository/skill/components/SkillTypeIcon", () => ({
+vi.mock("@/components/skill/SkillTypeIcon", () => ({
   default: () => null,
 }));
 vi.mock("@/components/resource/ResourceCard", () => ({

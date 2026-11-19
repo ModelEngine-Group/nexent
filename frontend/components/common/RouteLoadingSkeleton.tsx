@@ -51,10 +51,7 @@ export function RouteLoadingSkeleton({ pathname }: RouteLoadingSkeletonProps) {
     memory: { title: "sidebar.memoryConfig", layout: "configuration" },
     evaluation: { title: "sidebar.agentEvaluation", layout: "table" },
     "agent-tasks": { title: "sidebar.agentTasks", layout: "table" },
-    "agent-space": { title: "sidebar.agentSpace", layout: "cards" },
     "agent-repository": { title: "sidebar.agentSpace", layout: "cards" },
-    "mcp-space": { title: "sidebar.mcpSpace", layout: "cards" },
-    "skill-space": { title: "sidebar.skillSpace", layout: "cards" },
     "resource-manage": { title: "sidebar.resourceManage", layout: "table" },
     "owner-manage": { title: "sidebar.ownerManage", layout: "table" },
   };

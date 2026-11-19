@@ -16,8 +16,6 @@ import type {
   AgentRepositoryListingListParams,
   AgentRepositoryListingListResponse,
   AgentRepositoryListingStatus,
-  MyEditableAgentListParams,
-  MyEditableAgentListResponse,
   OfficialAgentInstallItem,
   OfficialAgentInstallOptions,
   OfficialAgentItem,
@@ -84,31 +82,6 @@ export async function fetchAgentRepositoryListingDetail(
     return response.json();
   } catch (error) {
     log.error("Error fetching agent repository listing detail:", error);
-    throw error;
-  }
-}
-
-export async function fetchMyEditableAgents(
-  params?: MyEditableAgentListParams
-): Promise<MyEditableAgentListResponse> {
-  try {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.agentRepository.mineAgents(params),
-      {
-        method: "GET",
-        headers: getAuthHeaders(),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch my editable agents: ${response.statusText}`
-      );
-    }
-
-    return response.json();
-  } catch (error) {
-    log.error("Error fetching my editable agents:", error);
     throw error;
   }
 }
@@ -351,7 +324,6 @@ const agentRepositoryService = {
   fetchAgentRepositoryListings,
   fetchAgentRepositoryTagStats,
   fetchAgentRepositoryListingDetail,
-  fetchMyEditableAgents,
   createAgentRepositoryListing,
   updateAgentRepositoryStatus,
   fetchRepositoryImportPrecheck,

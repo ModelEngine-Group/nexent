@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Locator, type Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 
@@ -5,27 +7,13 @@ export class SkillPage {
   constructor(readonly page: Page) {}
 
   async open(tab: "仓库" | "我的 Skill" | "审核中心" = "我的 Skill"): Promise<void> {
-    await this.page.goto(appPath("/skill-space"), { waitUntil: "domcontentloaded" });
-    await this.page.getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
+    const query = tab === "审核中心"
+      ? "tab=review&resource_type=skill"
+      : `tab=skill&view=${tab === "仓库" ? "repository" : "mine"}`;
+    await this.page.goto(appPath(`/resource-space?${query}`), { waitUntil: "domcontentloaded" });
   }
 
   async search(name: string): Promise<void> {
-    const reviewTab = this.page.getByRole("tab", { name: /^审核中心/ });
-    if (await reviewTab.count() && await reviewTab.getAttribute("aria-selected") === "true") {
-      // Review has a paginated list, not the Mine/Repository search input.
-      const target = this.page.getByRole("heading", { name, exact: true });
-      const headings = this.page.getByRole("heading", { level: 3 });
-      await expect(headings.first()).toBeVisible();
-      for (let index = 0; index < 100; index += 1) {
-        if (await target.isVisible()) return;
-        const next = this.page.getByRole("button", { name: "下一页", exact: true });
-        if (!(await next.isVisible()) || !(await next.isEnabled())) break;
-        const before = await headings.allTextContents();
-        await next.click();
-        await expect.poll(async () => await headings.allTextContents()).not.toEqual(before);
-      }
-      throw new Error(`Skill review application ${name} was not found in the paginated list`);
-    }
     await this.page.getByPlaceholder("搜索 Skill 名称、描述或标签").fill(name);
   }
 
@@ -72,13 +60,19 @@ export class SkillPage {
 
   async approve(name: string): Promise<void> {
     await this.open("审核中心");
-    await this.search(name);
-    const row = this.page.getByRole("heading", { name, exact: true }).locator("xpath=ancestor::li[1]");
-    const reviewed = this.page.waitForResponse((r) => ["POST", "PATCH"].includes(r.request().method()) && /repository.*skill|skill.*repository/i.test(r.url()));
+    const search = this.page.getByPlaceholder("搜索资源名称");
+    await search.fill(name);
+    await search.press("Enter");
+    const row = this.page.getByRole("row").filter({
+      has: this.page.getByRole("button", { name, exact: true }),
+    });
     await row.getByRole("button", { name: /^通\s*过$/ }).click();
-    const confirm = this.page.getByRole("dialog");
+    const confirm = this.page.getByRole("dialog", { name: "确定通过审核？" });
     await expect(confirm).toBeVisible();
-    await confirm.getByRole("button", { name: /^通\s*过$/ }).click();
+    const reviewed = this.page.waitForResponse((r) =>
+      r.request().method() === "POST" && /\/api\/reviews\/[^/]+\/decision$/.test(new URL(r.url()).pathname)
+    );
+    await confirm.getByRole("button", { name: /^确\s*定$/ }).click();
     if (!(await reviewed).ok()) throw new Error("skill review approval failed");
   }
 

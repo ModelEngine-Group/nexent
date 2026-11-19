@@ -44,13 +44,6 @@ export enum McpServerStatus {
   UNKNOWN = "unknown",
 }
 
-/** Main MCP tools page: imported workspace services vs. published community list. */
-export enum McpToolsServicesTab {
-  REPOSITORY = "repository",
-  MINE = "mine",
-  REVIEW = "review",
-}
-
 export enum McpDeploymentType {
   REMOTE_LINK = "remote_link",
   CONTAINER = "container",
@@ -135,7 +128,6 @@ export const MCP_TOOLS_QUERY_KEYS = {
   services: ["mcp-tools", "services"] as const,
   tools: (mcpId: number) => ["mcp-tools", "service-tools", mcpId] as const,
   communityList: ["mcp-tools", "community"] as const,
-  communityReview: ["mcp-tools", "community-review"] as const,
   communityTags: ["mcp-tools", "community-tags"] as const,
   myCommunity: ["mcp-tools", "my-community"] as const,
 };

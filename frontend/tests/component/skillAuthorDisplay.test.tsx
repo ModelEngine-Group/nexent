@@ -3,7 +3,7 @@
 import { render, screen } from "@testing-library/react";
 import { App } from "antd";
 import { expect, test, vi } from "vitest";
-import { MineSkillCard } from "@/components/repository/skill/components/MineSkillsView";
+import { MineSkillCard } from "@/app/resource-space/components/skill/components/MineSkillsView";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
 
@@ -14,12 +14,12 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("@/components/repository/ResourceReviewLink", () => ({
+vi.mock("@/app/resource-space/components/ResourceReviewLink", () => ({
   default: ({ review }: { review?: { status: string } | null }) =>
     review ? <a href="#review">{review.status}</a> : null,
 }));
 vi.mock(
-  "@/components/repository/skill/components/MineApplyListingModal",
+  "@/app/resource-space/components/skill/components/MineApplyListingModal",
   () => ({ MineApplyListingModal: () => null })
 );
 
@@ -58,10 +58,10 @@ test.each(["cards"] as const)(
   }
 );
 vi.mock(
-  "@/components/repository/skill/components/SkillReviewStatusModal",
+  "@/app/resource-space/components/skill/components/SkillReviewStatusModal",
   () => ({ SkillReviewStatusModal: () => null })
 );
-vi.mock("@/components/repository/skill/components/CreateNewSkillCard", () => ({
+vi.mock("@/app/resource-space/components/skill/components/CreateNewSkillCard", () => ({
   CreateNewSkillCard: () => null,
 }));
 vi.mock("@/components/resource/ResourceCardGrid", () => ({
@@ -69,7 +69,7 @@ vi.mock("@/components/resource/ResourceCardGrid", () => ({
 }));
 vi.mock("@/components/tag/TagFilterControls", () => ({ default: () => null }));
 vi.mock("@/components/tag/TagFilterPopover", () => ({ default: () => null }));
-vi.mock("@/components/repository/RepositoryDisplayControls", () => ({
+vi.mock("@/app/resource-space/components/RepositoryDisplayControls", () => ({
   default: () => null,
 }));
 

@@ -15,7 +15,7 @@ vi.mock("@/hooks/auth/useUserDisplayName", () => ({
 vi.mock("@/components/resource/CreateResourceCard", () => ({
   default: () => null,
 }));
-vi.mock("@/components/repository/agent/components/AgentCardTags", () => ({
+vi.mock("@/components/resource/AgentCardTags", () => ({
   AgentCardTags: () => null,
 }));
 
@@ -36,23 +36,14 @@ function renderManagement(
           showToolbar={false}
           batchDelete={remove}
           canBatchDelete={(item) => item.permission === "EDIT"}
-          cardSelectionInHeader
-          renderItem={(item, _index, selection) => (
-            <div key={item.skill_id}>{selection}</div>
-          )}
-          renderBatchToolbar={(_controls, state) => (
-            <>
-              <output aria-label="Selected count">{state.selectedCount}</output>
-              {state.selectPageControl}
-              <button onClick={state.clearSelection}>Clear selection</button>
-              <button
-                disabled={!state.selectedCount || state.deleting}
-                onClick={state.deleteSelected}
-              >
-                Delete selected
-              </button>
-            </>
-          )}
+          floatingBatch={{
+            onExit: vi.fn(),
+            canApply: () => false,
+            apply: vi.fn(),
+            canTakeDown: () => false,
+            takeDown: vi.fn(),
+          }}
+          renderItem={(item) => <div key={item.skill_id}>{item.name}</div>}
         />
       </RepositoryPresentationContext.Provider>
     </App>
@@ -63,7 +54,7 @@ test("selects editable resources only and clears the management selection", () =
   const remove = vi.fn().mockResolvedValue(undefined);
   renderManagement(remove);
   expect(
-    screen.getByRole("button", { name: "Delete selected" })
+    screen.getByRole("button", { name: /resourceCenter.deleteSelected/ })
   ).toBeDisabled();
   expect(
     screen.getByRole("checkbox", { name: "Read-only skill" })
@@ -71,15 +62,15 @@ test("selects editable resources only and clears the management selection", () =
   fireEvent.click(
     screen.getByRole("checkbox", { name: "resourceCenter.selectPage" })
   );
-  expect(screen.getByLabelText("Selected count")).toHaveTextContent("1");
+  expect(screen.getByRole("toolbar")).toBeVisible();
   expect(
     screen.getByRole("checkbox", { name: "Editable skill" })
   ).toBeChecked();
   expect(
     screen.getByRole("checkbox", { name: "Read-only skill" })
   ).not.toBeChecked();
-  fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
-  expect(screen.getByLabelText("Selected count")).toHaveTextContent("0");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Editable skill" }).closest("label")!);
+  expect(screen.getByRole("checkbox", { name: "Editable skill" })).not.toBeChecked();
   expect(remove).not.toHaveBeenCalled();
 });
 
@@ -91,16 +82,14 @@ test.each([false, true])(
     });
     renderManagement(remove);
     fireEvent.click(screen.getByRole("checkbox", { name: "Editable skill" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    fireEvent.click(screen.getByRole("button", { name: /resourceCenter.deleteSelected/ }));
     expect(remove).not.toHaveBeenCalled();
     fireEvent.click(
       await screen.findByRole("button", { name: "common.confirm" })
     );
     await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(screen.getByLabelText("Selected count")).toHaveTextContent(
-        fails ? "1" : "0"
-      )
+      expect(screen.getByRole("checkbox", { name: "Editable skill" })).toHaveProperty("checked", fails)
     );
     expect(remove.mock.calls[0][0].skill_id).toBe(1);
     if (fails) expect(await screen.findByText("Deletion failed")).toBeVisible();

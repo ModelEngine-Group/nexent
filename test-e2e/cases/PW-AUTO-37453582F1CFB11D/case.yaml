@@ -18,7 +18,7 @@ case:
     legacy_asset_declaration: 无需额外本地预置文件；仓库 listing 数据由共享记录提供，标签过滤依赖统一标签库 default_resource（page.tsx 中 useTagDefinitions）。
   steps:
   - order: 1
-    action: 以 DEV 或 ADMIN 账号登录系统，访问路由 /[locale]/skill-space，默认停留在「仓库」Tab（frontend/app/[locale]/skill-space/page.tsx:98-100）。
+    action: 以 DEV 或 ADMIN 账号登录系统，访问路由 /[locale]/resource-space?tab=skill，默认停留在「仓库」Tab（frontend/app/[locale]/resource-space/components/skill/skill-space.tsx）。
     expected: 「仓库」Tab 默认可见，GET /repository/skill?status=shared 返回非空 items，摘要 total 与分页 total 一致。
   - order: 2
     action: 等待共享列表加载完成（GET /repository/skill?status=shared，page_size 由当前响应式网格决定），断言仓库 Tab 计数与 pagination.total 一致且本批次两条 ResourceCard 可见。
@@ -55,7 +55,7 @@ case:
     legacy_row: 54
   actor: Nexent browser user
   journey:
-  - 以 DEV 或 ADMIN 账号登录系统，访问路由 /[locale]/skill-space，默认停留在「仓库」Tab（frontend/app/[locale]/skill-space/page.tsx:98-100）。
+  - 以 DEV 或 ADMIN 账号登录系统，访问路由 /[locale]/resource-space?tab=skill，默认停留在「仓库」Tab（frontend/app/[locale]/resource-space/components/skill/skill-space.tsx）。
   - 等待共享列表加载完成（GET /repository/skill?status=shared，page_size 由当前响应式网格决定），断言仓库 Tab 计数与 pagination.total 一致且本批次两条 ResourceCard 可见。
   - 在搜索框（placeholder=skillRepository.searchPlaceholder）输入关键字，等待 300ms 防抖后触发带 search 参数的列表请求，断言仅展示名称/描述/来源/提交者/标签匹配的条目（page.tsx:164-202）。
   - 点击标签过滤（TagFilterPopover）选择唯一标签 X，触发 tag_predicates 过滤请求，断言列表只显示含标签 X 的 listing 且过滤按钮高亮（RepositoryView.tsx:70-74；page.tsx:197-199）。

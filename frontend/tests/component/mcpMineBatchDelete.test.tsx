@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
 import type { ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { MyMcp } from "@/components/repository/mcp/my-mcp";
+import { MyMcp } from "@/app/resource-space/components/mcp/my-mcp";
 import {
   FILTER_ALL,
   McpHealthStatus,
@@ -63,6 +63,7 @@ const shared: McpServiceItem = {
 const published: CommunityMcpCard = {
   communityId: 7,
   name: "Published MCP",
+  reviewStatus: "approved",
   description: "",
   status: "active",
   createdAt: "",
@@ -203,4 +204,24 @@ test("keeps both selections available for retry when the batch request fails", a
   ).toBeEnabled();
   expect(localRefetch).not.toHaveBeenCalled();
   expect(publishedRefetch).not.toHaveBeenCalled();
+});
+
+test("clicking the card selects it and taking down targets only selected approved listings", async () => {
+  vi.mocked(fetchWithAuth).mockResolvedValueOnce(Response.json({ status: "success" }));
+  renderMine();
+  fireEvent.click(screen.getByRole("button", { name: "mcpTools.mine.batchActions" }));
+  const checkbox = screen.getByRole("checkbox", { name: published.name });
+  const card = checkbox.closest("label")!;
+  fireEvent.click(card);
+  expect(checkbox).toBeChecked();
+  fireEvent.click(card);
+  expect(checkbox).not.toBeChecked();
+  fireEvent.click(screen.getByRole("checkbox", { name: "resourceCenter.selectPage" }));
+  fireEvent.click(screen.getByRole("button", { name: "mcpTools.repository.offline (1)" }));
+  fireEvent.click(await screen.findByRole("button", { name: "common.confirm" }));
+  await waitFor(() => expect(checkbox).not.toBeChecked());
+  expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+  expect(fetchWithAuth).toHaveBeenCalledWith(API_ENDPOINTS.mcpTools.communityStatus(7), {
+    method: "PATCH", body: JSON.stringify({ status: "not_shared" }),
+  });
 });

@@ -99,26 +99,28 @@ export function useRepositoryAgentDetail(
     repositoryDetail?.is_official !== true &&
     repositoryDetail != null &&
     (agentId == null || versionNo == null);
+  const listingDetail =
+    listing && repositoryDetail
+      ? {
+          ...repositoryDetail,
+          published_at: repositoryDetail.published_at ?? listing.published_at,
+          version_label:
+            repositoryDetail.version_label ?? listing.version_label,
+          is_main_agent:
+            repositoryDetail.is_main_agent ?? listing.is_main_agent,
+        }
+      : undefined;
   const detail =
-    listing && repositoryDetail?.is_official === true
-      ? mapOfficialRepositoryDetail(repositoryDetail, listing.tags)
-      : listing && versionDetail && repositoryDetail
-        ? mapRepositoryAgentDetail(
-            versionDetail,
-            {
-              ...repositoryDetail,
-              published_at:
-                repositoryDetail.published_at ?? listing.published_at,
-            },
-            listing.tags,
-            {
-              tools,
-              skills,
-              models,
-              knowledgeBases,
-              subAgents,
-            }
-          )
+    listing && listingDetail?.is_official === true
+      ? mapOfficialRepositoryDetail(listingDetail, listing.tags)
+      : listing && versionDetail && listingDetail
+        ? mapRepositoryAgentDetail(versionDetail, listingDetail, listing.tags, {
+            tools,
+            skills,
+            models,
+            knowledgeBases,
+            subAgents,
+          })
         : listing
           ? undefined
           : null;
