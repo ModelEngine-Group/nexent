@@ -2,6 +2,7 @@
 """Read only the explicitly authorized tenant's allocation metadata."""
 
 from contextlib import contextmanager
+from dataclasses import replace
 
 from nexent.storage.models import StorageScope
 
@@ -9,6 +10,7 @@ from infrastructure.knowledge_catalog import knowledge as knowledge_table
 from infrastructure.rdb.cleanse_resources import bind_cleanse_resources
 from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.record_store import SQLRecordStore
+from infrastructure.rdb.storage_ledger import LEDGER, ledger_catalog
 from infrastructure.rdb.tenant_config_record import TenantConfig
 from infrastructure.storage.catalog import (
     DatasetCatalog,
@@ -20,14 +22,20 @@ CATALOG, CONFIGS = "quota_read_knowledge", "quota_read_configs"
 config_table = TenantConfig.__table__
 
 
-def bind_tenant_quota_records(actor, tenant_id, engine):
+def bind_tenant_quota_records(actor, tenant_id, engine, *, usage=False):
     schemas = []
+    knowledge_fields = ("knowledge_id", "tenant_id", "quota_limit_bytes", "delete_flag")
+    if usage:
+        knowledge_fields += (
+            "index_name", "knowledge_name", "knowledge_sources", "embedding_model_id",
+            "created_by", "group_ids", "ingroup_permission",
+        )
     for name, table, key, names, active in (
         (
             CATALOG,
             knowledge_table,
             "knowledge_id",
-            ("knowledge_id", "tenant_id", "quota_limit_bytes", "delete_flag"),
+            knowledge_fields,
             None,
         ),
         (
@@ -53,7 +61,7 @@ def bind_tenant_quota_records(actor, tenant_id, engine):
                         field,
                         "integer"
                         if field
-                        in {"knowledge_id", "quota_limit_bytes", "tenant_config_id"}
+                        in {"knowledge_id", "quota_limit_bytes", "tenant_config_id", "embedding_model_id"}
                         else "string",
                         nullable=True,
                     )
@@ -64,17 +72,25 @@ def bind_tenant_quota_records(actor, tenant_id, engine):
                 active_field=active,
             )
         )
+    tables = {CATALOG: knowledge_table, CONFIGS: config_table}
+    audits = {}
+    if usage:
+        definition, table, audit = ledger_catalog()
+        schemas.append(replace(definition, write_roles=frozenset()))
+        tables[LEDGER] = table
+        audits[LEDGER] = audit
     return SQLRecordStore(
-        StorageScope("management", tenant_id, actor.user_id, {CATALOG, CONFIGS}),
+        StorageScope("management", tenant_id, actor.user_id, set(tables)),
         DatasetCatalog(tuple(schemas)),
-        {CATALOG: knowledge_table, CONFIGS: config_table},
+        tables,
         engine,
         revision_fields={},
+        audit_mappings=audits,
     )
 
 
 @contextmanager
-def tenant_quota_read_ports(actor, *, context):
+def tenant_quota_read_ports(actor, *, context, usage=False):
     engine, owned = record_engine(context), []
     try:
         identity = bind_cleanse_resources(
@@ -92,7 +108,7 @@ def tenant_quota_read_ports(actor, *, context):
         owned.append(identity)
 
         def records(tenant_id):
-            port = bind_tenant_quota_records(actor, tenant_id, engine)
+            port = bind_tenant_quota_records(actor, tenant_id, engine, usage=usage)
             owned.append(port)
             return port
 

@@ -43,53 +43,57 @@ class TenantQuotaReader:
             records = open_records(tenant)
             require_quota_scope(records, actor, tenant)
 
-            def config(key):
-                page = records.query(
-                    CONFIGS,
-                    RecordQuery(where=Comparison("config_key", "eq", key)),
-                    PageRequest(limit=1),
-                    context=context,
-                )
-                return page.items[0]["config_value"] if page.items else None
-
-            hard = hard_limit_values(
-                config(KEY_TENANT_HARD_LIMIT_BYTES),
-                config("KB_QUOTA_HARD_LIMIT_EDITABLE"),
-            )
-            warning = warning_values(
-                config("KB_QUOTA_WARNING_ENABLED"),
-                config("KB_QUOTA_WARNING_THRESHOLD_PCT"),
-                config("KB_QUOTA_CRITICAL_THRESHOLD_PCT"),
-            )
-            # Original summary includes all non-deleted tenant KBs, including
-            # private resources belonging to others and non-ES providers.
-            query = RecordQuery(where=Comparison("delete_flag", "ne", "Y"))
-            count = records.count(CATALOG, query, context=context)
-            allocated = records.sum(
-                CATALOG, "quota_limit_bytes", query, context=context
-            )
-            from nexent.storage.models import Junction
-
-            finite = records.count(
-                CATALOG,
-                RecordQuery(
-                    where=Junction(
-                        "and",
-                        (
-                            Comparison("delete_flag", "ne", "Y"),
-                            Comparison("quota_limit_bytes", "is_null", False),
-                        ),
-                    )
-                ),
-                context=context,
-            )
+            result = self._read_records(records, context)
             self._authorize(identity, actor, tenant, context)
             context.remaining()
-            return {
-                **hard,
-                **warning,
-                "summary": allocation_summary(hard, allocated, count, finite),
-            }
+            return result
+
+    def _read_records(self, records, context):
+        def config(key):
+            page = records.query(
+                CONFIGS,
+                RecordQuery(where=Comparison("config_key", "eq", key)),
+                PageRequest(limit=1),
+                context=context,
+            )
+            return page.items[0]["config_value"] if page.items else None
+
+        hard = hard_limit_values(
+            config(KEY_TENANT_HARD_LIMIT_BYTES),
+            config("KB_QUOTA_HARD_LIMIT_EDITABLE"),
+        )
+        warning = warning_values(
+            config("KB_QUOTA_WARNING_ENABLED"),
+            config("KB_QUOTA_WARNING_THRESHOLD_PCT"),
+            config("KB_QUOTA_CRITICAL_THRESHOLD_PCT"),
+        )
+        # Original summary includes all non-deleted tenant KBs, including
+        # private resources belonging to others and non-ES providers.
+        query = RecordQuery(where=Comparison("delete_flag", "ne", "Y"))
+        count = records.count(CATALOG, query, context=context)
+        allocated = records.sum(
+            CATALOG, "quota_limit_bytes", query, context=context
+        )
+        from nexent.storage.models import Junction
+
+        finite = records.count(
+            CATALOG,
+            RecordQuery(
+                where=Junction(
+                    "and",
+                    (
+                        Comparison("delete_flag", "ne", "Y"),
+                        Comparison("quota_limit_bytes", "is_null", False),
+                    ),
+                )
+            ),
+            context=context,
+        )
+        return {
+            **hard,
+            **warning,
+            "summary": allocation_summary(hard, allocated, count, finite),
+        }
 
 
 async def read_tenant_quota(tenant, actor):

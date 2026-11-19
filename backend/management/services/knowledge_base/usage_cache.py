@@ -1,8 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Process-local quota cache with no database or object-store import side effects."""
 
+import asyncio
 import threading
-from contextlib import contextmanager
+from concurrent.futures import Future
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
 # In-memory cache for usage data
@@ -12,22 +14,49 @@ _usage_cache_state_lock = threading.RLock()
 _usage_cache_generation = 0
 
 
+def _enqueue_refresh(tenant_id):
+    ready = Future()
+    with _usage_cache_state_lock:
+        queue = _usage_refresh_locks.setdefault(tenant_id, [])
+        queue.append(ready)
+        if len(queue) == 1:
+            ready.set_result(_usage_cache_generation)
+    return ready
+
+
+def _release_refresh(tenant_id, ready):
+    """Remove queued or awarded ownership atomically on every exit path."""
+    with _usage_cache_state_lock:
+        queue = _usage_refresh_locks[tenant_id]
+        was_owner = queue[0] is ready
+        queue.remove(ready)
+        if not was_owner:
+            ready.cancel()
+        if not queue:
+            del _usage_refresh_locks[tenant_id]
+        elif was_owner:
+            queue[0].set_result(_usage_cache_generation)
+
+
 @contextmanager
 def usage_refresh_guard(tenant_id: str):
-    """Coalesce refreshes per tenant without retaining idle lock objects."""
-    with _usage_cache_state_lock:
-        entry = _usage_refresh_locks.setdefault(tenant_id, [threading.RLock(), 0])
-        entry[1] += 1
+    """Share refresh ownership with async callers without thread affinity."""
+    ready = _enqueue_refresh(tenant_id)
     try:
-        with entry[0]:
-            with _usage_cache_state_lock:
-                generation = _usage_cache_generation
-            yield generation
+        yield ready.result()
     finally:
-        with _usage_cache_state_lock:
-            entry[1] -= 1
-            if entry[1] == 0:
-                del _usage_refresh_locks[tenant_id]
+        _release_refresh(tenant_id, ready)
+
+
+@asynccontextmanager
+async def async_usage_refresh_guard(tenant_id: str):
+    """Wait without occupying a worker; cancellation relinquishes the ticket."""
+    ready = _enqueue_refresh(tenant_id)
+    try:
+        # Shield the shared Future so cancellation cannot corrupt handoff.
+        yield await asyncio.shield(asyncio.wrap_future(ready))
+    finally:
+        _release_refresh(tenant_id, ready)
 
 
 def store_usage_cache(tenant_id, timestamp, usage, generation):
