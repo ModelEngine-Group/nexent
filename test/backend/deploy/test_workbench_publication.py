@@ -278,6 +278,8 @@ ROOT_ENV_FILE=/deployment/.env
 COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 NEXENT_IMAGE=backend:test
+NEXENT_MANAGEMENT_IMAGE=management:test
+NEXENT_RUNTIME_IMAGE=runtime:test
 NEXENT_WEB_IMAGE=web:test
 failed_stage="''' + failed_stage + r'''"
 DEPLOYMENT_IMAGE_SOURCE=general
@@ -312,7 +314,7 @@ prepare_core_service_deployment nexent-config nexent-runtime nexent-web
         assert "--entrypoint" not in result.stdout
     assert "start-backend.sh" not in result.stdout
     if failed_stage == "pull":
-        assert "PULL:backend:test" in result.stdout
+        assert "PULL:management:test" in result.stdout
     else:
         assert "PULL:" not in result.stdout
 
@@ -324,6 +326,8 @@ ROOT_ENV_FILE=/deployment/.env
 COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 NEXENT_IMAGE=backend:test
+NEXENT_MANAGEMENT_IMAGE=management:test
+NEXENT_RUNTIME_IMAGE=runtime:test
 docker() {
   if [ "$1" = image ]; then return 1; fi
   printf 'PULL:%s\n' "$2"
@@ -332,8 +336,10 @@ container_command() { printf 'COMPOSE:%s\n' "$*"; }
 prepare_core_service_deployment nexent-config nexent-runtime
 ''')
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("PULL:backend:test") == 1
-    assert result.stdout.index("PULL:") < result.stdout.index("run --rm")
+    assert [line for line in result.stdout.splitlines() if line.startswith("PULL:")] == [
+        "PULL:management:test", "PULL:runtime:test",
+    ]
+    assert result.stdout.index("PULL:runtime:test") < result.stdout.index("run --rm")
 
 
 def test_web_only_deployment_does_not_stop_or_run_migration():
