@@ -368,4 +368,19 @@ test("confirms before history navigation with unsaved changes", async () => {
   confirmation.mockRestore();
 });
 
+test("keeps cached configuration editable after a background refresh failure", async () => {
+  renderPage();
+  const input = await screen.findByLabelText(
+    "systemConfig.param.MAX_TENANT_COUNT.label"
+  );
+  state.list.mockRejectedValueOnce(new Error("refresh failed"));
 
+  fireEvent.click(screen.getByRole("button", { name: "systemConfig.refresh" }));
+
+  expect(await screen.findByText("refresh failed")).toBeInTheDocument();
+  expect(
+    screen.getByTestId("config-row-MAX_TENANT_COUNT")
+  ).toBeInTheDocument();
+  fireEvent.change(input, { target: { value: "5" } });
+  expect(input).toHaveValue("5");
+});

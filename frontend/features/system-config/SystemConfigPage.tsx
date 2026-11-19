@@ -303,7 +303,7 @@ export function SystemConfigPage() {
             }
           />
         ) : null}
-        {!isLoading && !error
+        {!isLoading && (items.length > 0 || !error)
           ? CONFIG_GROUPS.map((group) => {
               const groupItems = visibleItems.filter(
                 (item) => item.group === group.id
