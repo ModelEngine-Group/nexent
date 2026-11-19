@@ -11,7 +11,7 @@ from contracts.configuration import (
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from management.services.permission.identity.session import authenticate
-from management.configuration.catalog import (
+from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,
 )
@@ -37,8 +37,19 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
 
 
 def _authorization_error(error: HTTPException) -> JSONResponse:
-    code = "UNAUTHORIZED" if error.status_code == HTTPStatus.UNAUTHORIZED else "FORBIDDEN"
-    return _error(error.status_code, code, str(error.detail))
+    if error.status_code == HTTPStatus.UNAUTHORIZED:
+        return _error(HTTPStatus.UNAUTHORIZED, "UNAUTHORIZED", "Authentication required")
+    return _error(HTTPStatus.FORBIDDEN, "FORBIDDEN", "Operations permission required")
+
+
+def _list_authorized_configurations(user):
+    authorize_operations(user)
+    return list_system_configurations()
+
+
+def _save_authorized_configurations(changes, user):
+    actor = authorize_configuration_write(user)
+    return save_system_configurations(changes, actor=actor)
 
 
 @router.get("")
@@ -46,9 +57,10 @@ async def get_configurations(
     request: Request, user: CurrentUser = Depends(authenticate)
 ):
     try:
-        authorize_operations(user)
         items = await run_system_configuration_io(
-            request.app.state.thread_manager, list_system_configurations
+            request.app.state.thread_manager,
+            _list_authorized_configurations,
+            user,
         )
     except HTTPException as error:
         return _authorization_error(error)
@@ -69,12 +81,11 @@ async def patch_configurations(
     user: CurrentUser = Depends(authenticate),
 ):
     try:
-        actor = authorize_configuration_write(user)
         result = await run_system_configuration_io(
             request.app.state.thread_manager,
-            save_system_configurations,
+            _save_authorized_configurations,
             payload.changes,
-            actor=actor,
+            user,
         )
     except HTTPException as error:
         return _authorization_error(error)

@@ -79,8 +79,8 @@ class Archive:
                 raise TrajectoryCorrupt("Published trajectory changed during verification")
             self._checksums.put(key, True, 512)
 
-    def manifest(self, row):
-        meta = self._manifest(row)
+    def manifest(self, row, *, persist_retention=True):
+        meta = self._manifest(row, persist_retention=persist_retention)
         if (
             meta is not None
             and meta.get("source_coverage_version") == 1
@@ -98,7 +98,7 @@ class Archive:
                 )
         return meta
 
-    def _manifest(self, row):
+    def _manifest(self, row, *, persist_retention=True):
         try:
             with self.store._session(identity(row), read_only=True) as directory:
                 meta = directory.read_json("meta.json")
@@ -113,7 +113,7 @@ class Archive:
                         if expiry != parse_time(run["expires_at"]):
                             run["expires_at"] = timestamp(expiry)
                             changed = True
-            if changed:
+            if changed and persist_retention:
                 # Persist a shorter retention period without making a historical GET
                 # wait for an unrelated writer. Maintenance also tightens these bounds.
                 try:

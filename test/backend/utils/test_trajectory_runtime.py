@@ -192,6 +192,8 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     tmp_path, monkeypatch, caplog, elapsed,
 ):
     caplog.set_level(logging.INFO)
+    ticker = [10000.0]
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: ticker[0])
     TrajectoryFileStore.provision(tmp_path)
     processor = create_maintenance_processor(configuration(tmp_path))
     store = processor._maintenance_store
@@ -211,7 +213,6 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     processor._maintain()
     now = processor._next_cleanup_at
     directory = tmp_path / "tenant/owner/42/1"
-    ticker = [10000.0]
     unlink = os.unlink
 
     def slow_unlink(path, **kwargs):
@@ -219,7 +220,6 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
         if str(path).endswith(".otlp.jsonl"):
             ticker[0] += elapsed
 
-    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: ticker[0])
     monkeypatch.setattr("infrastructure.trace.trajectory_store.os.unlink", slow_unlink)
     processor._maintain()
     assert sum((directory / f"{run}.otlp.jsonl").exists() for run in expired) == 2

@@ -274,6 +274,9 @@ class ToolResources:
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
                 kwargs["on_complete"] = lambda _result: self._push_file_workspace_to_sandbox()
+            if params.get("publish_file_artifacts"):
+                kwargs["artifact_path_resolver"] = self._resolve_skill_artifact_path
+                kwargs["artifact_uploader"] = self._upload_skill_artifacts
             return RunSkillScriptTool(**kwargs)
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
@@ -301,6 +304,8 @@ class ToolResources:
             )
             if params.get("authorized_skill_names") is not None:
                 kwargs["authorized_skill_names"] = params["authorized_skill_names"]
+            if params.get("isolated_skills_root"):
+                kwargs["isolated_skills_root"] = True
             return ReadSkillConfigTool(**kwargs)
         elif class_name == "DownloadFromS3Tool":
             from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool

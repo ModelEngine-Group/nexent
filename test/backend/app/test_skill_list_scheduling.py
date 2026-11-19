@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 
 from contracts.errors.exceptions import SkillException
 from management.api.skill import skill as module
-from management.utils.exception_handlers import register_exception_handlers
+from backend.http.server.exception_handlers import register_exception_handlers
 from nexent.core.concurrency import (
     LanePolicy,
     ThreadManager,

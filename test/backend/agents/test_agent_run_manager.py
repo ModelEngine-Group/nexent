@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from management.services.agent.lifecycle import (
+from runtime.executions import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
     AgentRunManager,
@@ -188,7 +188,7 @@ class TestAgentRunManager:
     def test_stop_agent_run_nonexistent(self, monkeypatch):
         """Return false when neither a local run nor a remote signal exists."""
         monkeypatch.setattr(
-            "management.services.agent.lifecycle.runtime_state_service.set_cancel_signal",
+            "runtime.executions.runtime_state_service.set_cancel_signal",
             lambda **_kwargs: False,
         )
         result = self.manager.stop_agent_run(999, "nonexistent_user")
@@ -197,7 +197,7 @@ class TestAgentRunManager:
     def test_stop_agent_run_wrong_user(self, monkeypatch):
         """A different user cannot stop the locally registered run."""
         monkeypatch.setattr(
-            "management.services.agent.lifecycle.runtime_state_service.set_cancel_signal",
+            "runtime.executions.runtime_state_service.set_cancel_signal",
             lambda **_kwargs: False,
         )
         conversation_id = 123
@@ -215,7 +215,7 @@ class TestAgentRunManager:
     def test_stop_agent_run_returns_remote_signal_result(self, monkeypatch):
         """A remote cancellation signal is a successful stop request."""
         monkeypatch.setattr(
-            "management.services.agent.lifecycle.runtime_state_service.set_cancel_signal",
+            "runtime.executions.runtime_state_service.set_cancel_signal",
             lambda **_kwargs: True,
         )
 

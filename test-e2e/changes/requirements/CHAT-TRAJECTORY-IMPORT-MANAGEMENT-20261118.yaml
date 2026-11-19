@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-IMPORT-MANAGEMENT-20261118
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-IMPORT-MANAGEMENT-20261118
+  title: 导入轨迹按文件名和时间排序及多选删除
+  description: 全列表排序、跨页勾选、确认串行删除、部分失败保留重试和页面离开中止。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D3-001
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D5-001
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D2-001
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 排序在分页前完成，文件名及时间双向、同值与非法参数。
+    - 跨页选择、确认取消、串行删除、部分失败仅重试失败项、进度和中止。
+    reason: 原UT覆盖单条删除和默认倒序；加强原文件，D2证明新增排序协议，D4证明多选旅程，不新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_saved_imports.py
+    - frontend/tests/component/trajectorySavedImports.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+  notes: Runtime ownership inherited; existing self-contained D2/D4 preparation and
+    owned cleanup retained.

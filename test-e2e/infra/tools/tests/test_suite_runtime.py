@@ -255,7 +255,8 @@ class SuiteTests(unittest.TestCase):
                     output.write_text("export NEXENT_D4_CHAT_AGENT='owned-agent'\n")
                 return 0
 
-            def run(record, repo, home, env, *, result_dir):
+            def run(record, repo, home, env, *, result_dir, enforce_timeout):
+                self.assertFalse(enforce_timeout)
                 events.append("test")
                 self.assertEqual(env["NEXENT_D4_CHAT_AGENT"], "owned-agent")
                 self.assertEqual(result_dir, directory)
@@ -300,7 +301,8 @@ class SuiteTests(unittest.TestCase):
             record = {"case_id": "PW-TEST-01", "stage": "D4", "execution": {
                 "preparation": {"families": []}}}
 
-            def run(record, repo, home, env, *, result_dir):
+            def run(record, repo, home, env, *, result_dir, enforce_timeout):
+                self.assertFalse(enforce_timeout)
                 save(result_dir / "status.json", {"reason": "STEP-02: configured element not found",
                      "evidence": ["d4/PW-TEST-01/trace.zip"], "cleanup_failed": True})
                 save(result_dir / "runtime/resolved-assets.yaml", {})

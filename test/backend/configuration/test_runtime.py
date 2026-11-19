@@ -11,7 +11,7 @@ from test.backend.configuration.test_catalog import EXPECTED_DEFAULTS
 
 
 def _runtime(**overrides):
-    from management.configuration.runtime import SystemConfigurationRuntime
+    from infrastructure.system_configuration.runtime import SystemConfigurationRuntime
 
     return SystemConfigurationRuntime(**overrides)
 
@@ -60,7 +60,7 @@ async def test_getter_is_local_and_does_not_call_loader_or_redis():
 
 
 def test_getter_fails_when_no_valid_snapshot_exists():
-    from management.configuration.runtime import ConfigurationNotReadyError
+    from infrastructure.system_configuration.runtime import ConfigurationNotReadyError
 
     runtime = _runtime(loader=AsyncMock())
 
@@ -91,7 +91,7 @@ async def test_concurrent_refreshes_are_serialized_and_latest_database_value_win
 
 
 async def test_poll_coalesces_notifications_and_ignores_message_values():
-    from management.configuration.runtime import CONFIGURATION_CHANNEL
+    from infrastructure.system_configuration.runtime import CONFIGURATION_CHANNEL
 
     loader = AsyncMock(return_value={**EXPECTED_DEFAULTS, "MAX_TENANT_COUNT": 7})
     runtime = _runtime(loader=loader)
@@ -162,3 +162,87 @@ async def test_reconnect_subscribes_again_and_refreshes_database():
     assert redis_factory.call_count >= 2
     assert loader.await_count >= 3
     pubsub.subscribe.assert_awaited_once()
+
+
+async def test_pubsub_close_failure_still_closes_redis_client():
+    runtime = _runtime(loader=AsyncMock())
+    pubsub = Mock()
+    pubsub.aclose = AsyncMock(side_effect=ConnectionError("close failed")
+    )
+    redis = Mock()
+    redis.aclose = AsyncMock()
+    runtime._pubsub = pubsub
+    runtime._redis = redis
+
+    await runtime._close_connection()
+
+    pubsub.aclose.assert_awaited_once_with()
+    redis.aclose.assert_awaited_once_with()
+
+
+async def test_reconnect_continues_after_pubsub_close_failure():
+    loader = AsyncMock(return_value=dict(EXPECTED_DEFAULTS))
+    pubsub = Mock(spec=["subscribe", "get_message", "aclose"])
+    pubsub.subscribe = AsyncMock()
+    pubsub.get_message = AsyncMock(side_effect=ConnectionError("lost connection"))
+    pubsub.aclose = AsyncMock(side_effect=ConnectionError("close failed"))
+    redis = Mock(spec=["pubsub", "aclose"])
+    redis.pubsub = Mock(return_value=pubsub)
+    redis.aclose = AsyncMock()
+    redis_factory = Mock(side_effect=[redis, redis])
+    runtime = _runtime(
+        loader=loader,
+        redis_factory=redis_factory,
+        disconnected_interval=0.001,
+    )
+
+    task = asyncio.create_task(runtime._run())
+    for _ in range(30):
+        if redis_factory.call_count >= 2:
+            break
+        await asyncio.sleep(0.001)
+
+    assert redis_factory.call_count >= 2
+    assert not task.done()
+    await runtime.stop()
+    assert pubsub.aclose.await_count >= 1
+    assert redis.aclose.await_count >= 1
+
+
+async def test_stop_suppresses_task_failure_and_closes_resources():
+    runtime = _runtime(loader=AsyncMock())
+    pubsub = Mock()
+    pubsub.aclose = AsyncMock(side_effect=ConnectionError("close failed")
+    )
+    redis = Mock()
+    redis.aclose = AsyncMock()
+    runtime._pubsub = pubsub
+    runtime._redis = redis
+
+    async def fail():
+        raise ConnectionError("task failed")
+
+    runtime._task = asyncio.create_task(fail())
+    await asyncio.sleep(0)
+
+    await runtime.stop()
+
+    assert runtime._task is None
+    assert runtime._pubsub is None
+    assert runtime._redis is None
+    pubsub.aclose.assert_awaited_once_with()
+    redis.aclose.assert_awaited_once_with()
+
+
+async def test_start_replaces_an_already_finished_refresh_task():
+    loader = AsyncMock(return_value=dict(EXPECTED_DEFAULTS))
+    runtime = _runtime(loader=loader, disconnected_interval=0.001)
+    previous = asyncio.create_task(asyncio.sleep(0))
+    await previous
+    runtime._task = previous
+
+    await runtime.start()
+
+    assert runtime._task is not previous
+    assert not runtime._task.done()
+    await runtime.stop()

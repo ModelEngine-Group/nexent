@@ -3,8 +3,8 @@
 
 from contracts.constants.environment import APP_VERSION
 from fastapi import FastAPI
+from backend.http.server.exception_handlers import register_exception_handlers
 from gateway.downstream.middleware import GatewayIdentityMiddleware
-from management.utils.exception_handlers import register_exception_handlers
 from ops.api.access import router as access_router
 from ops.api.health import router as health_router
 from ops.api.system_configurations import router as system_configuration_router
@@ -31,6 +31,10 @@ def create_app() -> FastAPI:
 
         application.include_router(trajectory_router)
         application.include_router(directory_router)
+    else:
+        from ops.api.trajectory import imports_router
+
+        application.include_router(imports_router, prefix="/trajectory")
     return application
 
 

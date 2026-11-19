@@ -1,8 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   DatePicker,
+  Dropdown,
   Popover,
   Tag,
   Tooltip,
@@ -13,6 +15,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
+  ChevronDown,
   ChevronRight,
   Clock3,
   Filter,
@@ -53,7 +56,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 export function ObservabilityCenter({ user }: { user: User }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isSuperAdmin = hasRole(user, "SU");
   const initial = (): TrajectoryFilters =>
     isSuperAdmin ? {} : { tenant_id: user.tenantId };
@@ -70,6 +73,9 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const [cleaning, setCleaning] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const scope = JSON.stringify([user.id, user.tenantId, effectiveRoles(user)]);
+  const select = (row: TrajectoryRecord | null) => {
+    setSelected(row);
+  };
   const records = useTrajectoryRecords(scope, {
     view: "conversation",
     ...filters,
@@ -79,7 +85,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const change = (next: TrajectoryFilters) => {
     setFilters(next);
     setPaging((value) => ({ ...value, page: 1 }));
-    setSelected(null);
+    select(null);
   };
   const directoryChange = (field: DirectoryField, option?: DirectoryOption) => {
     let next = resetFilters(filters, field, option?.id);
@@ -119,7 +125,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
     setScheduling(false);
   };
   const refresh = () => {
-    setSelected(null);
+    select(null);
     setPaging((value) => ({ ...value, page: 1 }));
     records.refresh();
   };
@@ -162,7 +168,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
       width: 250,
       render: (_, row) => (
         <div className="trajectory-record-agent">
-          <button className="trajectory-link" onClick={() => setSelected(row)}>
+          <button className="trajectory-link" onClick={() => select(row)}>
             {(row.root_agent_name && row.root_agent_name !== row.root_agent_id
               ? row.root_agent_name
               : null) || t("trajectory.unknownAgent")}
@@ -371,39 +377,49 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
-          <Button
-            aria-label={t("common.refresh")}
-            icon={<RefreshCw size={14} />}
-            loading={records.isFetching}
-            disabled={records.isFetching}
-            onClick={refresh}
+          <Link
+            href={`/${i18n?.language?.startsWith("en") ? "en" : "zh"}/observability/imports`}
           >
-            {t("common.refresh")}
-          </Button>
-          <Tooltip
-            title={
-              isSuperAdmin || tenant ? "" : t("trajectory.scheduleSelectTenant")
-            }
-          >
-            <span>
-              <Button
-                icon={<Clock3 size={14} />}
-                disabled={!isSuperAdmin && !tenant}
-                onClick={() => setScheduling(true)}
-              >
-                {t("trajectory.scheduledCleanup")}
-              </Button>
-            </span>
-          </Tooltip>
+            <Button>{t("trajectory.importedList")}</Button>
+          </Link>
           <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
             <span>
-              <Button
-                icon={<Trash2 size={14} />}
-                disabled={!canCleanup}
-                onClick={() => setCleaning(true)}
+              <Dropdown
+                trigger={["click"]}
+                menu={{
+                  items: [
+                    {
+                      key: "manual",
+                      label: t("trajectory.manualCleanup"),
+                      icon: <Trash2 size={14} />,
+                      disabled: !canCleanup,
+                      title: canCleanup
+                        ? undefined
+                        : t("trajectory.cleanupContext"),
+                    },
+                    {
+                      key: "schedule",
+                      label: t("trajectory.scheduledCleanup"),
+                      icon: <Clock3 size={14} />,
+                      disabled: !isSuperAdmin && !tenant,
+                      title:
+                        isSuperAdmin || tenant
+                          ? undefined
+                          : t("trajectory.scheduleSelectTenant"),
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === "manual" && canCleanup) setCleaning(true);
+                    if (key === "schedule" && (isSuperAdmin || tenant))
+                      setScheduling(true);
+                  },
+                }}
               >
-                {t("trajectory.cleanup")}
-              </Button>
+                <Button icon={<Trash2 size={14} />} disabled={!canCleanup}>
+                  {t("trajectory.cleanup")}
+                  <ChevronDown size={14} />
+                </Button>
+              </Dropdown>
             </span>
           </Tooltip>
         </div>
@@ -526,11 +542,38 @@ export function ObservabilityCenter({ user }: { user: User }) {
             </Tag>
           ))}
       </div>
-      <TrajectorySummary summary={records.data?.summary} />
+      <TrajectorySummary
+        summary={records.data?.summary}
+        pending={records.isPending}
+      />
       {records.isError && (
         <TrajectoryError error={records.error} retry={refresh} />
       )}
       <section className="trajectory-table-panel min-h-0 flex-1">
+        <div
+          role="toolbar"
+          aria-label={t("trajectory.recordList")}
+          className="mb-3 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium">
+              {t("trajectory.recordList")}
+            </h2>
+            {records.data && (
+              <span className="text-xs text-[var(--color-text-secondary)]">
+                {t("trajectory.recordTotal", { count: records.data.total })}
+              </span>
+            )}
+          </div>
+          <Button
+            icon={<RefreshCw size={14} />}
+            loading={records.isFetching}
+            disabled={records.isFetching}
+            onClick={refresh}
+          >
+            {t("trajectory.refreshData")}
+          </Button>
+        </div>
         <Table<TrajectoryRecord>
           className="trajectory-table [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!h-0 [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!border-0"
           size="middle"
@@ -546,12 +589,12 @@ export function ObservabilityCenter({ user }: { user: User }) {
               : t("trajectory.empty"),
           }}
           onRow={(row) => ({
-            onClick: () => setSelected(row),
+            onClick: () => select(row),
             className: "cursor-pointer",
             tabIndex: 0,
             onKeyDown: (event) => {
               if (event.key === "Enter" && event.target === event.currentTarget)
-                setSelected(row);
+                select(row);
             },
           })}
           onChange={(_pagination, tableFilters, sorter, extra) => {

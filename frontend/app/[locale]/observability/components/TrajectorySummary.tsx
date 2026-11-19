@@ -8,7 +8,13 @@ import type {
   TrajectorySummary as Summary,
 } from "@/types/trajectory";
 
-export function TrajectorySummary({ summary }: { summary?: Summary }) {
+export function TrajectorySummary({
+  summary,
+  pending = false,
+}: {
+  summary?: Summary;
+  pending?: boolean;
+}) {
   const { t } = useTranslation();
   const valid = summary?.complete ? summary : undefined;
   const samples = (count?: number) =>
@@ -31,11 +37,12 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
   );
   return (
     <>
-      {summary?.scope_type && (
-        <div
-          className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500"
-          role="status"
-        >
+      <div
+        className="mb-2 flex min-h-4 shrink-0 flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]"
+        role="status"
+        aria-busy={pending}
+      >
+        {summary?.scope_type && (
           <span>
             {t(
               summary.scope_type === "global"
@@ -43,15 +50,17 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
                 : "trajectory.statisticsTenant"
             )}
           </span>
+        )}
+        {(pending || summary?.scope_type) && (
           <span>
-            {summary.computed_at
+            {!pending && summary?.computed_at
               ? t("trajectory.statisticsComputedAt", {
                   time: new Date(summary.computed_at).toLocaleString(),
                 })
               : t("trajectory.statisticsPreparing")}
           </span>
-        </div>
-      )}
+        )}
+      </div>
       <div className="trajectory-summary">
         <section style={{ borderLeftColor: "#0067D1", color: "#0067D1" }}>
           <header>{t("trajectory.conversationCount")}</header>

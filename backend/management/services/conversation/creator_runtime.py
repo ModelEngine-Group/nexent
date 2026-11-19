@@ -13,11 +13,13 @@ from types import SimpleNamespace
 from redis.exceptions import RedisError
 
 from contracts.errors.exceptions import (
+    AgentRunAlreadyActiveError,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
 )
-from runtime.thread_management import runtime_thread_manager
-from management.services.agent.channels import streaming_channel_manager
+from infrastructure.agent_stream_channels import streaming_channel_manager
+from infrastructure.local_execution_registry import LocalExecutionRegistry
+from management.thread_management import config_thread_manager as runtime_thread_manager
 from management.services.conversation.runtime_output import is_runtime_event
 from management.services.conversation.creator_events import unit_event
 from management.services.conversation.creator_replay import creator_checkpoint_stream
@@ -26,16 +28,17 @@ from management.db.conversation.repository import (
     get_conversation_history,
     get_message_units,
 )
-from management.services.agent.lifecycle import (
-    AgentRunAlreadyActiveError,
-    agent_run_manager,
-)
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.agents.orchestration.entry import DeferredAgentRun
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, run_blocking
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadQueueTimedOut
 
 logger = logging.getLogger(__name__)
+class CreatorExecutionRegistry(LocalExecutionRegistry):
+    """Track the Management-owned producer and leave SDK admission to Runtime."""
+
+
+agent_run_manager = CreatorExecutionRegistry()
 _producers: set[asyncio.Task] = set()
 _request_claims: dict[str, float] = {}
 
@@ -257,6 +260,10 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
                 await runtime_state_service.mark_stream_completed_async(
                     user_id, conversation_id, status, generation=control.generation
                 )
+                await runtime_state_service._run_managed(
+                    "creator-finish", runtime_state_service.mark_run_finished,
+                    user_id, conversation_id, status, control.generation,
+                )
             finally:
                 try:
                     await streaming_channel_manager.remove_channel(
@@ -444,6 +451,29 @@ async def resume_creator(conversation_id, user_id):
                 return
 
     return replay()
+
+
+async def stop_creator(conversation_id, user_id, expected_generation=None):
+    """Cancel only the caller's live creator generation, including remote producers."""
+    local = agent_run_manager.get_agent_run_info(conversation_id, user_id)
+    if local is not None:
+        generation = local._automation_runtime_generation
+        if expected_generation is not None and expected_generation != generation:
+            return False
+        return agent_run_manager.stop_local_run(conversation_id, user_id, expected_run=local)
+    if not runtime_state_service.enabled:
+        return None
+    state = await runtime_state_service.get_run_state_async(user_id, conversation_id)
+    generation = state.get("generation")
+    if not generation or state.get("status") != "running":
+        return None
+    if not await runtime_state_service.creator_lease_async(user_id, conversation_id, generation):
+        return None
+    if expected_generation is not None and expected_generation != generation:
+        return False
+    return await runtime_state_service._run_managed(
+        "creator-stop", runtime_state_service.set_cancel_signal, user_id, conversation_id, generation,
+    )
 
 
 async def shutdown_creator_streams(timeout):

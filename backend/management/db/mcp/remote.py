@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from sqlalchemy import text
 
-from management.configuration.runtime import get_config_snapshot
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import TenantResourceLimitError
 from infrastructure.rdb.orm import as_dict, filter_property
 from infrastructure.rdb.client import get_db_session

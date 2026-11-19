@@ -24,8 +24,8 @@ case:
     action: Edit values, reset one default, discard another edit and save while editing the same field again before the response completes.
     expected: The save bar shares the configuration content's left and right edges; only changed keys are submitted; the saved baseline advances while the later draft remains, and the message says saved with automatic consumer refresh.
   - order: 3
-    action: Repeat with notification degradation, database failure, background query and attempted page exit.
-    expected: Degradation remains an honest save, failures and queries preserve drafts, and unsaved exit requires confirmation.
+    action: Repeat with notification degradation, database failure, background query and attempted page exit through links and browser Back/Forward.
+    expected: Degradation remains an honest save, failures and queries preserve drafts, and every unsaved navigation path requires confirmation before state can be discarded.
   expected_results:
   - Authorized localized browsing and denied configuration access follow explicit permission, while every signed-in role retains the personal-profile self-service route.
   - The save bar aligns with the configuration content, and changed-key save, default reset, discard and edit-during-save preserve the correct baseline and drafts.

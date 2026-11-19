@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from management.services.permission.identity.session import authenticate
-from management.configuration.catalog import (
+from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigurationValidationError,
 )

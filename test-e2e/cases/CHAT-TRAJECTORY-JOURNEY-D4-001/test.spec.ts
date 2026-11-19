@@ -26,6 +26,15 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .click({ position: { x: 10, y: 10 } });
     await expect(page.getByRole("dialog")).toHaveCount(0);
   };
+  const openCleanup = async (kind: "manual" | "schedule") => {
+    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    await page
+      .getByRole("menuitem", {
+        name: kind === "manual" ? "手动清理" : "定时清理",
+        exact: true,
+      })
+      .click();
+  };
   const preconditions = contract.expectedIds("preconditions");
   for (let index = 0; index < preconditions.length; index++) {
     await contract.precondition(preconditions[index], async () => {
@@ -343,7 +352,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await page.goto(`${base}/zh/observability`);
   });
   await contract.step(steps[5], async () => {
-    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    await openCleanup("manual");
     expect(state.cleanups).toHaveLength(0);
     await page.getByRole("spinbutton").fill("7");
     await page.getByRole("button", { name: "确认清理", exact: true }).click();
@@ -363,13 +372,13 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .click();
     state.cleanupPartial = false;
     const refreshed = state.records.length;
-    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    await openCleanup("manual");
     await page.getByRole("button", { name: "确认清理", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect.poll(() => state.cleanups.length).toBe(4);
     await expect.poll(() => state.records.length).toBeGreaterThan(refreshed);
     state.cleanupPaused = true;
-    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    await openCleanup("manual");
     await page.getByRole("button", { name: "确认清理", exact: true }).click();
     await expect.poll(() => state.cleanups.length).toBe(5);
     const runningDialog = page.getByRole("dialog");
@@ -436,7 +445,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   });
   await contract.step(steps[7], async () => {
     const deleted = state.cleanups.length;
-    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await openCleanup("schedule");
     const dialog = page.getByRole("dialog");
     const input = dialog.getByRole("spinbutton");
     await expect(input).toHaveValue("30");
@@ -466,7 +475,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .getByRole("button", { name: "关闭", exact: true })
       .last()
       .click();
-    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await openCleanup("schedule");
     await expect(page.getByRole("spinbutton")).toHaveValue("7");
     await page
       .getByRole("dialog")
@@ -476,9 +485,9 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     state.role = "SU";
     await page.goto(`${base}/zh/observability`);
     await expect(
-      page.getByRole("button", { name: "定时清理", exact: true }),
+      page.getByRole("button", { name: "清理轨迹", exact: true }),
     ).toBeEnabled();
-    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await openCleanup("schedule");
     const reopened = page.getByRole("dialog");
     await expect(
       reopened.getByText(
@@ -510,7 +519,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .getByRole("button", { name: "关闭", exact: true })
       .last()
       .click();
-    await page.getByRole("button", { name: "定时清理", exact: true }).click();
+    await openCleanup("schedule");
     await expect(page.getByRole("switch")).not.toBeChecked();
     await expect(page.getByRole("spinbutton")).toHaveValue("7");
     await page
@@ -519,7 +528,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .last()
       .click();
     expect(state.cleanups).toHaveLength(deleted);
-    await page.getByRole("button", { name: "清理轨迹", exact: true }).click();
+    await openCleanup("manual");
     const manual = page.getByRole("dialog");
     await expect(
       manual.getByRole("button", { name: "确认清理", exact: true }),
