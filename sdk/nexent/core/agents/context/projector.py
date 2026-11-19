@@ -1,18 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """ContextProjector: converts ContextComponent instances into fine-grained ContextItem candidates."""
 
 import uuid
 from typing import Any, Dict, List
 
-from ..agent_model import (
-    ContextComponent,
-    ExternalAgentsComponent,
-    KnowledgeBaseComponent,
-    ManagedAgentsComponent,
-    MemoryComponent,
-    SkillsComponent,
-    SystemPromptComponent,
-    ToolsComponent,
-)
+from nexent.core.agents.contracts.config import ContextComponent, ExternalAgentsComponent, KnowledgeBaseComponent, ManagedAgentsComponent, MemoryComponent, SkillsComponent, SystemPromptComponent, ToolsComponent
 from .context_item import AuthorityTier, ContextItem, ContextItemType, RepresentationTier
 from .item_handler_registry import ItemHandlerRegistry
 

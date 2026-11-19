@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -7,13 +8,15 @@ from nexent.core.models.sampling import resolve_sampling
 
 from contracts.constants.constants import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from contracts.errors.exceptions import ModelProviderError
+from contracts.errors.exceptions import ModelOutletValidationError, ModelProviderError
 from contracts.model import ModelConnectStatusEnum
 from contracts.model import _infer_model_type_from_name
 from contracts.constants.constants import DASHSCOPE_BASE_URL, DASHSCOPE_REALTIME_BASE_URL, MODEL_ENGINE_URL_MARKER, SILICON_BASE_URL, TOKENPONY_BASE_URL
 from contracts.model import ProviderEnum
-from management.db.model.repository import create_model_record, delete_model_record, get_model_by_model_id, get_model_by_name_factory, get_model_records, get_models_by_display_name, get_models_by_tenant_factory_type, update_model_record
+from management.utils.managed_read import managed_read
+from management.db.model.repository import delete_model_record, get_model_by_model_id, get_model_by_name_factory, get_model_records, get_model_records_page, get_models_by_display_name, get_models_by_tenant_factory_type
 from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
+from management.db.model.repository import create_model_record, update_model_record
 from management.services.model.names import (
     add_repo_to_name,
     sort_models_by_id,
@@ -99,8 +102,21 @@ def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
     model_data["max_tokens"] = max_output
 
 
+def _validate_configured_sampling(model_data):
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
+
+    try:
+        validate_sampling_parameters(model_data)
+        custom = (model_data.get("extra_params") or {}).get("__custom__")
+        if isinstance(custom, dict):
+            validate_sampling_parameters(custom)
+    except ParameterValidationError as error:
+        raise ModelOutletValidationError(error.category, error.path) from None
+
+
 def _create_model_configuration(model_data, user_id, tenant_id):
     """All LLM configuration writers persist the same resolved format."""
+    _validate_configured_sampling(model_data)
     if model_data.get("model_type") in {"llm", "chat"}:
         from management.services.model.outlet_legacy import create_legacy_llm_outlet
 
@@ -110,6 +126,7 @@ def _create_model_configuration(model_data, user_id, tenant_id):
 
 def _update_model_configuration(record, changes, user_id, tenant_id, *, scope_update=False):
     """Do not allow legacy configuration writes to replace resolved JSON."""
+    _validate_configured_sampling(changes)
     if record is None:
         raise LookupError("MODEL_OUTLET_NOT_FOUND")
     if record.get("model_type") in {"llm", "chat"}:
@@ -994,7 +1011,8 @@ async def list_llm_models_for_tenant(tenant_id: str):
         raise Exception(f"Failed to retrieve model list: {str(e)}")
 
 
-async def list_models_for_admin(
+@managed_read
+def list_models_for_admin(
     tenant_id: str, model_type: Optional[str] = None, page: int = 1, page_size: int = 20
 ) -> Dict[str, Any]:
     """Get models for a specified tenant (admin operation) with pagination.
@@ -1015,7 +1033,12 @@ async def list_models_for_admin(
             filters = {"model_type": model_type}
 
         # Get model records for the specified tenant
-        records = get_model_records(filters, tenant_id)
+        if page > 0 and page_size > 0:
+            records, total = get_model_records_page(filters, tenant_id, page, page_size)
+        else:
+            # Preserve direct callers' legacy slice behavior for non-HTTP inputs.
+            records = get_model_records(filters, tenant_id)
+            total = len(records)
 
         # Type mapping for backwards compatibility
         type_map = {
@@ -1040,11 +1063,11 @@ async def list_models_for_admin(
             normalized_models.append(record)
 
         # Calculate pagination
-        total = len(normalized_models)
         total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
-        paginated_models = normalized_models[start_index:end_index]
+        paginated_models = (normalized_models if page > 0 and page_size > 0
+                            else normalized_models[start_index:end_index])
 
         # Get tenant name
         from management.services.permission.identity.tenants import get_tenant_info

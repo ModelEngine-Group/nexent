@@ -135,6 +135,40 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(suite_notify.send_report(directory, {}), "NOT_TERMINAL")
                 send.assert_not_called()
 
+    def test_case_failures_and_fault_marker_do_not_stop_independent_cases(self):
+        for outcome, fault in (("FAIL", False), ("TIMEOUT", False), ("CLEANUP_FAILED", False), ("PASS", True)):
+            with self.subTest(outcome=outcome, fault=fault), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary)
+                records = [{"case_id": case_id, "stage": "D5", "status": "active", "execution": {"test": True}}
+                           for case_id in ("FIRST", "INDEPENDENT")]
+                calls = []
+
+                def execute(command, cwd, env, log, timeout):
+                    if "--case" in command:
+                        case_id = command[command.index("--case") + 1]
+                        batch = Path(command[command.index("--batch-dir") + 1])
+                        calls.append(case_id)
+                        save(batch / "cases" / case_id / "receipt.json", {
+                            "case_id": case_id, "stage": "D5", "result": outcome if case_id == "FIRST" else "PASS"})
+                        if fault:
+                            save(home / "state/deployment-guard/pending.json", {"status": "PENDING"})
+                    return 0
+
+                with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                        patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                        patch.object(suite, "static_requirements", return_value=set()), \
+                        patch.object(suite, "static_inventory", return_value=[]), \
+                        patch.object(suite, "logged", side_effect=execute):
+                    self.assertEqual(suite.execute(home, home, records, {"hooks": {}, "case_timeout_seconds": 20}),
+                                     int(outcome != "PASS"))
+                batch = next((home / "runs/repository-daily").iterdir())
+                summary = json.loads((batch / "summary.json").read_text())
+                self.assertEqual(calls, ["FIRST", "INDEPENDENT"])
+                self.assertTrue(summary["execution_complete"])
+                self.assertEqual(summary["counts"].get(outcome), 2 if outcome == "PASS" else 1)
+                if fault:
+                    self.assertTrue((home / "state/deployment-guard/pending.json").exists())
+
     def test_notification_deduplicates_uncertain_delivery(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
@@ -284,12 +318,15 @@ class SuiteTests(unittest.TestCase):
             self.assertIn("STEP-02", receipt["reason"])
             self.assertEqual(receipt["test_evidence"], ["d4/PW-TEST-01/trace.zip"])
 
-    def test_d5_cleanup_failure_stops_remaining_cases_and_finalizes_incomplete(self):
+    def test_existing_fault_marker_does_not_stop_batch_or_erase_cleanup_failures(self):
         with tempfile.TemporaryDirectory() as root:
             home = Path(root)
             records = [{"case_id": name, "stage": "D5", "status": "active", "execution": {"test": True}}
                        for name in ("SEC-002", "SEC-003")]
             started = []
+            fault = home / "state/deployment-guard/pending.json"
+            save(fault, {"status": "PENDING", "evidence": "previous-batch"})
+            original = fault.read_bytes()
 
             def command_result(command, cwd, env, log, timeout):
                 if "--batch-dir" in command:
@@ -309,9 +346,10 @@ class SuiteTests(unittest.TestCase):
                     patch.object(suite, "logged", side_effect=command_result):
                 self.assertEqual(suite.execute(home, home, records, {"hooks": {}, "case_timeout_seconds": 20}), 1)
             summary = json.loads(next((home / "runs/repository-daily").iterdir()).joinpath("summary.json").read_text())
-            self.assertEqual(started, ["SEC-002"])
-            self.assertEqual(summary["counts"], {"CLEANUP_FAILED": 1, "NOT_EXECUTED": 1})
-            self.assertFalse(summary["execution_complete"])
+            self.assertEqual(started, ["SEC-002", "SEC-003"])
+            self.assertEqual(summary["counts"], {"CLEANUP_FAILED": 2})
+            self.assertTrue(summary["execution_complete"])
+            self.assertEqual(fault.read_bytes(), original)
             self.assertTrue(summary["d6_complete"])
 
     def test_batch_continues_after_case_failure(self):
@@ -339,7 +377,7 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(summary["counts"], {"FAIL": 1, "PASS": 1})
             self.assertTrue(summary["execution_complete"])
 
-    def test_d0_missing_static_asset_prevents_case_worker(self):
+    def test_missing_static_asset_blocks_its_case_without_interrupting_the_batch(self):
         with tempfile.TemporaryDirectory() as root:
             home = Path(root)
             records = [{"case_id": "A-001", "stage": "D3", "status": "active", "execution": {"test": True}}]
@@ -352,7 +390,9 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(suite.execute(home, home, records, {"hooks": {}}), 1)
                 self.assertEqual(command.call_count, 1)  # Formal validator only.
             batch = next((home / "runs/repository-daily").iterdir())
-            self.assertEqual(json.loads((batch / "summary.json").read_text())["counts"], {"NOT_EXECUTED": 1})
+            summary = json.loads((batch / "summary.json").read_text())
+            self.assertEqual(summary["counts"], {"BLOCKED": 1})
+            self.assertTrue(summary["execution_complete"])
             self.assertEqual(json.loads((batch / "d0/static-assets.json").read_text())["assets"][0]["destination"], "MISSING")
 
 

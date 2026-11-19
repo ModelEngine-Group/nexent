@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: NB-ASSET-READINESS-20261117
+  change_type: test-fix
+  title: Repair Northbound identities, current UT references and preparation
+  description: >-
+    Resolve the four strict validation findings identified in PR 4351 at the
+    user's request. Restore the canonical final-answer identity, normalize the
+    telemetry Case identity, remove an obsolete UT selector and explicitly
+    declare the telemetry Case's externally supplied real dependencies.
+  affected_features:
+    existing: [F-146]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [NB-CHAT-FINAL-ANSWER-D2-001]
+    added: []
+    modified: [NB-OTEL-D3-001]
+    retired: []
+  no_case_change_reason: >-
+    No product behavior, proving stage, assertion or acceptance obligation changes.
+    The reintroduced final-answer directory duplicates the already normalized
+    Case byte-for-byte after ID substitution; keep its canonical contract and
+    complete script. Telemetry changes only identity-derived strings and binding
+    preparation. Keep the frozen naming catalog and all historical reports intact.
+  notes: >-
+    The final-answer correspondence already exists in
+    infra/migration/case-id-renames-20261102.json. The telemetry correspondence is
+    recorded in infra/migration/case-id-renames-20261117.json. Neither mapping
+    changes runtime lookup or grants a naming exemption. The removed deployment
+    UT suite is documented in K8S-ENV-INJECTION; retain its historical evidence
+    without advertising it as a current executable selector.
+    Telemetry uses an operator-supplied private credentials file selecting an
+    existing real Agent, bound skill and Phoenix deployment. No shared preparation
+    factory can create that exact real trace fixture. It starts no local provider
+    process and declares no controlled service or common factory. HTTP response
+    contexts are closed by the script; its owned conversations are intentionally
+    retained for trace review as required by the unchanged Case cleanup contract.
+    Missing credentials, service readiness or real-model prerequisites remain
+    execution blockers, never a formal PASS. Local offline validation and UT do
+    not certify actual Phoenix or model execution.

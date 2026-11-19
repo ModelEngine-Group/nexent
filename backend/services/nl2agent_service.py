@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote
 
-from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import (
     ContextItemInput,
@@ -33,7 +33,8 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN
+from management.configuration.runtime import get_config_snapshot
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem
@@ -44,7 +45,7 @@ from management.db.skill.repository import query_enabled_skill_instances
 from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
 from contracts.errors.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -68,7 +69,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from management.services.agent.context import (
     build_authorized_context_input,
 )
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
@@ -126,6 +127,10 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
         with self._boundary_lock:
             return self._boundary_reached
 
+    @property
+    def turn_complete(self) -> bool:
+        return self.boundary_reached
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
             (process_type == ProcessType.FINAL_ANSWER and content == self._STOP_FINAL_ANSWER)
@@ -144,7 +149,9 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
                 if self._boundary_reached:
                     return
                 self._boundary_reached = True
-            self._boundary_stop_event.set()
+            # Graceful turn completion must not cancel the SDK output consumer.
+            # CoreAgent observes turn_complete between actions, after the card
+            # has been queued, while agent_run drains output during cleanup.
 
 
 class Nl2AgentDraftSaveError(Exception):
@@ -1555,7 +1562,7 @@ async def build_nl2agent_run_info(
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        mcp_request_timeout_seconds=get_config_snapshot().get("MCP_REQUEST_TIMEOUT_SECONDS"),
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,
@@ -1564,6 +1571,10 @@ async def build_nl2agent_run_info(
         sandbox_config=None,
         redis_client=None,
     )
+    from management.services.agent.core_policy import prepare_creator_core
+
+    prepare_creator_core(run_info, tenant_id=tenant_id, user_id=user_id,
+                         user_context={"tenant_id": tenant_id, "user_id": user_id})
     run_info.context_input = build_authorized_context_input(run_info)
     return run_info
 
@@ -1588,6 +1599,10 @@ async def create_nl2agent_stream(
         authorization=authorization,
     )
 
+    control = getattr(request, "_creator_control", None)
+    if control is not None:
+        control.configure(run_info)
+
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
@@ -1604,12 +1619,19 @@ async def create_nl2agent_stream(
             async for chunk in agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,
+                **({"execution": control.execution, "deferred_run": control.deferred}
+                   if control is not None and control.execution is not None else {}),
             ):
                 if boundary_delivered:
-                    continue
+                    try:
+                        kind = json.loads(chunk).get("type")
+                    except (AttributeError, TypeError, json.JSONDecodeError):
+                        continue
+                    if kind not in {"tool_result", "run_terminal", "done", "error"}:
+                        continue
                 yield f"data: {chunk}\n\n"
                 try:
-                    boundary_delivered = (
+                    boundary_delivered = boundary_delivered or (
                         json.loads(chunk).get("type") == ProcessType.NL2A.value
                     )
                 except (AttributeError, TypeError, json.JSONDecodeError):
@@ -1629,6 +1651,7 @@ async def create_nl2agent_stream(
             )
             yield f"data: {error_payload}\n\n"
         finally:
-            run_info.stop_event.set()
+            if control is None:
+                run_info.stop_event.set()
 
     return generate()

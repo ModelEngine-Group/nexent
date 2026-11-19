@@ -1,6 +1,7 @@
 @import "tw-shimmer";
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./semantic-colors.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -50,17 +51,27 @@
 }
 
 @keyframes accordion-down {
-  from { height: 0; }
-  to { height: var(--radix-accordion-content-height); }
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
 }
 
 @keyframes accordion-up {
-  from { height: var(--radix-accordion-content-height); }
-  to { height: 0; }
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
 @layer base {
   :root {
+    --palette-gray-0: #ffffff;
+    --color-bg-3: var(--palette-gray-0);
     --navigation-surface: lab(97.0939% -0.108689 -0.749958);
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
@@ -338,7 +349,8 @@ button svg,
 }
 
 .auto-hide-scrollbars[data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover,
-.auto-hide-scrollbars [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
+.auto-hide-scrollbars
+  [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover) !important;
 }
 

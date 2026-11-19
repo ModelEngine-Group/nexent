@@ -55,6 +55,7 @@ from management.services.knowledge_base.quota_common import (
     update_knowledge_record,
 )
 from management.services.knowledge_base.usage import KnowledgeUsageAccounting
+from management.services.knowledge_base.quota_common import invalidate_usage_cache
 
 
 class QuotaService(
@@ -70,14 +71,11 @@ class QuotaService(
     @staticmethod
     def invalidate_usage_cache(tenant_id: Optional[str] = None) -> None:
         """Invalidate cached tenant usage used by tenant and platform quota views."""
-        if tenant_id is None:
-            _usage_cache.clear()
-            return
-        _usage_cache.pop(tenant_id, None)
+        invalidate_usage_cache(tenant_id)
 
     def get_kb_soft_quota(self, knowledge_id: int) -> Optional[int]:
         """Get per-KB soft quota in bytes. Returns None if not set."""
-        from management.db.client import get_db_session
+        from infrastructure.rdb.client import get_db_session
         from management.db.models import KnowledgeRecord
 
         with get_db_session() as session:

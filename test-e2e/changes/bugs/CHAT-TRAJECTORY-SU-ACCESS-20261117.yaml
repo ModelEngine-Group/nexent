@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-SU-ACCESS-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-SU-ACCESS-20261117
+  title: SU轨迹接口身份复核不绑定租户
+  description: 复用平台SU权限，修正轨迹catalog将SU身份绑定登录租户的问题。
+  observed_behavior: 接口入口允许SU，但数据库身份复核额外要求租户匹配，平台上下文变化时返回403。
+  expected_behavior: SU有效账号、角色及成员关系复核通过后可使用全部轨迹接口；OPS仍限当前租户，撤权和目标资源检查保持。
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_boundary
+    description: HTTP权限测试使用受控actor_active，SQL编译测试未断言SU独立于租户上下文。
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - CHAT-TRAJECTORY
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - SU平台角色使用有效账号和成员关系复核，不要求租户相等；OPS必须匹配租户。
+    - 账号/成员删除与角色撤销继续拒绝；清理与列表授权不放宽给普通角色。
+    reason: 加强真实ORM查询约束UT，复用服务层授权回归，D2覆盖HTTP全路由。
+    test_selectors:
+    - test/backend/services/trajectory/test_catalog.py
+    - test/backend/services/trajectory/test_collection.py
+    - test/backend/services/trajectory/test_cleanup_schedule.py
+  notes: SPEC su-access-fix.md；复用QUERY-D2/AC-01，PG执行受控，自包含fixture资源及runtime责任域不变；真实PG和部署验收暂缓。

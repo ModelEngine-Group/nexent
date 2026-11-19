@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from management.utils.orm import filter_property, as_dict
+from infrastructure.rdb.orm import filter_property, as_dict
 from contracts.tool import ToolSourceEnum
 from contracts.constants.constants import BUILTIN_LABEL_MAP
 import json
@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 
 from contracts.tool import ToolSourceEnum
 from contracts.constants.constants import BUILTIN_LABEL_MAP
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.models import ToolInfo, ToolInstance
 from management.services.tool.catalog import get_local_tools_description_zh
@@ -510,6 +510,23 @@ def search_tools_for_sub_agent(agent_id, tenant_id, version_no: int = 0):
 
             tools_list.append(new_tool_instance_dict)
         return tools_list
+
+
+def query_agent_tools_for_list(agent_ids: List[int], tenant_id: str):
+    """Load draft tool instances and definitions for list availability in two reads."""
+    if not agent_ids:
+        return [], {}
+    with get_db_session() as session:
+        instances = session.query(ToolInstance).filter(
+            ToolInstance.agent_id.in_(agent_ids),
+            ToolInstance.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
+            ToolInstance.version_no == 0,
+            ToolInstance.delete_flag != "Y",
+            ToolInstance.enabled,
+        ).all()
+        tool_ids = {row.tool_id for row in instances}
+        definitions = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(tool_ids)).all() if tool_ids else []
+        return [as_dict(row) for row in instances], {row.tool_id: as_dict(row) for row in definitions}
 
 
 def check_tool_is_available(tool_id_list: List[int]):

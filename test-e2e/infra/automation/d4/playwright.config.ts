@@ -4,6 +4,7 @@ import { defineConfig } from "playwright/test";
 import { join } from "node:path";
 
 const fakeAudio = process.env.NEXENT_TEST_BROWSER_FAKE_AUDIO;
+const executablePath = process.env.NEXENT_TEST_BROWSER_EXECUTABLE_PATH;
 
 export default defineConfig({
   testDir: "../../../cases",
@@ -29,6 +30,7 @@ export default defineConfig({
     headless: true,
     permissions: ["microphone"],
     launchOptions: {
+      ...(executablePath ? { executablePath } : {}),
       args: fakeAudio
         ? ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${fakeAudio}`]
         : [],

@@ -28,7 +28,8 @@ def test_zero_false_and_explicit_null_are_not_defaulted(profile):
     assert merged.parameter_values["temperature"] == 0
     assert merged.parameter_values["reasoning_budget_tokens"] == 64
     assert profile.model_dump() == original
-    assert service.merge_model_preferences(profile, {"temperature": None}).parameter_values["temperature"] is None
+    inherited = profile.model_copy(update={"parameter_values": {**original["parameter_values"], "temperature": 0.7}})
+    assert service.merge_model_preferences(inherited, {"temperature": None}).parameter_values["temperature"] == 0.7
 
 
 def test_thinking_off_excludes_inherited_budget_but_rejects_explicit_conflict(profile):
@@ -199,3 +200,17 @@ def test_preference_view_preserves_the_outlet_reasoning_status(persistence, prof
     result = service.read_model_preference_view(1, 42, "owner", "tenant")
     assert result["reasoning_status"] == profile.capabilities.reasoning.status
     assert profile.model_dump() == original
+
+
+
+def test_top_p_explicit_values_intersect_with_the_model_bounds(profile):
+    data = profile.model_dump()
+    rule = next(rule for rule in data["parameter_rules"] if rule["key"] == "top_p")
+    rule["schema"]["maximum"] = 0.8
+    bounded = profile.__class__.model_validate(data)
+    for invalid in (0, 0.995):
+        with pytest.raises(ModelOutletValidationError) as error:
+            service.merge_model_preferences(bounded, {"top_p": invalid})
+        assert error.value.path == "/top_p"
+    assert service.merge_model_preferences(bounded, {"top_p": 0.005}).parameter_values["top_p"] == 0.005
+    assert "top_p" not in service.merge_model_preferences(bounded, {"top_p": None}).parameter_values

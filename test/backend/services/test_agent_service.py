@@ -162,7 +162,7 @@ _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
-_thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
+_thread_lifecycle_module = types.ModuleType("runtime.thread_management")
 _thread_lifecycle_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
@@ -173,13 +173,14 @@ _thread_lifecycle_module.runtime_thread_manager.submit = MagicMock(return_value=
 ))
 _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
-sys.modules["infrastructure.concurrency"] = _thread_lifecycle_module
+sys.modules["runtime.thread_management"] = _thread_lifecycle_module
+sys.modules["management.thread_management"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
-sys.modules["nexent.core.agents.agent_model"] = nexent_agent_model_mock
-sys.modules["nexent.core.agents.run_agent"] = MagicMock()
-context_input_mock = types.ModuleType("nexent.core.agents.context_input")
+sys.modules["nexent.core.agents.contracts.config"] = nexent_agent_model_mock
+sys.modules["nexent.core.agents.orchestration.entry"] = MagicMock()
+context_input_mock = types.ModuleType("nexent.core.agents.contracts.context")
 
 
 class MockContextInput:
@@ -188,10 +189,11 @@ class MockContextInput:
 
 
 context_input_mock.ContextInput = MockContextInput
-sys.modules["nexent.core.agents.context_input"] = context_input_mock
+sys.modules["nexent.core.agents.contracts.context"] = context_input_mock
 context_items_mock = types.ModuleType("nexent.core.agents.context")
-context_items_mock.ContextItemInput = MagicMock()
 context_items_mock.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents/context")]
+context_items_mock.ContextItemInput = MagicMock()
+context_input_mock.ContextItemInput = context_items_mock.ContextItemInput
 sys.modules["nexent.core.agents.context"] = context_items_mock
 
 # Mock other nexent submodules
@@ -217,6 +219,7 @@ sys.modules["nexent.storage.storage_client_factory"] = MagicMock()
 sys.modules["nexent.storage.minio_config"] = MagicMock()
 sys.modules["nexent.monitor"] = MagicMock()
 sys.modules["nexent.monitor.monitoring"] = MagicMock()
+sys.modules["nexent.monitor.local_content"] = MagicMock()
 
 # Mock external dependencies
 sys.modules["boto3"] = MagicMock()
@@ -249,20 +252,22 @@ sys.modules["management.db.models"] = MagicMock()
 sys.modules["management.db.conversation.repository"] = MagicMock()
 sys.modules["management.db.models"] = MagicMock()
 
-# Stub management.db.client early so real DB modules are not loaded during import
+# Stub infrastructure.rdb.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
 _mock_db_client.as_dict = MagicMock()
 _mock_db_client.MinioClient = MagicMock()
 _mock_db_client.db_client = MagicMock()
-sys.modules["management.db.client"] = _mock_db_client
+sys.modules["infrastructure.rdb.client"] = _mock_db_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = _mock_db_client
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = _mock_db_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock services submodules
 services_module = types.ModuleType("services")
@@ -276,7 +281,7 @@ tag_management_service_module.TagManagementService = MagicMock()
 sys.modules["management.services.tag.library"] = tag_management_service_module
 setattr(services_module, "tag_management_service", tag_management_service_module)
 
-runtime_state_service_module = types.ModuleType("management.services.agent.run_state")
+runtime_state_service_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_service_mock = MagicMock()
 runtime_state_service_mock.enabled = False
 runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
@@ -286,7 +291,7 @@ runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value
 runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
 runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
 runtime_state_service_module.runtime_state_service = runtime_state_service_mock
-sys.modules["management.services.agent.run_state"] = runtime_state_service_module
+sys.modules["infrastructure.redis.run_state"] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
@@ -299,7 +304,7 @@ sys.modules["management.services.configuration.user.memory"] = memory_config_ser
 sys.modules["management.services.agent.versions"] = agent_version_service_mock
 sys.modules["management.services.skill.service"] = skill_service_mock
 sys.modules["management.services.file.service"] = MagicMock()
-sys.modules["infrastructure.streaming.channels"] = MagicMock()
+sys.modules["management.services.agent.channels"] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
@@ -375,7 +380,7 @@ streaming_channel_manager_mock.complete_channel = AsyncMock(
     side_effect=_complete_test_streaming_channel
 )
 sys.modules[
-    "infrastructure.streaming.channels"
+    "management.services.agent.channels"
 ].streaming_channel_manager = streaming_channel_manager_mock
 setattr(
     services_module, "skill_service", sys.modules["management.services.skill.service"]
@@ -447,9 +452,9 @@ utils_module.__path__ = [
     os.path.join(os.path.dirname(__file__), "../../../backend/utils")
 ]
 sys.modules["utils"] = utils_module
-sys.modules["gateway.authentication.auth"] = MagicMock()
+sys.modules["management.services.permission.identity.session"] = MagicMock()
 sys.modules["utils.thread_utils"] = MagicMock()
-sys.modules["infrastructure.observability.knowledge"] = MagicMock()
+sys.modules["infrastructure.trace.knowledge"] = MagicMock()
 
 
 # Mock str_utils with actual convert_list_to_string implementation
@@ -494,7 +499,7 @@ def mock_convert_list_to_string(items):
     from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
     # Ensure db_client is set to our mock after import
-    from management.db import client as db_client_module
+    from infrastructure.rdb import client as db_client_module
 
     db_client_module.db_client = mock_postgres_client
 
@@ -579,13 +584,13 @@ tenant_settings_mock.tenant_config_manager.get_model_config = MagicMock()
 sys.modules["management.services.configuration.tenant.settings"] = tenant_settings_mock
 sys.modules["management.services.agent.prompt"] = MagicMock()
 sys.modules["management.services.model.invocation"] = MagicMock()
-sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
+sys.modules["infrastructure.trace.bootstrap"] = MagicMock()
 
 # =============================================================================
 # STEP 2: Now import after all mocks are in place
 # =============================================================================
 
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from contracts.agent import AgentNameBatchCheckItem, AgentNameBatchCheckRequest, AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
 
 # Set up mock for nexent.monitor
@@ -608,8 +613,8 @@ monitoring_manager_mock.set_span_attributes = MagicMock()
 
 sys.modules["nexent.monitor"].get_monitoring_manager = lambda: monitoring_manager_mock
 sys.modules["nexent.monitor"].monitoring_manager = monitoring_manager_mock
-sys.modules["infrastructure.observability.bootstrap"].monitoring_manager = monitoring_manager_mock
-sys.modules["infrastructure.observability.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
+sys.modules["infrastructure.trace.bootstrap"].monitoring_manager = monitoring_manager_mock
+sys.modules["infrastructure.trace.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
 
 # Mock storage config validate
 sys.modules["nexent.storage.minio_config"].MinIOStorageConfig = type(
@@ -649,9 +654,10 @@ mock_backend_database_client.PostgresClient = MagicMock(
 mock_backend_database_client.get_db_session = mock_get_db_session
 mock_backend_database_client.MinioClient = MagicMock(return_value=minio_client_mock)
 mock_backend_database_client.db_client = mock_postgres_client
-sys.modules["management.db.client"] = mock_backend_database_client
+sys.modules["infrastructure.rdb.client"] = mock_backend_database_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock storage client factory
 sys.modules[
@@ -664,6 +670,14 @@ sys.modules[
 sys.modules.pop("contracts.agent", None)
 if hasattr(sys.modules.get("consts"), "model"):
     delattr(sys.modules["consts"], "model")
+
+from importlib.machinery import ModuleSpec as _SDKModuleSpec
+from pathlib import Path as _SDKPath
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.core.agents.contracts"):
+    if _package in sys.modules:
+        sys.modules[_package].__path__ = [str(_SDKPath(__file__).resolve().parents[3] / "sdk" / _package.replace(".", "/"))]
+        sys.modules[_package].__spec__ = _SDKModuleSpec(_package, loader=None, is_package=True)
+        sys.modules[_package].__package__ = _package
 
 # Now import backend modules
 # Load the consolidated context after its external collaborators are isolated.
@@ -4891,6 +4905,14 @@ def mock_http_request():
     return Request(scope={"type": "http", "headers": []})
 
 
+@pytest.fixture
+def authorized_history_boundary(monkeypatch):
+    monkeypatch.setattr("management.services.agent.run.get_current_run_user_message_id", lambda *a: 11)
+    monkeypatch.setattr("management.services.agent.run.load_historical_context", lambda *a: {
+        "conversation_turns": [], "history_summary": None,
+    })
+
+
 @pytest.mark.asyncio
 @patch("management.services.agent.run.build_memory_context")
 @patch("management.services.agent.run.create_agent_run_info", new_callable=AsyncMock)
@@ -4901,6 +4923,7 @@ async def test_prepare_agent_run(
     mock_build_memory_context,
     mock_agent_request,
     mock_http_request,
+    authorized_history_boundary,
 ):
     """Test prepare_agent_run function."""
     # Setup
@@ -4964,6 +4987,7 @@ async def test_prepare_agent_run_forwards_request_metadata(
     mock_agent_run_manager,
     mock_create_run_info,
     mock_build_memory_context,
+    authorized_history_boundary,
 ):
     """Request metadata only reaches create_agent_run_info when it is set."""
     metadata = {"project_id": "P001", "_mcp_headers": {"Cookie": "sid=1"}}
@@ -5003,6 +5027,7 @@ async def test_prepare_agent_run_can_disable_automation_tool(
     mock_create_run_info,
     mock_build_memory_context,
     mock_agent_request,
+    authorized_history_boundary,
 ):
     mock_agent_request.enable_automation_tool = False
     mock_run_info = MagicMock()
@@ -5747,7 +5772,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         yield json.dumps({"type": "model_output_code", "content": "pass"})
         yield json.dumps({"type": "final_answer", "content": "All done."})
 
-    monkeypatch.setitem(sys.modules, "nexent.core.agents.run_agent", MagicMock())
+    monkeypatch.setitem(sys.modules, "nexent.core.agents.orchestration.entry", MagicMock())
     monkeypatch.setattr(
         "management.services.agent.execution.agent_run", fake_agent_run, raising=False
     )
@@ -6343,6 +6368,12 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
         AsyncMock(return_value=MagicMock()),
     )
 
+    # Orchestration starts from an already saved, authorized database boundary.
+    monkeypatch.setattr(agent_run_service, "get_current_run_user_message_id", lambda *_: 13)
+    monkeypatch.setattr(agent_run_service, "load_historical_context", lambda *_: {
+        "history_summary": None, "conversation_turns": [], "current_user_message_index": 8,
+    })
+
     registered = {}
 
     def fake_register(conv_id, run_info, user_id, **kwargs):
@@ -6382,6 +6413,7 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
     ):
         collected.append(d)
 
+    assert agent_request._runtime_user_message_index == 8
     assert registered.get("conv_id") == 555
     assert registered.get("user_id") == "u"
     assert registered.get("run_info") is not None
@@ -7698,7 +7730,7 @@ async def test_import_agent_includes_model_names(
     mock_create_agent.return_value = {"agent_id": 999}
 
     # Create import data with model_name and business_logic_model_name
-    from nexent.core.agents.agent_model import ToolConfig as NexentToolConfig
+    from nexent.core.agents.contracts.config import ToolConfig as NexentToolConfig
 
     tool_config = NexentToolConfig(
         class_name="TestTool",
@@ -11105,6 +11137,8 @@ async def test_import_agent_impl_already_imported():
     from management.services.agent.service import import_agent_impl
     from contracts.agent import ExportAndImportDataFormat, ExportAndImportAgentInfo
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
+    mock_agent_info.agent_core = "smolagents"
+    mock_agent_info.enable_context_manager = True
     mock_agent_info.agent_id = 1
     mock_agent_info.name = 'agent_1'
     mock_agent_info.display_name = 'Agent 1'
@@ -11465,6 +11499,8 @@ async def test_import_agent_by_agent_id_publish_version_error(
     from contracts.agent import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
+    mock_agent_info.agent_core = "smolagents"
+    mock_agent_info.enable_context_manager = True
     mock_agent_info.agent_id = 1
     mock_agent_info.name = "valid_name"
     mock_agent_info.display_name = "Valid Name"
@@ -15578,6 +15614,7 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
     fake_runtime_state = MagicMock()
     fake_runtime_state.enabled = True
     fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[{'status': 'running'}, {'status': 'completed'}])
+    fake_runtime_state.read_replay_checkpoint_async = AsyncMock(return_value=None)
     fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[('1-0', 'data: {"type": "model_output", "content": "old"}\n\n'), ('2-0', '')])
     fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[('3-0', 'data: {"type": "final_answer", "content": "new"}\n\n')])
     fake_runtime_state.get_stream_status_async = AsyncMock(return_value={'status': 'completed'})
@@ -15617,6 +15654,7 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
     fake_runtime_state = MagicMock()
     fake_runtime_state.enabled = True
     fake_runtime_state.get_run_state_async = AsyncMock(side_effect=[{'status': 'running'}, {'status': 'stopped'}])
+    fake_runtime_state.read_replay_checkpoint_async = AsyncMock(return_value=None)
     fake_runtime_state.read_stream_events_async = AsyncMock(return_value=[])
     fake_runtime_state.wait_for_stream_events_async = AsyncMock(return_value=[('1-0', '')])
     fake_runtime_state.get_stream_status_async = AsyncMock(return_value={})
@@ -15651,8 +15689,10 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
     fake_runtime_state.get_run_state_async = AsyncMock(return_value={})
     mock_channel = MagicMock()
     mock_channel.history_size = 1
+    mock_channel.completion_status = "completed"
 
-    async def mock_subscribe(_start_index):
+    async def mock_subscribe(_start_index, *, include_replay_checkpoint=False):
+        assert include_replay_checkpoint
         yield 'data: {"type": "final_answer", "content": "from-channel"}\n\n'
     mock_channel.subscribe_with_history = mock_subscribe
     with patch('management.services.agent.subscription._resolve_user_tenant_language', return_value=('user1', 'tenant1', 'en')), patch('management.services.agent.subscription._detect_resume_position') as mock_detect, patch('management.services.agent.subscription.agent_run_manager') as mock_mgr, patch('management.services.agent.subscription.streaming_channel_manager') as mock_channel_mgr:
@@ -18527,3 +18567,28 @@ async def test_import_agent_with_skills_rejects_parameters_before_dependency_wri
         await management.import_agent_with_skills_impl(snapshot, [], AuthenticatedIdentity('user', 'tenant'))
     skill_service.assert_not_called()
     import_agents.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def batch_list_read_boundary(monkeypatch):
+    """Retain standalone projection assertions with isolated batch collaborators."""
+    from management.services.agent import read as read_service
+
+    class Context:
+        tools = {}
+        definitions = {}
+        models = {}
+
+        def model_cache(self):
+            return {}
+
+        def valid_model_ids(self, ids):
+            return read_service.get_valid_model_ids(ids, current_tenant[0])
+
+    current_tenant = [None]
+
+    def context(agents, tenant):
+        current_tenant[0] = tenant
+        return Context()
+
+    monkeypatch.setattr(agent_management, "load_agent_list_context", context)

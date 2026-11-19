@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-TIME-FILTER-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-TIME-FILTER-20261117
+  title: 修复轨迹时间筛选无法确认
+  description: 日期筛选及弹层事件停止向排序表头传播，保留起止时间转换与查询契约。
+  observed_behavior: 选择日期触发表头排序重渲染，待确认日期被重置，确定按钮保持禁用。
+  expected_behavior: 时间范围可确认、清除，支持单边范围；筛选交互保持排序，表头文字可独立排序。
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: 已有浏览器流程覆盖组合目录筛选，缺少日期弹层确认及与排序的事件隔离验证。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 使用真实AntD日期弹层确认完整范围和单边范围、清除筛选。
+    - 日期筛选点击与键盘确认保持当前排序，表头独立排序保持可用。
+    reason: 前端组件覆盖事件与状态回归，既有D4加强实际筛选请求验证；无Python产品变更。
+    test_selectors:
+    - frontend/tests/component/trajectoryTimeFilter.test.tsx
+  notes: 基线824348864，保持其他未提交修改。复用CHAT-TRAJECTORY的runtime责任域与D4独占路由、浏览器上下文及清理；没有新增共享资源。真实部署完整验收沿用用户暂缓安排，局部回归与正式Case结果分别记录。

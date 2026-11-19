@@ -5,9 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 from smolagents.memory import TaskStep, ActionStep
 from smolagents.monitoring import Timing
-from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
+from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.context.usage import ContextUsageBaseline
 
 

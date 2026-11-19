@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: WB-CREATOR-REPLAY-20261117
+  change_type: bugfix
+  bug_id: WB-CREATOR-REPLAY-20261117
+  title: Preserve complete creator events across checkpoint replay and database fallback
+  description: Prefer full local and Redis checkpoints for both creators and retain event semantics in durable fallback and old histories.
+  observed_behavior: Plain-text creator checkpoints lose delta and step metadata; reconnect overwrites fragments while refresh appends the complete answer.
+  expected_behavior: Reconnect and refresh produce the same answer, cards and files without another execution, including old histories and checkpoint expiry.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing tests count ordered events and cover native envelopes, but do not compare legacy answer delta semantics across actual frontend replay and history.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [WB-EXECUTION-RECOVERY-D3-001]
+    modified: [WB-SESSION-RECOVERY-D2-001, WB-SESSION-RECOVERY-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve versioned creator event envelopes and legacy delta compatibility without interpreting ordinary JSON answers as envelopes.
+    - Prefer complete local and Redis replay, recover from missing checkpoints and isolate retry generations.
+    - Render segmented answers identically through replay and history, retaining complete confirmation, rollback, cards and Skill files.
+    reason: Sanitized real-data replay reproduced a six-character answer instead of the complete 436-character answer despite contiguous persisted events.
+    test_selectors:
+    - test/backend/services/test_creator_event_replay.py
+    - test/backend/services/test_creator_resume_boundaries.py
+    - test/backend/services/test_creator_native_recovery.py
+    - frontend/tests/workbench/CreatorAnswerReplay.test.ts
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-workbench-session-state/changes/session-recovery/design.md,
+    Full-event replay correction dated 2026-11-17. Strengthen existing self-contained D2/D4
+    contracts and bindings; their controlled provider/storage/browser resources remain
+    owned and released by the cases. Reuse D3 for real Redis checkpoint/generation behavior.
+    No new D1, database migration, planning changes or draft-button modification is needed.

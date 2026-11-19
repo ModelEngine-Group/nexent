@@ -7,9 +7,10 @@ from threading import Thread
 from types import SimpleNamespace
 
 import pytest
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 from smolagents.memory import TaskStep, ActionStep
 from smolagents.monitoring import Timing
-from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig, ManagedContextRuntime
+from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
 from nexent.core.models.capacity_budget import CapacityReservePolicy, ContextBudgetCalculator
 from nexent.core.models.capacity_resolver import resolve_capacity
 from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
@@ -73,7 +74,7 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
             policy_layers={"platform": {"processing_mode": "adaptive_compact"}})), items=[
                 ContextItemInput(id="kb:large", type="knowledge_base", content={"text": "evidence " * (10000 if entrypoint.startswith("agent") else 1000)})])
         if entrypoint.startswith("agent"):
-            from nexent.core.agents.core_agent import CoreAgent
+            from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
             agent = CoreAgent(observer=model.observer, model=model, tools=[], name="context_policy",
                 enable_protocol_repair_retry=True, max_steps=2, context_runtime=runtime)
             assert str(agent.run("Respond briefly")) == "HELLO"

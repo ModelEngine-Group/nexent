@@ -21,6 +21,7 @@ const {createRequire} = require('node:module');
 const load = createRequire(process.argv[1]);
 (async () => {
   const options = {headless:true};
+  if (process.env.NEXENT_TEST_BROWSER_EXECUTABLE_PATH) options.executablePath = process.env.NEXENT_TEST_BROWSER_EXECUTABLE_PATH;
   if (process.argv[2]) options.channel = process.argv[2];
   const browser = await load('playwright').chromium.launch(options);
   try { const page = await browser.newPage(); await page.setContent('<p>runtime probe</p>'); }
@@ -29,11 +30,12 @@ const load = createRequire(process.argv[1]);
 """
 
 
-def node_toolchain_problems(repo: Path, home: Path, frameworks: set[str]) -> list[str]:
+def node_toolchain_problems(repo: Path, home: Path, frameworks: set[str], *, environment=None) -> list[str]:
     """Probe in child processes, without installing or changing shared dependencies."""
     node = shutil.which("node")
     if not node:
         return []  # The caller reports the missing Node executable.
+    env = {**os.environ, **(environment or {}), "PLAYWRIGHT_BROWSERS_PATH": str(home / "runtime/playwright-browsers")}
     probes = []
     if "vitest" in frameworks:
         probes.append(("D1 jsdom/CSS dependency resolution (including nested permissions)",
@@ -43,8 +45,8 @@ def node_toolchain_problems(repo: Path, home: Path, frameworks: set[str]) -> lis
         probes.append(("product frontend Chromium/headless-shell", "frontend", BROWSER_PROBE, ""))
     if "playwright" in frameworks:
         # D4's fixed config uses the full Chromium channel for attachment downloads.
-        probes.append(("D4 full Chromium", "test-e2e/infra/automation/d4", BROWSER_PROBE, "chromium"))
-    env = dict(os.environ, PLAYWRIGHT_BROWSERS_PATH=str(home / "runtime/playwright-browsers"))
+        probes.append(("D4 Chromium", "test-e2e/infra/automation/d4", BROWSER_PROBE,
+                       env.get("NEXENT_TEST_BROWSER_CHANNEL") or "chromium"))
     problems = []
     for label, relative, script, channel in probes:
         try:

@@ -6,9 +6,10 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from adapters.exception import NexentCapabilityError as _NCE
+from contracts.errors.capabilities import NexentCapabilityError as _NCE
 from contracts.errors.exceptions import (
     AppException,
+    ManagementReadBusyError,
     QuotaExceededError,
     TokenExpiredError,
 )
@@ -35,6 +36,14 @@ def register_exception_handlers(app: FastAPI) -> None:
     Args:
         app: FastAPI application instance
     """
+
+    @app.exception_handler(ManagementReadBusyError)
+    async def management_read_busy_handler(request, exc):
+        return JSONResponse(
+            status_code=429,
+            content={"code": exc.code, "message": str(exc), "retryable": True},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request, exc):

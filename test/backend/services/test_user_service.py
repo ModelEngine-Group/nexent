@@ -24,7 +24,7 @@ sys.modules['psycopg2'] = MagicMock()
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
 sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
@@ -43,12 +43,12 @@ class MockToolConfig(BaseModel):
     description: str = ""
     parameters: dict = {}
 
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = MockToolConfig
 
 # Patch storage client factory before imports
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=MagicMock()).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=MagicMock()).start()
 
 # Mock database functions before importing the service
 patch('management.db.identity.user_tenant.get_users_by_tenant_id').start()

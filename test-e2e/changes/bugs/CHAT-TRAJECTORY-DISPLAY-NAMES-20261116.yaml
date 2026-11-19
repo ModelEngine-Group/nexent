@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-DISPLAY-NAMES-20261116
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-DISPLAY-NAMES-20261116
+  title: 轨迹展示智能体名称并本地化Python解释器
+  description: 查询优先使用执行时展示名称，记忆阶段保存所属智能体展示名称，工具名称由前端本地化。
+  observed_behavior: 树及记忆准备显示general_assistant等内部调用名，python_interpreter直接显示英文标识。
+  expected_behavior: 根和子智能体及记忆准备显示采集时展示名称；Python解释器的树、搜索和详情名称一致；身份与执行行为保持。
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: 现有准备与节点测试使用名称相同的样本，缺少内部名和展示名不同的断言。
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-CAPTURE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Ops优先使用展示名称，缺失/空白/非法值回退；记忆历史匹配只用同次执行的唯一名称。
+    - 准备采集和SDK归并保留展示名称，异常/取消与调用次数保持。
+    - Python解释器中英文名称、记忆归属名称及树搜索和详情选择一致，其他工具保持。
+    reason: 加强现有UT和D3不同名称输入，不新增D1或接口。
+    test_selectors:
+    - test/backend/services/trajectory/test_phase_nodes.py
+    - test/backend/services/trajectory/test_nodes.py
+    - test/backend/agents/test_create_agent_info.py::TestCreateAgentConfig::test_memory_phase_boundaries_keep_original_calls_and_fallback
+    - test/sdk/core/agents/observability/test_memory_preparation.py
+    - frontend/tests/component/trajectoryPhases.test.tsx
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: SPEC changes/chat-trajectory-phases/name-display-fix.md；runtime责任域，D3沿用私有HTTP/文件/线程和既有清理，families为空；真实PG/部署与完整浏览器验收暂缓。

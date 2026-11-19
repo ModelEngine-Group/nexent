@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-AUTO-CONTENT-20261112
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-AUTO-CONTENT-20261112
+  title: 轨迹正文自动首块与滚动续读
+  description: 打开节点自动读取正文首块，滚动到底部追加后续块，取消手动分块按钮，保留失败位置重试和请求取消。
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 自动首块、触底追加、UTF-8偏移、并发去重及末块停止。
+    - 失败位置重试、引用失效清空、取消迟到响应、完整或不可用正文不请求、内存预算。
+    reason: 复用组件UT证明局部加载状态；既有D4证明真实页面滚动与HTTP分块协作，无需新增D1。后端合同未变，复用已有服务测试。
+    test_selectors:
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryBodyLoading.test.tsx
+  notes: Runtime responsibility inherited from CHAT-TRAJECTORY. D4 owns its browser
+    context, intercepted routes and cookies and retains its existing self-contained
+    preparation and cleanup. Formal browser and real PG/model acceptance remain
+    deferred at the user's earlier request. Baseline dev/trace ce179ba9e with existing
+    unrelated working changes preserved.

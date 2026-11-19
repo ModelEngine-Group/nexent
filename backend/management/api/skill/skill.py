@@ -1,26 +1,26 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
-from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
-from contracts.constants.constants import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FOUND_TEXT
-from contracts.skill import InstallSkillsRequest
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from starlette.responses import JSONResponse
 
-from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
-from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
-from management.services.permission.asset_owner import can_view_skill
-from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
+from contracts.constants.constants import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FOUND_TEXT
+from contracts.errors.exceptions import (
+    AgentDraftEditError, AppException, ForbiddenError, ResourceBindingError, SkillException, UnauthorizedError,
+)
+from contracts.skill import InstallSkillsRequest, SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
+from management.services.permission.identity.session import get_current_user_id
 from management.services.agent.authorization import require_agent_draft_edit
+from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
+from management.services.permission.asset_owner import can_view_skill
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
 from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
+from management.utils.managed_read import managed_read
 from permissions.resource_access import resource_read_tenant
-from gateway.authentication.auth import get_current_user_id
 
 
 logger = logging.getLogger(__name__)
@@ -58,10 +58,15 @@ def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
 
 
 @router.get("")
-async def list_skills(
+@managed_read
+def list_skills(
     tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
     authorization: Optional[str] = Header(None),
     request: Request = None,
+    include_content: bool = Query(False, description="Include skill bodies in the list response"),
+    view: Literal["full", "mount"] = Query(
+        "full", description="Use mount for metadata without Skill content or tool associations"
+    ),
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
@@ -70,13 +75,19 @@ async def list_skills(
         inventory_tenant = resource_read_tenant(request, shared=True)
         effective_tenant_id = inventory_tenant or tenant_id or current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
+        list_options = {"for_mount": True} if view == "mount" else {}
         if inventory_tenant:
             fields = ("skill_id", "name", "description", "source", "tags", "update_time")
-            skills = [{field: skill.get(field) for field in fields} for skill in service.list_skills()]
+            skills = [
+                {field: skill.get(field) for field in fields}
+                for skill in service.list_skills(include_content=False, **list_options)
+            ]
             return JSONResponse(content={"skills": skills})
         skills = service.list_visible_skills(
             tenant_id=effective_tenant_id,
             user_id=user_id,
+            include_content=include_content,
+            **list_options,
         )
         return JSONResponse(content={"skills": skills})
     except HTTPException:

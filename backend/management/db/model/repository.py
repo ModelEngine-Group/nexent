@@ -7,8 +7,8 @@ from sqlalchemy import and_, desc, func, insert, select, update
 
 from contracts.constants.constants import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from contracts.model import filter_extra_params
-from management.utils.orm import as_dict
-from management.db.client import db_client, get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import db_client, get_db_session
 from management.db.models import ModelRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 
@@ -170,7 +170,9 @@ def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
         return result.rowcount > 0
 
 
-def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List[Dict[str, Any]]:
+def _get_model_records(
+    filters: Optional[Dict[str, Any]], tenant_id: str, page: Optional[int] = None, page_size: Optional[int] = None,
+) -> tuple[List[Dict[str, Any]], int]:
     """
     Get a list of model records
 
@@ -201,7 +203,10 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
         # Order by creation time descending (newest first)
         stmt = stmt.order_by(desc(ModelRecord.create_time))
 
-        # Execute the query
+        total = None
+        if page is not None:
+            total = session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+            stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         records = session.scalars(stmt).all()
 
         # Convert SQLAlchemy model instances to dictionaries and fill default chunk sizes
@@ -218,7 +223,19 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
 
             result_list.append(record_dict)
 
-        return result_list
+        return result_list, len(result_list) if total is None else total
+
+
+def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List[Dict[str, Any]]:
+    """Return all active models, retaining the existing ordering and defaults."""
+    return _get_model_records(filters, tenant_id)[0]
+
+
+def get_model_records_page(
+    filters: Optional[Dict[str, Any]], tenant_id: str, page: int, page_size: int,
+) -> tuple[List[Dict[str, Any]], int]:
+    """Page active models in SQL without loading the tenant's entire catalog."""
+    return _get_model_records(filters, tenant_id, page, page_size)
 
 
 def get_model_by_display_name(display_name: str, tenant_id: str, model_type: str = None) -> Optional[Dict[str, Any]]:
@@ -349,6 +366,30 @@ def get_models_by_tenant_factory_type(tenant_id: str, model_factory: str, model_
     """
     filters = {"model_factory": model_factory, "model_type": model_type}
     return get_model_records(filters, tenant_id)
+
+
+def get_capacity_model_records(model_types: set[str], tenant_id: str) -> List[dict]:
+    """Read only fields consumed by capacity coverage, with SQL type filtering."""
+    statement = select(
+        ModelRecord.model_id, ModelRecord.model_name, ModelRecord.model_repo,
+        ModelRecord.model_factory, ModelRecord.model_type, ModelRecord.base_url,
+        ModelRecord.max_tokens, ModelRecord.context_window_tokens, ModelRecord.max_output_tokens,
+    ).where(ModelRecord.delete_flag == "N", ModelRecord.model_type.in_(model_types))
+    if tenant_id:
+        statement = statement.where(ModelRecord.tenant_id == tenant_id)
+    with get_db_session() as session:
+        rows = session.execute(statement.order_by(ModelRecord.create_time.desc())).mappings().all()
+        return [dict(row) for row in rows]
+
+
+def get_model_records_by_ids(model_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """Load complete frozen profiles and list flags without model credentials."""
+    if not model_ids:
+        return {}
+    with get_db_session() as session:
+        columns = [column for column in ModelRecord.__table__.columns if column.key not in {"api_key", "http_headers"}]
+        rows = session.execute(select(*columns).where(ModelRecord.model_id.in_(model_ids))).mappings().all()
+        return {row["model_id"]: dict(row) for row in rows}
 
 
 def get_valid_model_ids(model_ids: List[int], tenant_id: str) -> List[int]:

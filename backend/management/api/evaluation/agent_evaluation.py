@@ -6,11 +6,15 @@ from http import HTTPStatus
 from typing import Any
 
 from fastapi import APIRouter, Body, Header, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, TypeAdapter, ValidationError
 
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, UnauthorizedError
+from contracts.errors.exceptions import (
+    AppException,
+    RuntimeUpstreamError,
+    UnauthorizedError,
+)
 
 # AppException is caught by global middleware (maps ErrorCode to HTTP status)
 from management.db.evaluation.runs import update_annotation_schema_ids
@@ -25,7 +29,7 @@ from management.services.evaluation.runs import (
 )
 from management.services.evaluation.reporting.report import generate_agent_evaluation_report_impl
 from management.services.agent.runtime_client import forward_agent_evaluation_trial_run
-from gateway.authentication.auth import get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 
 
 logger = logging.getLogger("agent_evaluation_app")
@@ -552,6 +556,14 @@ async def trial_run_api(
 
     except UnauthorizedError:
         raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
+    except RuntimeUpstreamError as exc:
+        # Preserve the runtime's structured error (code/message/status) instead
+        # of collapsing a validation failure into a generic 500.
+        return Response(
+            content=exc.content,
+            status_code=exc.status_code,
+            media_type="application/json",
+        )
     except Exception as exc:
         logger.exception(
             "trial_run_api ERROR: tenant=%s user=%s agent_id=%s version=%s "
@@ -593,7 +605,7 @@ def _safe_extract_language(request: Request | None) -> str:
     if request is None:
         return "zh"
     try:
-        from gateway.authentication.auth import parse_language_from_request
+        from management.services.permission.identity.session import parse_language_from_request
 
         return str(parse_language_from_request(request) or "zh")
     except Exception:

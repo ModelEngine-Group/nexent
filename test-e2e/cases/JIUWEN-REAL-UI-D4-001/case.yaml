@@ -1,0 +1,120 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-REAL-UI-D4-001
+  feature_id: JIUWEN-OUTPUT
+  requirement_ids:
+  - JIUWEN-UNIFIED-OUTPUT-20261016
+  - JIUWEN-M4-20261016
+  business_rule_ids:
+  - JIUWEN-OUTPUT-RULE-003
+  - JIUWEN-OUTPUT-RULE-004
+  - JIUWEN-OUTPUT-RULE-005
+  title: Real file-assistant upload and bidirectional Core history in the common UI
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove actual browser upload, real configured model/tool execution, persisted
+    multi-turn and configuration-side Core switching with the same Nexent rendering.
+  preconditions:
+  - Authorized saved file assistant, owned reference image with known visual fact,
+    configured available real main/vision models, deployed unified Web and runtime;
+    machine-local fixture identity.
+  test_data:
+    profile: real_smoke
+    locale: zh
+    viewport:
+      width: 1440
+      height: 1000
+  steps:
+  - order: 1
+    action: Clone the saved file assistant with equivalent model, prompts, policies
+      and tool bindings. Publish smolagents, upload the owned image through the Composer
+      and ask for actual analysis and a fresh marker, then follow up from saved history.
+    expected: Real upload and analyze_image occur, successful visual result and one
+      substantive final are rendered by original components; follow-up recalls the
+      fact and marker without replaying analysis.
+  - order: 2
+    action: Change the owned assistant Core to Jiuwen in the configuration page, publish,
+      reopen the same history and continue; upload again as an explicit new task and
+      follow up.
+    expected: Original messages and attachments remain unchanged, actual Jiuwen execution
+      recalls saved facts and marker without old tool replay; new analysis succeeds
+      and uses the same process/tool/final components.
+  - order: 3
+    action: Switch the owned assistant back to smolagents, publish, reopen and continue
+      the same history. Reload the finished conversation and compare Core presentation.
+    expected: Both Core directions continue the same conversation, final content is
+      not duplicated, persisted display agrees with live display and no Agent run
+      starts from history navigation alone. For both Cores, live and restored usage
+      use the same percentage/detail component, with identical model capacity and
+      configured CM threshold; CM off retains capacity and CM on retains adaptive
+      mode.
+  - order: 4
+    action: Switch the owned assistant back to Jiuwen, request a docx through its
+      configured file-generation child, follow up and reload history.
+    expected: The actual child generates and uploads a docx containing the random
+      marker; downloaded document content verifies, follow-up does not replay tools,
+      live and reloaded final answers contain no internal history or final protocol
+      tags.
+  expected_results:
+  - Real browser uploads and both Core image analyses use configured real models and
+    return known visual facts, with completed persisted turns.
+  - Multi-turn and bidirectional configuration changes preserve history and recall
+    marker/fact without replay on follow-ups; common original UI components render
+    both Core outputs. Usage presentation retains shared capacity with CM off/on,
+      and legacy unknown history stays compatible. Live and reloaded reasoning step
+      labels never display serialized step_count event metadata.
+  - Child document generation, actual downloaded docx content and follow-up/history
+    rendering pass with no internal context or protocol wrappers.
+  forbidden_side_effects:
+  - No mutation of source assistant or source conversation, no injected model/tool
+    results or engine request override, no credentials in public output; only owned
+    fixture objects are cleaned.
+  - No inferred success from HTTP 200, hidden rerun, lost historical rows, dedicated
+    runtime renderer, duplicate final or tool execution on follow-up/history navigation.
+  - No internal history JSON/protocol envelopes in live or reloaded final answers;
+    no fabricated document success or follow-up tool replay.
+  actor: Authorized Agent development user
+  journey:
+  - Upload and analyze with smolagents and follow up.
+  - Switch configuration to Jiuwen, continue history, analyze a new upload and follow
+    up.
+  - Switch back to smolagents and continue, reload and verify common presentation.
+  final_business_result:
+  - Actual main/vision model and upload/tool execution with both Cores, preserved
+    cross-Core history and one common frontend display.
+  failure_evidence:
+  - Fixed Playwright assertions, safe wire event summaries, DB status and snapshot
+    hashes, failure screenshots and local trace.
+  acceptance:
+  - id: AC-01
+    description: Actual image and model execution through the browser and common rendering.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Multi-turn and bidirectional Core continuity without replay and preserved
+      history/UI.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 2
+  - id: AC-03
+    description: Real child document generation and clean multi-turn history output.
+    steps:
+    - 4
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 3

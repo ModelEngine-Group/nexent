@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-VERSION-20261111
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-VERSION-20261111
+  title: 轨迹记录并展示实际智能体版本
+  description: 根和子调用记录执行版本，OTLP冷读返回历史快照，列表和节点展示发布版、草稿和未知。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 最终配置版本独立于请求，根/并行子调用不继承，0/缺失/非法和采集失败。
+    - OTLP intValue严格解码、列表根版本投影、历史读取及非智能体null。
+    - 前端发布版/草稿/未知与列表/树/详情、非智能体隐藏。
+    reason: 既有快照/层级UT和正式脚本没有版本断言；补强原边界，无需新增D1。
+    test_selectors:
+    - test/sdk/monitor/test_agent_version.py
+    - test/sdk/core/model_service/test_run_capture.py
+    - test/sdk/core/agents/test_subagent_wrapper.py
+    - test/backend/services/trajectory/test_nodes.py
+    - test/backend/services/trajectory/test_collection.py
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectory.test.tsx
+  notes: Direct update of existing version SPEC, baseline dev/trace 9d5cfc811. Responsibility runtime inherited
+    from CHAT-TRAJECTORY. CAPTURE owns loopback Provider, temporary files, clients and managed threads with existing
+    teardown; JOURNEY owns browser routes/cookies. No shared preparation families. User deferred formal integration
+    acceptance; UT/static results will not close D3/D4 obligations.

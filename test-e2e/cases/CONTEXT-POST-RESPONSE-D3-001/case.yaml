@@ -4,7 +4,7 @@ module: AGENT-CONTEXT
 case:
   case_id: CONTEXT-POST-RESPONSE-D3-001
   feature_id: F-171
-  business_rule_ids: [F-171-RULE-02]
+  business_rule_ids: [F-171-RULE-03]
   title: Accepted response usage drives maintenance without output limits on the wire
   type: INTEGRATION
   priority: P1

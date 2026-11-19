@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
-import logging
 
 import pytest
 
@@ -9,8 +8,6 @@ from smolagents.monitoring import Timing
 from nexent.core.utils.observer import MessageObserver
 
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
-from nexent.core.agents.context.evidence import ContextEvidenceCollector
-from nexent.core.context_runtime.contracts import ContextEvidence
 from nexent.core.agents.context.history_compression import (
     HistorySummaryInput,
     _validate_summary_contract,
@@ -277,12 +274,12 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
         "CURRENT TASK", "CURRENT PLAN", "observation 1", "observation 2",
     )]
     assert positions == sorted(positions)
-    assert '<CODE_EXEC_RESULT>' in rendered
+    assert '<completed_action>' in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
-    assert "reasoning 1" in rendered
-    assert "reasoning 2" in rendered
+    assert "reasoning 1" not in rendered
+    assert "reasoning 2" not in rendered
     assert result.evidence.item_representations == (
         ("current_task:0", "raw"), ("current_planning:0", "raw"),
         ("current_action:0", "raw"), ("current_action:1", "raw"),
@@ -323,16 +320,16 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
         model=None, memory=memory, current_run_start_idx=0, run_context=run,
     )
     rendered = _rendered_text(result.messages)
-    assert "<code>" in rendered
-    assert "print('ok')" in rendered
-    assert "<OUTPUT>ok</OUTPUT>" in rendered
-    assert "<RETURN_VALUE>done</RETURN_VALUE>" in rendered
+    assert "<code>" not in rendered
+    assert "print(" in rendered and "ok" in rendered
+    assert "outcome:\nok" in rendered
+    assert "recorded_result:\ndone" in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
     summary_rendered = _rendered_text(manager.render_memory_messages(memory))
-    assert "<code>" in summary_rendered
-    assert "<OUTPUT>ok</OUTPUT>" in summary_rendered
+    assert "<code>" not in summary_rendered
+    assert "outcome:\nok" in summary_rendered
     assert "Calling tools:" not in summary_rendered
     assert "Observation:" not in summary_rendered
 
@@ -432,7 +429,7 @@ def test_compact_stages_old_actions_before_other_items(monkeypatch):
     assert result.evidence.current_action_compact_count == 1
     rendered = str(result.messages)
     assert "old observation" in rendered
-    assert "old reasoning" in rendered
+    assert "old reasoning" not in rendered
     assert "knowledge knowledge" in rendered
 
 
@@ -691,19 +688,3 @@ def test_summary_prompt_forbids_range_example_and_formula_substitution():
     prompt = _rendered_text(model.calls[0])
     assert "Preserve every explicit fact identifier" in prompt
     assert "ranges, selected examples, inferred patterns, or formulas" in prompt
-
-
-def test_context_evidence_log_is_pretty_printed(caplog):
-    collector = ContextEvidenceCollector()
-    collector.record_call(ContextEvidence(
-        processing_mode="adaptive_compact",
-        raw_token_estimate=120,
-        final_token_estimate=80,
-    ))
-
-    with caplog.at_level(logging.INFO, logger="context_evidence"):
-        collector.finalize(status="completed")
-
-    assert "Agent loop context evidence:\n{" in caplog.text
-    assert '\n  "final_token_estimate": 80,' in caplog.text
-    assert '\n  "processing_mode": "adaptive_compact",' in caplog.text

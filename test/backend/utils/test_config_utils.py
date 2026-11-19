@@ -169,11 +169,10 @@ class TestTenantConfigManager:
         }
 
     @patch('management.services.configuration.tenant.settings.get_model_by_model_id')
-    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_configs_by_tenant_id_and_keys')
     def test_get_model_config_success(self, mock_get_configs, mock_get_model, config_manager):
         """Test successful model config retrieval"""
-        mock_get_configs.return_value = [
-            {"config_key": "model_config", "config_value": "123"}]
+        mock_get_configs.return_value = {"model_config": "123"}
         mock_get_model.return_value = {
             "model_id": 123, "model_name": "test_model"}
 
@@ -182,11 +181,10 @@ class TestTenantConfigManager:
         assert result == {"model_id": 123, "model_name": "test_model"}
 
     @patch('management.services.configuration.tenant.settings.get_model_by_model_id')
-    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_configs_by_tenant_id_and_keys')
     def test_get_model_config_invalid_model_id(self, mock_get_configs, mock_get_model, config_manager):
         """Test with invalid model ID"""
-        mock_get_configs.return_value = [
-            {"config_key": "model_config", "config_value": "invalid"}]
+        mock_get_configs.return_value = {"model_config": "invalid"}
         mock_get_model.side_effect = ValueError("Invalid model_id")
 
         result = config_manager.get_model_config("model_config", {}, "tenant1")

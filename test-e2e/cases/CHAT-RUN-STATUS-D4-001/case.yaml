@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-RUN-STATUS-D4-001
+  feature_id: CHAT-SIDEBAR
+  business_rule_ids: [CHAT-SIDEBAR-RULE-012, CHAT-SIDEBAR-RULE-013]
+  title: Shared run and retry indicators clear after viewing on both conversation pages
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove browser-visible run status, nonoverlapping hover actions and acknowledgement on Workbench and Agent-chat.
+  preconditions:
+  - Local frontend with browser-controlled authenticated APIs and streams; no real model or persistent server resources.
+  test_data:
+    profile: mock
+    locale: zh
+  steps:
+  - order: 1
+    action: Open each page and send a new question through a controlled held stream, then complete it.
+    expected: The owning history row shows a running spinner and then one unread completion dot on both pages.
+  - order: 2
+    action: Hover the completed row and focus its action menu, then leave the row and interact with the conversation input.
+    expected: The status is hidden while row actions are available, returns after hover without interaction, and clears after conversation interaction without a new execution.
+  - order: 3
+    action: Regenerate the answer, complete it, and select that history row again.
+    expected: Retry uses the same running-to-completed transition and row reselection clears the completion dot without creating a new conversation or replaying another run.
+  - order: 4
+    action: Inspect each long history title at rest, hover its title, then focus the action button and leave the row.
+    expected: Both pages show the full overflow title in the same tooltip, align time and actions at the same trailing right edge and vertical center, display only one of them, and retain identical title width before, during and after hover or focus.
+  expected_results:
+  - Both page entries use the same status and acknowledgement behavior for new runs and retries.
+  - Hover and focus never overlap the menu, and read-only interaction sends no run request.
+  - Shared title truncation and overflow tooltips remain stable while time and actions alternate.
+  forbidden_side_effects:
+  - No real provider calls or server data writes, no automatic replay and no clearing another conversation's completion.
+  actor: Authorized controlled browser user
+  journey: [Open either page, Send, Observe status, Hover, Acknowledge, Retry, Reselect]
+  final_business_result:
+  - Completion notifications remain useful and dismissible without obscuring history actions.
+  failure_evidence:
+  - Browser assertions, status/menu visibility and run-request counts.
+  acceptance:
+  - id: AC-01
+    description: Both entries show identical new-run and retry transitions.
+    steps: [1, 3]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Hover/focus avoid overlap and viewing clears unread without new execution.
+    steps: [2, 3]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Both history pages retain stable title width and share overflow tooltip and time/action visibility.
+    steps: [4]
+    expected_results: [3]
+    forbidden_side_effects: [1]

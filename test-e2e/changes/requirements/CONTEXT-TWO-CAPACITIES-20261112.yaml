@@ -11,9 +11,9 @@ change:
     modified: [F-171]
     retired: []
   affected_cases:
-    existing: [MODEL-LEGACY-TOOLS-D3-001, MODEL-RECOVERY-D3-001]
+    existing: [MODEL-LEGACY-TOOLS-D3-001, MODEL-RECOVERY-D3-001, UT-SDK-AUTO-74430BEE8438F486]
     added: [CONTEXT-POST-RESPONSE-D3-001]
-    modified: [MODEL-RECOVERY-D3-001]
+    modified: [MODEL-RECOVERY-D3-001, UT-SDK-AUTO-74430BEE8438F486]
     retired: []
   traditional_ut:
     decision: strengthen
@@ -31,6 +31,9 @@ change:
     - test/sdk/core/model_service/test_gateway_long_text_outlet.py
     - test/sdk/core/model_service/test_legacy_context_budget.py
     - test/sdk/core/agents/test_post_response_context.py
+    - test/sdk/core/agents/test_jiuwen_context.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/models/test_implicit_output_cap.py
     - test/sdk/core/agents/test_history_context_runtime.py
     - test/backend/utils/test_config_utils.py
     - test/backend/agents/test_context_budget_v2_pipeline.py

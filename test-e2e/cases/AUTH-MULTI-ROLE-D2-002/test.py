@@ -70,7 +70,7 @@ def test_administrator_grants_and_protected_mutations(role_runtime):
 
     # A non-primary ADMIN grant still receives the original administrator audience.
     assert r.assign("user", ["ADMIN", "USER", "OPS"], "admin1").status_code == 200
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.notification.repository import _resolve_receivers
     from contracts.constants.constants import SCOPE_TENANT_ADMIN
 
