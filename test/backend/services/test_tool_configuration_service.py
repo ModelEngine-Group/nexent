@@ -220,8 +220,8 @@ if memory_pkg is not None:
     nexent_mock.memory = memory_pkg
     if real_memory_service is not None:
         sys.modules["nexent.memory.memory_service"] = real_memory_service
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
+sys.modules['nexent.core.agents.orchestration.entry'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
 # Mock nexent.multi_modal module
@@ -613,6 +613,15 @@ importlib.reload(_tool_contracts)
 # Reload service module so ToolInfo/ToolSourceEnum bind to the real tool contracts.
 from management.services.tool import configuration as _tool_cfg_service
 importlib.reload(_tool_cfg_service)
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from test.backend.configuration.helpers import system_config_snapshot
+    from management.services.tool import discovery, validation
+
+    monkeypatch.setattr(discovery, "get_config_snapshot", lambda: system_config_snapshot())
+    monkeypatch.setattr(validation, "get_config_snapshot", lambda: system_config_snapshot())
 patch_import_context('management.services.tool.configuration.get_embedding_model_by_index_name', MagicMock()).start()
 
 # Import consts after patching dependencies
@@ -687,7 +696,7 @@ class TestPythonTypeToJsonSchema:
         from typing import List, Dict, Any
 
         # test the None type
-        mock_python_type_to_json_schema.side_effect = lambda x: "NoneType" if x == type(
+        mock_python_type_to_json_schema.side_effect = lambda x: "NoneType" if x is type(
             None) else "array"
 
         from management.services.tool.configuration import python_type_to_json_schema
@@ -2170,7 +2179,8 @@ class TestBuildToolInfoFromLangchain:
         from management.services.tool.configuration import _build_tool_info_from_langchain
 
         # Create a mock tool with a callable that will raise TypeError on signature
-        mock_func = lambda: None  # A simple callable
+        def mock_func():
+            return None
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
         mock_tool.description = "Test tool description"
@@ -2190,7 +2200,8 @@ class TestBuildToolInfoFromLangchain:
         from management.services.tool.configuration import _build_tool_info_from_langchain
 
         # Create a mock tool with a callable that will raise ValueError on signature
-        mock_func = lambda: None
+        def mock_func():
+            return None
         mock_tool = MagicMock()
         mock_tool.name = "test_tool"
         mock_tool.description = "Test tool description"
@@ -5875,6 +5886,8 @@ class TestValidateToolParamRanges:
 @pytest.mark.asyncio
 async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
     """A stalled remote tool call uses the independent runtime tool timeout."""
+    from test.backend.configuration.helpers import system_config_snapshot
+
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.is_connected.return_value = True
@@ -5885,7 +5898,14 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
     client.call_tool.side_effect = stalled_call
     set_import_attribute(monkeypatch, _tool_cfg_service, "Client", MagicMock(return_value=client))
     set_import_attribute(monkeypatch, _tool_cfg_service, "_create_mcp_transport", MagicMock())
-    set_import_attribute(monkeypatch, _tool_cfg_service, "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setitem(
+        _tool_cfg_service._call_mcp_tool.__globals__,
+        "get_config_snapshot",
+        lambda: system_config_snapshot(
+            MCP_REQUEST_TIMEOUT_SECONDS=0.01,
+            RUNTIME_MCP_TOOL_TIMEOUT_SECONDS=0.01,
+        ),
+    )
 
     with pytest.raises(MCPConnectionError, match="tool execution timed out after 0.01 seconds"):
         await _tool_cfg_service._call_mcp_tool(

@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from infrastructure.system_configuration.runtime import get_config_snapshot
 
 import asyncio
 import importlib
@@ -73,12 +74,15 @@ async def _call_mcp_tool(
     Raises:
         MCPConnectionError: If MCP connection fails
     """
+    configuration = get_config_snapshot()
+    connection_timeout = configuration.get("MCP_REQUEST_TIMEOUT_SECONDS")
+    tool_timeout = configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS")
     transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
-    client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+    client = Client(transport=transport, timeout=tool_timeout)
     async with AsyncExitStack() as stack:
         await asyncio.wait_for(
             stack.enter_async_context(client),
-            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+            timeout=connection_timeout,
         )
         # Check if connected
         if not client.is_connected():
@@ -89,11 +93,11 @@ async def _call_mcp_tool(
         try:
             result = await asyncio.wait_for(
                 client.call_tool(name=tool_name, arguments=inputs),
-                timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+                timeout=tool_timeout,
             )
         except asyncio.TimeoutError as exc:
             raise MCPConnectionError(
-                f"MCP tool execution timed out after {RUNTIME_MCP_TOOL_TIMEOUT_SECONDS:g} seconds"
+                f"MCP tool execution timed out after {tool_timeout:g} seconds"
             ) from exc
         return result.content[0].text
 

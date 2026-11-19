@@ -13,12 +13,20 @@ from nexent.core.concurrency import ManagedTaskSpec
 
 def canonicalize_assistant_units(units):
     """Finalize the canonical answer and shared persistence representation."""
+    root_answers = [unit for unit in units if unit["type"] == "final_answer" and not unit.get("invocation_id")]
+    last_answer = root_answers[-1] if root_answers else None
+    step_id = last_answer.get("_step_id") if last_answer is not None else None
+    answer_units = (
+        [unit for unit in root_answers if unit.get("_step_id") == step_id]
+        if step_id is not None else root_answers[-1:]
+    )
     remove_answer_only_steps(units)
     total_bytes = _finalize_buffered_unit_fragments(units)
-    answer = next(
-        (unit["content"] for unit in reversed(units) if unit["type"] == "final_answer" and not unit.get("invocation_id")),
-        "",
-    )
+    answer = "".join(unit["content"] for unit in answer_units)
+    if len(answer_units) > 1:
+        earlier = {id(unit) for unit in answer_units[:-1]}
+        units[:] = [unit for unit in units if id(unit) not in earlier]
+        answer_units[-1].update(content=answer, unit_content=answer)
     return answer, total_bytes
 
 

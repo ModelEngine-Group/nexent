@@ -12,11 +12,12 @@ from contracts.agentos import AgentRunReference, PreparedEvaluationRun
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import model_record
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.fixture
@@ -42,6 +43,7 @@ def skill_snapshot(mocker, tmp_path):
     runtime_read = mocker.patch.object(prepared_skills, "read_bound_skills", return_value=[row])
     model = model_record(model_id=11)
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[model])
+    stub_resolved_model_catalog(mocker, model)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model)
     binding = create_model_config_from_record(model)
     metadata = {"agent_id": 7, "tenant_id": "tenant-a", "version_no": 2}

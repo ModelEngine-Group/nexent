@@ -13,7 +13,7 @@ from contracts.agentos import EvaluationSkillTool, FileToolDescription, Workbenc
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_skill_rows
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from runtime.agentos.prepared_workbench import fetch_workbench_skill_mounts
 
 _stage_lock = Lock()
@@ -80,16 +80,16 @@ def materialize_skill_tools(
     if rows.keys() != ids:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_SKILL_NOT_FOUND"})
 
+    if len({row["name"] for row in rows.values()}) != len(rows):
+        raise ValueError("Duplicate evaluation skill name")
+    validate_skill_context(context_items, rows.values())
     stage_root = skill_stage_path(workspace_path, create=True)
     stage = stage_root / uuid4().hex
-    validate_skill_context(context_items, rows.values())
     configs = {}
     stage.mkdir(parents=True, mode=0o700)
     for ref in refs:
         row = rows[ref.skill_id if workbench_refs else ref.instance_id]
         name = row["name"]
-        if name in configs:
-            raise ValueError("Duplicate evaluation skill name")
         try:
             files = capture_skill_files(tenant, name)
             revision = skill_execution_revision(tenant, resource.agent_id, resource.version_no, row, files)

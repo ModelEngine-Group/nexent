@@ -80,7 +80,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
     from sqlalchemy.engine import URL
     from sqlalchemy.orm import sessionmaker
 
-    from gateway.authentication import northbound_auth
+    from management.services.permission.identity import northbound as northbound_auth
     from management.db import models
     from infrastructure.rdb.client import db_client
 

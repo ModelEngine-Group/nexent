@@ -33,7 +33,11 @@ def test_business_api_modules_are_importable_packages(service):
         source = path.read_text(encoding="utf-8")
         compile(source, str(path), "exec")
         tree = ast.parse(source)
-        assert not any(isinstance(node, ast.ClassDef) for node in tree.body), path
+        classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+        if path == BACKEND / "runtime/api/exception_handler.py":
+            assert classes == {"ExceptionHandlerMiddleware"}
+        else:
+            assert not classes, path
 
 
 def test_contracts_do_not_depend_on_backend_implementations():
@@ -71,12 +75,19 @@ def test_project_imports_do_not_reference_removed_packages(source_root):
 
 
 def test_shared_helpers_do_not_import_database_clients():
-    for filename in ("orm.py", "audit_fields.py", "skill_params.py", "file_http.py", "a2a.py"):
-        path = BACKEND / "management/utils" / filename
+    helpers = [BACKEND / "management/utils" / name
+               for name in ("audit_fields.py", "skill_params.py", "a2a.py")]
+    for path in [ROOT / "infrastructure/rdb/orm.py", BACKEND / "management/api/file/http.py", *helpers]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
-                assert not (node.module or "").startswith(("management.db", "database")), path
+                modules = [node.module or "", *(f"{node.module}.{alias.name}" for alias in node.names)]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            assert not any(name.startswith(("management.db", "database", "infrastructure.rdb.client"))
+                           for name in modules), path
 
 
 def test_model_registry_retains_shared_metadata_without_opening_clients():
@@ -87,19 +98,21 @@ from management.db import models
 from management.db.base import SimpleTableBase, TableBase
 classes = {value for value in vars(models).values()
            if isinstance(value, type) and hasattr(value, '__tablename__')}
-assert len(classes) == 74
-assert len(TableBase.metadata.tables) == 69
+assert len(classes) == 76
+assert len(TableBase.metadata.tables) == 71
 assert len(SimpleTableBase.metadata.tables) == 5
 assert models.OuterApiTool is models.OuterApiService
 assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
 assert models.ModelMonitoringRecord.__module__ == 'infrastructure.rdb.model_monitoring'
+assert models.TrajectoryExecution.__module__ == 'management.db.trajectory.models'
+assert models.TrajectoryStatistics.__module__ == 'management.db.trajectory.models'
 assert all(value.metadata is TableBase.metadata or value.metadata is SimpleTableBase.metadata
            for value in classes)
 assert 'infrastructure.rdb.client' not in sys.modules
 print(json.dumps({'tables': len(classes), 'client_loaded': False}))
 """
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(BACKEND)
+    environment["PYTHONPATH"] = os.pathsep.join((str(BACKEND), str(ROOT / "sdk")))
     result = subprocess.run(
         [sys.executable, "-c", program],
         cwd=ROOT,
@@ -110,4 +123,4 @@ print(json.dumps({'tables': len(classes), 'client_loaded': False}))
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == {"tables": 74, "client_loaded": False}
+    assert json.loads(result.stdout) == {"tables": 76, "client_loaded": False}

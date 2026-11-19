@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import or_, update as sa_update
 from sqlalchemy.orm import defer
 
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, SKILL_DESCRIPTION_MAX_LENGTH
-from contracts.constants.environment import MAX_SKILLS_PER_TENANT
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from infrastructure.rdb.client import get_db_session
@@ -56,14 +56,15 @@ def _raise_if_skill_limit_reached(session, tenant_id: str, additional_count: int
     )
     # Lightweight test doubles may not implement count(); production SQLAlchemy
     # sessions always return an integer.
-    if isinstance(current_count, int) and current_count + additional_count > MAX_SKILLS_PER_TENANT:
+    limit = get_config_snapshot().get("MAX_SKILLS_PER_TENANT")
+    if isinstance(current_count, int) and current_count + additional_count > limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Tenant skill limit reached: maximum {MAX_SKILLS_PER_TENANT} skills per tenant",
+            f"Tenant skill limit reached: maximum {limit} skills per tenant",
             details={
                 "resource": "skills",
                 "scope": "tenant",
-                "limit": MAX_SKILLS_PER_TENANT,
+                "limit": limit,
                 "current_count": current_count,
             },
         )

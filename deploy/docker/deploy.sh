@@ -675,17 +675,12 @@ disable_dashboard() {
 }
 
 docker_monitoring_active_services() {
+  [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ] || return 0
   printf '%s\n' otel-collector
 
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
     phoenix)
       printf '%s\n' phoenix
-      ;;
-    grafana)
-      printf '%s\n' tempo grafana
-      ;;
-    zipkin)
-      printf '%s\n' zipkin
       ;;
     langfuse)
       printf '%s\n' langfuse-worker langfuse-web langfuse-clickhouse langfuse-minio langfuse-redis langfuse-postgres
@@ -696,9 +691,6 @@ docker_monitoring_active_services() {
 docker_monitoring_profile_services() {
   printf '%s\n' \
     phoenix \
-    tempo \
-    grafana \
-    zipkin \
     langfuse-worker \
     langfuse-web \
     langfuse-clickhouse \
@@ -711,9 +703,6 @@ docker_monitoring_container_names() {
   printf '%s\n' \
     nexent-otel-collector \
     nexent-phoenix \
-    nexent-tempo \
-    nexent-grafana \
-    nexent-zipkin \
     nexent-langfuse-worker \
     nexent-langfuse-web \
     nexent-langfuse-clickhouse \
@@ -737,7 +726,7 @@ docker_monitoring_containers_exist() {
 }
 
 stop_monitoring_services() {
-  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local all_profile_args=(--profile phoenix --profile langfuse)
 
   [ -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ] || return 0
   docker_monitoring_containers_exist || return 0
@@ -750,7 +739,7 @@ stop_monitoring_services() {
 }
 
 cleanup_stale_monitoring_services() {
-  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local all_profile_args=(--profile phoenix --profile langfuse)
   local active_services
   local service
   local stale_services=()
@@ -1268,6 +1257,17 @@ publish_shared_workbench() {
   fi
 }
 
+migrate_legacy_index_gateway() {
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application ||
+      ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" data-process; then
+    return 0
+  fi
+
+  if [ "$(deployment_get_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE)" = "http://nexent-config:5010/api" ]; then
+    deployment_update_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE "http://nexent-gateway:5013/api"
+  fi
+}
+
 deploy_core_services() {
   # Function to deploy core services
   local core_services=()
@@ -1375,7 +1375,7 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || [ "$DEPLOYMENT_MONITORING_PROVIDER" = "local_file" ]; then
     stop_monitoring_services || return 1
     return 0
   fi
@@ -1392,7 +1392,7 @@ deploy_monitoring() {
 
   local profile_args=()
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
-    phoenix|grafana|zipkin|langfuse)
+    phoenix|langfuse)
       profile_args+=(--profile "$DEPLOYMENT_MONITORING_PROVIDER")
       ;;
   esac
@@ -2018,6 +2018,9 @@ main_deploy() {
     fi
     exit 1
   }
+
+  # Migrate the previous full-stack indexing endpoint before starting the worker.
+  migrate_legacy_index_gateway || exit 1
 
   # Start core services
   deploy_core_services || {

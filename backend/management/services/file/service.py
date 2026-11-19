@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from infrastructure.system_configuration.runtime import get_config_snapshot
 import logging
 import os
 from datetime import datetime
@@ -15,6 +16,7 @@ from contracts.constants.constants import (
     OFFICE_MIME_TYPES,
 )
 from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.errors.ingestion import ingestion_error_fields
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException,
@@ -228,21 +230,22 @@ async def _validate_knowledge_file_sizes(
     files: List[UploadFile],
 ) -> None:
     """Reject oversized KB documents before any file is written to storage."""
+    limit_mb = get_config_snapshot().get("MAX_KNOWLEDGE_FILE_SIZE_MB")
+    limit_bytes = limit_mb * 1024 * 1024
     for upload in files:
         if not upload:
             continue
         file_size = await _get_upload_size(upload)
-        if file_size <= MAX_KNOWLEDGE_FILE_SIZE_BYTES:
+        if file_size <= limit_bytes:
             continue
 
         filename = upload.filename or "unknown"
-        limit_mb = MAX_KNOWLEDGE_FILE_SIZE_BYTES // (1024 * 1024)
         raise AppException(
             ErrorCode.FILE_TOO_LARGE,
             f"Knowledge base file '{filename}' exceeds the {limit_mb} MB limit",
             details={
                 "resource": "knowledge_file",
-                "limit_bytes": MAX_KNOWLEDGE_FILE_SIZE_BYTES,
+                "limit_bytes": limit_bytes,
                 "limit_mb": limit_mb,
                 "file_name": filename,
                 "actual_bytes": file_size,

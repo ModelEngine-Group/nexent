@@ -15,7 +15,6 @@ TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 from suite_runtime import BatchLock, deployment_lock, now, save
 from daily_git import run_git
-from daily_recovery import prepare_daily_retry
 from daily_process import notify_terminal, run_worker
 
 
@@ -56,7 +55,7 @@ def main(argv=None):
         parser.error("Test home must be outside the checkout")
     if not args.execute:
         print(json.dumps({"branch": args.branch, "execute": False, "publish_latest": args.publish_latest,
-                          "steps": ["lock", "fast-forward", "derived-view-validation", "static-assets",
+                          "steps": ["lock", "fast-forward", "recovery", "derived-view-validation", "static-assets",
                                     "doctor", "build", "deploy", "D1-D5", "D6"]}))
         return 0
     runtime = home / "runtime/test-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -71,8 +70,11 @@ def main(argv=None):
     try:
         with BatchLock(home / "state/daily.lock") as daily_lock:
             try:
-                with deployment_lock(repo) as checkout_lock, prepare_daily_retry(repo, home, directory):
-                    state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
+                with deployment_lock(repo) as checkout_lock:
+                    # Exclude active fault children while updating code. Recovery
+                    # validation belongs to the freshly synchronized interpreter.
+                    with BatchLock(home / "state/deployment-guard/exclusive.lock"):
+                        state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
                     save(directory / "status.json", state)
                     code = run_worker(repo, home, directory, state["head"], args.publish_latest,
                                       [daily_lock, checkout_lock])

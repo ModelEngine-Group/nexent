@@ -6,6 +6,7 @@ import pytest
 
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
 @pytest.mark.asyncio
@@ -93,7 +94,6 @@ async def test_workbench_mounts_tenant_catalog_aidp_with_signed_scope(mocker, mo
     }
     config = WorkbenchSessionConfig(mode="generic_chat", knowledge_scope={
         "aidp": {"mode": "override", "kds_ids": ["kb1", "kb2", "private"]},
-        "retrieval_config": {"top_k": 7, "search_method": "full_text_search"},
     })
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=8, version_no=3)), root_skills=())
     mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
@@ -104,7 +104,12 @@ async def test_workbench_mounts_tenant_catalog_aidp_with_signed_scope(mocker, mo
     mocker.patch.object(scope, "_resolve_aidp_access_snapshot", return_value=SimpleNamespace(
         accessible_id_set={"kb1", "kb2"}, name_to_id={"One": "kb1", "Two": "kb2"},
     ))
-    request = AgentRequest(query="query", entrypoint="workbench", workbench=config)
+    request = AgentRequest(
+        query="query", entrypoint="workbench", workbench=config,
+        tool_params={"agents": {"root": {"tools": {"aidp_search": {
+            "top_k": 7, "search_method": "full_text_search",
+        }}}}},
+    )
     prepared = workbench.prepare_portable_workbench(request, None, "user-a", "tenant-a")
     assert prepared.knowledge.aidp_kds_ids == ["kb1", "kb2"]
     assert prepared.knowledge.warnings == [{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "aidp", "count": 1}]
@@ -167,7 +172,7 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent.preparation import evaluation_snapshot, local_tool, tools
     from management.services.knowledge_base import scope
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
     from runtime.agentos import prepared_evaluation, prepared_local_tool
     from test.backend.app.test_agentos_prepared_evaluation import model_record
 
@@ -215,6 +220,7 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
     ))
     model = model_record(model_id=11)
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[model])
+    stub_resolved_model_catalog(mocker, model)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model)
     selected = create_model_config_from_record(model)
     child = AgentConfig(agent_id=9, version_no=4, name="child", description="", model_name=selected.cite_name, tools=[tool])

@@ -311,7 +311,11 @@ def reselect_outlet_profile(profile, request, *, compose=None):
 def apply_outlet_patch(profile, request, *, compose=None):
     """Validate partial updates against the saved rules without applying new defaults."""
     from nexent.core.model_service.profiles.parameter_rules import apply_parameter_values, compile_parameter_rules, validate_saved_parameter_values
-    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal
+    from nexent.core.model_service.profiles.parameter_schema import (
+        ParameterValidationError,
+        json_values_equal,
+        validate_sampling_parameters,
+    )
     from nexent.core.model_service.profiles.request_parameters import apply_extra_api_parameters
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
     from pydantic import ValidationError
@@ -324,6 +328,7 @@ def apply_outlet_patch(profile, request, *, compose=None):
     submitted = {key: value for key, value in request.parameter_values.items() if key not in cleared}
     profile = reselect_outlet_profile(profile, request.model_copy(update={"parameter_values": submitted}), compose=compose)
     try:
+        validate_sampling_parameters(submitted)
         from nexent.core.model_service.profiles.thinking_configuration import configure_outlet_policy
 
         from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules

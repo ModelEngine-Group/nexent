@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Memory service facade for the new Memory system.
 
 This module provides a high-level facade for memory operations used by
@@ -29,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from .embedding_model import EmbeddingModelInfo
 from .models import (
@@ -41,6 +43,10 @@ from .models import (
     StoreMemoryResult,
 )
 from .policy import MemoryAccessPolicy, MemoryRetrievalPolicy
+
+
+if TYPE_CHECKING:
+    from nexent.core.gateway.modality.embedding.openai import OpenAICompatibleEmbeddingAdapter
 
 
 logger = logging.getLogger("memory_service")

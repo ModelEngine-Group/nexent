@@ -15,6 +15,7 @@ import {
 } from "@/app/newchat/assistant-ui/agent-history-list";
 import { conversationService } from "@/services/conversationService";
 import agentChatStyles from "@/app/newchat/agent-chat.module.css";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const state = vi.hoisted(() => ({
   threadItems: [] as Array<{
@@ -120,9 +121,11 @@ function renderHistory(selectedAgentId?: number) {
   queryClients.push(client);
   return render(
     <QueryClientProvider client={client}>
-      <AgentHistoryViewport enabled={selectedAgentId === undefined}>
-        <AgentHistoryList searchQuery="" selectedAgentId={selectedAgentId} />
-      </AgentHistoryViewport>
+      <TooltipProvider>
+        <AgentHistoryViewport enabled={selectedAgentId === undefined}>
+          <AgentHistoryList searchQuery="" selectedAgentId={selectedAgentId} />
+        </AgentHistoryViewport>
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
@@ -292,10 +295,8 @@ it("expands the active Agent group so its selected conversation stays in the gro
   expect(group).toHaveAttribute("title", "Agent Seven");
   const currentConversation = await screen.findByText("Current conversation");
   expect(currentConversation).toBeVisible();
-  expect(currentConversation.closest("button")).toHaveAttribute(
-    "title",
-    "Current conversation"
-  );
+  expect(currentConversation).toHaveAttribute("data-history-title");
+  expect(currentConversation.closest("button")).not.toHaveAttribute("title");
   expect(await screen.findByText("History 502")).toBeVisible();
 
   fireEvent.click(group);

@@ -206,14 +206,8 @@ sys.modules["management.services.agent.management"] = agent_service_mod
 
 # Mock runtime forwarding service
 runtime_proxy_mod = types.ModuleType("management.services.agent.runtime_client")
-runtime_proxy_mod.forward_agent_run = AsyncMock()
+runtime_proxy_mod.forward_northbound_run = AsyncMock()
 
-
-async def _forward_via_northbound_fallback(_agent_request, _user_id, _tenant_id, *, fallback):
-    return await fallback()
-
-
-runtime_proxy_mod.forward_northbound_run = _forward_via_northbound_fallback
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["management.services.agent.runtime_client"] = runtime_proxy_mod
 
@@ -331,7 +325,7 @@ def reset_test_isolation():
     agent_version_mod.list_published_agents_impl.return_value = [
         {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
     ]
-    runtime_proxy_mod.forward_agent_run.reset_mock(side_effect=True)
+    runtime_proxy_mod.forward_northbound_run.reset_mock(side_effect=True)
     runtime_proxy_mod.forward_agent_stop.reset_mock(side_effect=True)
     runtime_proxy_mod.forward_agent_stop.return_value = {"message": "stopped"}
     yield
@@ -671,7 +665,7 @@ class TestStartStreamingChat:
             yield b"data: {\"type\": \"final_answer\", \"content\": \"ok\"}\n\n"
 
         mock_response.body_iterator = response_chunks()
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -703,7 +697,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
                 patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
@@ -727,9 +721,7 @@ class TestStartStreamingChat:
             user_id=ctx.user_id,
             agent_id=99,
         )
-        forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
-            "agent_request"
-        ]
+        forwarded_request = runtime_proxy_mod.forward_northbound_run.await_args.args[0]
         assert forwarded_request.version_no is None
 
     async def test_start_streaming_chat_logs_token_usage(self):
@@ -739,7 +731,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -779,7 +771,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -805,7 +797,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -831,7 +823,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -849,9 +841,7 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
-            forwarded_request = runtime_proxy_mod.forward_agent_run.call_args.kwargs[
-                "agent_request"
-            ]
+            forwarded_request = runtime_proxy_mod.forward_northbound_run.await_args.args[0]
             assert forwarded_request.minio_files == [{"name": "file.txt"}]
 
     async def test_start_streaming_chat_with_model_id_override(self):
@@ -862,7 +852,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -880,12 +870,11 @@ class TestStartStreamingChat:
             )
 
             # Verify run_agent_stream was called with an AgentRequest that has the override model_id
-            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
-            agent_request = call_kwargs.get("agent_request")
+            agent_request, forwarded_user, forwarded_tenant = runtime_proxy_mod.forward_northbound_run.await_args.args
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == override_model_id
-            assert call_kwargs["user_id"] == ctx.user_id
-            assert call_kwargs["tenant_id"] == ctx.tenant_id
+            assert forwarded_user == ctx.user_id
+            assert forwarded_tenant == ctx.tenant_id
 
     async def test_start_streaming_chat_model_id_null_uses_agent_default(self):
         """Test that omitting model_id results in None, preserving agent's default model."""
@@ -894,7 +883,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -911,8 +900,7 @@ class TestStartStreamingChat:
                 # model_id not provided -> defaults to None
             )
 
-            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
-            agent_request = call_kwargs.get("agent_request")
+            agent_request, forwarded_user, forwarded_tenant = runtime_proxy_mod.forward_northbound_run.await_args.args
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) is None
 
@@ -924,7 +912,7 @@ class TestStartStreamingChat:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
@@ -943,8 +931,7 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
-            call_kwargs = runtime_proxy_mod.forward_agent_run.call_args.kwargs
-            agent_request = call_kwargs.get("agent_request")
+            agent_request, forwarded_user, forwarded_tenant = runtime_proxy_mod.forward_northbound_run.await_args.args
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == 99
 
@@ -959,7 +946,7 @@ class TestStartStreamingChat:
         mock_response.headers = {"x-existing": "1"}
         mock_response.media_type = "text/event-stream"
         mock_response.body_iterator = _body_iterator()
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
 
         with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
                 patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
@@ -1617,36 +1604,19 @@ class TestStartStreamingChatErrorHandling:
                 )
 
 
-    async def test_start_streaming_chat_save_message_error(self):
-        """Test that save_conversation_user error is wrapped properly."""
-        ctx = MockNorthboundContext(token_id=0)
-
-        mock_response = MagicMock()
-        mock_response.headers = {}
-        mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
-
-        async def mock_get_history(*args, **kwargs):
-            return {"data": {"history": []}}
-
-        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
-                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
-                patch.object(
-                    ns.config_thread_manager,
-                    'run',
-                    new_callable=AsyncMock,
-                    side_effect=Exception("DB error"),
-                ):
-            with pytest.raises(Exception) as exc_info:
-                await ns.start_streaming_chat(
-                    ctx=ctx,
-                    conversation_id=123,
-                    agent_name="test_agent",
-                    query="test query"
-                )
-            assert "Failed to persist user message" in str(exc_info.value)
+    async def test_start_streaming_chat_surfaces_agentos_handoff_errors(self):
+        failure = RuntimeError("AgentOS could not persist turn")
+        runtime_proxy_mod.forward_northbound_run.side_effect = failure
+        with (
+            patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock),
+            patch.object(ns, "idempotency_start", new_callable=AsyncMock),
+            patch.object(ns, "_release_idempotency_after_delay", new_callable=AsyncMock),
+            patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock,
+                         return_value={"data": {"history": []}}),
+        ):
+            with pytest.raises(RuntimeError, match="AgentOS could not persist turn") as error:
+                await ns.start_streaming_chat(MockNorthboundContext(token_id=0), 123, "test_agent", "test query")
+        assert error.value is failure
 
     async def test_start_streaming_chat_token_logging_failure(self):
         """Test that token logging failure is handled gracefully."""
@@ -1655,7 +1625,7 @@ class TestStartStreamingChatErrorHandling:
         mock_response = MagicMock()
         mock_response.headers = {}
         mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
+        runtime_proxy_mod.forward_northbound_run.return_value = mock_response
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
         async def mock_get_history(*args, **kwargs):
@@ -1699,10 +1669,7 @@ class TestStartStreamingChatErrorHandling:
                     "agent_id": 42,
                     "latest_version_no": 5
                 }), \
-                patch.object(ns, 'save_conversation_user', side_effect=lambda *args: None), \
-                patch.object(ns, 'forward_agent_run', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
-            conv_mgmt_mod.save_conversation_user.reset_mock()
-
+                patch.object(ns, 'forward_northbound_run', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
             await ns.start_streaming_chat(
                 ctx=ctx,
                 conversation_id=123,
@@ -1711,48 +1678,24 @@ class TestStartStreamingChatErrorHandling:
             )
 
             mock_stream.assert_called_once()
-            call_kwargs = mock_stream.call_args.kwargs
-            assert call_kwargs["agent_request"].version_no == 5
-            assert call_kwargs["agent_request"].agent_id == 42
+            request = mock_stream.await_args.args[0]
+            assert request.version_no == 5
+            assert request.agent_id == 42
 
-    async def test_tc_tlm_009_start_streaming_chat_uses_managed_control_io(self, mocker):
-        """User persistence must use the northbound control-I/O lane."""
-        ctx = MockNorthboundContext(token_id=0)
-
-        mock_response = MagicMock()
-        mock_response.headers = {}
-        mock_response.status_code = 200
-        runtime_proxy_mod.forward_agent_run.return_value = mock_response
-
-        async def mock_get_history(*args, **kwargs):
-            return {"data": {"history": []}}
-
-        async def mock_managed_run(lane, spec, func, *args, **kwargs):
-            assert lane == "control-io"
-            assert spec.task_name == "northbound-save-user-message"
-            func(*args)
-            return None
-
-        mock_manager = MagicMock()
-        mock_manager.run = AsyncMock(side_effect=mock_managed_run)
-
-        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
-                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
-                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
-                patch.object(ns, 'save_conversation_user') as mock_save, \
-                patch.object(ns, 'config_thread_manager', mock_manager):
-            mock_save.reset_mock()
-
-            await ns.start_streaming_chat(
-                ctx=ctx,
-                conversation_id=123,
-                agent_name="test_agent",
-                query="test query"
-            )
-
-            assert mock_save.call_count == 1
-            mock_manager.run.assert_awaited_once()
+    async def test_chat_hands_off_the_owned_turn_to_agentos(self):
+        context = MockNorthboundContext(token_id=0)
+        response = MagicMock(status_code=200, headers={})
+        with (
+            patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock),
+            patch.object(ns, "idempotency_start", new_callable=AsyncMock),
+            patch.object(ns, "_release_idempotency_after_delay", new_callable=AsyncMock),
+            patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock,
+                         return_value={"data": {"history": []}}),
+            patch.object(ns, "forward_northbound_run", new_callable=AsyncMock, return_value=response) as forward,
+        ):
+            assert await ns.start_streaming_chat(context, 123, "test_agent", "test query") is response
+        request, user, tenant = forward.await_args.args
+        assert (request.conversation_id, request.query, user, tenant) == (123, "test query", context.user_id, context.tenant_id)
 
     async def test_start_streaming_chat_get_agent_by_name_impl_error_wrapped(self):
         """Test that get_agent_by_name_impl error is wrapped by outer exception handler.
@@ -2328,7 +2271,7 @@ async def test_runtime_error_is_not_prefixed_with_conversation_created():
     async def chunks():
         yield b'{"message":"Agent run already active"}'
 
-    runtime_proxy_mod.forward_agent_run.return_value = StreamingResponse(chunks(), status_code=409)
+    runtime_proxy_mod.forward_northbound_run.return_value = StreamingResponse(chunks(), status_code=409)
     with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
             patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
             patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock, return_value={"data": {}}):
@@ -2353,7 +2296,7 @@ async def test_inaccessible_chat_rejected_before_persistence(unavailable):
             )
     ns.get_conversation_service.assert_called_once_with(987, "user-1", "tenant-1")
     conv_mgmt_mod.save_conversation_user.assert_not_called()
-    runtime_proxy_mod.forward_agent_run.assert_not_awaited()
+    runtime_proxy_mod.forward_northbound_run.assert_not_awaited()
     idempotency.assert_not_awaited()
 
 

@@ -12,7 +12,8 @@ from contracts.agentos import (
     EVENT_ID_PATTERN, IDEMPOTENCY_KEY_PATTERN, RUN_ID_PATTERN, AgentResume, AgentStop, CompatibilityConversationRun,
 )
 from contracts.errors.exceptions import (
-    RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError,
+    ForbiddenError, RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError,
+    RuntimeUpstreamError, UnauthorizedError, ValidationError,
 )
 from management.services.agent.runtime_client import (
     forward_active_run, forward_conversation_resume, forward_conversation_run, forward_debug_stop, forward_scoped_stop,
@@ -58,6 +59,15 @@ async def run_conversation(
             idempotency_key=idempotency_key,
         )
         return await forward_conversation_run(payload, user_id, tenant_id)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeServiceTimeoutError as exc:
         raise HTTPException(status_code=504, detail="Runtime service timed out") from exc
     except RuntimeServiceUnavailableError as exc:
@@ -67,7 +77,10 @@ async def run_conversation(
 
 
 @router.get("/stop/{run_id}")
-async def stop_conversation(run_id: str, response: Response, authorization: Annotated[str | None, Header()] = None):
+async def stop_conversation(
+    run_id: str, response: Response, authorization: Annotated[str | None, Header()] = None,
+    generation: Annotated[str | None, Query(pattern=RUN_ID_PATTERN)] = None,
+):
     response.headers["Cache-Control"] = "no-store"
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -83,6 +96,16 @@ async def stop_conversation(run_id: str, response: Response, authorization: Anno
             if not re.fullmatch(r"[0-9]{1,10}", run_id) or not 0 < int(run_id) <= 2147483647:
                 raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
             conversation_id = int(run_id)
+            from management.services.conversation.creator_runtime import stop_creator
+
+            creator_stopped = await stop_creator(conversation_id, user_id, generation)
+            if creator_stopped is not None or generation is not None:
+                return {
+                    "status": "success",
+                    "message": "Run cancellation requested" if creator_stopped else "No active run found",
+                    "cancellation_requested": bool(creator_stopped),
+                    "already_stopped": not creator_stopped,
+                }
             run_id = await forward_active_run(conversation_id, user_id, tenant_id)
             if run_id is None:
                 return {"status": "success", "message": "No active run found", "already_stopped": True}

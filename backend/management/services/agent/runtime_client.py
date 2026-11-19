@@ -89,16 +89,20 @@ async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: 
     from management.services.agent.preparation.evaluation_snapshot import prepare_a2a_snapshot
 
     snapshot = await prepare_a2a_snapshot(agent_request, user_id, tenant_id)
+    if snapshot is None:
+        raise ValidationError("Agent resources could not be prepared for AgentOS")
     response = await _agentos_client().run_ephemeral(snapshot, user_id, tenant_id)
     return present_ephemeral_stream(response, user_id, snapshot.run_id)
 
 
 async def forward_northbound_run(
-    agent_request: AgentRequest, user_id: str, tenant_id: str,
+    agent_request: AgentRequest, user_id: str, tenant_id: str, *, final_answer_mode: str = "complete",
 ):
     payload = CompatibilityConversationRun(request=agent_request.model_dump(mode="json"))
     try:
-        response = await forward_conversation_run(payload, user_id, tenant_id, northbound=True)
+        response = await forward_conversation_run(
+            payload, user_id, tenant_id, northbound=True, complete_answer=final_answer_mode == "complete",
+        )
     except HTTPException as exc:
         if exc.status_code != 409 or exc.detail != {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}:
             raise
@@ -115,7 +119,7 @@ async def forward_northbound_run(
 
 async def forward_conversation_run(
     payload: CompatibilityConversationRun, user_id: str, tenant_id: str, *,
-    northbound: bool = False,
+    northbound: bool = False, complete_answer: bool = False,
 ):
     request = AgentRequest.model_validate(payload.request)
     if payload.resume and (request.is_debug or (request.conversation_id or 0) <= 0):
@@ -174,11 +178,13 @@ async def forward_conversation_run(
 
     async def dispatch(claimed, owner, tenant):
         if candidate:
-            saved_options = {"saved_user": saved_user} if saved_user is not None else {}
+            presentation_options = {"complete_answer": True} if complete_answer else {}
+            if saved_user is not None:
+                presentation_options["saved_user"] = saved_user
             response = await prepared_turn.start_turn(
                 claimed, request, owner, tenant, client, include_journal_controls=not northbound,
                 metadata_from_northbound=northbound and request.metadata is not None,
-                **saved_options,
+                **presentation_options,
             )
             if response is not None:
                 return response

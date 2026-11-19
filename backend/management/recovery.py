@@ -155,4 +155,3 @@ async def schedule_interrupted_upload_cleanup(upload_owner_service: str, *, thre
     _upload_cleanup_tasks.add(task)
     task.add_done_callback(_upload_cleanup_tasks.discard)
     return task
-

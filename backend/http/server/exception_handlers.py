@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from adapters.exception import NexentCapabilityError as _NCE
+from contracts.errors.capabilities import NexentCapabilityError as _NCE
 from contracts.errors.exceptions import (
     AppException,
     ManagementReadBusyError,

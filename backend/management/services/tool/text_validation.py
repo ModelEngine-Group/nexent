@@ -10,7 +10,7 @@ from management.services.agent.preparation.analysis import prepare_analysis_tool
 from management.services.agent.preparation.evaluation_snapshot import (
     _export_analysis_binding,
 )
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.concurrency import run_blocking
 
 from backend.http.client import create_httpx_client

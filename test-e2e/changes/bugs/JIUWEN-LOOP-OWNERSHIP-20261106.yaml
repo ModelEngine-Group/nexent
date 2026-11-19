@@ -1,0 +1,55 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-LOOP-OWNERSHIP-20261106
+  change_type: bugfix
+  bug_id: JIUWEN-LOOP-OWNERSHIP-20261106
+  title: Own global Jiuwen async state on one managed execution loop
+  description: Use a managed process service for concurrent and repeated Runner invocations, preserving per-invocation
+    cancellation, context and cleanup.
+  observed_behavior: Parallel children enter independent asyncio.run loops and contend on the global callback registration
+    asyncio.Lock; one child fails before sandbox execution. Root recovery can hide the failure.
+  expected_behavior: All Jiuwen Runner coroutines use one managed loop without serializing whole runs. First-attempt
+    children succeed; cancelling one run leaves unrelated runs healthy and service shutdown drains owned tasks.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing collaboration D3/D5 covers one child and root outcomes; earlier real smoke checked final
+      arithmetic and missed a failed child repaired by another delegation. No simultaneous roots/three-child first-terminal
+      assertion.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - JIUWEN-RESOURCES
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    modified:
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-RESOURCES-D5-003
+    added:
+    - JIUWEN-CONCURRENCY-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Deterministic old cross-loop lock reproduction; concurrent and repeated invocations preserve one loop and
+      per-caller context.
+    - Invocation cancellation waits for cleanup without stopping siblings; shutdown, startup/capacity errors and
+      same-loop sync reentry terminate safely.
+    - Typed terminal clarification survives the thread bridge and still emits one existing public card.
+    reason: Unit lifecycle and error contracts complement real native Runner, HTTP and cancellation collaboration.
+      No duplicate formal D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_execution_loop.py
+    - test/sdk/core/agents/test_jiuwen_clarification.py
+  notes: 'SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md AC-LOOP-01..03. Existing D3/D5
+    own isolated loopback providers, native sessions/tools, managed service/tasks and temporary workspaces; preparation
+    families remain self-contained and cleanup asserts zero active executions. D3 asserts each first invocation,
+    not just root completion or later retry. Production configuration/history remain unchanged; deployed smoke owns
+    only new conversations. New real-smoke D3 owns only newly allocated conversations and managed HTTP clients;
+    it requires external local identities, verifies exact child terminals/history and original records, then deletes
+    only its resources. This proof is distinct from controlled in-process scheduling and SDK UT.'

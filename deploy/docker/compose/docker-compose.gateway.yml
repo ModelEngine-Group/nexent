@@ -24,6 +24,7 @@ services:
       GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
+      GATEWAY_OPS_URL: "http://nexent-ops:${OPS_PORT:-5016}"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
     networks:
       - nexent

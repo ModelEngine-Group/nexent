@@ -1,16 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Administrator bootstrap and command-line credential transport contracts."""
 
+import json
+import runpy
 from contextlib import nullcontext
 from io import StringIO
-import json
-from pathlib import Path
-import runpy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from contracts.errors.exceptions import AccountConflictError
 from management.cli import account as cli
 from management.utils.account_passwords import verify_password
@@ -26,17 +24,29 @@ def store(mocker):
     lookup = mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     create = mocker.patch("management.db.identity.account.create_account", return_value={"user_id": "new-su"})
     member = mocker.patch("management.db.identity.user_tenant.insert_user_tenant")
-    return SimpleNamespace(session=session, lock=lock, lookup=lookup, create=create, member=member)
+    configuration = mocker.patch("management.cli.account.load_system_configuration")
+    return SimpleNamespace(configuration=configuration, session=session, lock=lock, lookup=lookup, create=create, member=member)
 
 
 def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
     assert cli.bootstrap_super_admin(" SUAdmin@Example.com ", "Password123") == {"created": True}
+    store.configuration.assert_called_once_with()
     store.lock.assert_called_once_with(store.session, "super-admin-bootstrap", "suadmin@example.com")
     email, encoded = store.create.call_args.args
     assert email == "suadmin@example.com"
     assert verify_password("Password123", encoded)
     assert store.create.call_args.kwargs["db_session"] is store.session
     store.member.assert_called_once_with("new-su", "", "SU", email, created_by="system", db_session=store.session)
+
+
+def test_bootstrap_configuration_failure_prevents_account_writes(store):
+    store.configuration.side_effect = RuntimeError("configuration unavailable")
+
+    with pytest.raises(RuntimeError, match="configuration unavailable"):
+        cli.bootstrap_super_admin("suadmin@example.com", "Password123")
+
+    store.create.assert_not_called()
+    store.member.assert_not_called()
 
 
 @pytest.mark.parametrize("check_only", [True, False])
@@ -90,15 +100,6 @@ def test_cli_failure_returns_safe_diagnostics(mocker, capsys, error, expected):
     assert output.out == ""
     assert expected in output.err
     assert "private-credential" not in output.err
-
-
-def test_container_entry_point_propagates_cli_status(mocker):
-    main = mocker.patch.object(cli, "main", return_value=3)
-    path = Path(__file__).resolve().parents[3] / "backend/account_admin.py"
-    with pytest.raises(SystemExit) as raised:
-        runpy.run_path(str(path), run_name="__main__")
-    assert raised.value.code == 3
-    main.assert_called_once_with()
 
 
 def test_cli_module_entry_point_runs_preflight(mocker, capsys):

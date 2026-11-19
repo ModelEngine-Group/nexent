@@ -413,10 +413,43 @@ class TestNorthboundBaseApp(unittest.TestCase):
             northbound_base_app_module,
             "recover_northbound_tasks_on_startup",
             new=recover_on_startup,
+        ), patch.object(
+            northbound_base_app_module,
+            "start_system_configuration",
+            new=AsyncMock(),
+        ), patch.object(
+            northbound_base_app_module,
+            "stop_system_configuration",
+            new=AsyncMock(),
         ):
             asyncio.run(exercise_lifespan())
 
         recover_on_startup.assert_awaited_once_with([])
+
+    def test_lifespan_stops_configuration_when_recovery_fails(self):
+        recover_on_startup = AsyncMock(side_effect=RuntimeError("startup failed"))
+        stop_configuration = AsyncMock()
+
+        async def exercise_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(None):
+                pass
+
+        with patch.object(
+            northbound_base_app_module,
+            "recover_northbound_tasks_on_startup",
+            new=recover_on_startup,
+        ), patch.object(
+            northbound_base_app_module,
+            "start_system_configuration",
+            new=AsyncMock(),
+        ), patch.object(
+            northbound_base_app_module,
+            "stop_system_configuration",
+            new=stop_configuration,
+        ), self.assertRaisesRegex(RuntimeError, "startup failed"):
+            asyncio.run(exercise_lifespan())
+
+        stop_configuration.assert_awaited_once_with()
 
     # -------------------------------------------------------------------
     # Application configuration

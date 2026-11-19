@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from contracts.constants.constants import STREAM_STATUS_EVENT
+from infrastructure.agent_stream_replay import subscribe_shared_checkpoint
 
 if TYPE_CHECKING:
     from infrastructure.agent_stream_channels import StreamingChannelManager
@@ -60,6 +61,13 @@ def replay_legacy_stream(
         if state_service.enabled and is_remote_running:
 
             async def redis_channel_stream():
+                checkpoint = await state_service.read_replay_checkpoint_async(user_id, conversation_id)
+                if checkpoint:
+                    yield STREAM_STATUS_EVENT
+                    yield _resume_status_chunk(len(checkpoint["entries"]))
+                    async for chunk in subscribe_shared_checkpoint(state_service, user_id, conversation_id, checkpoint):
+                        yield chunk
+                    return
                 replay_events = (
                     await state_service.read_stream_events_async(
                         user_id=user_id,
@@ -149,15 +157,12 @@ def replay_legacy_stream(
         yield STREAM_STATUS_EVENT
         yield _resume_status_chunk(replay_chunk_count)
 
-        # Use subscribe_with_history(0) to replay ALL chunks from the buffer
-        # This ensures no chunks are lost even if frontend disconnected during streaming
-        # The frontend skips all chunks until replay_chunk_count is reached
-        async for chunk in channel.subscribe_with_history(0):
+        async for chunk in channel.subscribe_with_history(0, include_replay_checkpoint=True):
             yield chunk
 
         # Mark as complete when channel ends
         yield STREAM_STATUS_EVENT
-        yield _resume_completed_chunk()
+        yield _resume_completed_chunk(channel.completion_status or "failed")
 
     return StreamingResponse(
         channel_stream(),

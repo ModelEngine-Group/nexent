@@ -7,8 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 from contracts.agentos_knowledge import KnowledgeContentRequest, ObjectReference
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.resources.tools import ToolResources
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.utils.observer import ProcessType
 from runtime.knowledge_base.tool import KnowledgeBaseSearchTool
@@ -59,8 +59,9 @@ def test_cancelled_filter_never_projects_picture_event():
 
 def test_factory_installs_local_image_capability_and_scope():
     scope, filterer = object(), Mock()
-    owner = SimpleNamespace(observer=Mock(), cancellation_scope=scope)
-    value = NexentAgent.create_local_tool(owner, ToolConfig(
+    owner = ToolResources()
+    owner.observer, owner.cancellation_scope = Mock(), scope
+    value = owner.create_local_tool(ToolConfig(
         class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
         params={"index_names": ["allowed"]}, metadata={"image_filterer": filterer, "allowed_index_names": ["allowed"]},
     ))

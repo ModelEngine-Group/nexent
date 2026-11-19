@@ -4,6 +4,7 @@
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentRunReference, TrackedBackgroundResult
 from contracts.conversation import MessageSource
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.errors.exceptions import (
     AgentBackgroundError, RuntimeMetadataVersionConflict, RuntimeServiceUnavailableError, RuntimeUpstreamError,
     WorkbenchConfigVersionConflict, WorkbenchError,
@@ -15,7 +16,7 @@ from infrastructure.rdb.agent_admission import (
 from management.db.conversation import prepared_turn as store
 from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
-from management.services.agent.prepared_projection import resume_assistant_projection
+from management.services.agent.prepared_projection import acknowledge_projection, resume_assistant_projection
 from management.services.conversation.service import get_current_run_user_message_id
 from nexent.core.concurrency import run_blocking
 
@@ -58,7 +59,10 @@ async def _prepare(request, reference, actor):
     if snapshot.memory_enabled:
         user_turn["memory_agent_id"] = snapshot.resource.agent_id
     if request.metadata is not None:
-        user_turn["metadata_update"] = {"expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata}
+        user_turn["metadata_update"] = {
+            "expected_version": snapshot.runtime_metadata_version - 1,
+            "value": strip_reserved_runtime_metadata_fields(request.metadata),
+        }
     if workbench is not None:
         user_turn["workbench_update"] = {
             "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,
@@ -93,6 +97,7 @@ async def _project(client, turn):
             **({"memory_agent_id": turn.memory_agent_id} if turn.memory_agent_id is not None else {}),
         )
         message_id, status, chunks = projected.assistant_message_id, projected.status, projected.chunks
+    await acknowledge_projection(client, turn.reference, turn.user_id, turn.tenant_id)
     await _io("background-compat-finished", store.close_turn, turn)
     if status != "completed":
         raise AgentBackgroundError("AGENTOS_BACKGROUND_NOT_COMPLETED")

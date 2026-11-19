@@ -137,6 +137,7 @@ import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
 import { QuoteBlock } from "../ui/quote";
 import { BranchPicker } from "../ui/branch-picker";
 import { getCreationRetryTarget } from "@/features/workbench/creationRetry";
+import { getConversationRetryTarget } from "@/lib/conversationRetry";
 import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
@@ -899,9 +900,11 @@ const ThreadView: FC<ThreadViewProps> = ({
   // Question the viewport is currently scrolled to; highlights the matching
   // directory row so long conversations show "where am I" at a glance.
   const activeQuestionId = useActiveQuestionId(questionDirectory);
+  const contentThreadId = useAuiState((state) => state.threads.mainThreadId);
 
   return (
     <ThreadPrimitive.Root
+      data-conversation-content={contentThreadId}
       className={cn(
         "flex h-full flex-row bg-background",
         newChatDesign && newChatStyles.font,
@@ -1396,6 +1399,7 @@ const ThreadScrollToBottom: FC = () => {
 
 const MessageError: FC = () => {
   const { t } = useTranslation();
+  const hasInlineError = useAuiState((s) => s.message.content.some(part => (part as { isError?: boolean }).isError));
   const rawError = useAuiState((state) => {
     const status = state.message.status;
     return status?.type === "incomplete" && status.reason === "error"
@@ -1403,6 +1407,7 @@ const MessageError: FC = () => {
       : undefined;
   });
   const localizedMessage = getConversationResourceLimitMessage(rawError, t);
+  if (hasInlineError) return null;
 
   return (
     <MessagePrimitive.Error>
@@ -1442,18 +1447,21 @@ const AssistantWorkingIndicator: FC = () => {
 
 const AssistantCompletionIndicator: FC = () => {
   const { t } = useTranslation();
-  const isComplete = useAuiState((s) => s.message.status?.type === "complete");
+  const status = useAuiState((s) => s.message.status);
+  const isComplete = status?.type === "complete";
+  const failed = status?.type === "incomplete" && status.reason === "error";
+  const stopped = status?.type === "incomplete" && status.reason === "cancelled";
 
-  if (!isComplete) return null;
+  if (!isComplete && !failed && !stopped) return null;
 
   return (
     <span
       data-slot="aui_assistant-message-completion-indicator"
-      className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"
+      className={cn("inline-flex items-center gap-1 text-xs", failed ? "text-destructive" : stopped ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400")}
       role="status"
     >
-      <DotMatrix state="success" aria-hidden />
-      <span>{t("chat.thread.complete")}</span>
+      {isComplete && <DotMatrix state="success" aria-hidden />}
+      <span>{t(failed ? "chat.thread.failed" : stopped ? "chat.thread.stopped" : "chat.thread.complete")}</span>
     </span>
   );
 };
@@ -1916,7 +1924,8 @@ const AssistantMessage: FC<{
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
         {showAgentCreationResult &&
-        typeof createdAgent?.agentId === "number" &&
+        createdAgent?.completed === true &&
+        typeof createdAgent.agentId === "number" &&
         createdAgent.agentId > 0 ? (
           <AgentCreationResultCard
             agentId={createdAgent.agentId}
@@ -1956,14 +1965,14 @@ const AssistantActionBar: FC = () => {
     const runConfig = aui.thread.composer().getState().runConfig;
     const custom = runConfig.custom as
       { runtimeMode?: string; [key: string]: unknown } | undefined;
-    if (
-      custom?.runtimeMode !== "nl2skill" &&
-      custom?.runtimeMode !== "nl2agent"
-    ) {
+    if (custom?.runtimeMode === "agent-debug") {
       aui.message.reload();
       return;
     }
-    const target = getCreationRetryTarget(
+    const resolveTarget = creationMode
+      ? getCreationRetryTarget
+      : getConversationRetryTarget;
+    const target = resolveTarget(
       aui.thread.getState().messages,
       aui.message.getState().parentId
     );
@@ -1993,21 +2002,13 @@ const AssistantActionBar: FC = () => {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
-        {creationMode ? (
-          <TooltipIconButton
-            tooltip={t("chat.thread.refresh")}
-            onClick={reloadMessage}
-            disabled={creationRetryDisabled}
-          >
-            <RefreshCwIcon />
-          </TooltipIconButton>
-        ) : (
-          <ActionBarPrimitive.Reload asChild>
-            <TooltipIconButton tooltip={t("chat.thread.refresh")}>
-              <RefreshCwIcon />
-            </TooltipIconButton>
-          </ActionBarPrimitive.Reload>
-        )}
+        <TooltipIconButton
+          tooltip={t("chat.thread.refresh")}
+          onClick={reloadMessage}
+          disabled={creationRetryDisabled}
+        >
+          <RefreshCwIcon />
+        </TooltipIconButton>
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton
@@ -2262,6 +2263,7 @@ const SubAgentGroupRenderer: FC<{
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
     metadata?: {
+      executionStatus?: "completed" | "failed" | "stopped";
       subagentId?: number | string;
       runId?: string;
       agentName?: string;
@@ -2324,6 +2326,9 @@ const SubAgentGroupRenderer: FC<{
 
   return (
     <SubAgentContainer
+      executionStatus={indices
+        .map((index) => content[index]?.metadata?.executionStatus)
+        .find((status) => status === "failed" || status === "stopped")}
       agentName={descriptor.agentName}
       depth={descriptor.depth}
       isRunning={descriptor.isRunning}

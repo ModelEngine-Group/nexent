@@ -4,7 +4,6 @@
 import asyncio
 import logging
 from time import monotonic
-from types import SimpleNamespace
 
 from contracts.agentos import (
     BODY_KEY,
@@ -17,7 +16,7 @@ from contracts.agentos import (
     KnowledgeToolInput,
 )
 from fastapi import APIRouter, HTTPException, Request
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.resources.tools import ToolResources
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     RunCancellationScope,
@@ -61,9 +60,10 @@ def execute_tool(payload, actor, scope):
         display_name=getattr(config.metadata.get("llm_model"), "display_name", None),
     )
     observer = MessageObserver(lang=payload.language)
-    tool = NexentAgent.create_local_tool(
-        SimpleNamespace(observer=observer, cancellation_scope=scope), config
-    )
+    resources = ToolResources()
+    resources.observer = observer
+    resources.cancellation_scope = scope
+    tool = resources.create_local_tool(config)
     return AgentToolResult(result=tool.forward(**payload.inputs))
 
 

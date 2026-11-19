@@ -666,7 +666,7 @@ class TestTrialRun:
         from contracts.errors.exceptions import RuntimeUpstreamError
 
         _mock_impls(
-            forward_agent_evaluation_trial_run=AsyncMock(
+            run_evaluation_trial_in_worker=MagicMock(
                 side_effect=RuntimeUpstreamError(
                     status_code=400,
                     content=b'{"code":"160209","message":"At least one published evaluator is required.","details":null}',

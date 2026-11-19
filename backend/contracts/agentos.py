@@ -90,6 +90,7 @@ class AgentOperation(str, Enum):
     RUN_EPHEMERAL = NAMESPACE + "v1/agent/run-ephemeral"
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
     RESUME = NAMESPACE + "v1/agent/resume"
+    ACKNOWLEDGE_PROJECTION = NAMESPACE + "v1/agent/acknowledge-projection"
     RESUME_LEGACY = NAMESPACE + "v1/agent/resume-legacy"
     INSPECT = NAMESPACE + "v1/agent/inspect"
     STOP = NAMESPACE + "v1/agent/stop"
@@ -299,6 +300,18 @@ class RunInput(RunSpecModel):
     query: str
     history: list[RunHistoryMessage | RunAttachmentHistory] = Field(default_factory=list)
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    user_query: str | None = None
+
+    @property
+    def trace_query(self) -> str:
+        return self.query if self.user_query is None else self.user_query
+
+    @model_serializer(mode="wrap")
+    def serialize_input(self, handler):
+        data = handler(self)
+        if self.user_query is None:
+            data.pop("user_query", None)
+        return data
 
 
 class EvaluationFileTool(str, Enum):
@@ -614,16 +627,27 @@ class PreparedConversationScope(AgentRunReference):
     historical_context: PreparedConversationHistory | None = None
     runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
     runtime_metadata_version: int | None = Field(default=None, ge=0)
+    # Request-owned headers cross only the signed Management-to-Runtime call.
+    mcp_header_metadata: dict[str, JsonValue] | None = Field(default=None, repr=False)
 
     @field_validator("runtime_metadata")
     @classmethod
     def validate_metadata(cls, value):
         return validate_runtime_metadata(value)
 
+    @field_validator("mcp_header_metadata")
+    @classmethod
+    def validate_mcp_header_metadata(cls, value):
+        if value is None:
+            return None
+        if not value.keys() <= {"_mcp_headers", "_mcp_headers_by_server"}:
+            raise ValueError("MCP transport metadata must contain only MCP headers")
+        return validate_runtime_metadata(value)
+
     @model_serializer(mode="wrap")
     def serialize_optional_scope(self, handler):
         data = handler(self)
-        for name in ("workbench_config_version", "native_knowledge"):
+        for name in ("workbench_config_version", "native_knowledge", "mcp_header_metadata"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data

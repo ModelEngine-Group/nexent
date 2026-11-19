@@ -4,7 +4,7 @@
 from contracts.agentos import AnalysisToolBinding, EvaluationAnalysisTool, FileToolDescription, RevisionedModelBinding
 from infrastructure.agent_model_config import model_record_revision
 from management.services.model.adapter import _fetch_slot_config
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 
 def prepare_analysis_tool(tool: ToolConfig, tenant_id: str) -> bool:

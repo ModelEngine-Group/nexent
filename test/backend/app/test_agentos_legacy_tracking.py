@@ -1,63 +1,88 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+"""Exercise the durable tracking path that replaced legacy Runtime channels."""
+
+import asyncio
+from contextlib import nullcontext
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
-from infrastructure.rdb.agent_execution import RunIdentity
-from runtime.agentos import legacy_tracking
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.rdb import agent_execution
+from runtime.agentos import prepared_run
+from test.backend.app.test_agentos_prepared_run import payload
 
 
-@pytest.mark.asyncio
-async def test_legacy_tracking_registers_the_original_scoped_identity(mocker):
-    scope = RunIdentity("tenant", "owner", 42, "a" * 32)
-    persist = mocker.patch.object(legacy_tracking, "run_blocking")
-    track = mocker.patch.object(legacy_tracking, "track_execution")
-
-    assert await legacy_tracking.begin_legacy_tracking(42, scope.run_id, "owner", "tenant") == scope
-    persist.assert_awaited_once_with(
-        "agentos-execution-start", legacy_tracking.begin_execution, scope, lane="control-io", owner="runtime",
-    )
-    track.assert_called_once_with(scope)
+ACTOR = ServicePrincipal("owner", "tenant")
+RUN_ID = "a" * 32
+IDENTITY = agent_execution.RunIdentity("tenant", "owner", 42, RUN_ID)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ledger_error", [False, True])
-async def test_setup_failure_releases_live_registration_even_if_ledger_write_fails(mocker, ledger_error):
-    scope = RunIdentity("tenant", "owner", 42, "a" * 32)
-    persist = mocker.patch.object(legacy_tracking, "run_blocking")
-    untrack = mocker.patch.object(legacy_tracking, "untrack_execution")
-    if ledger_error:
-        persist.side_effect = RuntimeError("ledger unavailable")
-        with pytest.raises(RuntimeError, match="ledger unavailable"):
-            await legacy_tracking.fail_legacy_setup(scope)
+async def test_prepared_admission_tracks_the_same_identity_as_its_journal(mocker, payload):
+    async def inline(_task, function, *args):
+        return function(*args)
+
+    mocker.patch.object(prepared_run, "_control_io", side_effect=inline)
+    ledger = mocker.patch.object(prepared_run, "begin_execution")
+    track = mocker.patch.object(prepared_run, "track_execution")
+    journal = mocker.patch.object(prepared_run, "RunJournal")
+    producer = mocker.patch.object(prepared_run, "_produce", new_callable=AsyncMock)
+    tasks = set()
+    mocker.patch.object(prepared_run, "agent_stream_producer_tasks", tasks)
+    registry = mocker.patch.object(prepared_run, "agent_run_manager")
+
+    result = await prepared_run._admit(payload, ACTOR)
+    await asyncio.gather(*tasks)
+
+    assert result.conversation_id == 42 and result.run_id == RUN_ID
+    ledger.assert_called_once_with(IDENTITY)
+    track.assert_called_once_with(IDENTITY)
+    journal.assert_called_once_with("tenant", "owner", 42, RUN_ID, retain_for_projection=True)
+    journal.return_value.start.assert_called_once_with()
+    producer.assert_awaited_once()
+    assert producer.await_args.args[:4] == (payload, ACTOR, IDENTITY, journal.return_value)
+    registry.reserve_agent_capacity.assert_called_once_with(payload.resource.agent_id, prepared_run.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
+    registry.release_agent_capacity.assert_called_once_with(registry.reserve_agent_capacity.return_value)
+    assert not tasks
+
+
+@pytest.mark.parametrize("ledger_failure", [False, True])
+def test_finishing_releases_live_registration_even_when_ledger_write_fails(mocker, ledger_failure):
+    session = Mock()
+    session.execute.return_value.rowcount = 1
+    mocker.patch.object(agent_execution, "get_db_session", return_value=nullcontext(session))
+    untrack = mocker.patch.object(agent_execution, "untrack_execution")
+    if ledger_failure:
+        session.execute.side_effect = SQLAlchemyError("database unavailable")
+        with pytest.raises(SQLAlchemyError, match="database unavailable"):
+            agent_execution.finish_execution(IDENTITY, "failed")
     else:
-        await legacy_tracking.fail_legacy_setup(scope)
-
-    persist.assert_awaited_once_with(
-        "agentos-execution-setup-failed", legacy_tracking.finish_execution, scope, "failed",
-        lane="control-io", owner="runtime",
-    )
-    untrack.assert_called_once_with(scope)
+        assert agent_execution.finish_execution(IDENTITY, "failed")
+    untrack.assert_called_once_with(IDENTITY)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("journal_id", [None, "a" * 32])
-async def test_channel_binds_claim_to_the_runtime_journal_availability(mocker, journal_id):
-    identity = RunIdentity("tenant", "owner", 42, "a" * 32)
-    channel = SimpleNamespace(start_journal=AsyncMock(return_value=journal_id))
-    mocker.patch.object(legacy_tracking, "runtime_state_service", SimpleNamespace(enabled=True))
-    persist = mocker.patch.object(legacy_tracking, "run_blocking", return_value=True)
+async def test_journal_start_failure_finishes_the_tracking_record_without_starting_a_producer(mocker, payload):
+    async def inline(_task, function, *args):
+        return function(*args)
 
-    result = await legacy_tracking.bind_legacy_channel(
-        channel, identity.run_id, "owner", "tenant", conversation_id=42, identity=identity, admission_scope="claim",
-    )
+    mocker.patch.object(prepared_run, "_control_io", side_effect=inline)
+    mocker.patch.object(prepared_run, "begin_execution")
+    mocker.patch.object(prepared_run, "track_execution")
+    journal = mocker.patch.object(prepared_run, "RunJournal")
+    journal.return_value.start.side_effect = RuntimeError("journal unavailable")
+    finish = mocker.patch.object(prepared_run, "finish_execution")
+    produce = mocker.patch.object(prepared_run, "_produce")
+    registry = mocker.patch.object(prepared_run, "agent_run_manager")
 
-    assert result == journal_id and channel.execution_identity == identity
-    channel.start_journal.assert_awaited_once_with("tenant", identity.run_id)
-    persist.assert_awaited_once_with(
-        "agentos-bind-conversation", legacy_tracking.set_conversation_admission, "claim",
-        identity.run_id, "owner", "tenant", conversation_id=42, journal_available=journal_id is not None,
-        lane="control-io", owner="runtime",
-    )
+    with pytest.raises(HTTPException) as failure:
+        await prepared_run._admit(payload, ACTOR)
+
+    assert failure.value.status_code == 503
+    finish.assert_called_once_with(IDENTITY, "failed")
+    produce.assert_not_called()
+    registry.release_agent_capacity.assert_called_once_with(registry.reserve_agent_capacity.return_value)

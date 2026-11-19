@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from infrastructure.redis.client import run_state as runtime_state_module
+from infrastructure.redis import run_state as runtime_state_module
 from infrastructure.redis.run_state import RuntimeStateService
 
 
@@ -143,6 +143,7 @@ def test_mark_run_finished_shortens_completed_runtime_key_ttls(monkeypatch):
         ("runtime:cancel:user-1:42", 300),
         ("runtime:stream:user-1:42", 300),
         ("runtime:stream:done:user-1:42", 300),
+        ("runtime:replay:user-1:42", 300),
     }
 
 
@@ -161,6 +162,7 @@ def test_mark_stream_completed_shortens_completed_runtime_key_ttls(monkeypatch):
         ("runtime:cancel:user-1:42", 300),
         ("runtime:stream:user-1:42", 300),
         ("runtime:stream:done:user-1:42", 300),
+        ("runtime:replay:user-1:42", 300),
     }
 
 
@@ -222,7 +224,7 @@ def test_reset_stream_clears_previous_stop_before_new_run_preparation():
     service.reset_stream("user-1", 42)
 
     assert not service.is_cancelled("user-1", 42)
-    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42", "runtime:cancel:user-1:42")]
+    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42", "runtime:cancel:user-1:42", "runtime:replay:user-1:42")]
 
 
 def test_reset_stream_swallows_redis_errors(caplog):

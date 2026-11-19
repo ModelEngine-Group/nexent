@@ -13,6 +13,7 @@ class GatewaySettings:
     management_url: str = "http://localhost:5010"
     runtime_url: str = "http://localhost:5014"
     northbound_url: str = "http://localhost:5010"
+    ops_url: str = "http://localhost:5016"
     auth_enabled: bool = True
     jwt_secret: str = field(default="", repr=False)
     jwt_issuer: str = "nexent"
@@ -77,6 +78,7 @@ def load_settings(environ=None):
         management_url=management,
         runtime_url=values.get("GATEWAY_RUNTIME_URL", "http://localhost:5014").rstrip("/"),
         northbound_url=values.get("GATEWAY_NORTHBOUND_URL", management).rstrip("/"),
+        ops_url=values.get("GATEWAY_OPS_URL", "http://localhost:5016").rstrip("/"),
         auth_enabled=flag == "true", jwt_secret=values.get("JWT_SECRET", ""),
         jwt_issuer=values.get("JWT_ISSUER", "nexent"),
         signing_secret=values.get("GATEWAY_SIGNING_SECRET", ""),

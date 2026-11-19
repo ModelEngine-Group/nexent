@@ -7,7 +7,7 @@ import pytest
 
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import local_tool, tools
-from nexent.core.agents.nexent_agent import NexentAgent
+from test.common.local_agent_tools import create_local_tool
 from runtime.agentos import prepared_local_tool
 from test.backend.app.test_agentos_prepared_local_tool import stored_tool
 
@@ -38,8 +38,8 @@ async def test_catalog_system_class_keeps_actual_sdk_state_and_bound_scope(mocke
     rebound = prepared_local_tool.materialize_local_tools(
         SimpleNamespace(agent_id=7, version_no=3, tools=[reference]), ServicePrincipal("user-a", "tenant-a"), "zh",
     )[reference.tool_id]
-    old = NexentAgent.create_local_tool(SimpleNamespace(observer=None), legacy)
-    actual = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    old = create_local_tool(legacy)
+    actual = create_local_tool(rebound)
     assert rebound.name == portable.name and actual.name == old.name == canonical
     if class_name in {"StoreMemoryTool", "SearchMemoryTool"}:
         assert actual.memory_service is old.memory_service is None

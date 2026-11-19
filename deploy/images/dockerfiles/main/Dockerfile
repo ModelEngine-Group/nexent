@@ -160,6 +160,7 @@ RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 
 COPY backend/__init__.py /opt/backend/
 COPY backend/management /opt/backend/management
+COPY backend/ops /opt/backend/ops
 COPY backend/contracts /opt/backend/contracts
 COPY backend/configs /opt/backend/configs
 COPY backend/permissions /opt/backend/permissions

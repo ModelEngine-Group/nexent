@@ -3,6 +3,8 @@
 "use client";
 
 import i18next from "i18next";
+import { messageExecutionStatus } from "@/lib/messageExecutionState";
+import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   persistModelDrafts,
   snapshotModelDrafts,
@@ -24,6 +26,8 @@ import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDra
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
+import { safeUUID } from "@/lib/utils";
+import { acknowledgeConversationUser } from "@/lib/conversationRetry";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import type { SourceAttributes } from "@/types/source";
 import { getSourceAttributes } from "@/lib/source";
@@ -85,6 +89,9 @@ interface SseChunk {
   unit_index?: number;
   // Unique ID shared by a tool call and its side-channel output.
   tool_call_id?: string;
+  provider_call_id?: string | null;
+  is_error?: boolean;
+  execution_status?: "completed" | "failed" | "stopped";
   role?: string;
   tool_name?: string;
   tool_arguments?: string | Record<string, unknown>;
@@ -102,6 +109,7 @@ interface SseChunk {
   attempt_id?: string;
   step_id?: string;
   answer_phase?: "delta" | "complete";
+  answer_preview?: boolean;
   reclassify_step?: boolean;
   phase?: "begin" | "rollback" | "commit";
   attempt?: number;
@@ -141,6 +149,7 @@ export type Nl2AgentCardActionSubtype =
   | "installed_resource_binding";
 
 export interface Nl2AgentCardAction {
+  card_id?: string;
   type: "nl2agent_card_action";
   subtype: Nl2AgentCardActionSubtype;
   agent_id: number;
@@ -187,6 +196,7 @@ export interface Nl2aRequirementClarificationQuestion {
 }
 
 export interface Nl2aRequirementClarificationPayload {
+  card_id?: string;
   subtype: "requirement_clarification";
   agent_id: number;
   questions: Nl2aRequirementClarificationQuestion[];
@@ -217,12 +227,14 @@ export interface Nl2aAgentDraftPayload {
 }
 
 export interface Nl2aSuggestedResourceInstallationPayload {
+  card_id?: string;
   subtype: "suggested_resource_installation";
   agent_id: number;
   resources: Nl2aInstallableResource[];
 }
 
 export interface Nl2aInstalledResourceBindingPayload {
+  card_id?: string;
   subtype: "installed_resource_binding";
   agent_id: number;
   resources: Nl2aRecommendedResource[];
@@ -315,6 +327,7 @@ interface NexentRunConfig {
   onGenerationStopped?: (conversationId: number) => void;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
+  onMessageAccepted?: (submittedText: string) => void;
   onRunRejected?: (error: unknown, message?: ThreadMessage) => void;
   // Structured reply annotations for the outgoing message; set when the
   // composer keeps the library-managed send (in-flight attachment uploads).
@@ -409,6 +422,7 @@ interface SubAgentStartPayload {
 }
 
 interface SubAgentEndPayload {
+  status?: "completed" | "failed" | "stopped";
   agent_id?: number | string | null;
   agent_name?: string;
   invocation_id?: string;
@@ -446,6 +460,8 @@ function parseSubAgentEnd(content: string): SubAgentEndPayload {
 export interface StepTokenCount {
   stepNumber: number;
   duration: number;
+  inputKnown?: boolean;
+  outputKnown?: boolean;
   stepInputTokens: number;
   stepOutputTokens: number;
   totalOutputTokens: number;
@@ -477,8 +493,6 @@ export interface VerificationPanelPart {
   completed: boolean;
 }
 
-// Accumulated total duration across all steps
-let accumulatedDuration = 0;
 
 /**
  * Parses a backend `token_count` payload into a `StepTokenCount` entry.
@@ -499,6 +513,8 @@ export function parseStepTokenCount(content: string): StepTokenCount | null {
     return {
       stepNumber: data.step_number ?? 0,
       duration: data.duration ?? 0,
+      inputKnown: typeof data.step_input_tokens === "number",
+      outputKnown: typeof data.step_output_tokens === "number",
       stepInputTokens: data.step_input_tokens ?? 0,
       stepOutputTokens: data.step_output_tokens ?? 0,
       totalOutputTokens: data.total_output_tokens ?? 0,
@@ -657,6 +673,14 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
       });
     }
     if (typeof parsed.type === "string") {
+      // Preview and confirmation share one answer slot, separate from reasoning.
+      if (
+        parsed.type === "model_output_thinking" &&
+        parsed.answer_preview === true &&
+        parsed.answer_phase === "delta"
+      ) {
+        parsed.type = "final_answer";
+      }
       if (typeof parsed.content === "string") {
         parsed.content = stripAnsiControlSequences(parsed.content);
       }
@@ -788,6 +812,7 @@ export function buildToolCallPart(chunk: SseChunk): any {
     argsText,
     unit_index: chunk.unit_index,
     tool_call_id: chunk.tool_call_id,
+    provider_call_id: chunk.provider_call_id,
   };
 }
 
@@ -1006,6 +1031,14 @@ export function attachExecutionLogsToTool(
   }
 
   targetToolCall.result = (targetToolCall.result ?? "") + chunk.content;
+  if (chunk.is_error) {
+    targetToolCall.isError = true;
+    targetToolCall.status = {
+      type: "incomplete",
+      reason: "error",
+      error: chunk.content,
+    };
+  }
   return true;
 }
 
@@ -1274,10 +1307,15 @@ export function parseVerification(chunk: {
  * collapsible card flips from its running indicator to a finished state
  * without needing a separate per-message registry.
  */
-export function markSubAgentRunFinished(parts: any[], runId: string): void {
+export function markSubAgentRunFinished(
+  parts: any[],
+  runId: string,
+  executionStatus?: "completed" | "failed" | "stopped"
+): void {
   for (const part of parts) {
     if (part && part.metadata && part.metadata.runId === runId) {
       part.metadata.isRunning = false;
+      if (executionStatus) part.metadata.executionStatus = executionStatus;
     }
   }
 }
@@ -1354,7 +1392,6 @@ export function pushStepTokenCount(step: StepTokenCount): void {
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
-  accumulatedDuration = 0;
 }
 
 /**
@@ -1362,11 +1399,13 @@ export function clearStepTokenCounts(): void {
 
 /**
  * Parse and build timing metadata from backend token_count chunk.
- * Also stores step data in the global registry for SingleTurnTokenUsage.
+ * Stores usage in the owning message and preserves the compatibility registry.
  */
 function buildTimingFromTokenCount(
-  content: string
+  chunk: SseChunk,
+  counts: Map<string, StepTokenCount>
 ): ReturnType<typeof buildTimingResult> | null {
+  const content = chunk.content;
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
     log.warn("[ChatModelAdapter] Failed to parse token_count:", content);
@@ -1376,21 +1415,13 @@ function buildTimingFromTokenCount(
   // Store step data in global registry so the currently-streaming message's
   // `SingleTurnTokenUsage` can render it without subscribing to per-message
   // metadata updates.
-  pushStepTokenCount(parsed);
-
-  // Accumulate duration across all steps
-  accumulatedDuration += parsed.duration;
-
-  // Use accumulated duration for total stream time
-  const totalDuration = accumulatedDuration;
-
-  return buildTimingResult(
-    Date.now(), // streamStartTime - approximate
-    undefined, // firstTokenTime - not available
-    0, // toolCallCount - tracked separately
-    parsed.totalOutputTokens,
-    totalDuration
-  );
+  const identity = chunk.unit_index !== undefined ? `unit:${chunk.unit_index}`
+    : parsed.stepNumber > 0 ? `${chunk.invocation_id ?? ""}:${parsed.stepNumber}` : `event:${counts.size}`;
+  counts.set(identity, parsed);
+  clearStepTokenCounts();
+  counts.forEach(pushStepTokenCount);
+  const timing = buildHistoricalMessageTiming([...counts.values()]);
+  return timing ? { metadata: { timing: { ...timing, firstTokenTime: undefined } } } : null;
 }
 
 /**
@@ -1430,7 +1461,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
-    const isResume = !isEphemeralRuntime && custom?.resume === true;
+    const isResume = !isAgentDebug && custom?.resume === true;
     // Freeze the controls before draft creation or other asynchronous work.
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
@@ -1527,9 +1558,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ? (msg.metadata?.custom as
             { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
         : undefined;
-      const text = customMetadata?.nl2agentCardAction
-        ? JSON.stringify(customMetadata.nl2agentCardAction)
-        : extractTextContent([msg]);
+      const historicalCard =
+        isNl2Agent && msg.role === "assistant"
+          ? (msg.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
+          : undefined;
+      const text = historicalCard
+        ? JSON.stringify(historicalCard.content)
+        : customMetadata?.nl2agentCardAction
+          ? JSON.stringify(customMetadata.nl2agentCardAction)
+          : extractTextContent([msg]);
       const historicalFiles = msg.role === "user" ? extractMinioFiles(msg) : [];
       return {
         role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
@@ -1553,7 +1590,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Build request payload. Resume only needs the conversation identity; the
     // backend owns the original query and execution state.
     const requestBody: Record<string, unknown> = {
-      query: isResume ? "" : query,
+      query: isResume ? (isNl2Agent || isNl2Skill ? "Resume" : "") : query,
       history: isResume ? [] : history,
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: isAgentDebug,
@@ -1631,8 +1668,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let userAborted = false;
     const stopBackendRun = async (runId: string | number) => {
       if (backendStopPromise) return;
-      backendStopPromise = conversationService
-        .stop(runId)
+      const stop =
+        (isNl2Agent || isNl2Skill) && backendRunId
+          ? conversationService.stop(runId, backendRunId)
+          : conversationService.stop(runId);
+      backendStopPromise = stop
         .then(() => undefined)
         .catch((error) => {
           log.error(
@@ -1713,12 +1753,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               ? "nl2skill"
               : undefined,
           persist_history: isNl2Agent || isNl2Skill,
-          retry_message_index: isEphemeralRuntime
-            ? custom?.retry_message_index
-            : undefined,
-          retry_user_message_id: isEphemeralRuntime
-            ? custom?.retry_user_message_id
-            : undefined,
+          request_id: isNl2Agent || isNl2Skill ? safeUUID() : undefined,
+          retry_message_index: custom?.retry_message_index,
+          retry_user_message_id: custom?.retry_user_message_id,
           workbench_config: isEphemeralRuntime ? creationConfig : undefined,
           draft_snapshot: isNl2Skill
             ? (custom?.getDraftSnapshot?.() ?? custom?.draftSnapshot)
@@ -1765,6 +1802,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
         (version) => {
           if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        },
+        (id, index) => {
+          if (
+            !userAborted &&
+            !isResume &&
+            !isEphemeralRuntime &&
+            lastUserIndex >= 0
+          ) {
+            acknowledgeConversationUser(messages[lastUserIndex].id, id, index);
+          }
         }
       );
       if (userAborted) {
@@ -1774,6 +1821,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
+      if (!("type" in agentResponse) && !isResume) custom?.onMessageAccepted?.(query);
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
@@ -1835,6 +1883,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
+    const streamTokenCounts = new Map<string, StepTokenCount>();
+    let terminalOutcome: string | undefined;
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
     let nl2SkillSummaryPartIndex: number | null = null;
@@ -2234,7 +2284,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       return true;
     };
     const deliveredNl2AgentStates = new Set<string>();
-    const upsertCreatedAgentPart = (completed: boolean) => {
+    const upsertCreatedAgentPart = () => {
       if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
       if (!Number.isInteger(agentId) || agentId <= 0) return;
@@ -2242,12 +2292,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         (part) => part.type === "data" && part.name === "nl2agent-created"
       );
       if (existing) {
-        existing.data.completed ||= completed;
+        existing.data.completed = true;
       } else {
         contentParts.push({
           type: "data",
           name: "nl2agent-created",
-          data: { agentId, completed },
+          data: { agentId, completed: true },
         });
       }
     };
@@ -2263,8 +2313,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         if (deliveredNl2AgentStates.has(eventKey)) return;
         deliveredNl2AgentStates.add(eventKey);
       }
-      if (event.event === "agent_generation_completed")
-        upsertCreatedAgentPart(true);
+      if (
+        event.event === "agent_generation_completed" &&
+        event.agent_id === Number(nl2AgentId)
+      )
+        upsertCreatedAgentPart();
       custom?.onNl2AgentState?.(event);
     };
     let verificationPanel: VerificationPanelPart | null = null;
@@ -2370,7 +2423,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let streamFinished = false;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
+      status: userAborted
+        ? { type: "incomplete", reason: "cancelled" }
+        : content.some((part) => part.isError)
+          ? { type: "incomplete", reason: "error" }
+          : streamFinished
+            ? { type: "complete", reason: "stop" }
+            : { type: "running" },
       content: collapseSubAgentParts(
         content.map((part) =>
           part.type === "data" &&
@@ -2380,7 +2441,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : part
         )
       ),
-      metadata: nl2a ? { custom: { nl2a } } : undefined,
+      metadata: { custom: {
+        ...(nl2a ? { nl2a } : {}),
+        stepTokenCounts: [...streamTokenCounts.values()],
+      } },
     });
 
     const streamStartTime = Date.now();
@@ -2403,6 +2467,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         for (const line of lines) {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
+          if (chunk.type === "status") {
+            if (["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+            continue;
+          }
           if (chunk.type === "final_answer") {
             chunk.content = unwrapFinalAnswer(chunk.content);
           }
@@ -2483,7 +2551,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
-            storedTiming = buildTimingFromTokenCount(chunk.content);
+            storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
             continue; // Don't yield for internal data chunks
           }
 
@@ -2642,7 +2710,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             flushOpenReasoning(chunk.invocation_id);
             if (!chunk.invocation_id && chunk.answer_phase !== "delta")
               completeVerificationPanel();
-            upsertCreatedAgentPart(false);
             yield buildStreamResult(contentParts);
             continue;
           }
@@ -2729,7 +2796,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 flushOpenReasoning(closing.invocationId);
               }
               activeSubAgents.delete(invocationId!);
-              markSubAgentRunFinished(contentParts, closing.runId);
+              markSubAgentRunFinished(
+                contentParts,
+                closing.runId,
+                payload.status
+              );
             }
             // Pick the next active invocation id so subsequent reasoning /
             // tool parts default to a still-open sibling when present.
@@ -2945,6 +3016,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Process any remaining buffered line
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
+        if (chunk?.type === "status" && ["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+        if (chunk?.type === "token_count") {
+          storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
+        }
         if (chunk && chunk.type !== "status") {
           if (!isHumanInteractionEvent(chunk)) {
             if (chunk.type === "final_answer") {
@@ -3091,7 +3166,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               flushOpenReasoning(chunk.invocation_id);
               if (!chunk.invocation_id && chunk.answer_phase !== "delta")
                 completeVerificationPanel();
-              upsertCreatedAgentPart(false);
               yield buildStreamResult(contentParts);
             } else if (chunk.type === "warning") {
               flushOpenReasoning();
@@ -3445,6 +3519,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         });
       }
 
+      streamFinished = true;
       const finalResult = buildStreamResult(
         collapseSubAgentParts(contentParts)
       );
@@ -3453,6 +3528,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
       yield {
         ...finalResult,
+        status: messageExecutionStatus(terminalOutcome ?? (contentParts.some(part => part.isError) ? "failed" : "completed")),
         messageId,
         metadata: {
           ...finalResult.metadata,
@@ -3467,6 +3543,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           content: "",
         });
       }
+      // Cleanup must not replace an already reported transport failure.
+      await reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   },

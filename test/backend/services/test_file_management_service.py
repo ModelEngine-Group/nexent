@@ -81,6 +81,9 @@ knowledge_storage_stub = types.ModuleType('management.services.knowledge_base.st
 knowledge_storage_stub.resolve_storage_object_access = MagicMock(return_value=False)
 knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
 knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
+knowledge_storage_stub.get_committed_bytes_by_kb = MagicMock(return_value=0)
+knowledge_storage_stub.get_committed_source_bytes_by_paths = MagicMock(return_value=0)
+knowledge_storage_stub.get_tenant_committed_source_bytes = MagicMock(return_value=0)
 sys.modules['management.services.knowledge_base.storage'] = knowledge_storage_stub
 setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
 
@@ -156,6 +159,13 @@ def setup_patches():
 
 
 @pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(file_management_service, "get_config_snapshot", system_config_snapshot)
+
+
+@pytest.fixture(autouse=True)
 def reset_knowledge_storage_stub():
     """Keep generic MinIO tests outside KB accounting unless they opt in."""
     file_management_service.invalidate_usage_cache.reset_mock()
@@ -200,18 +210,27 @@ class TestUploadFilesImpl:
 
         assert await _get_upload_size(fallback_upload) == 3
 
-        set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 2)
-        oversized_upload = MagicMock(size=3, filename="large.pdf")
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        monkeypatch.setattr(
+            file_management_service,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(MAX_KNOWLEDGE_FILE_SIZE_MB=2),
+        )
+        oversized_upload = MagicMock(size=2 * 1024 * 1024 + 1, filename="large.pdf")
         with pytest.raises(AppException) as exc_info:
             await _validate_knowledge_file_sizes([None, oversized_upload])
 
         assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
-        assert exc_info.value.details["limit_bytes"] == 2
+        assert exc_info.value.details["limit_bytes"] == 2 * 1024 * 1024
 
     @pytest.mark.asyncio
     async def test_local_knowledge_upload_validates_size_before_writing(self, monkeypatch):
-        set_import_attribute(monkeypatch, file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 1)
-        upload = MagicMock(size=2, filename="large.pdf")
+        from test.backend.configuration.helpers import system_config_snapshot
+
+        monkeypatch.setattr(file_management_service, 'get_config_snapshot',
+                            lambda: system_config_snapshot(MAX_KNOWLEDGE_FILE_SIZE_MB=1))
+        upload = MagicMock(size=1024 * 1024 + 1, filename="large.pdf")
         with patch('management.services.file.staged_local_source.upload_staged_local_files', new_callable=AsyncMock) as stage:
             with pytest.raises(AppException) as error:
                 await upload_files_impl(destination="local", file=[upload], folder="knowledge_base")

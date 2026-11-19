@@ -46,7 +46,9 @@ def execute_locked(repo, home, directory, head, publish_latest=False):
         checked_revision(repo, state["branch"], head)
         state["worker_head"] = head
         save(directory / "status.json", state)
-        with prepare_daily_retry(repo, home, directory, prepared=True):
+        # Resume a before-image prepared by an older supervisor, or prepare it
+        # here after synchronization when launched by the current supervisor.
+        with prepare_daily_retry(repo, home, directory, prepared=(directory / "recovery.json").exists()):
             command = [sys.executable, str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
                        "--phase", "implementation", "--daily-report", str(directory / "asset-validation.json")]
             if logged(command, repo, os.environ.copy(), directory / "validate.log", 180):
@@ -54,7 +56,8 @@ def execute_locked(repo, home, directory, head, publish_latest=False):
             checked_revision(repo, state["branch"], head)
             import static_assets
             import suite
-            static_assets.apply(home, repo / "test-e2e/infra/assets")
+            fixtures = static_assets.apply(home, repo / "test-e2e/infra/assets", allow_unready=True)
+            save(directory / "static-assets.json", {"assets": fixtures})
             records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None), daily=True)
             problems = suite.doctor(repo, home, records, common_only=True)
             if problems:

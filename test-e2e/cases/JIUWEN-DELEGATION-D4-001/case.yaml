@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-DELEGATION-D4-001
+  feature_id: JIUWEN-RESOURCES
+  business_rule_ids: [JIUWEN-RESOURCES-RULE-005]
+  title: Generic explicit delegation generates a real child file in live and restored UI
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove both Cores share generic delegation behavior and render configured child execution and saved results.
+  preconditions:
+  - Authorized saved file assistant with a file-generation worker, available real model and deployed common Web/runtime.
+  test_data:
+    profile: real_smoke
+    locale: zh
+    core_variants: [smolagents, jiuwen]
+    variant_selection: NEXENT_DELEGATION_CORE; both variant runs are required for shared-policy acceptance
+  steps:
+  - order: 1
+    action: For each Core smolagents and Jiuwen, clone the authorized assistant tree and send the generic request
+      to call a sub-agent and generate a simple docx with a fresh marker.
+    expected: A nested worker card appears while streaming; real child start/end and child-owned
+      execution generate and upload a downloadable docx containing the marker.
+  - order: 2
+    action: Open canonical saved history and refresh the page, then expand the same child card.
+    expected: The same child result and file remain visible, persisted message identities are
+      unchanged and history navigation starts no execution.
+  - order: 3
+    action: Ask an ordinary follow-up about the saved result and reload again.
+    expected: The answer recalls the saved fact without a child call or file tool replay;
+      only owned fixtures are cleaned and source configuration/history remain unchanged.
+  expected_results:
+  - Actual authorized delegation, downloaded docx verification and live common nested UI.
+  - Reload restores nested ownership and results without another Agent execution.
+  - Follow-up uses historical results without replay and isolated cleanup preserves source data.
+  forbidden_side_effects:
+  - No fabricated child card or file success, root direct-generation bypass, model-result substitution or credential output.
+  - No historical replay, row mutation, source assistant change or deletion outside owned fixtures.
+  actor: Authorized Agent user
+  journey:
+  - Delegate a real file task, observe the child live, reload and continue from saved results.
+  final_business_result:
+  - Explicit delegation and persisted common presentation agree with actual child execution.
+  failure_evidence:
+  - Safe SSE summaries, DOM assertions, database identities, downloaded document check and screenshots.
+  acceptance:
+  - id: AC-01
+    description: Actual child file creation and live nested presentation.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Saved nested results and ordinary follow-up preserve ownership without replay.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [2]

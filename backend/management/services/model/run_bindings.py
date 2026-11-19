@@ -5,8 +5,8 @@
 from infrastructure.model_adapter import restore_model_snapshot
 from contracts.model_names import get_model_name_from_config
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
-from nexent.core.agents.agent_model import ModelConfig
-from contracts.constants.environment import LLM_INCLUDE_LOGPROBS
+from nexent.core.agents.contracts.config import ModelConfig
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -24,7 +24,7 @@ from infrastructure.agent_model_config import (
 async def create_model_config_list(tenant_id, *, versions=None):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = [create_model_config_from_record(record) for record in records if record.get("model_id") is None or record.get("profile_schema_version") is not None]
-    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
+    extra_body = {"logprobs": True} if get_config_snapshot().get("LLM_INCLUDE_LOGPROBS") else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -39,8 +39,15 @@ async def create_model_config_list(tenant_id, *, versions=None):
         return model_list
     main_snapshot = restore_model_snapshot(main_model_config, tenant_id)
     if main_snapshot is not None:
-        model_list.extend(_resolved_model_config(main_model_config, main_snapshot, cite_name=alias)
-                          for alias in ("main_model", "sub_model"))
+        model_list.extend(
+            _resolved_model_config(
+                main_model_config,
+                main_snapshot,
+                cite_name=alias,
+                extra_body=extra_body,
+            )
+            for alias in ("main_model", "sub_model")
+        )
     else:
         main_prompt_cache = resolve_prompt_cache_profile(main_model_config.get("model_factory"))
         for alias in ("main_model", "sub_model"):

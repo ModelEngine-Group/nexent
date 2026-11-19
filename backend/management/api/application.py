@@ -6,6 +6,7 @@ from contracts.constants.environment import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     ENABLE_AIDP_KNOWLEDGE,
+    RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
 )
 from management.api.a2a.a2a_client import router as a2a_client_router
 from management.api.a2a.a2a_server import router as a2a_server_router
@@ -90,6 +91,8 @@ from management.api.skill.skill import router as skill_router
 from management.api.skill.skill_repository import skill_repository_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.tool.tool_config import router as tool_config_router
+from nexent.core.concurrency import ManagedTaskSpec
+from management.thread_management import config_thread_manager
 from management.recovery import (
     recover_config_tasks,
 )
@@ -164,6 +167,7 @@ async def config_lifespan(_app):
     from management.services.file.cleanse_lifespan import cleanse_lifespan
     from management.services.knowledge_base.ingestion_dispatch import ingestion_lifespan
     from management.services.knowledge_base.summary_dispatch import summary_lifespan
+    from management.services.conversation.creator_runtime import shutdown_creator_streams
 
     # One Management manager owns ordinary and Northbound requests and recovery.
     async with northbound_lifespan(_app):
@@ -184,15 +188,20 @@ async def config_lifespan(_app):
                 yield
         finally:
             try:
-                if dreaming_started:
-                    await stop_dreaming_scheduler()
+                await shutdown_creator_streams(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
             finally:
-                if maintenance_started:
-                    from management.services.evaluation.maintenance import (
-                        stop as stop_eval_maintenance,
-                    )
+                await _stop_config_maintenance(dreaming_started, maintenance_started)
 
-                    stop_eval_maintenance()
+
+async def _stop_config_maintenance(dreaming_started, maintenance_started):
+    try:
+        if dreaming_started:
+            await stop_dreaming_scheduler()
+    finally:
+        if maintenance_started:
+            from management.services.evaluation.maintenance import stop as stop_eval_maintenance
+
+            stop_eval_maintenance()
 
 
 app = create_app(

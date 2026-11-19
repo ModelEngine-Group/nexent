@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import AgentRunReference
 from contracts.conversation import MessageSource
-from contracts.errors.exceptions import RuntimeServiceUnavailableError
+from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.services.agent import prepared_projection
 
 REFERENCE = AgentRunReference(conversation_id=42, run_id="a" * 32)
@@ -28,6 +28,58 @@ def response(*values):
                 raise value
             yield value
     return StreamingResponse(body())
+
+
+async def test_projection_does_not_commit_after_upstream_expired_receipt(mocker):
+    upstream = response(b'{"code":"AGENTOS_CURSOR_UNAVAILABLE"}')
+    upstream.status_code = 410
+    resume = AsyncMock(return_value=upstream)
+    persist = mocker.patch.object(prepared_projection, "run_blocking")
+    with pytest.raises(RuntimeUpstreamError) as expired:
+        await prepared_projection.resume_assistant_projection(
+            resume, REFERENCE, "actor", "tenant", message_index=3, message_source=MessageSource.CHAT,
+        )
+    assert expired.value.status_code == 410
+    assert expired.value.content == b'{"code":"AGENTOS_CURSOR_UNAVAILABLE"}'
+    resume.assert_awaited_once()
+    persist.assert_not_awaited()
+
+
+@pytest.mark.parametrize("frame", [
+    event(1, "agentos_observer", "[]"),
+    event(1, "agentos_unknown", "{}"),
+    event(1, "agentos_terminal", '{"status":"running"}'),
+])
+async def test_projection_rejects_unknown_event_payloads(mocker, frame):
+    resume = AsyncMock(return_value=response(frame))
+    persist = mocker.patch.object(prepared_projection, "run_blocking")
+    with pytest.raises(RuntimeServiceUnavailableError):
+        await prepared_projection.resume_assistant_projection(
+            resume, REFERENCE, "actor", "tenant", message_index=3, message_source=MessageSource.CHAT,
+        )
+    persist.assert_not_awaited()
+
+
+async def test_projection_ignores_unusable_checkpoints_and_preserves_bound_memory_source(mocker):
+    frames = [
+        event(1, "agentos_observer", '{"type":"execution_result","content":"internal"}'),
+        event(2, "agentos_observer", '{"type":"history_summary","content":"not-json"}'),
+        event(3, "agentos_observer", '{"type":"history_summary","content":{"status":"rejected"}}'),
+        event(4, "agentos_observer",
+              '{"type":"history_summary","content":{"status":"accepted","persist_status":"persisted"}}'),
+        event(5, "agentos_terminal", '{"status":"completed"}'),
+    ]
+    persist = mocker.patch.object(prepared_projection, "run_blocking", return_value=61)
+    result = await prepared_projection.resume_assistant_projection(
+        AsyncMock(return_value=response(*frames)), REFERENCE, "actor", "tenant", message_index=3,
+        message_source=MessageSource.AUTOMATION, assistant_message_id=61, memory_agent_id=7,
+        memory_source_message_id=23,
+    )
+    assert result.assistant_message_id == 61
+    fields = persist.await_args.kwargs
+    assert fields["history_checkpoints"] == []
+    assert (fields["memory_agent_id"], fields["memory_source_message_id"]) == (7, 23)
+    assert all(unit["type"] != "execution_result" for unit in fields["message_units"])
 
 
 @pytest.mark.asyncio

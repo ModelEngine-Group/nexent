@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from infrastructure.system_configuration.runtime import get_config_snapshot
 
 import inspect
 import json
@@ -470,14 +471,17 @@ async def get_tool_from_remote_mcp_server(
     tools_info = []
 
     try:
+        configuration = get_config_snapshot()
+        connection_timeout = configuration.get("MCP_REQUEST_TIMEOUT_SECONDS")
+        tool_timeout = configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS")
         transport = _create_mcp_transport(
             remote_mcp_server, authorization_token, custom_headers
         )
-        client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+        client = Client(transport=transport, timeout=tool_timeout)
         async with AsyncExitStack() as stack:
             await asyncio.wait_for(
                 stack.enter_async_context(client),
-                timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                timeout=connection_timeout,
             )
             # List available operations
             tools = await client.list_tools()

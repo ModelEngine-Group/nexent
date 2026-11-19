@@ -153,7 +153,8 @@ async def test_creation_stream_factory_http_exception_is_preserved(mocker):
 
 
 @pytest.mark.asyncio
-async def test_default_route_persists_creator_and_model_preferences(mocker, skill_app):
+async def test_default_route_persists_creator_and_model_preferences(mocker, monkeypatch, skill_app):
+    from test.common.creator_runtime_boundary import isolate_creator_runtime
     from contracts.agent import SystemAgentRef
     from management.services.conversation import creator_execution
 
@@ -172,20 +173,19 @@ async def test_default_route_persists_creator_and_model_preferences(mocker, skil
     async def upstream():
         yield 'data: {"type":"done","content":""}\n\n'
 
-    async def persist(stream, **kwargs):
-        assert kwargs == {"conversation_id": 42, "assistant_index": 1,
-                          "user_id": "user-a", "tenant_id": "tenant-a"}
-        async for event in stream:
-            yield event
-
     dispatch = mocker.patch.object(creation, "create_nl2skill_stream", side_effect=lambda *args: upstream())
-    mocker.patch.object(creator_execution, "persist_creation_stream", side_effect=persist)
+    runtime = isolate_creator_runtime(monkeypatch, creator_execution)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=skill_app), base_url="http://management") as client:
         response = await client.post("/skills/nl2skill/run", json={
             "query": "Create", "model_id": 21, "model_parameter_preferences": {"21": {"temperature": 0.3}},
         })
     assert response.status_code == 200 and response.headers["conversation_id"] == "42"
-    assert '"type":"done"' in response.text
+    events = [json.loads(line.removeprefix("data: ")) for line in response.text.splitlines()
+              if line.startswith("data: ")]
+    assert any(event["type"] == "done" for event in events)
+    runtime.checkpoint.assert_called_once()
+    assert runtime.checkpoint.call_args.kwargs == {"message_id": 101, "conversation_id": 42, "user_id": "user-a"}
+    runtime.launch.assert_awaited_once()
     assert save.call_args.kwargs["agent_id"] == 78
     assert save.call_args.kwargs["selected_model_id"] == 21
     assert save.call_args.kwargs["model_parameter_preferences"] == {"21": {"temperature": 0.3}}

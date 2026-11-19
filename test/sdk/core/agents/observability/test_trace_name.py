@@ -7,7 +7,7 @@ from contextlib import nullcontext
 import pytest
 from opentelemetry import trace
 
-from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper
+from nexent.core.agents.resources.subagents import SubAgentToolWrapper
 from nexent.monitor import AgentRunMetadata, get_agent_monitoring_context
 
 from .conftest import assert_child, by_name

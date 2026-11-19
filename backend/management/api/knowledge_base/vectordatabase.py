@@ -737,6 +737,17 @@ async def delete_documents(
         )
 
 
+@router.get("/{index_name}/documents/error-info")
+async def get_document_error_info_by_query(
+    index_name: str = Path(..., description="Name of the index"),
+    path_or_url: str = Query(..., min_length=1, description="Path or URL of the document"),
+    file_id: Optional[str] = Query(None, description="Durable lifecycle file ID"),
+    authorization: Optional[str] = Header(None),
+):
+    """Look up an opaque document identifier without putting it in the route path."""
+    return await get_document_error_info(index_name, path_or_url, file_id, authorization)
+
+
 @router.get("/{index_name}/documents/{path_or_url:path}/error-info")
 async def get_document_error_info(
     index_name: str = Path(..., description="Name of the index"),

@@ -166,12 +166,12 @@ const COOKIE_NAMES = {
   OAUTH_PENDING: "nexent_oauth_pending",
 };
 
-const isProduction = process.env.NODE_ENV === "production";
+const authCookieSecure = process.env.NEXENT_AUTH_COOKIE_SECURE !== "false";
 
 function buildCookieOptions(httpOnly) {
   return {
     httpOnly,
-    secure: false, // cookie can be send through http
+    secure: authCookieSecure,
     sameSite: "lax",
     path: BASE_PATH || "/",
   };
@@ -232,7 +232,7 @@ function setAuthCookies(res, session) {
 }
 
 function clearAuthCookies(res) {
-  const expired = { maxAge: 0, path: "/" };
+  const expired = { ...buildCookieOptions(false), maxAge: 0 };
   res.setHeader("Set-Cookie", [
     cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", {
       ...expired,
@@ -262,9 +262,8 @@ function setPendingOAuthCookie(res, pendingToken) {
 function clearPendingOAuthCookie(res) {
   appendSetCookies(res, [
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
+      ...buildCookieOptions(true),
       maxAge: 0,
-      path: "/",
-      httpOnly: true,
     }),
   ]);
 }
@@ -566,6 +565,7 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 
           // Copy response headers, but override content-length and set cookies
           const responseHeaders = { ...proxyRes.headers };
+          delete responseHeaders["transfer-encoding"];
           responseHeaders["content-length"] = String(finalBody.length);
           // Merge Set-Cookie: proxyRes cookies + our auth cookies
           const existingSetCookie = res.getHeader("Set-Cookie") || [];
@@ -812,6 +812,8 @@ function handleNorthboundProxy(pathname, req, res) {
  */
 function handleAllApiProxy(pathname, req, res) {
   if (!pathname.startsWith("/api/")) return false;
+
+
 
   // 1. 认证接口单独处理
   if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {

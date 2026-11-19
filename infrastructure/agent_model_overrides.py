@@ -6,7 +6,7 @@ import json
 import math
 from typing import Any
 
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 
 from contracts.agentos import TurnModelGeneration
 from contracts.constants import environment

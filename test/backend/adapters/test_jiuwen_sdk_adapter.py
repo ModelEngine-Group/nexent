@@ -115,7 +115,7 @@ _ensure_openjiuwen_stub()
 # multiple times inside the same pytest session without leaking state.
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def adapter_module(monkeypatch):
+def adapter_module(monkeypatch, request):
     """Import ``adapters.jiuwen_sdk_adapter`` fresh for each test.
 
     The module installs a meta-path finder and writes module-level stubs on
@@ -128,6 +128,7 @@ def adapter_module(monkeypatch):
     # Snapshot of the stub-tree entries we manage.  We re-register them
     # before every test, even if the test deleted them.
     _ensure_openjiuwen_stub()
+    monkeypatch.setattr("importlib.metadata.version", lambda name: getattr(request, "param", "0.1.13"))
 
     sys.modules.pop("adapters.jiuwen_sdk_adapter", None)
     import adapters.jiuwen_sdk_adapter as mod  # noqa: E402,WPS433
@@ -152,6 +153,12 @@ class TestModuleImport:
     def test_bypasser_installed_flag_is_true(self, adapter_module):
         # The module marks the bypasser as installed at import time.
         assert adapter_module._bypasser_installed is True
+
+    @pytest.mark.parametrize("adapter_module", ["0.1.18"], indirect=True)
+    def test_native_version_does_not_install_legacy_import_shims(self, adapter_module):
+        assert adapter_module._needs_legacy_bypass is False
+        assert adapter_module._bypasser_installed is False
+        assert not any(isinstance(finder, adapter_module._JiuwenInitBypasser) for finder in sys.meta_path)
 
     def test_install_jiuwen_bypasser_is_now_a_noop(self, adapter_module):
         # After the import-time install, calling the helper is a no-op that

@@ -45,6 +45,7 @@ class RunJournal:
     user_id: str
     conversation_id: int
     run_id: str
+    retain_for_projection: bool = False
 
     @property
     def key(self) -> str:
@@ -52,19 +53,24 @@ class RunJournal:
         return "runtime:agentos:events:" + hashlib.sha256(scope.encode()).hexdigest()
 
     def _append(self, redis_id, fields, ttl):
+        maxlen = None if self.retain_for_projection else max(1, RUNTIME_STREAM_MAX_LEN)
         with runtime_state_service.client.pipeline() as pipe:
-            pipe.xadd(self.key, fields, id=redis_id, maxlen=max(1, RUNTIME_STREAM_MAX_LEN), approximate=False)
+            pipe.xadd(self.key, fields, id=redis_id, maxlen=maxlen, approximate=False)
             pipe.expire(self.key, max(1, ttl))
             pipe.execute()
 
     def start(self) -> None:
-        self._append(START, {"kind": "start"}, RUNTIME_STREAM_TTL_SECONDS)
+        fields = {"kind": "start"}
+        if self.retain_for_projection:
+            fields["retention"] = "projection"
+        self._append(START, fields, RUNTIME_STREAM_TTL_SECONDS)
 
     def append(self, index: int, chunk: str) -> None:
         self._append(f"{index}-0", {"kind": "chunk", "data": chunk}, RUNTIME_STREAM_TTL_SECONDS)
 
     def finish(self, index: int, status: str) -> None:
-        self._append(f"{index}-0", {"kind": "terminal", "status": status}, RUNTIME_COMPLETED_TTL_SECONDS)
+        ttl = RUNTIME_STREAM_TTL_SECONDS if self.retain_for_projection else RUNTIME_COMPLETED_TTL_SECONDS
+        self._append(f"{index}-0", {"kind": "terminal", "status": status}, ttl)
 
     @property
     def cancel_key(self) -> str:
@@ -95,10 +101,42 @@ class RunJournal:
             end
             local index = tonumber(string.match(tail[1][1], '^%d+'))
             local next_id = string.format('%.0f-0', index + 1)
+            local head = redis.call('XRANGE', KEYS[1], ARGV[4], ARGV[4], 'COUNT', 1)
+            if #head ~= 0 then
+                local start_fields = head[1][2]
+                for i = 1, #start_fields, 2 do
+                    if start_fields[i] == 'retention' and start_fields[i + 1] == 'projection' then
+                        redis.call('XADD', KEYS[1], next_id, 'kind', 'terminal', 'status', ARGV[1])
+                        redis.call('EXPIRE', KEYS[1], ARGV[5])
+                        return
+                    end
+                end
+            end
             redis.call('XADD', KEYS[1], 'MAXLEN', '=', ARGV[2], next_id, 'kind', 'terminal', 'status', ARGV[1])
             redis.call('EXPIRE', KEYS[1], ARGV[3])
             """,
             1, self.key, status, max(1, RUNTIME_STREAM_MAX_LEN), max(1, RUNTIME_COMPLETED_TTL_SECONDS),
+            START, max(1, RUNTIME_STREAM_TTL_SECONDS),
+        )
+
+    def acknowledge_projection(self) -> None:
+        # Keep the full replay available during the normal post-completion window.
+        # Repeated acknowledgments cannot extend it, and active logs are unaffected.
+        runtime_state_service.client.eval(
+            """
+            local tail = redis.call('XREVRANGE', KEYS[1], '+', '-', 'COUNT', 1)
+            if #tail == 0 then return end
+            local fields = tail[1][2]
+            for i = 1, #fields, 2 do
+                if fields[i] == 'kind' and fields[i + 1] == 'terminal' then
+                    if redis.call('TTL', KEYS[1]) > tonumber(ARGV[1]) then
+                        redis.call('EXPIRE', KEYS[1], ARGV[1])
+                    end
+                    return
+                end
+            end
+            """,
+            1, self.key, max(1, RUNTIME_COMPLETED_TTL_SECONDS),
         )
 
     def replay(self, after_id):

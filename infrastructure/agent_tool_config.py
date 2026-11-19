@@ -3,7 +3,7 @@
 
 import json
 
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
 from nexent.core.tools.create_scheduled_task_tool import CreateScheduledTaskProposalTool
 from nexent.core.tools.parallel_executor import ParallelExecutorTool

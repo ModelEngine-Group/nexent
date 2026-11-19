@@ -56,6 +56,7 @@ def flow(mocker):
         yield b"data: answer\n\n"
 
     client = SimpleNamespace(
+        acknowledge_projection=AsyncMock(),
         find_active_run=AsyncMock(return_value=None), start_prepared_run=AsyncMock(side_effect=start),
         resume=AsyncMock(return_value=StreamingResponse(chunks(), media_type="text/event-stream")),
     )

@@ -257,6 +257,12 @@ class TestConfigAppRouterConfiguration:
             "management.thread_management",
             thread_lifecycle_module,
         )
+        configuration_runtime = types.ModuleType("infrastructure.system_configuration.runtime")
+        configuration_runtime.start_system_configuration = AsyncMock()
+        configuration_runtime.stop_system_configuration = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules, "infrastructure.system_configuration.runtime", configuration_runtime
+        )
 
         runtime_state = MagicMock()
         monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
@@ -327,6 +333,10 @@ class TestConfigAppRouterConfiguration:
 
         monkeypatch.setitem(sys.modules, "management.services.agent.prepared_turn", types.SimpleNamespace(
             prepared_turn_lifespan=prepared_lifespan,
+        ))
+        shutdown_creators = AsyncMock()
+        monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
+            shutdown_creator_streams=shutdown_creators,
         ))
 
         ingestion_events = []
@@ -410,6 +420,7 @@ class TestConfigAppRouterConfiguration:
         ):
             asyncio.run(exercise_lifespan())
 
+        shutdown_creators.assert_awaited_once_with(timeout=1)
         assert config_app.app.lifespan is config_app.config_lifespan
         assert prepared_events == ["start", "stop"]
         assert ingestion_events == ["cleanse-start", "ingestion-start", "summary-start", "summary-stop", "ingestion-stop", "cleanse-stop"]
@@ -431,6 +442,8 @@ class TestConfigAppRouterConfiguration:
         automation_scheduler.stop.assert_awaited_once_with()
         for router in router_modules["management.api.automation.agent_automation"].values():
             assert router in config_app.app.included_routers
+        assert configuration_runtime.start_system_configuration.await_count == 1
+        configuration_runtime.stop_system_configuration.assert_awaited_once_with()
 
         # A failure after Northbound recovery must still release Management ownership.
         for target in ("recover_config_tasks_on_startup", "validate_external_service_configuration", "start_dreaming_scheduler"):

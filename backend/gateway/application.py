@@ -18,7 +18,7 @@ from gateway.exposure.registry import default_registry
 from gateway.security.identity import IDENTITY_HEADER, IdentityError, sign_identity
 from gateway.proxy.http import forward_http
 from gateway.proxy.websocket import forward_websocket
-from gateway.routing import filtered_headers
+from gateway.routing import exposure_target, filtered_headers
 
 
 class _NoCookies(DefaultCookiePolicy):
@@ -32,7 +32,7 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
                        identity_lookup=None):
     settings = load_settings() if settings is None else settings
     targets = dict(upstreams or {"management": settings.management_url, "runtime": settings.runtime_url,
-                                "northbound": settings.northbound_url})
+                                "northbound": settings.northbound_url, "ops": settings.ops_url})
     authenticate = settings.auth_enabled if authentication is None else authentication
     registry = default_registry() if registry is None else registry
     for target in targets.values():
@@ -83,25 +83,26 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
     async def health():
         return {"status": "ready"}
 
-    def target_url(method, path, query, *, transport="http"):
-        match = registry.match(method, path, transport=transport)
-        if match is None:
-            return None
-        return targets[match.target].rstrip("/") + path + ("?" + query if query else "")
+    def target_url(connection, target):
+        # Preserve the exact request path and query used for the downstream signature.
+        scope = connection.scope
+        path = scope["raw_path"].decode("ascii")
+        query = scope["query_string"].decode("ascii")
+        return targets[target].rstrip("/") + path + ("?" + query if query else "")
 
-    async def request_headers(connection):
+    async def request_headers(connection, target):
         headers = filtered_headers(connection.headers.items(), request=True)
         if authenticate:
             method = connection.scope.get("method", "GET")
             principal = await resolve_identity(connection, settings=settings,
                                                identity_lookup=connection.app.state.identity_lookup)
-            selected = connection.scope["gateway.exposure"].target
             match = connection.scope["gateway.exposure"]
             if principal is not None and principal.get("kind") not in match.credential_kinds:
                 raise IdentityError("Credential policy mismatch")
             if principal is None and "anonymous" not in match.credential_kinds:
                 raise IdentityError("Identity required by exposure policy")
-            token = sign_identity(principal, "runtime" if selected == "runtime" else "management",
+            audience = "management" if target == "northbound" else target
+            token = sign_identity(principal, audience,
                                   method, connection.url.path, connection.scope["query_string"], key=settings.signing_key())
             headers.append((IDENTITY_HEADER, token))
             if connection.scope["type"] == "http" and not connection.headers.get("authorization") and authorization_for(connection):
@@ -121,13 +122,10 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
     async def proxy(request: Request, path: str):
-        url = target_url(request.method, request.url.path, request.scope["query_string"].decode("ascii"))
-        if url is None:
-            return JSONResponse({"detail": "Not found"}, status_code=404)
-        origin = urlsplit(url)
-        url = origin.scheme + "://" + origin.netloc + request.scope["raw_path"].decode("ascii") + ("?" + origin.query if origin.query else "")
+        target = exposure_target(request.scope["gateway.exposure"], request.scope["query_string"])
+        url = target_url(request, target)
         try:
-            headers = await request_headers(request)
+            headers = await request_headers(request, target)
         except IdentityError:
             return JSONResponse({"message": "Invalid or missing credentials"}, status_code=401)
         except IdentityUnavailable:
@@ -136,13 +134,11 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
 
     @app.websocket("/{path:path}")
     async def websocket_proxy(websocket: WebSocket, path: str):
-        url = target_url("GET", websocket.url.path, websocket.scope["query_string"].decode("ascii"), transport="websocket")
-        if url is None:
-            await websocket.close(code=1008)
-            return
+        target = websocket.scope["gateway.exposure"].target
+        url = target_url(websocket, target)
         url = ("wss" if url.startswith("https:") else "ws") + url[url.index(":"):]
         try:
-            headers = await request_headers(websocket)
+            headers = await request_headers(websocket, target)
         except (IdentityError, IdentityUnavailable):
             await websocket.close(code=1008)
             return

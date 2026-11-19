@@ -7,7 +7,7 @@ from typing import Any
 
 from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
 from contracts.model_names import add_repo_to_name, get_model_name_from_config
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.model_service.compatibility.legacy_config import (
     legacy_extra_body,
     legacy_reasoning_budget,
@@ -27,7 +27,10 @@ def create_tenant_default_model_config(record: dict, alias: str, *, include_logp
     """Build the SDK profile used by legacy main_model and sub_model aliases."""
     snapshot = restore_model_snapshot(record, record.get("tenant_id"))
     if snapshot is not None:
-        return _resolved_model_config(record, snapshot, cite_name=alias)
+        return _resolved_model_config(
+            record, snapshot, cite_name=alias,
+            extra_body={"logprobs": True} if include_logprobs else None,
+        )
     provider = record.get("model_factory")
     return ModelConfig(
         cite_name=alias,
@@ -213,7 +216,7 @@ def create_model_config_from_record(record):
                         extra_body=legacy_extra_body(record.get("extra_params")))
 
 
-def _resolved_model_config(record, snapshot, cite_name=None):
+def _resolved_model_config(record, snapshot, cite_name=None, *, extra_body=None):
     """Map one frozen outlet into the existing Agent configuration contract."""
     from infrastructure.model_adapter import project_saved_outlet
 
@@ -239,4 +242,5 @@ def _resolved_model_config(record, snapshot, cite_name=None):
         tokenizer_family=snapshot.context_configuration.tokenizer_family,
         capacity_source=snapshot.context_configuration.capacity_source,
         capability_profile_version=snapshot.context_configuration.capability_profile_version,
+        extra_body=extra_body,
     )

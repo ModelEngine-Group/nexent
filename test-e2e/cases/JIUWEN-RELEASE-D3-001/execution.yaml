@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: JIUWEN-RELEASE-D3-001
+implementations:
+- framework: pytest
+  file: test_release.py
+  selector: test_deployed_real_smoke
+  profiles:
+  - real_smoke
+timeout_seconds: 1200
+acceptance_bindings:
+  AC-01:
+  - test_deployed_real_smoke
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

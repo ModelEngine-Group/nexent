@@ -17,6 +17,7 @@ from redis.exceptions import RedisError
 from contracts.constants.environment import RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
+from infrastructure.agent_stream_replay import CompactReplay
 from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
@@ -42,10 +43,12 @@ class StreamingChannel:
     ):
         self.conversation_id = conversation_id
         self.user_id = user_id
+        self.generation: Optional[str] = None
         self._history_size = max(1, history_size)
         self._history_max_bytes = max(1, RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES)
         self._history_buffer: Deque[Tuple[int, str, int]] = deque()
         self._history_bytes = 0
+        self._replay = CompactReplay()
         self._next_event_index = 0
         self._lock: asyncio.Lock = asyncio.Lock()
         self._data_event: asyncio.Event = asyncio.Event()
@@ -177,6 +180,7 @@ class StreamingChannel:
             event_index = self._next_event_index
             self._next_event_index += 1
             self._history_buffer.append((event_index, chunk, chunk_bytes))
+            replay_update = self._replay.append(chunk)
             self._history_bytes += chunk_bytes
             while len(self._history_buffer) > self._history_size or (
                 self._history_bytes > self._history_max_bytes
@@ -190,6 +194,8 @@ class StreamingChannel:
             user_id=self.user_id,
             conversation_id=self.conversation_id,
             chunk=chunk,
+            replay_update=replay_update,
+            **({"generation": self.generation} if self.generation is not None else {}),
         )
 
         # Wake up waiting subscribers immediately
@@ -232,7 +238,9 @@ class StreamingChannel:
         """Get the error message."""
         return self._error
 
-    async def subscribe_with_history(self, start_from_index: int = 0) -> AsyncIterator[str]:
+    async def subscribe_with_history(
+        self, start_from_index: int = 0, *, include_replay_checkpoint: bool = False,
+    ) -> AsyncIterator[str]:
         """
         Subscribe with history: yields historical chunks from start_from_index,
         then continues waiting for new chunks until stream completes.
@@ -242,6 +250,10 @@ class StreamingChannel:
             start_from_index: Index to start yielding historical chunks from.
                               Pass resume_from_unit_index to skip already-received chunks.
         """
+        if include_replay_checkpoint:
+            async for chunk in self._subscribe_checkpoint():
+                yield chunk
+            return
         self.add_subscriber()
         try:
             async with self._lock:
@@ -286,6 +298,27 @@ class StreamingChannel:
                     )
                 for chunk in pending_chunks:
                     yield chunk
+        finally:
+            self.remove_subscriber()
+
+    async def _subscribe_checkpoint(self) -> AsyncIterator[str]:
+        """Slow reconnecting readers must not lose updates to a trimmed raw tail."""
+        self.add_subscriber()
+        cursor = (0, 0)
+        try:
+            while True:
+                async with self._lock:
+                    chunks, cursor = self._replay.read_after(cursor)
+                    completed = self._completed
+                    self._data_event.clear()
+                for chunk in chunks:
+                    yield chunk
+                if completed:
+                    break
+                try:
+                    await asyncio.wait_for(self._data_event.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
         finally:
             self.remove_subscriber()
 

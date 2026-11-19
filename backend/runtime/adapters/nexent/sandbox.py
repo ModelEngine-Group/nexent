@@ -6,7 +6,7 @@ from typing import Any
 
 from contracts.constants import environment
 from infrastructure.sandbox_deployment import default_sandbox_policy
-from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.sandbox.config import SandboxConfig
 
 
 def resolve_deployed_sandbox(database_policy: dict[str, Any] | None) -> SandboxConfig | None:

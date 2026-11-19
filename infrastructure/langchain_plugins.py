@@ -12,7 +12,7 @@ from contracts.constants import environment
 from infrastructure.local_tool_execution import catalog_tool_parameters
 from infrastructure.rdb.local_tool_records import read_bound_catalog_tools
 from infrastructure.rdb.mcp_execution_records import read_skill_derived_tools
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 LANGCHAIN_PLUGIN_DIRECTORY = Path(__file__).resolve().parents[1] / "backend/tool_collection/langchain"
 

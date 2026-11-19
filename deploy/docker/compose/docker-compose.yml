@@ -95,6 +95,7 @@ services:
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
@@ -136,6 +137,7 @@ services:
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
@@ -222,6 +224,7 @@ services:
       DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
+      GATEWAY_OPS_URL: "http://nexent-ops:${OPS_PORT:-5016}"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
     entrypoint: ["python", "-m", "backend.http.gateway_service"]
     healthcheck:
@@ -259,6 +262,7 @@ services:
       - RUNTIME_HTTP_BACKEND=http://nexent-gateway:5013
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
+      - NEXENT_AUTH_COOKIE_SECURE=${NEXENT_AUTH_COOKIE_SECURE:-true}
       - MODEL_ENGINE_ENABLED=${MODEL_ENGINE_ENABLED:-false}
     logging:
       driver: "json-file"
@@ -298,7 +302,6 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
-      ELASTICSEARCH_SERVICE: "http://nexent-gateway:5013/api"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"

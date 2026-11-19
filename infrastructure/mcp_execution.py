@@ -6,7 +6,7 @@ import json
 from urllib.parse import quote, urljoin
 
 from contracts.constants import environment
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 LOCAL_MCP_NAME = "outer-apis"
 MCP_ARGUMENT_OVERRIDES = "agentos_mcp_argument_overrides"
@@ -49,7 +49,7 @@ def select_mcp_server(records: list[dict], usage: str, tenant_id: str) -> tuple[
         if local_url is None:
             raise LookupError("Local MCP server is not configured")
         server_id, url = None, local_url
-        headers = {"X-Tenant-ID": tenant_id, "X-Nexent-Internal-Token": environment.TOKEN}
+        headers = {"X-Tenant-ID": tenant_id, "X-Nexent-Internal-Token": environment.NEXENT_MCP_INTERNAL_TOKEN}
     else:
         matches = [record for record in records if record["mcp_name"] == usage]
         if len(matches) != 1 or matches[0]["enabled"] is False:

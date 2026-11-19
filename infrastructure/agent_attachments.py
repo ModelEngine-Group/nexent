@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import MINIO_DEFAULT_BUCKET
 from infrastructure.object_storage.read_access import require_s3_read_access
-from nexent.core.agents.agent_model import AgentHistory
+from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.agents.prompt.user_context import render_user_context
 
 logger = logging.getLogger(__name__)

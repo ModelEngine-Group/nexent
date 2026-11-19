@@ -13,30 +13,24 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import uvicorn
+from fastapi import FastAPI, Request, Response
+from starlette.responses import StreamingResponse
+
 from contracts.agentos import (
-    AgentOperation,
-    AgentResume,
-    AgentRunReference,
-    AgentStop,
-    BackgroundRun,
-    EvaluationAgentRun,
-    PreparedAgentRun,
-    PreparedEvaluationRun,
+    TurnModelGeneration, AgentOperation, AgentResume, AgentRunReference, AgentStop, BackgroundRun,
+    CompatibilityStop, EvaluationAgentResult, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun,
     TrackedBackgroundResult,
-    TurnModelGeneration,
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
-from fastapi import FastAPI, Request, Response
 from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.security.context import trusted_identity
+from infrastructure import agentos_identity
+from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
 from runtime.agentos import prepared_evaluation
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.agentos.middleware import AgentOSMiddleware
-from starlette.responses import StreamingResponse
-
-from infrastructure import agentos_identity
-from infrastructure.agentos_identity import ServicePrincipal, sign_call
 
 _LOCAL_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=2.0, write=2.0, pool=2.0)
 
@@ -75,7 +69,7 @@ def serve(app):
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
 @pytest.mark.asyncio
 async def test_signed_agentos_transport(monkeypatch, tmp_path):
-    from contracts.agentos import PRINCIPAL_KEY, ModelOperation, ModelReference
+    from contracts.agentos import ModelOperation, ModelReference, PRINCIPAL_KEY
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-current-transport-key")
     actor = ServicePrincipal("user-a", "tenant-a")
     runtime = FastAPI(root_path="/api")
@@ -234,22 +228,22 @@ async def _assert_memory_store_over_signed_http(monkeypatch):
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
-    from contracts.agentos import PreparedConversationScope
-    from contracts.model import WorkbenchGenerationConfig
+    from fastapi import Request
+
     from ext_components.aidp.database import aidp_permission_db
     from ext_components.aidp.services import aidp_service
-    from fastapi import Request
-    from management.services.agent.preparation import evaluation_snapshot, local_tool
-    from management.services.agent.preparation.run import apply_root_generation_overlay
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import prepared_evaluation, prepared_local_tool, prepared_run
-    from runtime.executions import LocalExecutionRegistry
-
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
     from infrastructure.rdb import account_access
+    from contracts.agentos import PreparedConversationScope
+    from contracts.model import WorkbenchGenerationConfig
     from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
+    from management.services.agent.preparation import evaluation_snapshot, local_tool
+    from management.services.agent.preparation.run import apply_root_generation_overlay
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from runtime.agentos import prepared_evaluation, prepared_local_tool, prepared_run
+    from runtime.executions import LocalExecutionRegistry
 
     provider = FastAPI()
     searches = []
@@ -413,23 +407,17 @@ async def test_catalog_system_tools_over_signed_agentos(monkeypatch, tmp_path, s
 
 async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, catalog_name="dify_search", system_class=None):
     from fastapi import Request, Response
-    from management.services.agent.preparation import evaluation_snapshot, tools
-    from management.services.knowledge_base.providers import (
-        aidp as independent_aidp_proxy,
-    )
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.utils.observer import ProcessType
-    from runtime.agentos import (
-        prepared_evaluation,
-        prepared_langchain,
-        prepared_local_tool,
-    )
-    from runtime.executions import LocalExecutionRegistry
 
     from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import evaluation_snapshot, tools
+    from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.utils.observer import ProcessType
+    from runtime.agentos import prepared_evaluation, prepared_langchain, prepared_local_tool
+    from runtime.executions import LocalExecutionRegistry
 
     system_name = "tenant_" + system_class.removesuffix("Tool").lower() if system_class else None
     model_record = {
@@ -715,38 +703,25 @@ async def test_knowledge_catalog_alias_over_signed_agentos(monkeypatch, tmp_path
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *, legacy_top_k=4, analysis_name="analyze_image", knowledge_name="knowledge_base_search"):
     from types import SimpleNamespace
-
-    from management.services.agent import runtime_client
-    from management.services.agent.preparation import (
-        analysis,
-        evaluation_snapshot,
-        knowledge_search,
-        tools,
-    )
-    from management.services.knowledge_base import permission as knowledge_permission
-    from management.services.knowledge_base.providers import (
-        aidp as independent_aidp_proxy,
-    )
-    from management.services.model import adapter as management_model_adapter
-    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import (
-        prepared_analysis,
-        prepared_attachments,
-        prepared_evaluation,
-        prepared_knowledge,
-        prepared_local_tool,
-        prepared_mcp,
-        prepared_skills,
-    )
-    from runtime.executions import LocalExecutionRegistry
-
-    from infrastructure import agent_attachments, ind_aidp_images
-    from infrastructure.a2a_execution import build_external_agent_config
+    from infrastructure import agent_attachments
+    from infrastructure.object_storage.client import minio_client
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+    from infrastructure import ind_aidp_images
     from infrastructure.local_tool_execution import build_local_tool
-    from infrastructure.object_storage.client import minio_client
+    from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
+    from management.services.agent import runtime_client
+    from management.services.agent.preparation import analysis, evaluation_snapshot, knowledge_search, tools
+    from management.services.model import adapter as management_model_adapter
+    from management.services.knowledge_base import permission as knowledge_permission
+    from infrastructure.a2a_execution import build_external_agent_config
+    from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from runtime.agentos import (
+        prepared_analysis, prepared_attachments, prepared_evaluation, prepared_knowledge,
+        prepared_local_tool, prepared_mcp, prepared_skills,
+    )
+    from runtime.executions import LocalExecutionRegistry
 
     key = "synthetic-prepared-evaluation-fixture-secret"
     monkeypatch.setattr(environment, "JWT_SECRET", key)
@@ -780,22 +755,6 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         "model_repo": None, "display_name": "evaluation_llm", "api_key": "only-in-runtime",
         "base_url": "https://provider.example/v1", "update_time": "revision-1",
     }
-    from nexent.core.model_service.profiles.outlet_storage import (
-        encode_resolved_model_profile,
-    )
-    from nexent.core.model_service.registry import model_service_references
-    from shared.model_service_profiles import resolved_profile_for_test
-    profile = resolved_profile_for_test(record["base_url"])
-    profile_data = profile.model_dump(mode="json")
-    profile_data["outlet_id"] = profile_data["connection"]["credential_ref"]["model_id"] = 11
-    profile_data["identity"]["tenant_id"] = "tenant-a"
-    profile_data["identity"]["display_name"] = record["display_name"]
-    profile = profile.__class__.model_validate(profile_data)
-    record.update(encode_resolved_model_profile(profile, registered_references=model_service_references()))
-    monkeypatch.setattr("management.services.agent.preparation.model_bindings.get_model_by_model_id", lambda *_: record)
-    monkeypatch.setattr("management.services.agent.preparation.model_bindings.read_agent_model_overrides", lambda *_: {})
-    monkeypatch.setattr("runtime.model.parameters.read_agent_model_overrides", lambda *_: {})
-
 
     external_row = {
         "external_agent_id": 19, "name": "External", "description": "Authorized peer",
@@ -936,50 +895,20 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         ]
 
     membership = {"tenant_id": "tenant-a", "user_role": "DEV"}
-    from unittest.mock import AsyncMock
-
-    from contracts.agentos import ModelMetadata
-    monkeypatch.setattr(knowledge_search, "read_knowledge_search_records", read_knowledge)
-    monkeypatch.setattr(prepared_knowledge, "get_model_by_model_id", lambda model_id, tenant_id: embedding_row
-                        if (model_id, tenant_id) == (91, "tenant-a") else None)
-    metadata_client = SimpleNamespace(get_model=AsyncMock(return_value=ModelMetadata(
-        model_id=91, model_type="embedding", display_name="Embedding", revision="revision-1")))
-    monkeypatch.setattr(knowledge_search, "AgentOSClient", lambda *args: metadata_client)
-    async def compile_scope(name, method, *args, **kwargs):
-        kwargs.pop("lane", None)
-        kwargs.pop("owner", None)
-        return method(*args, **kwargs)
-    monkeypatch.setattr(knowledge_search, "run_blocking", compile_scope)
+    for module in (knowledge_search, prepared_knowledge):
+        monkeypatch.setattr(module, "read_knowledge_search_records", read_knowledge)
+        monkeypatch.setattr(module, "get_model_by_model_id", lambda model_id, tenant_id: embedding_row
+                            if (model_id, tenant_id) == (91, "tenant-a") else None)
     monkeypatch.setattr(knowledge_permission, "get_user_tenant_by_user_id", lambda user_id: membership)
     monkeypatch.setattr(knowledge_permission, "query_group_ids_by_user", lambda user_id: list(groups))
-    from contracts.agentos_knowledge import KnowledgeBaseGrant, KnowledgeSearchGrant
-
-    from infrastructure.knowledge_search import knowledge_search_revision
-    def fresh_knowledge_grant(binding, actor, client):
-        if not groups:
-            raise RuntimeUpstreamError(status_code=403, content=b'{"code":"KNOWLEDGE_FORBIDDEN"}', headers={})
-        return KnowledgeSearchGrant(knowledge_bases=[KnowledgeBaseGrant(
-            knowledge_id=90, collection="kb-open", embedding_model_id=91, revision=knowledge_search_revision(knowledge_row))])
-    monkeypatch.setattr(prepared_knowledge, "_current_grant", fresh_knowledge_grant)
+    monkeypatch.setattr(prepared_knowledge, "read_knowledge_search_actor", lambda user_id: (membership, list(groups)))
     monkeypatch.setattr(prepared_knowledge, "build_adapter_fresh", lambda *args: object())
-    from contracts.agentos_knowledge import KnowledgeFileReference
-    monkeypatch.setattr(knowledge_search, "prepare_tool_files", lambda *args, **kwargs: [
-        KnowledgeFileReference(knowledge_id=90, file_id="a" * 32, file_version=0)])
-
-    def standard_search(backend, *, rerank_model):
-        assert backend.files[0].file_id == "a" * 32
-        def invoke(*, query, index_names, search_mode, top_k, cancellation_scope):
-            assert search_mode == "accurate" and index_names == ["kb-open"]
-            rows = accurate_search(index_names=index_names, query_text=query, top_k=top_k)
-            return {"results": [{**row["document"], "score": row["score"], "index": row["index"]}
-                                for row in rows if row["document"]["path_or_url"] == "reports/allowed.txt"]}
-        return invoke
-    monkeypatch.setattr(prepared_knowledge, "RuntimeKnowledgeTool", standard_search)
+    monkeypatch.setattr(prepared_knowledge, "create_elasticsearch_core", lambda **kwargs: SimpleNamespace(accurate_search=accurate_search))
     kb_tool = ToolConfig(
         class_name="KnowledgeBaseSearchTool", name=knowledge_name, source="local",
         params={"index_names": ["kb-open", "kb-blocked"], "search_mode": "accurate", "top_k": legacy_top_k},
     )
-    assert await knowledge_search.prepare_knowledge_search(kb_tool, "user-a", "tenant-a", ["reports/allowed.txt"])
+    assert knowledge_search.prepare_knowledge_search(kb_tool, "user-a", "tenant-a", ["reports/allowed.txt"])
 
     media_model = dict(record, model_id=93, model_type="vlm", api_key="private-image-model-key")
     media_adapter = object()
@@ -1042,8 +971,27 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         result = knowledge.forward("facts", ["Blocked"])
         assert "authorized-document" in result and "secret-document" not in result
         assert "no read permission" in result
-        assert knowledge_queries == [{
-            "index_names": ["kb-open"], "query_text": "facts", "top_k": knowledge.top_k,
+        from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
+
+        original_queries = []
+
+        def original_search(**kwargs):
+            original_queries.append(kwargs)
+            return [
+                {"index": "kb-open", "score": 1, "document": {"content": content, "path_or_url": path}}
+                for content, path in [("authorized-document", "reports/allowed.txt"), ("secret-document", "reports/hidden.txt")]
+            ]
+
+        original = KnowledgeBaseSearchTool(
+            top_k=legacy_top_k, index_names=["kb-open", "kb-blocked"], search_mode="accurate",
+            observer=None, rerank=False, rerank_model_name="", embedding_model=None, rerank_model=None,
+            allowed_index_names=["kb-open"], document_paths=["reports/allowed.txt"],
+            display_name_to_index_map={"Open": "kb-open", "Blocked": "kb-blocked"},
+            vdb_core=SimpleNamespace(accurate_search=original_search),
+        )
+        assert original.forward("facts", ["Blocked"]) == result
+        assert knowledge_queries == original_queries == [{
+            "index_names": ["kb-open"], "query_text": "facts", "top_k": original.top_k,
         }]
         image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name[analysis_name])
         assert image.name == "analyze_image"
@@ -1248,12 +1196,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
 
 
 async def _assert_resume_over_signed_http(monkeypatch):
+    from infrastructure.rdb.agent_admission import AdmissionScopeError
+    from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
     from management.services.agent import prepared_turn, runtime_client
     from runtime.agentos import resume
-
-    from infrastructure.rdb.agent_admission import AdmissionScopeError
-    from infrastructure.redis.agent_events import START
 
     run_id = "1" * 32
     reads = []
@@ -1450,7 +1397,6 @@ async def _assert_run_lifecycle_over_signed_http(monkeypatch):
 
 async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
     from unittest.mock import patch
-
     from contracts.agentos import OPERATIONS_BY_PATH
     with patch("nexent.core.nlp.stopwords.load_stopwords"):
         from runtime.api.application import app
@@ -1476,41 +1422,25 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from unittest.mock import AsyncMock, Mock
 
     from contracts.agent import AgentRequest
-    from contracts.agentos import (
-        AgentMemoryReceipt,
-        AgentMemoryStored,
-        ManagementOperation,
-        PreparedMemorySearch,
-    )
+    from contracts.agentos import AgentMemoryReceipt, AgentMemoryStored, ManagementOperation, PreparedMemorySearch
     from contracts.conversation import MessageSource
     from contracts.errors.exceptions import RuntimeServiceUnavailableError
-    from management.api.agent import conversation_run
-    from management.api.memory import agentos_callback as memory_api
-    from management.services.agent import (
-        agentos_events,
-        prepared_projection,
-        runtime_client,
-    )
-    from management.services.agent.preparation import evaluation_snapshot
-    from management.services.agent.preparation import run as compile_run
     from management.services.automation import runner as automation
-    from management.services.memory import agentos_callback as memory_callback
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
-    from nexent.core.tools.store_memory_tool import StoreMemoryTool
-    from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
-    from runtime.agentos import (
-        prepared_evaluation,
-        prepared_memory,
-        prepared_run,
-        resume,
-    )
-
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_store_memory_tool
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
+    from management.api.agent import conversation_run
+    from management.api.memory import agentos_callback as memory_api
+    from management.services.memory import agentos_callback as memory_callback
+    from management.services.agent import agentos_events, prepared_projection, runtime_client
+    from management.services.agent.preparation import evaluation_snapshot, run as compile_run
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
+    from nexent.core.tools.store_memory_tool import StoreMemoryTool
+    from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
+    from runtime.agentos import prepared_evaluation, prepared_memory, prepared_run, resume
 
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     actor = ServicePrincipal("user-a", "tenant-a")
@@ -1922,11 +1852,10 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     from unittest.mock import Mock
 
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.plan_repo import PlanRepo
-    from runtime.agentos import prepared_run
-
     from infrastructure.agent_model_config import model_record_revision
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
+    from runtime.agentos import prepared_run
 
     principal = ServicePrincipal("planning-user", "planning-tenant")
     reference = AgentRunReference(conversation_id=47, run_id="a" * 32)
@@ -2009,27 +1938,21 @@ def _serve_workbench_aidp_images():
 
 
 async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, provider_url, provider_calls):
-    from contracts.agentos import (
-        EvaluationSkillTool,
-        ManagementOperation,
-        WorkbenchSkillLookup,
-        WorkbenchSkillMounts,
-    )
+    from contracts.agentos import EvaluationSkillTool, ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
     from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
-    from management.api.agent import workbench_callback
-    from management.api.knowledge_base import ind_aidp
-    from management.services.agent.preparation import evaluation_snapshot
-    from management.services.agent.workbench import ResolvedSkillMount
-    from management.services.knowledge_base.providers import aidp
-    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import prepared_mcp, prepared_run, prepared_skills
-
     from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
     from infrastructure.local_tool_execution import build_local_tool
     from infrastructure.mcp_execution import build_mcp_tool
     from infrastructure.skill_execution import capture_skill_files
+    from management.api.agent import workbench_callback
+    from management.api.knowledge_base import ind_aidp
+    from management.services.knowledge_base.providers import aidp
+    from management.services.agent.preparation import evaluation_snapshot
+    from management.services.agent.workbench import ResolvedSkillMount
+    from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from runtime.agentos import prepared_mcp, prepared_run, prepared_skills
 
     actor = ServicePrincipal("workbench-user", "workbench-tenant")
     reference = AgentRunReference(conversation_id=88, run_id="a" * 32)
@@ -2263,21 +2186,15 @@ async def _assert_public_prepared_turn_over_signed_http(
     use_knowledge_scope=False, clarification=False, use_memory=False, use_root_skill=False,
     check_cursorless_resume=False, raw_prior_users=None,
 ):
-    from contracts.agent import WorkbenchSessionConfig
     from contracts.agentos import CompatibilityConversationRun
+    from contracts.agent import WorkbenchSessionConfig
     from contracts.clarification import ClarificationResponse
     from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
-    from management.api.agent import conversation_run
-    from management.services.agent import (
-        conversation_submission,
-        prepared_projection,
-        prepared_turn,
-        runtime_client,
-    )
-    from runtime.agentos import prepared_run, resume
-
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
+    from management.api.agent import conversation_run
+    from management.services.agent import conversation_submission, prepared_projection, prepared_turn, runtime_client
+    from runtime.agentos import prepared_run, resume
 
     raw_new = raw_prior_users is not None
     boundary = raw_prior_users * 2 if raw_new else 0 if new_conversation else 4
@@ -2701,16 +2618,14 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     from contracts.tool import ToolParamsRequest
     from management.api.agent import conversation_run
     from management.services.agent import agentos_events, authorization, runtime_client
-    from management.services.agent.preparation import evaluation_snapshot
-    from management.services.agent.preparation import run as compile_run
+    from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from management.services.model import run_controls
     from nexent.core.agents import run_agent as sdk_runner
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.plan_repo import PlanRepo
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.monitor import get_agent_monitoring_context
-    from runtime.agentos import debug as debug_lifecycle
-    from runtime.agentos import ephemeral, resume
+    from runtime.agentos import debug as debug_lifecycle, ephemeral, resume
     from runtime.agentos.prepared_skills import skill_stage_path
     from runtime.executions import LocalExecutionRegistry
 
@@ -3024,13 +2939,12 @@ async def _assert_automation_proposal_callback(monkeypatch):
     from unittest.mock import AsyncMock, Mock
 
     from contracts.agentos import AgentResource, ManagementOperation, ToolBinding
+    from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
     from management.api.automation import agentos_callback as callback_api
     from management.services.automation import agentos_callback, proposal
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from runtime.agentos import resume
     from runtime.agentos.prepared_automation import materialize_automation_tool
-
-    from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 
     actor = ServicePrincipal("proposal-user", "proposal-tenant")
     reference = AgentRunReference(conversation_id=56, run_id="c" * 32)
@@ -3120,8 +3034,8 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     from management.api.skill import creation
     from management.services.agent import runtime_client
     from management.services.conversation import creation_history
-    from management.services.model import creator_snapshot
     from management.services.skill import creation as skill_service
+    from management.services.model import creator_snapshot
     from nexent.core.agents import run_agent as sdk_runner
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.core.utils.observer import ProcessType
@@ -3243,25 +3157,15 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
     from contextlib import nullcontext
 
     from contracts.agentos import ManagementOperation, NL2AgentToolCall
-    from management.api.agent import creator
-    from management.api.agent import nl2agent_callback as callback_api
-    from management.services.agent import (
-        creator_run,
-        nl2agent,
-        nl2agent_callback,
-        runtime_client,
-    )
+    from infrastructure.nl2agent_tool_config import NL2A_WRAPPER_NAME, SAVE_AGENT_DRAFT_FIELDS_NAME
+    from management.api.agent import creator, nl2agent_callback as callback_api
+    from management.services.agent import creator_run, nl2agent_callback, nl2agent, runtime_client
     from management.services.model import creator_snapshot
     from nexent.core.agents import run_agent as sdk_runner
-    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.core.utils.observer import ProcessType
     from runtime.agentos import ephemeral, prepared_agent_creator
-
-    from infrastructure.nl2agent_tool_config import (
-        NL2A_WRAPPER_NAME,
-        SAVE_AGENT_DRAFT_FIELDS_NAME,
-    )
 
     actor = ServicePrincipal("creator-user", "creator-tenant")
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-nl2agent-transport-secret")
@@ -3408,13 +3312,12 @@ async def test_saved_user_compatibility_over_signed_http(monkeypatch, fallback):
 ])
 @pytest.mark.asyncio
 async def test_background_management_handoff_over_signed_http(monkeypatch, mode):
-    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY
-    from contracts.conversation import HistoryItem
     from fastapi import HTTPException
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, ManagementOperation
     from management.db.conversation.prepared_turn import SavedUserTurn
     from management.services.agent import background, runtime_client
-
-    from backend.http.server.app_factory import create_app
+    from contracts.conversation import HistoryItem
 
     actor = ServicePrincipal("background-user", "background-tenant")
     reference = AgentRunReference(run_id="8" * 32, conversation_id=42)
@@ -3631,18 +3534,16 @@ async def test_raw_scoped_preparation_over_signed_http(monkeypatch, workbench):
 async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypatch, tmp_path, sampling, child_level):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
-    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, PreparedEphemeralRun
-    from management.services.agent import tool_identity
-    from management.services.agent.preparation import evaluation_snapshot
-    from management.services.agent.preparation import run as preparation
-    from management.services.model import run_controls
-    from nexent.core.agents.agent_model import AgentConfig
-    from nexent.core.agents.nexent_agent import NexentAgent
-
     from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, PreparedEphemeralRun
     from infrastructure import agent_model_config
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_model_overrides import overlay_root_model
+    from management.services.agent import tool_identity
+    from management.services.agent.preparation import run as preparation, evaluation_snapshot
+    from management.services.model import run_controls
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
 
     actor = ServicePrincipal("profile-user", "profile-tenant")
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-profile-key")
@@ -3773,21 +3674,12 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
 @pytest.mark.parametrize("source_record", [False, True])
 @pytest.mark.asyncio
 async def test_background_without_automation_record_over_signed_agentos(monkeypatch, disconnect, source_record):
-    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY
     from fastapi import HTTPException
-    from management.services.agent import (
-        background,
-        prepared_projection,
-        runtime_client,
-    )
-    from management.services.agent import background_compatibility as compatible
-    from runtime.agentos import prepared_run
-
     from backend.http.server.app_factory import create_app
-    from infrastructure.rdb.agent_admission import (
-        AdmissionClaim,
-        AdmissionRequestConflict,
-    )
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY
+    from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
+    from management.services.agent import background, background_compatibility as compatible, prepared_projection, runtime_client
+    from runtime.agentos import prepared_run
 
     actor = ServicePrincipal("compat-user", "compat-tenant")
     reference = AgentRunReference(conversation_id=42, run_id="7" * 32)

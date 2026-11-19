@@ -9,7 +9,7 @@ from contracts.errors.exceptions import ToolExecutionException
 from management.services.agent.preparation.knowledge_search import (
     prepare_knowledge_search,
 )
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient

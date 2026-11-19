@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Verified TLS transport and non-destructive migration of legacy containers."""
 
 import io
@@ -13,10 +14,10 @@ from unittest.mock import Mock
 
 import pytest
 from cryptography import x509
-from nexent.core.agents import sandbox
-from nexent.core.agents import sandbox_tls as tls
-from nexent.core.agents import sandbox_tls_bootstrap as bootstrap
-from nexent.core.agents.sandbox_tls_bootstrap import generate_identity
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.sandbox import tls as tls
+from nexent.core.agents.sandbox import tls_bootstrap as bootstrap
+from nexent.core.agents.sandbox.tls_bootstrap import generate_identity
 from requests.exceptions import SSLError
 
 

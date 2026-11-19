@@ -208,6 +208,11 @@ def session(monkeypatch):
         yield value
 
     monkeypatch.setattr(db, "get_db_session", sessions)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        db, "get_config_snapshot", lambda: system_config_snapshot()
+    )
     return value
 
 

@@ -1,84 +1,108 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Background execution must report this execution's persisted terminal result."""
+"""Background results come from the scoped execution's terminal projection."""
 
 import asyncio
-from contextlib import nullcontext
+import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
-from contracts.agent import AgentRequest
-from management.services.agent import run
+from contracts.conversation import MessageSource
+from contracts.errors.exceptions import RuntimeServiceUnavailableError
+from management.services.agent import background, prepared_projection
+from management.services.automation import runner
+from .test_agentos_conversation_projection import REFERENCE, event, response
 
 
 @pytest.fixture
-def background(monkeypatch):
-    monkeypatch.setattr(run, "build_agent_run_context", lambda *a, **k: SimpleNamespace(
-        metadata={}, enable_memory=False,
-    ))
-    monkeypatch.setattr(run, "agent_monitoring_context", lambda *a: nullcontext())
-    monkeypatch.setattr(run, "get_latest_assistant_message", lambda *a: pytest.fail(
-        "A background run must never reuse the latest conversation message"
-    ), raising=False)
-    return AgentRequest(query="controlled", conversation_id=99, agent_id=1)
+def projection(mocker):
+    record = {
+        "projection_message_index": 5, "runtime_run_id": REFERENCE.run_id,
+        "user_id": "owner", "tenant_id": "tenant", "user_message_id": 101,
+    }
+    mocker.patch.object(runner, "get_prepared_projection_receipt", return_value=None)
+    persist = mocker.patch.object(prepared_projection, "persist_prepared_assistant_projection", return_value=123)
+    return record, persist
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome,persisted,expected", [
-    ("completed", True, "completed"),
-    ("failed", True, "failed"),
-    ("completed", False, "failed"),
-    (None, False, "failed"),
-    ("stopped", True, "stopped"),
-])
-async def test_background_requires_current_terminal_outcome(monkeypatch, background, outcome, persisted, expected):
-    async def stream(*args, **kwargs):
-        state = kwargs.get("execution_state")
-        if state is not None:
-            state.assistant_message_id = 123
-            state.outcome = outcome
-            state.persisted = persisted
-        yield 'data: {"type":"error","content":"controlled event"}\n\n'
+@pytest.mark.parametrize("status", ["completed", "failed", "stopped", None])
+@pytest.mark.parametrize("persisted", [False, True])
+async def test_background_requires_completed_and_persisted_terminal_projection(projection, status, persisted):
+    record, persist = projection
+    first = event(1, "agentos_observer", '{"type":"final_answer","content":"Current answer"}')
+    frames = [first]
+    if status is not None:
+        frames.append(event(2, "agentos_terminal", json.dumps({"status": status})))
+    if not persisted:
+        persist.side_effect = RuntimeError("controlled storage failure")
 
-    monkeypatch.setattr(run, "generate_stream", stream)
-    result = await run.run_agent_background(background, "owner", "tenant", skip_user_save=True)
-    assert result["status"] == expected
-    assert result["assistant_message_id"] == 123
-    assert result["chunks"] == 1
-    assert background._message_source == "AUTOMATION"
-    if expected == "failed":
-        assert result["error_code"]
+    async def acknowledge(*_args):
+        persist.assert_called_once()
+
+    transport = SimpleNamespace(
+        resume=AsyncMock(side_effect=[response(*frames), response()]),
+        acknowledge_projection=AsyncMock(side_effect=acknowledge),
+    )
+
+    if status is None:
+        with pytest.raises(RuntimeServiceUnavailableError):
+            await background._project(transport, REFERENCE, record)
+        persist.assert_not_called()
+        transport.acknowledge_projection.assert_not_awaited()
+        return
+    if not persisted:
+        with pytest.raises(RuntimeError, match="controlled storage failure"):
+            await background._project(transport, REFERENCE, record)
+    elif status == "completed":
+        result = await background._project(transport, REFERENCE, record)
+        assert result.run_id == REFERENCE.run_id
+        assert (result.assistant_message_id, result.chunks) == (123, 1)
+    else:
+        with pytest.raises(HTTPException) as error:
+            await background._project(transport, REFERENCE, record)
+        assert error.value.detail == {"code": "AGENTOS_BACKGROUND_NOT_COMPLETED"}
+    persist.assert_called_once()
+    if persisted:
+        transport.acknowledge_projection.assert_awaited_once_with(REFERENCE, "owner", "tenant")
+    else:
+        transport.acknowledge_projection.assert_not_awaited()
+    fields = persist.call_args.kwargs
+    assert fields["projection_run_id"] == REFERENCE.run_id
+    assert fields["message_source"] is MessageSource.AUTOMATION
+    assert fields["message_content"] == "Current answer"
+    assert fields["terminal_status"] == status
 
 
 @pytest.mark.asyncio
-async def test_preparation_failure_cannot_reuse_previous_assistant(monkeypatch, background):
-    async def stream(*args, **kwargs):
-        state = kwargs.get("execution_state")
-        if state is not None:
-            state.fail("AUTOMATION_PREPARATION_FAILED", "Preparation failed")
-        yield 'data: {"type":"error","content":"preparation failed"}\n\n'
-
-    monkeypatch.setattr(run, "generate_stream", stream)
-    result = await run.run_agent_background(background, "owner", "tenant", skip_user_save=True)
-    assert result["status"] == "failed"
-    assert result["assistant_message_id"] is None
-    assert result["error_code"] == "AUTOMATION_PREPARATION_FAILED"
-
-
-@pytest.mark.asyncio
-async def test_background_cancellation_closes_stream_and_propagates(monkeypatch, background):
+async def test_background_cancellation_closes_journal_without_committing(projection):
+    record, persist = projection
+    started = asyncio.Event()
     closed = asyncio.Event()
 
-    async def stream(*args, **kwargs):
+    async def journal():
         try:
-            await asyncio.sleep(60)
-            yield "unreachable"
+            started.set()
+            yield event(1, "agentos_observer", '{"type":"final_answer","content":"Uncommitted"}')
+            await asyncio.Future()
         finally:
             closed.set()
 
-    monkeypatch.setattr(run, "generate_stream", stream)
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(run.run_agent_background(
-            background, "owner", "tenant", skip_user_save=True,
-        ), timeout=0.02)
+    from starlette.responses import StreamingResponse
+
+    transport = SimpleNamespace(
+        resume=AsyncMock(return_value=StreamingResponse(journal())), acknowledge_projection=AsyncMock(),
+    )
+    task = asyncio.create_task(background._project(transport, REFERENCE, record))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
     assert closed.is_set()
+    persist.assert_not_called()
+    transport.acknowledge_projection.assert_not_awaited()

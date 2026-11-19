@@ -123,7 +123,7 @@ def isolated_runtime():
         from management.api.identity import api_key, user_management, user, invitation, group, tenant
         from management.api.configuration import tenant_config
         from management.api.model import model_managment
-        from gateway.authentication import auth as helpers
+        from management.services.permission.identity import session as helpers
         from ops.api import access
         from backend.http.server.app_factory import create_app
 

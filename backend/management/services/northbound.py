@@ -567,7 +567,9 @@ async def start_streaming_chat(
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {exc}") from exc
 
     try:
-        response = await forward_northbound_run(agent_request, ctx.user_id, ctx.tenant_id)
+        response = await forward_northbound_run(
+            agent_request, ctx.user_id, ctx.tenant_id, final_answer_mode=final_answer_mode,
+        )
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))

@@ -21,6 +21,13 @@ def test_independent_target_installs_deployment_plugins_without_peer_sources(ser
     assert all(parts[1] not in {"backend", "backend/" + peer} for parts in copies)
     assert (ROOT / "backend/tool_collection/langchain").is_dir()
 
+
+def test_management_image_contains_ops_router_dependencies():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    management = dockerfile.split("FROM backend-common AS management\n", 1)[1].split("\nFROM ", 1)[0]
+    assert "COPY backend/ops /opt/backend/ops" in management.splitlines()
+
+
 @pytest.mark.parametrize("service", ["management", "runtime"])
 @pytest.mark.parametrize("syntax", ["list", "flag"])
 def test_service_build_selection_uses_independent_target_and_latest(service, syntax):

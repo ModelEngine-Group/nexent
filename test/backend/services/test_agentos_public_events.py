@@ -141,47 +141,43 @@ async def test_ephemeral_frames_preserve_observers_and_only_sign_run_owned_files
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["unsupported", "unavailable"])
-async def test_a2a_falls_back_only_before_prepared_dispatch(mocker, mode):
-    from types import SimpleNamespace
-
+async def test_a2a_surfaces_preparation_and_transport_failures(mocker, mode):
     from contracts.agent import AgentRequest
-    from contracts.errors.exceptions import RuntimeServiceUnavailableError
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError, ValidationError
     from management.services.agent.preparation import evaluation_snapshot
 
     request = AgentRequest(query="query", agent_id=7, version_no=2, is_debug=True)
     snapshot = SimpleNamespace(run_id=CURSOR.run_id) if mode == "unavailable" else None
     mocker.patch.object(evaluation_snapshot, "prepare_a2a_snapshot", return_value=snapshot)
-    fallback = mocker.patch.object(runtime_client, "forward_agent_run", return_value=response())
     client = mocker.patch.object(runtime_client, "_agentos_client").return_value
     client.run_ephemeral = AsyncMock(side_effect=RuntimeServiceUnavailableError("lost response"))
     if mode == "unsupported":
-        assert await runtime_client.forward_a2a_run(request, "actor", "tenant") is fallback.return_value
+        with pytest.raises(ValidationError, match="could not be prepared"):
+            await runtime_client.forward_a2a_run(request, "actor", "tenant")
         client.run_ephemeral.assert_not_awaited()
     else:
         with pytest.raises(RuntimeServiceUnavailableError):
             await runtime_client.forward_a2a_run(request, "actor", "tenant")
         client.run_ephemeral.assert_awaited_once_with(snapshot, "actor", "tenant")
-        fallback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["prepared", "unsupported", "denied", "upstream_error"])
-async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
+async def test_public_debug_prepares_before_dispatching_agentos(mocker, mode):
     from fastapi import HTTPException
 
     from contracts.agentos import CompatibilityConversationRun
-    from contracts.errors.exceptions import RuntimeServiceUnavailableError
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError, ValidationError
     from management.services.agent.preparation import evaluation_snapshot
 
     payload = CompatibilityConversationRun(request={"agent_id": 7, "query": "hello", "is_debug": True}, language="en")
     snapshot = SimpleNamespace(run_id=CURSOR.run_id)
     prepared = SimpleNamespace(payload=snapshot, knowledge=None, workbench=None)
-    compile_debug = mocker.patch.object(evaluation_snapshot, "prepare_debug_snapshot", create=True, new_callable=AsyncMock)
+    compile_debug = mocker.patch.object(evaluation_snapshot, "prepare_debug_snapshot", new_callable=AsyncMock)
     compile_debug.return_value = None if mode == "unsupported" else prepared
     upstream = response(b'data: {"type":"final_answer","content":"answer"}\n\n')
     client = mocker.patch.object(runtime_client, "_agentos_client").return_value
     client.run_ephemeral = AsyncMock(return_value=upstream)
-    client.run_conversation = AsyncMock(return_value=upstream)
     if mode == "denied":
         compile_debug.side_effect = HTTPException(status_code=403)
         with pytest.raises(HTTPException) as exc:
@@ -191,14 +187,14 @@ async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
         client.run_ephemeral.side_effect = RuntimeServiceUnavailableError("lost response")
         with pytest.raises(RuntimeServiceUnavailableError):
             await runtime_client.forward_conversation_run(payload, "actor", "tenant")
+    elif mode == "unsupported":
+        with pytest.raises(ValidationError, match="could not be prepared"):
+            await runtime_client.forward_conversation_run(payload, "actor", "tenant")
     else:
         result = await runtime_client.forward_conversation_run(payload, "actor", "tenant")
         assert result.status_code == 200
 
-    if mode == "unsupported":
-        client.run_conversation.assert_awaited_once_with(payload.model_copy(update={"preparation": "legacy"}), "actor", "tenant")
-    else:
-        client.run_conversation.assert_not_awaited()
+    compile_debug.assert_awaited_once()
     if mode in {"prepared", "upstream_error"}:
         client.run_ephemeral.assert_awaited_once_with(snapshot, "actor", "tenant")
     else:
@@ -281,7 +277,7 @@ async def test_workbench_debug_skill_grant_wraps_runtime_preparation(mocker, ima
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resume,is_debug", [(False, False), (False, True), (True, False)])
-async def test_disabled_workbench_is_rejected_before_legacy_dispatch(mocker, resume, is_debug):
+async def test_disabled_workbench_is_rejected_before_runtime_dispatch(mocker, resume, is_debug):
     mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", False)
     client = mocker.patch.object(runtime_client, "_agentos_client")
     payload = CompatibilityConversationRun(
@@ -290,7 +286,8 @@ async def test_disabled_workbench_is_rejected_before_legacy_dispatch(mocker, res
             "query": "hello",
             "conversation_id": 42 if resume else None,
             "is_debug": is_debug,
-            "workbench": {"mode": "generic_chat", "model_id": 1},
+            "workbench": {"mode": "generic_chat"},
+            "model_id": 1,
         },
         resume=resume,
     )
@@ -324,10 +321,13 @@ async def test_background_recovers_only_matching_completed_run_after_lost_respon
     from contracts.agent import AgentRequest
     from contracts.agentos import AgentRunLookup
     from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeUpstreamError
+    from management.db.automation import repository as runs
+    from management.services.agent import background
 
     original_error = RuntimeServiceTimeoutError("lost response")
     client = mocker.patch.object(runtime_client, "_agentos_client").return_value
-    client.run_tracked_background = AsyncMock(side_effect=original_error)
+    dispatch = mocker.patch.object(background, "dispatch_background", side_effect=original_error)
+    mocker.patch.object(runs, "get_run_by_runtime_id", return_value=None)
     client.inspect_run = AsyncMock(return_value=SimpleNamespace(
         run_id="b" * 32 if result == "wrong_run" else CURSOR.run_id,
         conversation_id=43 if result == "wrong_conversation" else CURSOR.conversation_id,
@@ -348,7 +348,11 @@ async def test_background_recovers_only_matching_completed_run_after_lost_respon
             await runtime_client.forward_tracked_background(request, CURSOR.run_id, "actor", "tenant")
         assert error.value is original_error
 
-    assert client.run_tracked_background.await_count == 1
+    dispatch.assert_awaited_once()
+    payload, actor = dispatch.await_args.args
+    assert payload.run_id == CURSOR.run_id
+    assert payload.request["conversation_id"] == CURSOR.conversation_id
+    assert (actor.user_id, actor.tenant_id) == ("actor", "tenant")
     client.inspect_run.assert_awaited_once_with(
         AgentRunLookup(run_id=CURSOR.run_id, conversation_id=CURSOR.conversation_id), "actor", "tenant",
     )

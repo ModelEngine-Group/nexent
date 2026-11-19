@@ -36,8 +36,8 @@ sys.modules['nexent'] = types.ModuleType('nexent')
 sys.modules['nexent'].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent")]
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = MagicMock()
 
 # Add missing nexent.data_process module mock
 sys.modules['nexent.data_process'] = MagicMock()

@@ -385,15 +385,12 @@ def get_capacity_model_records(model_types: set[str], tenant_id: str) -> List[di
 
 
 def get_model_records_by_ids(model_ids: List[int]) -> Dict[int, Dict[str, Any]]:
-    """Load list metadata and deletion flags without reading model credentials."""
+    """Load complete frozen profiles and list flags without model credentials."""
     if not model_ids:
         return {}
     with get_db_session() as session:
-        rows = session.execute(select(
-            ModelRecord.model_id, ModelRecord.tenant_id, ModelRecord.delete_flag,
-            ModelRecord.model_type, ModelRecord.display_name, ModelRecord.model_name,
-            ModelRecord.profile_schema_version, ModelRecord.connect_status,
-        ).where(ModelRecord.model_id.in_(model_ids))).mappings().all()
+        columns = [column for column in ModelRecord.__table__.columns if column.key not in {"api_key", "http_headers"}]
+        rows = session.execute(select(*columns).where(ModelRecord.model_id.in_(model_ids))).mappings().all()
         return {row["model_id"]: dict(row) for row in rows}
 
 

@@ -62,7 +62,7 @@ from contracts.knowledge import (
     ConversationKnowledgeScopeRequest,
     ResolvedKnowledgeScope,
 )
-from contracts.runtime_metadata import validate_runtime_metadata
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields, validate_runtime_metadata
 from fastapi import HTTPException
 from management.db.conversation.repository import (
     get_conversation,
@@ -227,7 +227,8 @@ async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: s
     if snapshot is None:
         return None
     return PreparedEphemeralRun(
-        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex, runtime_metadata=metadata or {},
+        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,
+        runtime_metadata=strip_reserved_runtime_metadata_fields(metadata),
     )
 
 
@@ -299,6 +300,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     snapshot = await create_agent_run_info(
         agent_id=root.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(format_annotations_for_llm(request.query, request.annotations), timezone, language=language), history=request.history,
+        user_query=request.query,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
         override_version_no=root.version_no, override_model_id=request.model_id,
         tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
@@ -316,7 +318,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         return None
     return PreparedDebug(PreparedEphemeralRun(
         **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,
-        runtime_metadata=request.metadata or {}, debug=True,
+        runtime_metadata=strip_reserved_runtime_metadata_fields(request.metadata), debug=True,
     ), knowledge=knowledge, workbench=config)
 
 
@@ -365,6 +367,7 @@ async def prepare_debug_snapshot(
     snapshot = await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(format_annotations_for_llm(request.query, request.annotations), timezone, language=language), history=request.history,
+        user_query=request.query,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
         override_version_no=version, override_model_id=request.model_id,
         tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
@@ -378,7 +381,8 @@ async def prepare_debug_snapshot(
         return None
     payload = PreparedEphemeralRun(
         **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,
-        runtime_metadata=request.metadata or {}, debug=True, native_knowledge=True if knowledge is not None else None,
+        runtime_metadata=strip_reserved_runtime_metadata_fields(request.metadata),
+        debug=True, native_knowledge=True if knowledge is not None else None,
     )
     return PreparedDebug(payload, knowledge)
 
@@ -557,14 +561,14 @@ async def prepare_conversation_snapshot(
         if history is None:
             raise ForbiddenError("Conversation history boundary is not accessible")
         historical_context = _prepare_conversation_history(history, user_id, tenant_id)
-    metadata = conversation.get("runtime_metadata") or {}
+    metadata = strip_reserved_runtime_metadata_fields(conversation.get("runtime_metadata"))
     metadata_version = conversation.get("runtime_metadata_version") or 0
     if request.metadata is not None:
         if not new_conversation and request.expected_metadata_version not in (None, metadata_version):
             raise RuntimeMetadataVersionConflict(metadata_version)
         if workbench is not None:
             await _authorize_prepared_metadata(request, tenant_id)
-        metadata = request.metadata
+        metadata = strip_reserved_runtime_metadata_fields(request.metadata)
         metadata_version += 1
     scope = PreparedConversationScope(
         **reference.model_dump(),
@@ -575,9 +579,10 @@ async def prepare_conversation_snapshot(
         runtime_metadata=metadata,
         runtime_metadata_version=metadata_version,
     )
-    return await create_agent_run_info(
+    snapshot = await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(format_annotations_for_llm(request.query, request.annotations), timezone, language=language), history=request.history,
+        user_query=request.query,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=memory_enabled,
         override_version_no=request.version_no, override_model_id=request.model_id,
         model_parameter_preferences=request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}),
@@ -586,6 +591,16 @@ async def prepare_conversation_snapshot(
         enable_automation_tool=request.enable_automation_tool, enable_planning=bool(request.enable_plan),
         prepared_conversation=scope, **compile_options,
     )
+    if snapshot is not None and metadata_from_northbound and request.metadata is not None:
+        from management.services.agent.mcp_passthrough import prepare_bound_mcp_header_metadata
+
+        transport = await run_blocking(
+            "snapshot-northbound-mcp-headers", prepare_bound_mcp_header_metadata, request.metadata,
+            snapshot.resource, tenant_id, lane="control-io", owner="management",
+        )
+        if transport is not None:
+            snapshot = snapshot.model_copy(update={"mcp_header_metadata": transport})
+    return snapshot
 
 
 def _file_tool_binding(tool):

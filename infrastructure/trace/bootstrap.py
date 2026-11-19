@@ -17,6 +17,7 @@ Usage:
 import logging
 from importlib import import_module
 
+from infrastructure.trace.trajectory_runtime import create_local_processor
 from infrastructure.rdb.model_monitoring import write_model_monitoring_record
 from nexent.monitor import MonitoringConfig, configure_monitoring_records, get_monitoring_manager
 
@@ -30,8 +31,18 @@ logger = logging.getLogger(__name__)
 monitoring_manager = get_monitoring_manager()
 
 
+def _agent_metadata():
+    from nexent.monitor import get_agent_monitoring_context
+    return get_agent_monitoring_context()
+
+
+local_trajectory_processor = create_local_processor(environment, _agent_metadata)
+
+
 def _initialize_monitoring():
     """Initialize monitoring configuration with OTLP settings."""
+    from infrastructure.trace.trajectory_execution import execution_observer
+
     config = MonitoringConfig(
         enable_telemetry=environment.ENABLE_TELEMETRY,
         service_name=environment.OTEL_SERVICE_NAME,
@@ -52,7 +63,12 @@ def _initialize_monitoring():
         telemetry_sample_rate=environment.TELEMETRY_SAMPLE_RATE,
         trace_content_mode=environment.MONITORING_TRACE_CONTENT_MODE,
         trace_max_chars=environment.MONITORING_TRACE_MAX_CHARS,
-        trace_max_items=environment.MONITORING_TRACE_MAX_ITEMS
+        trace_max_items=environment.MONITORING_TRACE_MAX_ITEMS,
+        local_span_processor=local_trajectory_processor,
+        local_execution_observer=execution_observer(
+            capturing=environment.ENABLE_TELEMETRY and environment.MONITORING_PROVIDER == "local_file",
+            store=local_trajectory_processor.store,
+        ) if local_trajectory_processor is not None else None,
     )
 
     monitoring_manager.configure(config)

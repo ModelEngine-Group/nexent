@@ -156,6 +156,15 @@ async def resume_run(payload: AgentResume, actor):
     })
 
 
+async def acknowledge_projection(payload: AgentRunReference, actor):
+    journal = await _owned_journal(payload, actor)
+    try:
+        await _control_io("agentos-acknowledge-projection", journal.acknowledge_projection)
+    except (RedisError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EVENT_STORE_UNAVAILABLE"}) from exc
+    return {}
+
+
 async def stop_run(payload: AgentStop | DebugRunReference, actor):
     if isinstance(payload, DebugRunReference):
         return await debug.stop_agentos_debug(payload.run_id, actor)
@@ -200,6 +209,10 @@ def create_run_lifecycle_router():
 
     router.add_api_route(
         AgentOperation.RESUME.value, handler(AgentResume, resume_run), methods=["POST"], include_in_schema=False,
+    )
+    router.add_api_route(
+        AgentOperation.ACKNOWLEDGE_PROJECTION.value, handler(AgentRunReference, acknowledge_projection),
+        methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
         AgentOperation.RESUME_LEGACY.value, handler(AgentLegacyResume, resume_legacy_run),

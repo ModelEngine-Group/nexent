@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: SYS-CONFIG-JOURNEY-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: SYS-CONFIG-JOURNEY-D4-001
+timeout_seconds: 180
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [SYS-CONFIG-JOURNEY-D4-001]
+  AC-02: [SYS-CONFIG-JOURNEY-D4-001]
+  AC-03: [SYS-CONFIG-JOURNEY-D4-001]
+notes: >-
+  Self-contained browser proof using the real frontend and Chromium with all API
+  outcomes controlled at the browser boundary. No backend process, provider,
+  shared asset or database is required. Playwright releases routes and the browser;
+  fixture values exist only in memory and require no persistent restoration.

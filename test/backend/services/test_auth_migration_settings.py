@@ -1,83 +1,52 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Host migration endpoints and credential precedence regressions."""
-
-from pathlib import Path
+"""Shared environment precedence and container-address migration settings."""
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate_docker as settings
+from deploy.sql.tools.supabase_to_postgres import migrate_docker as worker
+from test.backend.services.migration_shell_fixture import run_migration
 
 
-@pytest.fixture
-def values():
-    return {"SUPABASE_POSTGRES_PASSWORD": "source", "NEXENT_POSTGRES_PASSWORD": "target"}
+def test_managed_sources_use_internal_container_ports(tmp_path):
+    result = run_migration(tmp_path, values={"POSTGRES_PORT": "5544", "SUPABASE_POSTGRES_PORT": "5545"})
+    assert result.code == 0, result.stderr
+    assert result.connections["target_host"] == "10.0.0.2"
+    assert result.connections["source_host"] == "10.0.0.3"
+    assert result.connections["target_port"] == result.connections["source_port"] == "5432"
 
 
-def test_host_defaults(values, mocker):
-    prompt = mocker.patch.object(settings.getpass, "getpass")
-    source, target, managed = settings.connections(values)
-    assert (source["host"], source["port"]) == ("127.0.0.1", 5436)
-    assert (target["host"], target["port"]) == ("127.0.0.1", 5434)
-    assert managed
-    prompt.assert_not_called()
-
-
-def test_environment_overrides_deployment_file(mocker):
-    mocker.patch.object(Path, "is_file", return_value=True)
-    mocker.patch("dotenv.dotenv_values", return_value={"SUPABASE_POSTGRES_PASSWORD": "file", "POSTGRES_USER": "root"})
-    result = settings.load_settings(Path("config.env"), {"SUPABASE_POSTGRES_PASSWORD": "exported"})
-    assert result == {"SUPABASE_POSTGRES_PASSWORD": "exported", "POSTGRES_USER": "root"}
-
-
-def test_missing_env_file_is_optional(mocker):
-    mocker.patch.object(Path, "is_file", return_value=False)
-    assert settings.load_settings(Path("missing"), {"ONE": "value"}) == {"ONE": "value"}
+def test_environment_overrides_deployment_file(tmp_path):
+    result = run_migration(tmp_path, env_text="SUPABASE_POSTGRES_PASSWORD=file-value\nPOSTGRES_USER=file-user\n")
+    assert result.code == 0, result.stderr
+    assert result.connections["target_user"] == "root"
+    assert result.connections["secret_match"] == "source-secret-matched"
 
 
 @pytest.mark.parametrize("host", ["supabase_db", "supabase-db-mini", "nexent-supabase-db"])
-def test_service_hostnames_map_to_published_host_ports(values, host):
-    source, target, managed = settings.connections({**values, "SUPABASE_POSTGRES_HOST": host,
-                                                 "POSTGRES_HOST": "nexent-postgresql", "POSTGRES_PORT": "5432"})
-    assert source["host"] == target["host"] == "127.0.0.1"
-    assert target["port"] == 5434
-    assert managed
+def test_service_hostnames_resolve_original_container(tmp_path, host):
+    result = run_migration(tmp_path, values={"SUPABASE_POSTGRES_HOST": host})
+    assert result.code == 0, result.stderr
+    assert result.connections["source_host"] == "10.0.0.3"
 
 
-def test_existing_connection_fields(values):
-    source, target, managed = settings.connections({**values,
-        "SUPABASE_POSTGRES_HOST": "archive.example", "SUPABASE_POSTGRES_PORT": "1234",
-        "SUPABASE_POSTGRES_DB": "archive", "SUPABASE_POSTGRES_USER": "reader",
-        "POSTGRES_HOST": "target.example", "POSTGRES_PORT": "2345",
-    })
-    assert (source["host"], source["port"], source["dbname"], source["user"]) == ("archive.example", 1234, "archive", "reader")
-    assert (target["host"], target["port"]) == ("target.example", 2345)
-    assert not managed
+def test_external_connection_fields_are_preserved(tmp_path):
+    result = run_migration(tmp_path, values={"SUPABASE_POSTGRES_HOST": "archive.example",
+        "SUPABASE_POSTGRES_PORT": "1234", "SUPABASE_POSTGRES_DB": "archive", "SUPABASE_POSTGRES_USER": "reader"})
+    assert result.code == 0, result.stderr
+    assert [result.connections[key] for key in ("source_host", "source_port", "source_db", "source_user")] == ["archive.example", "1234", "archive", "reader"]
 
 
-def test_missing_source_password_prompts_hidden(values, mocker):
-    values.pop("SUPABASE_POSTGRES_PASSWORD")
-    mocker.patch.object(settings.sys.stdin, "isatty", return_value=True)
-    prompt = mocker.patch.object(settings.getpass, "getpass", return_value="interactive")
-    assert settings.connections(values)[0]["password"] == "interactive"
-    prompt.assert_called_once()
-
-
-@pytest.mark.parametrize("interactive", [True, False])
-def test_missing_password_fails_without_echoing_input(values, interactive, mocker):
-    values.pop("SUPABASE_POSTGRES_PASSWORD")
-    mocker.patch.object(settings.sys.stdin, "isatty", return_value=interactive)
-    mocker.patch.object(settings.getpass, "getpass", return_value="")
-    with pytest.raises(settings.MigrationSetupError):
-        settings.connections(values)
+@pytest.mark.parametrize("key", ["SUPABASE_POSTGRES_PASSWORD", "NEXENT_POSTGRES_PASSWORD"])
+def test_missing_password_fails_without_echoing_input(tmp_path, key):
+    result = run_migration(tmp_path, values={key: None})
+    assert result.code != 0
+    assert "password" in result.stderr
+    assert "private-source" not in result.stdout + result.stderr
+    assert "private-target" not in result.stdout + result.stderr
+    assert not any(command[1:2] == ["create"] for command in result.commands)
 
 
 @pytest.mark.parametrize("port", ["bad", "0", "65536"])
-def test_invalid_port_rejected(values, port):
-    with pytest.raises(settings.MigrationSetupError):
-        settings.connections({**values, "SUPABASE_POSTGRES_PORT": port})
-
-
-def test_missing_target_password_rejected(values):
-    values.pop("NEXENT_POSTGRES_PASSWORD")
-    with pytest.raises(settings.MigrationSetupError, match="NEXENT_POSTGRES_PASSWORD"):
-        settings.connections(values)
+def test_invalid_port_is_rejected_by_database_worker(port):
+    with pytest.raises(worker.MigrationSetupError):
+        worker._port(port)

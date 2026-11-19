@@ -436,4 +436,3 @@ async def prepare_conversation_request(
         )
 
     return PreparedConversationRequest(is_new_conversation, canonical_workbench, resolved_scope, tuple(runtime_knowledge_tree))
-

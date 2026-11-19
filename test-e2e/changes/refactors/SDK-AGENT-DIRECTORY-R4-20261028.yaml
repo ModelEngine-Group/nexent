@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: SDK-AGENT-DIRECTORY-R4-20261028
+  change_type: refactor
+  title: Verify clean SDK image installation and deployed real Agent journeys
+  description: Build the R1 to R3 source with clean SDK installation, audit installed canonical and compatibility
+    modules, retain rollback images and verify real resource execution, history continuity, Core switching and common
+    UI rendering.
+  feature_contract_changed: false
+  no_case_change_reason: Existing real resource and browser journey contracts cover the required deployed behavior.
+    Packaging and import identity reuse the R1 to R3 unit checks and a separate installed-source audit; no duplicate
+    D1 is necessary.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    - JIUWEN-OUTPUT
+    - JIUWEN-CONTEXT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D5-001
+    modified:
+    - JIUWEN-RESOURCES-D3-003
+    - JIUWEN-REAL-UI-D4-001
+    - JIUWEN-SKILL-FILES-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Canonical and historical imports retain module and type identity.
+    - Sandbox is a package with lightweight configuration and correct TLS bootstrap resources.
+    - Neutral context and Core memory boundaries retain saved CM and history semantics.
+    - Terminal MCP failure prevents subsequent model requests.
+    reason: R1 to R3 already added focused success boundary and failure assertions. R4 reruns these unchanged and
+      adds actual image installation and real journey evidence.
+    test_selectors:
+    - test/sdk/core/agents/test_canonical_agent_imports.py
+    - test/sdk/core/agents/test_resource_orchestration_boundaries.py
+    - test/sdk/core/agents/test_context_directory_boundaries.py
+    - test/sdk/core/agents/test_sandbox_directory_boundaries.py
+    - test/sdk/core/agents/test_jiuwen_context_terminal_guard.py
+  notes: The original external date probe and full Case acceptance remain intact. Current tenant external providers
+    are unavailable. A reachable PubMed candidate belongs to another tenant and is not an acceptable substitute;
+    record the real MCP proof as blocked rather than widening access or accepting a Mock. Fixed real fixtures import
+    the current gateway authentication owner and use the current complete prompt field. The browser runner accepts
+    an explicit machine-local installed channel when downloaded Chromium cannot start; all journey contracts and
+    assertions remain unchanged. Retain thin historical import facades per the compatibility contract. Do not remove
+    aliases or modify model directories, dependencies, source agents or unrelated assets. On 2026-10-29, obsolete
+    compatibility UT file selectors were rebound to canonical/removal tests by SDK-AGENT-CANONICAL-IMPORTS-20261029.
+    Original old-import execution claims describe this historical stage only.

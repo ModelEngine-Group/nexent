@@ -18,42 +18,46 @@ Installation:
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
 try:
-    from opentelemetry.trace.status import Status, StatusCode
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry import metrics, propagate, trace
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPSpanExporterGRPC
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPMetricExporterHTTP
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry import trace, metrics, propagate
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.trace.status import Status, StatusCode
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
 
+import functools
+import inspect
+import json
 import logging
 import os
 import threading
 import time
-import functools
-import json
-import inspect
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional, Callable, TypeVar, cast, Iterator
 from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
+from .agent_version import agent_version_attributes
+from .first_token import stream_token_basis, valid_ttft
+from .local_content import local_capture_enabled
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
     DEFAULT_EXCLUDED_SPAN_NAMES,
     normalize_span_exclusions,
 )
 from .trace_name import TRACE_NAME_ATTRIBUTE, agent_trace_name_scope
+
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +177,7 @@ SUPPORTED_PROVIDERS = {
     "phoenix",
     "langfuse",
     "langsmith",
-    "grafana",
-    "zipkin",
+    "local_file",
 }
 
 
@@ -196,6 +199,8 @@ class AgentRunMetadata:
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
     user_email: Optional[str] = None
     agent_display_name: Optional[str] = None
+    agent_version_no: Optional[int] = None
+    agent_version_name: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""
@@ -423,6 +428,8 @@ class MonitoringConfig:
     trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
+    local_span_processor: Any = None
+    local_execution_observer: Any = None
     excluded_elasticsearch_operations: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
     )
@@ -436,14 +443,14 @@ class MonitoringConfig:
         self.excluded_span_names = normalize_span_exclusions(self.excluded_span_names)
         self.provider = (self.provider or "otlp").strip().lower()
         if self.provider not in SUPPORTED_PROVIDERS:
-            logger.warning(
-                f"Unknown monitoring provider '{self.provider}'. Using 'otlp'."
-            )
-            self.provider = "otlp"
+            raise ValueError("Unsupported monitoring provider")
 
         self.enable_telemetry = _as_bool(self.enable_telemetry)
         self.export_traces = _as_bool(self.export_traces, True)
-        self.export_metrics = _as_bool(self.export_metrics, True)
+        if (self.enable_telemetry and self.export_traces and self.provider == "local_file"
+                and self.local_span_processor is None):
+            raise ValueError("Local monitoring requires an injected span processor")
+        self.export_metrics = _as_bool(self.export_metrics, True) and self.provider != "local_file"
         self.instrument_requests = _as_bool(self.instrument_requests, False)
         self.fastapi_included_urls = str(self.fastapi_included_urls or "").strip()
         self.fastapi_excluded_urls = str(self.fastapi_excluded_urls or "").strip()
@@ -594,9 +601,13 @@ class MonitoringManager:
 
             # Initialize TracerProvider with OTLP exporter
             self._tracer_provider = TracerProvider(resource=resource)
+            if self._config.export_traces and self._config.provider == "local_file":
+                local = self._config.local_span_processor
+                self._tracer_provider.sampler = local.wrap_sampler(self._tracer_provider.sampler)
+                self._tracer_provider.add_span_processor(local)
             trace.set_tracer_provider(self._tracer_provider)
 
-            if self._config.export_traces:
+            if self._config.export_traces and self._config.provider != "local_file":
                 # Choose exporter based on protocol
                 if self._config.otlp_protocol == "grpc":
                     span_exporter = OTLPSpanExporterGRPC(
@@ -868,6 +879,11 @@ class MonitoringManager:
         if attributes:
             plain_attrs.update(attributes)
 
+        if span_kind == OPENINFERENCE_SPAN_KIND_AGENT:
+            plain_attrs.update(agent_version_attributes(
+                agent_metadata.agent_version_no, agent_metadata.agent_version_name,
+            ))
+
         return self.build_openinference_attributes(
             span_kind=span_kind,
             input_value=agent_metadata.query if include_query else None,
@@ -890,44 +906,49 @@ class MonitoringManager:
         self,
         metadata: Optional[AgentRunMetadata | Dict[str, Any]] = None,
         operation_name: str = "agent.run",
+        *,
+        start_time: Optional[int] = None,
     ) -> Iterator[Optional[Any]]:
         """Create the SDK-owned top-level Agent span."""
         agent_metadata = _coerce_agent_run_metadata(metadata)
-        with agent_monitoring_context(agent_metadata):
-            if _monitoring_agent_run_active.get():
+        if _monitoring_agent_run_active.get():
+            with agent_monitoring_context(agent_metadata):
                 yield self.get_current_span()
-                return
-
-            active_token = _monitoring_agent_run_active.set(True)
-            attributes = self.build_agent_run_attributes(
-                agent_metadata,
-                span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
-                include_query=True,
-            )
-            trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
-            if trace_name:
-                # The main Agent owns the trace name; children retain their own node identities.
-                attributes[TRACE_NAME_ATTRIBUTE] = trace_name
-            parent_span = self.get_current_span()
-            try:
-                with self.trace_operation(
-                    operation_name,
-                    OPENINFERENCE_SPAN_KIND_AGENT,
-                    **attributes,
-                ) as span:
-                    with agent_trace_name_scope(span, trace_name, parent_span):
-                        self.add_span_event(f"{operation_name}.started")
-                        try:
-                            yield span
-                            self.add_span_event(f"{operation_name}.completed")
-                        except Exception as error:
-                            self.add_span_event(f"{operation_name}.error", {
-                                "error.type": type(error).__name__,
-                                "error.message": str(error),
-                            })
-                            raise
-            finally:
-                _monitoring_agent_run_active.reset(active_token)
+            return
+        observer = getattr(self._config, "local_execution_observer", None) if operation_name == "agent.run" else None
+        with (observer(agent_metadata) if observer else nullcontext(agent_metadata)) as agent_metadata:
+            with agent_monitoring_context(agent_metadata):
+                active_token = _monitoring_agent_run_active.set(True)
+                attributes = self.build_agent_run_attributes(
+                    agent_metadata,
+                    span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
+                    include_query=True,
+                )
+                trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
+                if trace_name:
+                    # The main Agent owns the trace name; children retain their own node identities.
+                    attributes[TRACE_NAME_ATTRIBUTE] = trace_name
+                parent_span = self.get_current_span()
+                try:
+                    with self.trace_operation(
+                        operation_name,
+                        OPENINFERENCE_SPAN_KIND_AGENT,
+                        start_time=start_time,
+                        **attributes,
+                    ) as span:
+                        with agent_trace_name_scope(span, trace_name, parent_span):
+                            self.add_span_event(f"{operation_name}.started")
+                            try:
+                                yield span
+                                self.add_span_event(f"{operation_name}.completed")
+                            except Exception as error:
+                                self.add_span_event(f"{operation_name}.error", {
+                                    "error.type": type(error).__name__,
+                                    "error.message": str(error),
+                                })
+                                raise
+                finally:
+                    _monitoring_agent_run_active.reset(active_token)
 
     @contextmanager
     def with_agent_monitoring(
@@ -971,6 +992,7 @@ class MonitoringManager:
         self,
         operation_name: str,
         span_kind: str = OPENINFERENCE_SPAN_KIND_CHAIN,
+        start_time: Optional[int] = None,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """Trace a non-LLM operation using OpenInference span kind semantics."""
@@ -981,7 +1003,7 @@ class MonitoringManager:
         span_attrs = {
             OPENINFERENCE_SPAN_KIND: span_kind,
         }
-        
+
         # Process input.value and output.value through payload preview (same as trace_llm_request)
         input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
         output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
@@ -995,12 +1017,13 @@ class MonitoringManager:
             if output_preview != "":
                 span_attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
             span_attrs.update(self._trace_payload_attributes("output", output_value))
-        
+
         span_attrs.update(attributes)
 
         with self._tracer.start_as_current_span(
             operation_name,
-            attributes=span_attrs
+            attributes=span_attrs,
+            start_time=start_time,
         ) as span:
             try:
                 yield span
@@ -1310,6 +1333,16 @@ class MonitoringManager:
                 summary["keys"],
                 ensure_ascii=False,
             )
+        if self._config and self._config.export_traces and self._config.provider == "local_file":
+            slot = "output" if prefix.endswith("output") else "input" if prefix.endswith("input") else None
+            if slot:
+                from .local_content import safe_local_content
+
+                try:
+                    attrs[f"nexent.local.{slot}.value"] = safe_local_content(value)
+                except (ValueError, TypeError, RecursionError):
+                    attrs["nexent.trajectory.gap"] = True
+                    attrs[f"nexent.availability.{slot}"] = "serialization_failed"
         return attrs
 
     def _trace_payload_preview(self, value: Any) -> str:
@@ -1951,6 +1984,8 @@ class LLMTokenTracker:
         self.model_name = model_name
         self.span = span
         self.start_time = time.time()
+        self._start_monotonic = time.perf_counter()
+        self.ttft_seconds: Optional[float] = None
         self.first_token_time: Optional[float] = None
         self.token_count = 0
         self.input_tokens = 0
@@ -1959,33 +1994,33 @@ class LLMTokenTracker:
         # downstream code running in a different thread can still access it.
         self._context_snapshot: Dict[str, Any] = get_monitoring_context()
 
-    def record_first_token(self) -> None:
-        """Record the time when first token is received."""
-        if not getattr(self.manager, "is_enabled", False):
+    def record_first_token(self, basis: str = "content") -> None:
+        """Publish the first nonempty output immediately, including partial failures."""
+        if not getattr(self.manager, "is_enabled", False) or self.first_token_time is not None:
             return
-
-        if self.first_token_time is None:
-            self.first_token_time = time.time()
-            ttft = self.first_token_time - self.start_time
-
-            if self.span:
-                self.span.add_event("first_token_received",
-                                    {"llm.time_to_first_token": ttft})
-
-            self.manager.record_llm_metrics(
-                "ttft", ttft, {"llm.model_name": self.model_name})
+        ttft = valid_ttft(time.perf_counter() - self._start_monotonic)
+        if ttft is None:
+            return
+        self.ttft_seconds = ttft
+        self.first_token_time = time.time()
+        attributes = {
+            "llm.time_to_first_token": ttft,
+            "llm.ttft_ms": ttft * 1000,
+            "llm.ttft_basis": basis,
+        }
+        if self.span:
+            self.span.set_attributes(attributes)
+            self.span.add_event("first_token_received", attributes)
+        self.manager.record_llm_metrics("ttft", ttft, {"llm.model_name": self.model_name})
 
     def record_token(self, token: str) -> None:
-        """Record a new token generated."""
-        if not getattr(self.manager, "is_enabled", False):
+        """Record a nonempty content increment without estimating token usage."""
+        if not getattr(self.manager, "is_enabled", False) or not token:
             return
-
         if self.first_token_time is None:
             self.record_first_token()
-
         self.token_count += 1
-
-        if self.span:
+        if self.span and not local_capture_enabled(self.manager):
             self.span.add_event("token_generated", {
                 "token_count": self.token_count,
                 "token_length": len(token)
@@ -1993,12 +2028,14 @@ class LLMTokenTracker:
 
     def record_completion(self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Any = ...) -> None:
         """Preserve legacy inferred totals; explicit None means the provider did not report one."""
+        if total_tokens is not ... and total_tokens is not None and (type(total_tokens) is not int or total_tokens < 0):
+            raise ValueError("total_tokens must be a non-negative integer or None")
         if not self.manager.is_enabled:
             return
 
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
-        total_duration = time.time() - self.start_time
+        total_duration = time.perf_counter() - self._start_monotonic
         generation_rate = 0.0
 
         # Calculate token generation rate (tokens per second)
@@ -2029,8 +2066,7 @@ class LLMTokenTracker:
                 "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
-                "llm.duration.total": total_duration,
-                "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
+                "llm.duration.total": total_duration
             }
             if total is not None:
                 attributes["llm.token_count.total"] = total
@@ -2217,7 +2253,7 @@ class RecordModelCallContext:
                 "model_name": self.model_name,
                 "operation": f"{self.model_type}_call",
                 "request_duration_ms": request_duration_ms,
-                "ttft_ms": 0,
+                "ttft_ms": None,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
@@ -2270,9 +2306,11 @@ class RecordModelCallContext:
 
 class _MonitoredStreamIterator:
 
-    def __init__(self, stream, start_time: float, model_name: str, model_type: str):
+    def __init__(self, stream, start_time: float, model_name: str, model_type: str, *, start_monotonic=None):
         self._stream = stream
         self._start_time = start_time
+        self._start_monotonic = time.perf_counter() if start_monotonic is None else start_monotonic
+        self._ttft_seconds: Optional[float] = None
         self._model_name = model_name
         self._model_type = model_type
         self._error: Optional[Exception] = None
@@ -2281,6 +2319,7 @@ class _MonitoredStreamIterator:
         self._output_tokens: int = 0
         self._state_lock = threading.Lock()
         self._closed = False
+        self._aborted = False
         self._finalized = False
 
     def __iter__(self):
@@ -2294,6 +2333,28 @@ class _MonitoredStreamIterator:
             self._error = exc_value
         self.close()
         return False
+
+    def abort(self):
+        """Wake a blocked HTTP read before closing a cancelled stream."""
+        import socket
+
+        import httpx
+
+        with self._state_lock:
+            if self._closed or self._aborted:
+                return
+            self._aborted = True
+        try:
+            response = getattr(self._stream, "response", None)
+            if isinstance(response, httpx.Response):
+                network = response.extensions.get("network_stream")
+                connection = network.get_extra_info("socket") if network is not None else None
+                if connection is not None:
+                    connection.shutdown(socket.SHUT_RDWR)
+        except (OSError, AttributeError, ValueError):
+            pass
+        finally:
+            self.close()
 
     def close(self):
         with self._state_lock:
@@ -2313,8 +2374,11 @@ class _MonitoredStreamIterator:
     def __next__(self):
         try:
             chunk = next(self._stream)
-            if self._first_chunk_time is None:
-                self._first_chunk_time = time.time()
+            if self._first_chunk_time is None and stream_token_basis(chunk) is not None:
+                elapsed = valid_ttft(time.perf_counter() - self._start_monotonic)
+                if elapsed is not None:
+                    self._ttft_seconds = elapsed
+                    self._first_chunk_time = time.time()
             if hasattr(chunk, "usage") and chunk.usage is not None:
                 self._input_tokens = getattr(
                     chunk.usage, "prompt_tokens", 0) or 0
@@ -2335,13 +2399,10 @@ class _MonitoredStreamIterator:
                 return
             self._finalized = True
         try:
-            request_duration_ms = int((time.time() - self._start_time) * 1000)
-
-            if self._first_chunk_time is not None:
-                ttft_ms = int(
-                    (self._first_chunk_time - self._start_time) * 1000)
-            else:
-                ttft_ms = 0
+            duration = time.perf_counter() - self._start_monotonic
+            request_duration_ms = int(duration * 1000) if valid_ttft(duration) is not None else 0
+            ttft = valid_ttft(self._ttft_seconds, duration)
+            ttft_ms = int(ttft * 1000) if ttft is not None else None
 
             duration_seconds = request_duration_ms / 1000.0
             if duration_seconds > 0 and self._output_tokens > 0:
@@ -2377,6 +2438,7 @@ class _MonitoredChatCompletions:
     def create(self, **kwargs):
         stream = kwargs.get("stream", False)
         start_time = time.time()
+        start_monotonic = time.perf_counter()
         try:
             response = self._original.create(**kwargs)
         except Exception as exc:
@@ -2384,7 +2446,9 @@ class _MonitoredChatCompletions:
             raise
 
         if stream:
-            return _MonitoredStreamIterator(response, start_time, self._model_name, self._model_type)
+            return _MonitoredStreamIterator(
+                response, start_time, self._model_name, self._model_type, start_monotonic=start_monotonic
+            )
         else:
             self._record_non_streaming(start_time, response=response)
             return response
@@ -2403,7 +2467,7 @@ class _MonitoredChatCompletions:
                 model_name=self._model_name,
                 model_type=self._model_type,
                 request_duration_ms=request_duration_ms,
-                ttft_ms=0,
+                ttft_ms=None,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=input_tokens + output_tokens,
@@ -2462,7 +2526,7 @@ def _enqueue_client_monitoring_record(
     model_name: str,
     model_type: str,
     request_duration_ms: int,
-    ttft_ms: int,
+    ttft_ms: Optional[int],
     input_tokens: int,
     output_tokens: int,
     total_tokens: int,
@@ -2531,18 +2595,22 @@ def _enqueue_client_monitoring_record(
 def _extract_tracker_metrics(tracker):
     """Extract timing and token metrics from an LLMTokenTracker."""
     request_duration_ms = 0
-    ttft_ms = 0
+    ttft_ms = None
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
     generation_rate = 0.0
 
     if tracker is not None:
-        request_duration_ms = int(
-            (time.time() - tracker.start_time) * 1000)
-        if tracker.first_token_time is not None:
-            ttft_ms = int((tracker.first_token_time -
-                          tracker.start_time) * 1000)
+        monotonic_start = getattr(tracker, "_start_monotonic", None)
+        duration = (
+            time.perf_counter() - monotonic_start
+            if type(monotonic_start) in (int, float) else time.time() - tracker.start_time
+        )
+        request_duration_ms = int(duration * 1000) if valid_ttft(duration) is not None else 0
+        ttft = valid_ttft(getattr(tracker, "ttft_seconds", None), duration)
+        if ttft is not None:
+            ttft_ms = int(ttft * 1000)
         input_tokens = tracker.input_tokens
         output_tokens = tracker.output_tokens
         total_tokens = input_tokens + output_tokens

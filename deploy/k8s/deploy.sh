@@ -394,6 +394,15 @@ render_infrastructure_runtime_values() {
   printf '{}\n' > "$output_file"
 }
 
+effective_northbound_api_server() {
+  local gateway_url="http://nexent-gateway:5013/api"
+  local configured="${NORTHBOUND_API_SERVER:-$gateway_url}"
+  case "$configured" in
+    http://nexent-northbound:5013/api) printf '%s' "$gateway_url" ;;
+    *) printf '%s' "$configured" ;;
+  esac
+}
+
 render_k8s_runtime_config_values() {
   local output_file="$1"
   local file
@@ -430,7 +439,7 @@ render_k8s_runtime_config_values() {
     printf '      user: %s\n' "$(yaml_quote "${POSTGRES_USER:-root}")"
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
     echo "    services:"
-    printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-gateway:5013/api")")"
+    printf '      northboundServer: %s\n' "$(yaml_quote "$(effective_northbound_api_server)")"
     # These inputs also supply defaults for runtime state and worker concurrency.
     echo "    redis:"
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
@@ -987,12 +996,10 @@ wait_for_nexent_ready() {
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         deployments="$deployments nexent-openssh"
     fi
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ]; then
         deployments="$deployments nexent-otel-collector"
         case "$DEPLOYMENT_MONITORING_PROVIDER" in
             phoenix) deployments="$deployments nexent-phoenix" ;;
-            grafana) deployments="$deployments nexent-tempo nexent-grafana" ;;
-            zipkin) deployments="$deployments nexent-zipkin" ;;
             langfuse) deployments="$deployments nexent-langfuse-postgres nexent-langfuse-clickhouse nexent-langfuse-minio nexent-langfuse-redis nexent-langfuse-web nexent-langfuse-worker" ;;
         esac
     fi
@@ -1224,7 +1231,7 @@ render_runtime_secret_values() {
     fi
 
     env_checksum="$(deployment_env_values_checksum)"
-    env_checksum="$(deployment_sha256_string "${env_checksum}|root=${root_env_data}|monitoring=${monitoring_env_data}|sandboxMode=${DEPLOYMENT_SANDBOX_MODE:-lightweight}|mcp=${NEXENT_MCP_DOCKER_IMAGE:-}|sandbox=${NEXENT_SANDBOX_IMAGE:-}")"
+    env_checksum="$(deployment_sha256_string "${env_checksum}|root=${root_env_data}|monitoring=${monitoring_env_data}|northbound=$(effective_northbound_api_server)|sandboxMode=${DEPLOYMENT_SANDBOX_MODE:-lightweight}|mcp=${NEXENT_MCP_DOCKER_IMAGE:-}|sandbox=${NEXENT_SANDBOX_IMAGE:-}")"
     sql_checksum="$(sql_files_checksum)"
 
     {

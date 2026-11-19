@@ -1,5 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, App, Tag } from "antd";
@@ -111,8 +114,6 @@ export const ModelOverrideModal = ({
         const formRecord = hasOverride
           ? { ...entry, reasoning_capability: model.reasoningCapability }
           : {
-              temperature: model.temperature,
-              top_p: model.topP,
               extra_params: model.extraParams,
               reasoning_capability: model.reasoningCapability,
             };
@@ -140,7 +141,11 @@ export const ModelOverrideModal = ({
       onOk={onClose}
       okText={t("common.confirm", { defaultValue: "确定" })}
       cancelText={t("common.cancel", { defaultValue: "取消" })}
-      okButtonProps={{ disabled }}
+      okButtonProps={{
+        disabled:
+          disabled ||
+          Object.values(value).some((entry) => !samplingComplete(entry)),
+      }}
       cancelButtonProps={{ disabled }}
       width={760}
       centered
@@ -199,8 +204,9 @@ export const ModelOverrideModal = ({
                 modelType={modelType}
                 specs={specs}
                 value={formValue}
-            onChange={(next) => handleFieldChange(model.id, next)}
+                onChange={(next) => handleFieldChange(model.id, next)}
                 mode="override"
+                inheritedDefaults={{ temperature: model.temperature, top_p: model.topP }}
                 disabled={disabled}
                 reasoningCapability={model.reasoningCapability}
               />

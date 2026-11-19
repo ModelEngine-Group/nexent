@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: PR4320-UT-20261116
+  change_type: test-fix
+  title: Repair PR4320 unit-test import isolation and current legacy action expectations
+  description: 'The linked CI job failed in two AIDP files because module-stub capture evicted genuine lazy/native
+    dependencies and invoked package __getattr__ while restoring exports. Keep real third-party imports alive, scope
+    new project imports and explicit doubles, and use concrete module namespaces. Update legacy action feedback
+    assertions to the existing develop protocol: execute valid code once, require runtime confirmation, and never
+    accept an adjacent unconfirmed final candidate.'
+  affected_features:
+    existing:
+    - CMSR-005
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: Traditional UT infrastructure and obsolete UT assertions only. No product behavior, HTTP
+    contract, workflow, dependency lock or formal Case changes. Existing protocol runtime regressions remain unchanged.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Module-stub capture/install/undo never invokes lazy attribute hooks or evicts new real third-party/native
+      modules, including in-project virtualenv dependencies.
+    - Original and replacement module identities restore correctly while new project imports and explicit doubles
+      remain fixture-scoped.
+    - Valid mixed code/candidate output executes once and waits for confirmation; malformed Python is still rejected
+      and display-only final code stays nonexecutable.
+    reason: The CI job exposed import-time fixture failures and assertions superseded by the merged develop protocol.
+      Add deterministic helper regressions and retain the actual protocol/runtime regressions without weakening
+      product checks.
+    test_selectors:
+    - test/backend/utils/test_module_stubs.py
+    - test/ext_components/aidp/test_aidp_mgmt_app.py
+    - test/ext_components/aidp/test_aidp_cas_display.py
+    - test/sdk/core/agents/test_legacy_action_feedback.py
+    - test/sdk/core/agents/test_output_protocol_patch.py
+  notes: 'CI evidence: actions/runs/43819976258/job/133140590311. The new helper regressions reproduced collection/installation
+    recursion before the fix. No new D1 or formal quota; five existing helper consumers are regression targets.
+    Machine-local logs and unrelated workspace changes are excluded.'

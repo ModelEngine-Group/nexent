@@ -14,7 +14,7 @@ from contracts.agentos import (
 )
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.resolver import find_named_rerank_record
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 from infrastructure.agent_model_config import model_record_revision
 from infrastructure.local_tool_execution import (

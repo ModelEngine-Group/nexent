@@ -15,7 +15,7 @@ from infrastructure.a2a_execution import (
 )
 from management.services.knowledge_base.summary_metadata import SummaryMetadata
 from nexent.storage.errors import DeadlineExceeded, OperationCancelled
-from nexent.core.agents.agent_model import ExternalA2AAgentConfig, ToolConfig
+from nexent.core.agents.contracts.config import ExternalA2AAgentConfig, ToolConfig
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)

@@ -6,7 +6,7 @@ from functools import partial
 from contracts.agentos import AnalysisToolBinding, EvaluationAnalysisTool, ToolBinding
 from contracts.constants import environment
 from fastapi import HTTPException
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.utils.observer import MessageObserver
 from nexent.multi_modal.utils import is_url
 from runtime.text_cleanse import RunTextCleanser

@@ -9,8 +9,8 @@ from fastapi import HTTPException
 from contracts.agentos import ToolBinding
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ToolConfig
+from test.common.local_agent_tools import create_local_tool
 from test.sdk.core.model_service.conftest import openai_profile  # noqa: F401
 
 
@@ -74,7 +74,7 @@ async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields
     lookup.assert_called_once_with(7, 3, "tenant-a", ["dify_search"])
     assert rebound.description_zh == "检索"
     assert rebound.params == tool.params
-    instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    instance = create_local_tool(rebound)
     assert instance.dataset_ids == ["dataset-a"]
     assert instance.top_k == (requested or {}).get("top_k", 2)
     assert instance.rerank_model is (hydrate_rerank.return_value if rerank_name else None)
@@ -222,7 +222,7 @@ def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_to
     from contracts.agentos import PreparedEvaluationRun
     from management.services.agent import tool_identity
     from management.services.agent.preparation import evaluation_snapshot, local_tool
-    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.contracts.config import AgentConfig
     from runtime.agentos import prepared_local_tool
 
     from infrastructure.agent_model_config import create_model_config_from_record
@@ -262,6 +262,7 @@ def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_to
     )
     mocker.patch.object(evaluation_snapshot, "read_bound_local_tools", return_value=[stored_tool])
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    stub_resolved_model_catalog(mocker, record)
     mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
     mocker.patch.object(tool_identity, "resolve_tool_user_context", return_value={})
     snapshot = evaluation_snapshot.export_snapshot(
@@ -396,7 +397,7 @@ def test_workspace_and_ssh_tools_restore_persisted_parameters_without_exposing_t
     mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[row])
     resource = SimpleNamespace(agent_id=7, version_no=3, tools=[binding])
     rebound = prepared_local_tool.materialize_local_tools(resource, ServicePrincipal("user-a", "tenant-a"), "en")[name]
-    tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    tool = create_local_tool(rebound)
 
     assert type(tool).__name__ == class_name
     assert tool.init_path == str(tmp_path)
@@ -431,6 +432,8 @@ def test_web_search_installs_runtime_image_filter_after_rebinding(mocker, stored
     resource = SimpleNamespace(agent_id=7, version_no=3, tools=[reference])
     rebound = prepared_local_tool.materialize_local_tools(resource, ServicePrincipal("user-a", "tenant-a"), "en")[name]
     assert callable(rebound.metadata["image_filterer"])
-    instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    instance = create_local_tool(rebound)
     assert instance.image_filterer is rebound.metadata["image_filterer"]
     assert not hasattr(instance, "data_process_service")
+
+from test.backend.services.model_profile_helpers import stub_resolved_model_catalog

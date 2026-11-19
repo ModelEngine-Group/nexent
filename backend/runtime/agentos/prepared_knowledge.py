@@ -12,7 +12,7 @@ from contracts.agentos_knowledge import (
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeUpstreamError
 from fastapi import HTTPException
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from runtime.knowledge_base.composition import default_service
 from runtime.knowledge_base.sdk_tool import RuntimeKnowledgeTool
 from runtime.knowledge_base.search import KnowledgeSearchService

@@ -6,6 +6,8 @@ Unit tests for management.api.skill.skill module.
 from test.common.contract_stubs import install_shared_contract_stub
 from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 from contracts import skill as skill_app_management_skill_skill_skill
+# Resolve ownership exceptions before this endpoint suite replaces environment modules.
+from contracts.errors.exceptions import AgentRunAlreadyActiveError  # noqa: F401
 import sys
 import os
 import io
@@ -37,7 +39,7 @@ sys.modules['boto3'] = boto3_mock
 nexent_mock = types.ModuleType('nexent')
 nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
-nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
+nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.contracts.config')
 nexent_core_models_mock = types.ModuleType('nexent.core.models')
 nexent_core_models_prompt_cache_mock = types.ModuleType('nexent.core.models.prompt_cache')
 nexent_skills_mock = types.ModuleType('nexent.skills')
@@ -50,7 +52,7 @@ nexent_storage_minio_config_mock = types.ModuleType('nexent.storage.minio_config
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 sys.modules['nexent.core.agents'] = nexent_core_agents_mock
-sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model_mock
+sys.modules['nexent.core.agents.contracts.config'] = nexent_core_agents_agent_model_mock
 sys.modules['nexent.core.models'] = nexent_core_models_mock
 sys.modules['nexent.core.models.prompt_cache'] = nexent_core_models_prompt_cache_mock
 sys.modules['nexent.skills'] = nexent_skills_mock
@@ -205,6 +207,7 @@ class MockSkillResponse(BaseModel):
 
 class MockNL2SkillRunRequest(BaseModel):
     query: str
+    request_id: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     conversation_id: Optional[int] = None

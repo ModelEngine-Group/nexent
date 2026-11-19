@@ -1,0 +1,86 @@
+schema_version: '1.0'
+module:
+  id: CHAT-MESSAGE
+  name: 对话运行与轨迹
+feature:
+  feature_id: CHAT-TRAJECTORY
+  name: 本地文件与自研管理员历史轨迹查看
+  status: planned
+  description: 现有MonitoringManager选择local_file/otlp及远端提供方导出；本地按租户/用户/首次根Agent/会话ID分组，每会话meta.json＋每执行正文完整内嵌的OTLP
+    JSONL，管理员按用户→最近Agent→会话使用自研查看器静态查看轨迹，默认保留30天，直接复用用户POST、扩展2个会话GET及新增4个轨迹读取GET、1个清理POST及租户每日零点清理策略设置GET/PUT；支持配置定期清理及管理员主动清理N天以前。
+  business_rules:
+  - rule_id: TRJ-RULE-001
+    description: 复用OTel埋点，物理模型attempt、工具及Agent为实际Span，完整输入输出/失败片段/思考在属性和Events保留，聊天回滚兼容。
+      stop_event结束（含有效交互卡片后的主动停止）统一cancelled，摘要与列表独立显示已取消并支持筛选；正文可读且累计指标保持，正常完成及错误保持。
+      系统内置 NL2Agent/NL2Skill/工作台在查询DTO中固定显示1/V1，按SYSTEM来源及稳定system_key确认；归档实际版本保持。
+      根和子Agent分别保存实际version_no及可用版本名称，0为草稿、缺失为未知，历史查询不查当前版本。 流式思考、回答和工具参数在内存合并，结束时保存最终内容；失败或取消保存合并后的已接收部分，活动快照仅保留输入和结构信息，最终文件不保存逐块SSE或deltas。
+      智能体input.value只记录本次用户query，子智能体记录本次任务；配置与上下文快照独立保存，模型请求正文保持完整，预览与分块正文一致。
+      模型展示输入采用实际HTTP请求JSON，输出采用服务端响应正文；流式按原字段合并，内部DTO/采集状态不混入，指标独立展示，预览与完整正文来源一致。
+      记忆准备按每个智能体合并为一个phase节点，正文保留内部步骤与错误，名称区分归属，总耗时按实际起止范围；沙箱初始化合并展示，python_interpreter下代码执行单独计时且排除延迟初始化，准备事实归入同次执行，阶段不计为模型/工具调用。
+      智能体及记忆归属优先采用采集时展示名称，缺失沿用内部名；Python包装分组显示代码执行，生成代码显示Python调用，具体工具直接显示实际名称；成功的重复包装层在Ops完整树投影中归并，原ID、正文、耗时和原始汇总指标保持，异常包装保留，搜索、详情和父导航一致。
+  - rule_id: TRJ-RULE-002
+    description: PG新增执行摘要及统计快照两张表，复用现有授权目录，列表和候选只读PG；节点详情按需读取文件。本地按tenant/user/agent/conversation组织；meta保存固定归属/执行清单，每执行一份OTLP，全部正文内嵌属性/Events并按字段分块读取。256KiB为刷盘阈值，单行可更大，增量编码/解码须实际验证。
+  - rule_id: TRJ-RULE-003
+    description: 管理员用户→最近根Agent→会话查询，自研调用树/思考/工具详情/折叠与本段概览，不建历史Agent关联。 用户列表直接复用；两个会话分组接口扩展view=trajectory管理员分支，保留原登录用户合同。
+      可观测中心按历史根Agent筛选授权执行集合，静态分页固定查询成员，全量耗时/TTFT读取独立授权范围的统计快照，Token与调用数按完整子树计算。 列表展示根版本，树和详情展示所选Agent自身版本，模型和工具不展示。
+      输入输出支持各自切换自动换行，按当前框宽度折行，JSON/文本模式和复制保持源内容；正文首块自动读取，触底后按服务端UTF-8偏移追加，失败位置重试并取消旧节点请求。 会话视图每会话一行，先确定最新执行四态再匹配历史执行，累计指标独立于匹配指标；详情按根执行顺序连续追加全部保留轮次。
+  - rule_id: TRJ-RULE-004
+    description: 显式查询静态历史快照，真实指标可为空；切换选择清理旧请求，无实时订阅或自动刷新。 模型TTFT记录首个非空回答/思考/工具参数增量，空块和usage排除，未知可空且零值有效；模型Span、事件、Histogram和本地OTLP使用同一实测值。
+      页头刷新按钮保留筛选排序并回到第一页，更新查询快照及汇总；加载时禁止重复点击，列表移除保留天数说明。
+  - rule_id: TRJ-RULE-005
+    description: 仅OPS/SU可读可信租户当前用户，PG归属、目录各层及固定meta同时核验；迁租旧归属检查只用于拒绝冲突，文件保持原租户，迁租事务撤销旧摘要并登记未采集占位。
+      引用状态在服务端有界缓存保存，随机ID逐次核验类型及身份/资源绑定，部署无需轨迹密钥，失效后重新查询。
+  - rule_id: TRJ-RULE-006
+    description: OTLP先刷盘，再原子提交meta.json的confirmed_bytes/hash才确认；Span/批次幂等，实际运行文件锁，终态起保留30天并整份删除。
+      定时及手动清理只删除轨迹文件，活动会话全部执行摘要及已知指标长期保留；expired执行继续参与会话累计耗时、Token和数据库耗时统计，文件清理不作为用量缺失原因。实际未知值保持null；自然到期补偿只更新文件状态。
+      OPS可保存本租户定时清理开关与1至30天天数；SU确认后在一个事务同步全部现有有效租户，手动清理须显式选择一个授权租户，游标绑定该租户；固定每天北京时间00:00执行，后台30秒刷新；管理员可主动清理当前可信租户1至30天以前的轨迹；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
+      单个/批量删除会话确认成功后立即向受管文件线程提交定向清理；会话与执行摘要在同一PG事务软删除；只清理实际删除会话的全部轮次，失败/占用重试且独立于定期清理开关。
+  - rule_id: TRJ-RULE-007
+    description: 后端注入导出目标及文件依赖，默认otlp兼容远端预览/采样/过滤，local_file仅写本地且关闭远端导出，默认目录/mnt/nexent-data/trajectory，查询固定30秒，启动自动初始化且无需根UUID，SDK仅接参数，单节点/共享卷验证。
+  - rule_id: TRJ-RULE-008
+    description: trace_id=conversation_id；先PG确定owner，再有界定位固定会话目录，返回全部保留执行和覆盖；查找预算耗尽返回503，未采集判断须完成归属查找。
+  - rule_id: TRJ-RULE-009
+    description: 'Historical contract retained only for the two retired Cases; the
+      user withdrew execution-recovery preparation on 2026-11-05. Retirement evidence:
+      nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json'
+  - rule_id: TRJ-RULE-010
+    description: 设计新增：会话轨迹详情右上角直接导出ZIP，按原会话目录打包meta.json与可读已归档的OTLP JSONL，完整正文保持内嵌，名称/历史版本/指标和缺失状态保持，不受浏览器加载页数限制。
+  - rule_id: TRJ-RULE-011
+    description: 旧POST /trajectory/import保持单次请求临时解析，无持久记录；页面内存和未完成请求在关闭、刷新、离开及退出时释放，不在浏览器持久保存正文。页面上传行为由TRJ-RULE-012定义。
+  - rule_id: TRJ-RULE-012
+    description: 管理员导入ZIP到本地服务持久目录，每次上传新增记录，仅可信当前租户的导入者可访问和删除；独立导入列表分页倒序展示，刷新、重登、服务重启后可重新查看，保存至手动删除，不参与原采集清理与统计。
+      文件名及导入时间支持分页前升降序，勾选跨页保留并确认批量删除；成功项移除、失败项保留重试，离开或认证失效停止后续请求。
+  required_test_stages:
+  - D2
+  - D3
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - CHAT-TRAJECTORY-IMPORT-MANAGEMENT-20261118
+    - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+    - CHAT-TRAJECTORY-CLEANUP-SCOPE-20261117
+    - CHAT-TRAJECTORY-BODY-WRAP-20261117
+    - CHAT-TRAJECTORY-CODE-DISPLAY-20261117
+    - CHAT-TRAJECTORY-BUILTIN-VERSION-20261116
+    - CHAT-LOCAL-TRAJECTORY-20261103
+    - CHAT-TRAJECTORY-VERSION-20261111
+    - CHAT-TRAJECTORY-REFERENCES-20261111
+    - CHAT-TRAJECTORY-DEPLOYMENT-20261111
+    - CHAT-TRAJECTORY-CONVERSATION-20261111
+    - CHAT-TRAJECTORY-AUTO-CONTENT-20261112
+    - CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
+    - CHAT-TRAJECTORY-SUMMARY-20261113
+    - CHAT-TRAJECTORY-FINAL-OUTPUT-20261113
+    - CHAT-TRAJECTORY-PHASES-20261116
+    - CHAT-TRAJECTORY-MEMORY-GROUP-20261116
+    - CHAT-TRAJECTORY-SANDBOX-TIMING-20261116
+    - CHAT-TRAJECTORY-REFRESH-20261116
+    - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
+    notes: Current rules include TRJ-RULE-001 through TRJ-RULE-012. Preserve existing
+      D1 and the retired TRJ-RULE-009 provenance. Native archive exchange is implemented;
+      POST /trajectory/import remains temporary, while current UI uploads use persistent
+      imports with private owner-scoped lists. See changes/ops-trajectory-saved-imports
+      for implementation and separate local verification evidence; global suite readiness
+      is not implied by fixed-script passes.

@@ -8,8 +8,8 @@ from fastapi import HTTPException
 from contracts.agentos import ToolBinding
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ToolConfig
+from test.common.local_agent_tools import create_local_tool
 
 from test.backend.app.test_agentos_prepared_evaluation import model_record
 
@@ -60,7 +60,7 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
     runtime_model.assert_called_once_with(9, "tenant-a")
     assert create_adapter.call_args.args == (model, modality, slot, "tenant-a")
     assert rebound.metadata["storage_client"] is storage.minio_client
-    tool_instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    tool_instance = create_local_tool(rebound)
     assert tool_instance.name == canonical_name
     assert tool_instance.selected_model_id == 9
     assert (tool_instance.llm_model if slot == "llm" else tool_instance.vlm_model) is create_adapter.return_value

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """TFP-D5-001: preserved fast-path acceptance checks."""
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from shared.tool_fastpath import make_wrapper
 
-from nexent.core.agents.tool_fastpath import is_simple_whitelisted_action
+from nexent.core.agents.cores.smolagents.tool_fastpath import is_simple_whitelisted_action
 
 
 pytestmark = [pytest.mark.case_id("TFP-D5-001"), pytest.mark.stage("D5")]

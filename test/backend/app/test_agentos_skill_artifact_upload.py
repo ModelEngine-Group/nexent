@@ -8,8 +8,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox_workspace import SandboxWorkspace
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.resources.workspace import SandboxWorkspace
 from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
 from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
 

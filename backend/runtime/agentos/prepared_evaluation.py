@@ -20,7 +20,7 @@ from contracts.agentos import (
     WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from contracts.errors.exceptions import RunModelControlsError, ValidationError as AgentValidationError
@@ -28,6 +28,7 @@ from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
 from infrastructure.agent_attachments import validate_attachment_references
+from infrastructure.agent_core_policy import apply_agent_core_policy
 from infrastructure.agent_model_config import (
     create_model_config_from_record, create_tenant_default_model_config, model_record_revision, normalize_model_revision,
 )
@@ -45,13 +46,14 @@ from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools
 from infrastructure.redis.client import get_redis_client
 from infrastructure.workspace_paths import create_run_workspace
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
-from nexent.core.agents.context_input import build_authorized_context_input
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.context.authorized_input import build_authorized_context_input
+from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
-from nexent.core.agents.sandbox import SandboxLevel
+from nexent.core.agents.sandbox.config import SandboxLevel
 from nexent.core.concurrency import run_blocking
 from runtime.adapters.nexent.factory import materialize_run
 from runtime.adapters.nexent.runner import agent_run
@@ -64,6 +66,8 @@ from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_langchain import materialize_langchain_tools
 from runtime.agentos.prepared_local_tool import materialize_local_tools
 from runtime.agentos.prepared_mcp import PreparedMCP
+from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
@@ -360,10 +364,12 @@ def prepare_run_snapshot(
     native_run = isinstance(payload, PreparedAgentRun) or debug
     native_knowledge = native_run and payload.native_knowledge is True
     if (
-        (root_generation is not None) != (workbench_version is not None or workbench_debug)
+        (root_generation is not None and workbench_version is None and not workbench_debug)
         or (native_knowledge and (workbench_version is not None or workbench_debug))
         or (turn_generation is not None and (
-            not native_run or (root_generation is not None and turn_generation.settings is not None)
+            not native_run
+            or (workbench_version is not None and root_generation is None)
+            or (root_generation is not None and turn_generation.settings is not None)
         ))
         or any(binding.root_generation is not None or binding.turn_generation is not None
                for binding in payload.models.additional_llms)
@@ -373,7 +379,9 @@ def prepare_run_snapshot(
     historical_context = (
         _restore_conversation_history(payload.historical_context, actor) if isinstance(payload, PreparedAgentRun) else None
     )
-    query, history, files = materialize_evaluation_input(payload.input, actor, payload.language)
+    query, history, files = materialize_evaluation_input(
+        payload.input, actor, payload.language, include_history_in_query=NEXENT_AGENT_CORE != "jiuwen",
+    )
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
@@ -400,12 +408,19 @@ def prepare_run_snapshot(
                 workbench_version=workbench_version, allow_debug_planning=debug,
                 workbench_debug_run_id=payload.run_id if workbench_debug else None,
             )
+            apply_agent_core_policy(agent_config, NEXENT_AGENT_CORE)
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")
         except (ValidationError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
 
         models = [_materialize_model(binding, actor, payload.resource) for binding in bindings]
+        if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
+            header_metadata = payload.mcp_header_metadata if isinstance(payload, PreparedAgentRun) else None
+            apply_bound_mcp_headers(
+                list(mcp.hosts.values()), header_metadata, passthrough_allowed=header_metadata is not None,
+                agent_id=payload.resource.agent_id, run_id=workspace_run_id,
+            )
         user_context = None
         if mcp.hosts or payload.tool_caller is not None:
             user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
@@ -436,7 +451,7 @@ def prepare_run_snapshot(
             redis_client=get_redis_client() if agent_config.enable_planning and not debug else None,
         )
         if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
-            info.runtime_metadata = payload.runtime_metadata
+            info.runtime_metadata = strip_reserved_runtime_metadata_fields(payload.runtime_metadata)
         if isinstance(payload, PreparedAgentRun):
             info.runtime_metadata_version = payload.runtime_metadata_version
         info.context_input = build_authorized_context_input(info, historical_context)

@@ -14,9 +14,10 @@ from nexent.core.model_service.profiles.contracts import VersionedReference
 from nexent.core.model_service.profiles.instruction_mapping import validate_instruction_mapping
 from nexent.core.model_service.profiles.parameter_bindings import validate_parameter_bindings
 from nexent.core.model_service.profiles.parameter_rules import compile_parameter_rules, validate_saved_parameter_values
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
 from nexent.core.model_service.profiles.request_parameters import _set, _tokens, apply_extra_api_parameters
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+from nexent.core.models.sampling import without_unset_sampling
 
 
 class ModelAdapterError(ValueError):
@@ -214,6 +215,11 @@ class OpenAIChatAdapter:
             body = apply_extra_api_parameters(
                 body, profile.extra_api_parameters, parameter_paths=[binding["path"] for binding in bindings.values()]
             )
+            try:
+                validate_sampling_parameters(body)
+            except ParameterValidationError as error:
+                raise ModelAdapterError(error.category) from None
+            body = without_unset_sampling(body)
             return PreparedHttpRequest(
                 request_id=request.request_id,
                 method=profile.connection_rules.method,
@@ -226,6 +232,8 @@ class OpenAIChatAdapter:
                 ssl_verify=profile.connection.ssl_verify,
                 stream_protocol="sse" if request.stream else None,
             )
+        except ModelAdapterError:
+            raise
         except (ParameterValidationError, ValueError, TypeError):
             raise ModelAdapterError("MODEL_REQUEST_CONFIGURATION_INVALID") from None
 

@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Set
 
@@ -10,6 +11,7 @@ from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.clarification import ClarificationResponse, normalize_form
 from contracts.agentos_knowledge import validate_knowledge_source_reference
 from contracts.constants.constants import (
@@ -19,10 +21,6 @@ from contracts.constants.constants import (
     DEFAULT_TENANT_ID,
     HISTORY_SUMMARY_UNIT_TYPE,
     MESSAGE_ROLE,
-)
-from contracts.constants.environment import (
-    MAX_CONVERSATION_TURNS,
-    MAX_CONVERSATIONS_PER_USER,
 )
 from contracts.conversation import (
     ConversationHistory,
@@ -37,6 +35,7 @@ from contracts.conversation import (
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.agentos import RUN_ID_PATTERN
+from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.models import KnowledgeRecord
 
@@ -176,14 +175,15 @@ def _enforce_user_conversation_limit(session, user_id: Optional[str]) -> None:
         ConversationRecord.delete_flag == "N",
     )
     conversation_count = int(session.scalar(statement) or 0)
-    if conversation_count >= MAX_CONVERSATIONS_PER_USER:
+    limit = get_config_snapshot().get("MAX_CONVERSATIONS_PER_USER")
+    if conversation_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation history limit reached: maximum {MAX_CONVERSATIONS_PER_USER} conversations per user",
+            f"Conversation history limit reached: maximum {limit} conversations per user",
             details={
                 "resource": "conversations",
                 "scope": "user",
-                "limit": MAX_CONVERSATIONS_PER_USER,
+                "limit": limit,
                 "current_count": conversation_count,
             },
         )
@@ -208,14 +208,15 @@ def _enforce_conversation_turn_limit(
         ConversationMessage.delete_flag == "N",
     )
     turn_count = int(session.scalar(statement) or 0)
-    if turn_count >= MAX_CONVERSATION_TURNS:
+    limit = get_config_snapshot().get("MAX_CONVERSATION_TURNS")
+    if turn_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation turn limit reached: maximum {MAX_CONVERSATION_TURNS} turns per conversation",
+            f"Conversation turn limit reached: maximum {limit} turns per conversation",
             details={
                 "resource": "conversation_turns",
                 "scope": "conversation",
-                "limit": MAX_CONVERSATION_TURNS,
+                "limit": limit,
                 "current_count": turn_count,
             },
         )
@@ -265,7 +266,7 @@ def create_conversation(
         if knowledge_scope is not None:
             data["knowledge_scope"] = knowledge_scope
         if runtime_metadata is not None:
-            data["runtime_metadata"] = deepcopy(runtime_metadata)
+            data["runtime_metadata"] = deepcopy(strip_reserved_runtime_metadata_fields(runtime_metadata))
             data["runtime_metadata_version"] = 1
         if workbench_config is not None:
             data["workbench_config"] = deepcopy(workbench_config)
@@ -297,6 +298,8 @@ def create_conversation(
         )
 
         record = session.execute(stmt).fetchone()
+        from management.db.trajectory.repository import seed_conversation
+        seed_conversation(session, record.conversation_id, user_id, agent_id)
 
         # Convert to dictionary and ensure timestamps are integers
         result_dict = {
@@ -306,7 +309,7 @@ def create_conversation(
             "target": record.target if isinstance(getattr(record, "target", None), dict) else None,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
-            "runtime_metadata": record.runtime_metadata or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(record.runtime_metadata),
             "runtime_metadata_version": record.runtime_metadata_version or 0,
             "workbench_config": (
                 record.workbench_config if isinstance(getattr(record, "workbench_config", None), dict) else None
@@ -348,7 +351,7 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
-                                 status: str = 'completed', *,
+                                 status: str = 'completed', *, _session=None,
                                  message_source: MessageSource = MessageSource.CHAT, execution_identity=None,
                                  streaming_owner: str | None = None, db_session=None,
                                  expected_clarification_source_id: int | None = None) -> int:
@@ -369,7 +372,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         int: Newly created message ID (auto-increment ID)
     """
     message_source = MessageSource(message_source)
-    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
+    with (nullcontext(_session) if _session is not None else
+          get_db_session() if db_session is None else get_db_session(db_session)) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data["conversation_id"])
         message_idx = int(message_data["message_idx"])
@@ -451,6 +455,77 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         return message_id
 
 
+def append_conversation_user_message(
+    conversation_id: int, content: str, minio_files, user_id: str, *,
+    message_source: MessageSource = MessageSource.CHAT,
+    clarification_response=None,
+    annotations=None,
+) -> tuple[int, int]:
+    """Reserve an ordered user/assistant pair independently of client history."""
+    with get_db_session() as session:
+        _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+        allowed = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ))
+        if allowed is None:
+            raise ConversationNotFoundError("Conversation not found")
+        latest = session.scalar(select(func.max(ConversationMessage.message_index)).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == "N",
+        ))
+        index = 0 if latest is None else max(0, (int(latest) // 2 + 1) * 2)
+        message_id = create_conversation_message({
+            "conversation_id": conversation_id, "message_idx": index, "role": MESSAGE_ROLE["USER"],
+            "content": content, "minio_files": minio_files,
+            **({"annotations": annotations} if annotations is not None else {}),
+            **({"clarification_response": clarification_response} if clarification_response is not None else {}),
+        }, user_id, _session=session, **(
+            {"message_source": MessageSource(message_source)} if MessageSource(message_source) != MessageSource.CHAT else {}
+        ))
+        return message_id, index
+
+
+def resolve_conversation_retry_user(
+    conversation_id: int, user_id: str, message_id: int, message_index: Optional[int],
+    content: str, minio_files,
+) -> tuple[int, int]:
+    """Authorize a retry boundary without appending another user turn."""
+    def file_keys(value):
+        if isinstance(value, str):
+            value = json.loads(value)
+        return [item.get("object_name") or item.get("url") or item.get("name")
+                if isinstance(item, dict) else item for item in (value or [])]
+
+    with get_db_session() as session:
+        _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+        ))
+        if owned is None:
+            raise ConversationNotFoundError("Conversation not found")
+        target = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.created_by == user_id,
+            ConversationMessage.message_role == "user", ConversationMessage.delete_flag == "N",
+        ))
+        if (target is None or target.message_index is None or target.message_index < 0
+                or (message_index is not None and target.message_index != message_index)
+                or target.message_content != content or file_keys(target.minio_files) != file_keys(minio_files)):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Invalid retry target")
+        answer = session.scalar(select(ConversationMessage.message_id).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_index == target.message_index + 1,
+            ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ).limit(1))
+        if answer is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Retry target has no answer")
+        return target.message_id, target.message_index
+
+
 def _resolve_clarification_response(session, conversation_id, user_id, role, raw):
     """Resolve an owned latest form before writing either side of the response."""
 
@@ -473,7 +548,7 @@ def _resolve_clarification_response(session, conversation_id, user_id, role, raw
     if source is None or source.message_role != 'assistant' or source.status != 'completed':
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification is no longer available")
     units = session.execute(select(
-        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index,
+        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index, ConversationMessageUnit.unit_type,
     ).where(
         ConversationMessageUnit.conversation_id == conversation_id,
         ConversationMessageUnit.message_id == source.message_id,
@@ -485,7 +560,16 @@ def _resolve_clarification_response(session, conversation_id, user_id, role, raw
         if response.unit_index is not None and unit.unit_index != response.unit_index:
             continue
         try:
-            if normalize_form(json.loads(unit.unit_content)) == response.form:
+            saved = json.loads(unit.unit_content)
+            if (isinstance(saved, dict) and type(saved.get('schema_version')) is int
+                    and saved['schema_version'] == 1 and saved.get('runtime_mode') == 'native_agent'
+                    and saved.get('type') == unit.unit_type == 'human_interaction'
+                    and isinstance(saved.get('turn_id'), str) and saved['turn_id'].strip()
+                    and isinstance(saved.get('content'), str)):
+                # Only the owned persisted event may carry a single public envelope.
+                # Client forms remain strict data; nested envelopes are not interpreted.
+                saved = json.loads(saved['content'])
+            if normalize_form(saved) == response.form:
                 matches.append(unit)
         except (TypeError, ValueError):
             continue
@@ -781,7 +865,7 @@ def branch_conversation(
             "delete_flag": "N",
             "agent_id": conversation.agent_id,
             "chat_mode": conversation.chat_mode,
-            "runtime_metadata": deepcopy(conversation.runtime_metadata) or {},
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(conversation.runtime_metadata)),
             "runtime_metadata_version": 1,
         }
         # SQLAlchemy serializes Python None bound to a JSONB column as the JSON
@@ -963,7 +1047,7 @@ def branch_conversation(
             "agent_id": new_conversation.agent_id,
             "chat_mode": new_conversation.chat_mode or "execution",
             "knowledge_scope": new_conversation.knowledge_scope,
-            "runtime_metadata": new_conversation.runtime_metadata or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(new_conversation.runtime_metadata),
             "runtime_metadata_version": new_conversation.runtime_metadata_version or 0,
             "workbench_config": (
                 new_conversation.workbench_config
@@ -1337,6 +1421,48 @@ def update_conversation_message_status(message_id: int, status: str, user_id: Op
         )
 
 
+def checkpoint_creator_message(
+    message_id: int, conversation_id: int, user_id: str,
+    units: List[Dict[str, Any]], content: str, status: str = "streaming",
+) -> None:
+    """Append an owned creator checkpoint and its status in one transaction."""
+    if status not in {"streaming", "completed", "failed", "stopped"}:
+        raise ValueError("Invalid creator checkpoint status")
+    with get_db_session() as session:
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update())
+        if owned is None:
+            raise ValueError("Conversation does not exist or is not accessible")
+        parent = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_role == "assistant",
+            ConversationMessage.created_by == user_id,
+            ConversationMessage.delete_flag == "N",
+        ).with_for_update())
+        if parent is None or parent.status != "streaming":
+            raise ValueError("Creator message is not an owned active stream")
+        if units:
+            session.execute(insert(ConversationMessageUnit), [add_creation_tracking({
+                "message_id": message_id, "conversation_id": conversation_id,
+                "unit_index": unit["unit_index"], "unit_type": unit["unit_type"],
+                "unit_content": unit["unit_content"], "unit_status": "completed",
+                "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"), "delete_flag": "N",
+            }, user_id) for unit in units])
+        session.execute(update(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+        ).values(**add_update_tracking({
+            "message_content": content, "status": status,
+            "update_time": func.current_timestamp(),
+        }, user_id)))
+        if status != "streaming":
+            _touch_conversation_activity(session, conversation_id, user_id)
+
+
 def update_conversation_message_content(message_id: int, content: str, user_id: Optional[str] = None) -> None:
     """
     Update the message_content field of a conversation message.
@@ -1445,7 +1571,12 @@ def get_conversation(
             stmt = stmt.where(ConversationRecord.created_by == user_id)
         # Execute the query
         record = session.scalars(stmt).first()
-        return None if record is None else as_dict(record)
+        if record is None:
+            return None
+        conversation = as_dict(record)
+        if "runtime_metadata" in conversation:
+            conversation["runtime_metadata"] = strip_reserved_runtime_metadata_fields(conversation["runtime_metadata"])
+        return conversation
 
 
 def resolve_conversation_runtime_metadata(
@@ -1475,14 +1606,14 @@ def resolve_conversation_runtime_metadata(
         if update_requested:
             if expected_version is not None and expected_version != current_version:
                 raise RuntimeMetadataVersionConflict(current_version)
-            record.runtime_metadata = deepcopy(request_metadata or {})
+            record.runtime_metadata = deepcopy(strip_reserved_runtime_metadata_fields(request_metadata))
             record.runtime_metadata_version = current_version + 1
             record.updated_by = user_id
             record.update_time = func.current_timestamp()
             session.flush()
 
         return {
-            "runtime_metadata": deepcopy(record.runtime_metadata or {}),
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(record.runtime_metadata)),
             "runtime_metadata_version": int(record.runtime_metadata_version or 0),
         }
 
@@ -1594,7 +1725,7 @@ def replace_conversation_workbench_and_metadata(
         record.workbench_config = normalized
         record.workbench_config_version = current_config_version + int(config_changed)
         record.knowledge_scope = deepcopy(normalized.get("knowledge_scope"))
-        record.runtime_metadata = deepcopy(metadata)
+        record.runtime_metadata = deepcopy(strip_reserved_runtime_metadata_fields(metadata))
         record.runtime_metadata_version = current_metadata_version + 1
         record.updated_by = user_id
         record.update_time = func.current_timestamp()
@@ -1604,7 +1735,7 @@ def replace_conversation_workbench_and_metadata(
             "workbench_config_version": int(record.workbench_config_version),
             "agent_id": record.agent_id,
             "knowledge_scope": deepcopy(record.knowledge_scope),
-            "runtime_metadata": deepcopy(record.runtime_metadata),
+            "runtime_metadata": deepcopy(strip_reserved_runtime_metadata_fields(record.runtime_metadata)),
             "runtime_metadata_version": int(record.runtime_metadata_version),
         }
 
@@ -1627,7 +1758,7 @@ def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
         stmt = (
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conversation_id, ConversationMessage.delete_flag == "N")
-            .order_by(asc(ConversationMessage.message_index))
+            .order_by(asc(ConversationMessage.message_index), asc(ConversationMessage.message_id))
         )
 
         # Execute the query
@@ -2011,7 +2142,7 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for updated_by field
+        user_id: Conversation owner and updated_by value
 
     Returns:
         bool: Whether the operation was successful
@@ -2031,7 +2162,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+        if user_id:
+            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
+        if conversation_result.rowcount == 0:
+            return False
+
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, [conversation_id], user_id)
 
         # 2. Mark related messages as deleted
         message_stmt = (
@@ -2120,6 +2258,9 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
             .values(update_data)
         )
 
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, owned_ids, user_id)
+
         # 2. Mark related messages as deleted
         session.execute(
             update(ConversationMessage)
@@ -2179,6 +2320,9 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             .where(ConversationRecord.conversation_id.in_(conv_ids), ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+
+        from management.db.trajectory.repository import delete_summaries
+        delete_summaries(session, conv_ids, user_id)
 
         # 3) Mark messages as deleted
         session.execute(
@@ -2317,6 +2461,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
                 ConversationMessageUnit.message_id == ConversationMessage.message_id,
                 ConversationMessageUnit.delete_flag == "N",
                 ConversationMessageUnit.unit_type.is_not(None),
+                ConversationMessageUnit.unit_type != "execution_result",
             )
             .scalar_subquery()
         )
@@ -2392,7 +2537,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             "agent_system_key": conversation.get("agent_system_key"),
             "chat_mode": conversation.get("chat_mode") or "execution",
             "knowledge_scope": conversation.get("knowledge_scope"),
-            "runtime_metadata": conversation.get("runtime_metadata") or {},
+            "runtime_metadata": strip_reserved_runtime_metadata_fields(conversation.get("runtime_metadata")),
             "runtime_metadata_version": int(conversation.get("runtime_metadata_version") or 0),
             "workbench_config": conversation.get("workbench_config"),
             "workbench_config_version": int(conversation.get("workbench_config_version") or 0),
@@ -3295,7 +3440,7 @@ def get_historical_context(
                 ConversationMessage.delete_flag == "N",
                 ConversationMessage.message_role.in_(["user", "assistant"]),
             )
-            .order_by(asc(ConversationMessage.message_index))
+            .order_by(asc(ConversationMessage.message_index), desc(ConversationMessage.message_id))
         ).all()
 
         # Fetch reply-annotation units for the historical user messages so the
@@ -3362,13 +3507,39 @@ def get_historical_context(
                 )
             )
 
+        assistant_ids = [turn["assistant_message_id"] for turn in turns if turn["assistant_message_id"] > 0]
+        if assistant_ids:
+            records = session.execute(select(
+                ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
+                ConversationMessageUnit.invocation_id,
+            ).where(
+                ConversationMessageUnit.conversation_id == conversation_id,
+                ConversationMessageUnit.message_id.in_(assistant_ids),
+                ConversationMessageUnit.unit_type.in_([
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                ]),
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
+            by_message = {}
+            for record in records:
+                by_message.setdefault(record.message_id, []).append({
+                    "record_type": record.unit_type, "content": record.unit_content,
+                    "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
+                })
+            for turn in turns:
+                if turn["assistant_message_id"] in by_message:
+                    turn["execution_records"] = by_message[turn["assistant_message_id"]]
+
         summary_result = None
         if summary_record and summary_payload:
             summary_result = {
                 "unit_id": summary_record.unit_id,
                 **summary_payload,
             }
-        return {"history_summary": summary_result, "conversation_turns": turns}
+        return {"history_summary": summary_result, "conversation_turns": turns,
+                "current_user_message_index": current.message_index}
 
 
 def _remove_scope_references(

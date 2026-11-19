@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  title: 会话轨迹一键导出ZIP与浏览器临时导入查看
+  description: 详情导出原会话目录meta.json及OTLP JSONL；列表上传ZIP由本地服务单次请求临时解析，页面内存查看，刷新或离开后重传。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    added:
+    - CHAT-TRAJECTORY-ARCHIVE-D2-001
+    - CHAT-TRAJECTORY-ARCHIVE-D3-001
+    - CHAT-TRAJECTORY-ARCHIVE-D4-001
+    - CHAT-TRAJECTORY-ARCHIVE-SECURITY-D5-001
+    - CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 原meta/JSONL打包、完整内嵌正文及Unicode、会话权限和源变化。
+    - 上传ZIP校验及现有OTLP解析复用，单次请求临时文件释放和页面数据源隔离。
+    - 两个按钮、失败重试、同文件重选、刷新/离开/登录退出后清空，无持久档案或后续源资源请求。
+    reason: 既有UT证明原运行存储和查看，新增格式交换及临时页面生命周期需要局部测试；D2导出协议、D3格式集成、D4完整交互、D5风险分别证明。
+    test_selectors:
+    - test/backend/services/trajectory/test_exchange.py
+    - frontend/tests/component/trajectoryArchive.test.tsx
+    - frontend/tests/component/trajectoryExport.test.tsx
+  notes: Implemented native meta/OTLP ZIP and request-local import; current fixed
+    Cases own their source files, managed workers and browser contexts. D3 proves
+    exchange and immediate cleanup; browser generation/lifecycle assertions belong
+    to D4 and recovery D5. Execution results remain in local evidence and SPEC task.md.

@@ -1017,7 +1017,7 @@ async def delete_documents(
             ctx=ctx, index_name=index_name, path_or_url=path_or_url, scope=scope,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid document deletion request") from exc
     except ScopeDenied:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Permission denied")
     except LimitExceededError as e:

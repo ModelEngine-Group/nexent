@@ -27,7 +27,7 @@ def test_explicit_boolean_patch_preserves_false_and_unrelated_fields(mocker, val
 @pytest.mark.parametrize("value", [None, "true", "false", "yes", 0, 1, [], {}])
 @pytest.mark.asyncio
 async def test_invalid_policy_never_authorizes_or_writes(mocker, value):
-    auth = mocker.patch.object(tools, "get_current_user_id")
+    auth = mocker.patch.object(tools, "authenticate_identity")
     update = mocker.patch.object(service, "update_agent_draft_fields")
     mocker.patch.object(tools, "_resolve_agent_context_id", return_value=42)
     result = await tools.save_agent_draft_fields(42, {FIELD: value})
@@ -57,7 +57,7 @@ async def test_verified_state_includes_effective_policy(mocker, draft, expected)
 def authorized_tool(mocker):
     mocker.patch.object(tools, "_resolve_agent_context_id", return_value=42)
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={"Authorization": "Bearer test"}))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("user", "tenant"))
+    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="user", tenant_id="tenant"))
     mocker.patch.object(service, "require_agent_draft_edit", return_value={"name": "test_assistant"})
 
 

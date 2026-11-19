@@ -18,9 +18,9 @@ from infrastructure.nl2agent_tool_config import (
     NL2A_WRAPPER_NAME, RECOMMEND_RESOURCES_NAME, SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME, SEARCH_UNINSTALLED_RESOURCES_NAME, create_nl2agent_mcp_tool_configs,
 )
-from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextItemInput, ContextItemType
-from nexent.core.agents.context_input import build_authorized_context_input
+from nexent.core.agents.context.authorized_input import build_authorized_context_input
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from runtime.adapters.nexent.factory import build_run_info
 from runtime.agentos.creator_context import apply_creator_budget
@@ -111,6 +111,10 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
         with self._boundary_lock:
             return self._boundary_reached
 
+    @property
+    def turn_complete(self) -> bool:
+        return self.boundary_reached
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         if not agent_name and process_type == ProcessType.FINAL_ANSWER:
             return
@@ -131,7 +135,6 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
                 if self._boundary_reached:
                     return
                 self._boundary_reached = True
-            self._boundary_stop_event.set()
 
 
 def prepare_agent_creator_run(payload: PreparedAgentCreatorRun, actor: ServicePrincipal) -> AgentRunInfo:

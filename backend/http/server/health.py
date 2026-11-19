@@ -17,6 +17,13 @@ def install_health_contract(app: FastAPI) -> None:
         if any(task.done() for task in getattr(app.state, "required_background_tasks", ())):
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return {"status": "not_ready", "background_state": "stopped"}
+        configuration = getattr(app.state, "configuration_runtime", None)
+        if configuration is not None and not configuration.is_ready:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {
+                "status": "not_ready",
+                "configuration_ready": False,
+            }
         manager = getattr(app.state, "thread_manager", None)
         if manager is None:
             return {"status": "ready"}

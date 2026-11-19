@@ -156,7 +156,7 @@ def test_snapshot_requires_a_model(mocker):
 
 
 def test_runtime_renders_authorized_attachment_in_prompt(mocker):
-    from nexent.core.agents.agent_model import ModelConfig
+    from nexent.core.agents.contracts.config import ModelConfig
     from runtime.agentos import prepared_attachments
 
     mocker.patch.object(runtime, "_materialize_model", return_value=ModelConfig(

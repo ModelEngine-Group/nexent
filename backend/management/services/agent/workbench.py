@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
+from nexent.core.agents.contracts.config import AgentConfig
 
 from contracts.errors.exceptions import RuntimeMetadataVersionConflict, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
@@ -49,7 +50,6 @@ from management.services.skill.permission import (
     can_view_skill,
 )
 from management.services.skill.service import SkillService
-from nexent.core.agents.agent_model import AgentConfig
 
 
 @dataclass(frozen=True)

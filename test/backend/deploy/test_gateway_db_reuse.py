@@ -65,7 +65,8 @@ def test_k8s_password_rotation_uses_shared_postgres_checksum():
     def function(text, name):
         return re.search(r"^" + name + r"\(\) \{.*?^\}", text, re.M | re.S).group()
     script = "\n".join([function(source, "env_or_default"), function(source, "yaml_quote"),
-                          function(common, "deployment_sha256_string"), function(source, "render_runtime_secret_values")])
+                          function(common, "deployment_sha256_string"), function(source, "effective_northbound_api_server"),
+                          function(source, "render_runtime_secret_values")])
     script += """
 k8s_env_file_data() { printf '      {}'; }
 deployment_monitoring_env_file() { printf '/nonexistent-gateway-fixture'; }
@@ -76,9 +77,10 @@ k8s_write_private_values() { cat; }
 render_runtime_secret_values
 """
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
-    def render(password):
+    def render(password, northbound_url=""):
         env = {**os.environ, "NEXENT_POSTGRES_PASSWORD": password, "JWT_SECRET": "fixture-jwt",
-               "ROOT_ENV_FILE": "fixture", "GENERATED_SECRETS_VALUES": "fixture"}
+               "ROOT_ENV_FILE": "fixture", "GENERATED_SECRETS_VALUES": "fixture",
+               "NORTHBOUND_API_SERVER": northbound_url}
         result = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True, timeout=15)
         assert result.returncode == 0, result.stderr
         return yaml.safe_load(result.stdout)
@@ -86,6 +88,10 @@ render_runtime_secret_values
     assert first["global"]["rolloutChecksums"]["postgresSecret"] == hashlib.sha256(b"existing-secret").hexdigest()
     assert first["global"]["rolloutChecksums"]["postgresSecret"] != rotated["global"]["rolloutChecksums"]["postgresSecret"]
     assert first["nexent-common"]["secrets"]["postgresPassword"] == "existing-secret"
+    legacy = render("existing-secret", "http://nexent-northbound:5013/api")
+    custom = render("existing-secret", "https://gateway.example.test/api")
+    assert first["global"]["rolloutChecksums"]["env"] == legacy["global"]["rolloutChecksums"]["env"]
+    assert first["global"]["rolloutChecksums"]["env"] != custom["global"]["rolloutChecksums"]["env"]
 
 
 
@@ -93,7 +99,7 @@ def test_k8s_runtime_renderer_passes_existing_postgres_values(tmp_path):
     source = (ROOT / "deploy/k8s/deploy.sh").read_text(encoding="utf-8")
     def function(name):
         return re.search(r"^" + name + r"\(\) \{.*?^\}", source, re.M | re.S).group()
-    script = "\n".join(function(name) for name in ("yaml_quote", "env_or_default", "render_k8s_runtime_config_values"))
+    script = "\n".join(function(name) for name in ("yaml_quote", "env_or_default", "effective_northbound_api_server", "render_k8s_runtime_config_values"))
     script += '\nrender_k8s_runtime_config_values "$FIXTURE_OUTPUT"'
     (tmp_path / "sql/migrations").mkdir(parents=True)
     init_file = tmp_path / "sql/init.sql"
@@ -108,3 +114,42 @@ def test_k8s_runtime_renderer_passes_existing_postgres_values(tmp_path):
     config = yaml.safe_load(output.read_text(encoding="utf-8"))["nexent-common"]["config"]
     assert config["postgres"] == dict(host="existing-db", port="5544", db="existing", user="existing-user")
     assert set(config) == {"timezone", "postgres", "services", "redis", "dataProcess"}
+
+
+@pytest.mark.parametrize(("file_key", "chart_key", "expected"), [
+    (None, None, None),
+    ("fixture-from-env", None, "fixture-from-env"),
+    ("fixture-from-env", "fixture-helm-override", "fixture-helm-override"),
+])
+def test_helm_gateway_and_downstream_share_signing_key(tmp_path, file_key, chart_key, expected):
+    key = "GATEWAY_SIGNING_SECRET"
+    common = {"secrets": {"jwtSecret": "fixture-jwt"}}
+    if chart_key:
+        common["secrets"]["gatewaySigningSecret"] = chart_key
+    if file_key:
+        common["envFiles"] = {"rootData": {key: base64.b64encode(file_key.encode()).decode()}}
+    values = tmp_path / "values.yaml"
+    values.write_text(yaml.safe_dump({"nexent-common": common}), encoding="utf-8")
+    result = subprocess.run(
+        ["helm", "template", "fixture", str(CHART.parent), "-f", str(values)],
+        capture_output=True, text=True, check=True,
+    )
+    docs = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+    shared = next(doc["data"] for doc in docs if doc["kind"] == "Secret"
+                  and doc["metadata"]["name"] == "nexent-secrets")
+    if expected:
+        assert base64.b64decode(shared[key]).decode() == expected
+    else:
+        assert key not in shared
+
+    def container(name):
+        deployment = next(doc for doc in docs if doc["kind"] == "Deployment"
+                          and doc["metadata"]["name"] == name)
+        return deployment["spec"]["template"]["spec"]["containers"][0]
+
+    gateway = container("nexent-gateway")
+    signing = next(item for item in gateway["env"] if item["name"] == key)
+    assert signing["valueFrom"]["secretKeyRef"] == {"name": "nexent-secrets", "key": key, "optional": True}
+    for name in ("nexent-config", "nexent-runtime", "nexent-mcp"):
+        refs = [ref["secretRef"]["name"] for ref in container(name)["envFrom"] if "secretRef" in ref]
+        assert refs[-1] == "nexent-secrets"

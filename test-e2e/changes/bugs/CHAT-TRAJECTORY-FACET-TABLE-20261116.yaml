@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-FACET-TABLE-20261116
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-FACET-TABLE-20261116
+  title: 修复智能体筛选引用不存在的表
+  description: Ops筛选SQL使用AgentInfo模型表名，保持权限、搜索、版本和分页。
+  observed_behavior: records facet=agents查询nexent.agent_info_t导致UndefinedTable并返回503。
+  expected_behavior: 使用现有智能体表完成候选查询，保持tenant_id/id/name、可信租户范围和搜索分页规则；数据库错误正常传播。
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: 现有UT未检查摘要facet原始SQL的物理表关系，D2控制PG边界，不能发现表名与ORM漂移。
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - CHAT-TRAJECTORY
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 所有facet物理表与ORM元数据一致；agents使用AgentInfo表名及租户/草稿/软删除规则。
+    - 中文LIKE转义、用户/Agent过滤、游标及有界分页保持。
+    - 候选结果合同保持，真实数据库错误不被吞掉。
+    reason: 用SQL编译及元数据约束准确检测错误关系，不增加重复D1；正式D2沿用路由回归。
+    test_selectors:
+    - test/backend/services/trajectory/test_pg_facets.py
+  notes: SPEC facet-table-fix.md，恢复原合同，无新表或迁移。D2沿用runtime责任域、私有资源与既有清理。真实PG/部署验收依用户此前要求暂缓，Mock/编译不宣称PG集成通过。

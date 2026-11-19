@@ -75,6 +75,7 @@ from contracts.knowledge_collections import (
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppended
 from contracts.knowledge_sources import KnowledgeSourcesResult
+from nexent.monitor import get_monitoring_manager
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -254,7 +255,8 @@ class AgentOSClient:
             token = sign_call(operation, body, ServicePrincipal(user_id, tenant_id))
         except AgentOSIdentityError as exc:
             raise RuntimeServiceUnavailableError("Internal runtime authentication is not configured") from exc
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = get_monitoring_manager().get_trace_headers()
+        headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
         return f"{self.runtime_url}/api{operation.value}", body, headers
 
     async def start_prepared_run(self, payload: PreparedAgentRun, user_id: str, tenant_id: str) -> AgentRunReference:
@@ -274,6 +276,9 @@ class AgentOSClient:
 
     async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME, request, user_id, tenant_id)
+
+    async def acknowledge_projection(self, request: AgentRunReference, user_id: str, tenant_id: str) -> None:
+        await self._post_json(AgentOperation.ACKNOWLEDGE_PROJECTION, request, user_id, tenant_id)
 
     async def resume_legacy(self, request: AgentLegacyResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME_LEGACY, request, user_id, tenant_id)

@@ -4,14 +4,15 @@
 from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
 from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, validate_sampling_parameters
 from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
 from nexent.core.model_service.profiles.request_parameters import overlay_extra_api_parameters
+from nexent.core.models.sampling import without_unset_sampling
 
 
 def _apply_agent_parameters(profile, canonical):
     resolved = overlay_profile_parameters(
-        ensure_outlet_parameter_rules(profile), canonical["parameter_values"], scope="outlet",
+        profile, canonical["parameter_values"], scope="outlet",
     )
     if canonical.get("custom_overrides") is not None:
         data = resolved.model_dump(mode="json")
@@ -21,14 +22,17 @@ def _apply_agent_parameters(profile, canonical):
 
 
 def merge_agent_parameters(profile, entry):
-    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry))
+    profile = ensure_outlet_parameter_rules(profile)
+    return _apply_agent_parameters(profile, read_agent_parameter_entry(entry, profile=profile))
 
 
 def merge_conversation_parameters(profile, preferences):
     if not isinstance(preferences, dict):
         raise ParameterValidationError("CONVERSATION_PREFERENCES_INVALID")
     profile = ensure_outlet_parameter_rules(profile)
-    resolved = overlay_profile_parameters(profile, without_outlet_token_limits(preferences), scope="conversation")
+    submitted = without_unset_sampling(without_outlet_token_limits(preferences))
+    validate_sampling_parameters(submitted)
+    resolved = overlay_profile_parameters(profile, submitted, scope="conversation")
     output = resolved.parameter_values.get("max_output_tokens", resolved.parameter_values.get("max_tokens"))
     context = profile.capabilities.context
     limits = [value for value in (context.output_limit, context.combined_window) if value is not None]
@@ -40,8 +44,9 @@ def merge_conversation_parameters(profile, preferences):
 def merge_runtime_parameters(profile, entry, preferences):
     if not isinstance(preferences, dict):
         raise ParameterValidationError("CONVERSATION_PREFERENCES_INVALID")
-    canonical = read_agent_parameter_entry(entry)
-    preferences = without_outlet_token_limits(preferences)
+    profile = ensure_outlet_parameter_rules(profile)
+    canonical = read_agent_parameter_entry(entry, profile=profile)
+    preferences = without_unset_sampling(without_outlet_token_limits(preferences))
     session = merge_conversation_parameters(_apply_agent_parameters(profile, canonical), preferences)
     inherited = {key: value for key, value in canonical["parameter_values"].items()
                  if key in session.parameter_values}

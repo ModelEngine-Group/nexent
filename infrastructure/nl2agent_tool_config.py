@@ -3,7 +3,7 @@
 
 import json
 
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 NL2A_MCP_SERVICE_NAME = "nl2a"
 MAX_BINDING_CANDIDATES = 12

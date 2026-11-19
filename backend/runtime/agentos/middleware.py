@@ -5,7 +5,7 @@ from starlette.responses import JSONResponse
 
 from contracts.agentos import BODY_KEY, MAX_REQUEST_BYTES, NAMESPACE, OPERATIONS_BY_PATH, PRINCIPAL_KEY
 from gateway.security.context import identity_context
-from infrastructure.agentos_identity import AgentOSIdentityError, verify_call
+from infrastructure.agentos_identity import AgentOSIdentityError, read_bearer_token, verify_call
 
 
 class AgentOSMiddleware:
@@ -29,11 +29,11 @@ class AgentOSMiddleware:
         if scope["method"] != "POST" or scope["query_string"]:
             return await self._error(scope, receive, send, 400, "AGENTOS_INVALID_REQUEST")
 
-        authorization = [value for name, value in scope["headers"] if name == b"authorization"]
-        if len(authorization) != 1:
-            return await self._error(scope, receive, send, 401, "AGENTOS_UNAUTHORIZED")
-        scheme, _, token = authorization[0].decode("latin-1").partition(" ")
-        if scheme.lower() != "bearer" or not token:
+        try:
+            token = read_bearer_token([
+                value.decode("latin-1") for name, value in scope["headers"] if name == b"authorization"
+            ])
+        except AgentOSIdentityError:
             return await self._error(scope, receive, send, 401, "AGENTOS_UNAUTHORIZED")
 
         buffer = bytearray()

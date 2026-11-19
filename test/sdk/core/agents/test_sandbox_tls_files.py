@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real POSIX filesystem boundaries of the container's TLS bootstrap."""
 
 import importlib.util
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.skipif(sys.platform != 'linux', reason='Container POSIX
 
 @pytest.fixture
 def bootstrap(monkeypatch):
-    source = Path(__file__).resolve().parents[4] / 'sdk/nexent/core/agents/sandbox_tls.py'
+    source = Path(__file__).resolve().parents[4] / 'sdk/nexent/core/agents/sandbox/tls.py'
     spec = importlib.util.spec_from_file_location('standalone_tls', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -30,7 +31,7 @@ def bootstrap(monkeypatch):
             monkeypatch.setattr(os, 'execvp', lambda command, argv: launched.append(command))
             monkeypatch.setattr(sys, 'argv', ['bootstrap', 'sandbox-test', str(path), 'jupyter'])
             try:
-                runpy.run_path(str(source.with_name('sandbox_tls_bootstrap.py')), run_name='__main__')
+                runpy.run_path(str(source.with_name("tls_bootstrap.py")), run_name='__main__')
             except (ValueError, OSError) as exc:
                 return SimpleNamespace(returncode=1, stdout='', stderr=str(exc))
             return SimpleNamespace(returncode=0, stdout='gateway launched' if launched else '', stderr='')
@@ -98,7 +99,7 @@ def test_rejects_damaged_existing_identity(bootstrap, tmp_path, damage):
     elif damage == 'missing_certificate':
         (directory / 'server.crt').unlink()
     else:
-        os.link(key, tmp_path / 'key-link')
+        os.link(key, directory.parent / 'key-link')
     original = key.read_bytes()
     result = run()
     assert result.returncode != 0

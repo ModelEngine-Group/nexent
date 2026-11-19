@@ -12,7 +12,7 @@ from infrastructure.langchain_plugins import (
     build_langchain_tool, langchain_binding_revision, load_langchain_plugin,
     read_bound_langchain_tools, read_skill_derived_langchain_tools,
 )
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 
 def materialize_langchain_tools(resource: AgentResource, actor: ServicePrincipal, *, workbench_tools=()) -> list[ToolConfig]:

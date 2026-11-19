@@ -169,6 +169,20 @@ def mock_session():
     return mock_session, mock_query
 
 
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    monkeypatch.setattr(
+        "management.db.configuration.tenant.get_config_snapshot",
+        _system_config_snapshot,
+    )
+
+
 def test_get_all_configs_by_tenant_id_success(monkeypatch, mock_session):
     """Test successfully retrieving all configs for a tenant"""
     session, query = mock_session
@@ -618,7 +632,11 @@ def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
-    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_TENANT_COUNT=1),
+    )
 
     with pytest.raises(ResourceLimitError, match="Tenant limit"):
         module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
@@ -640,7 +658,11 @@ def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, shoul
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
-    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_TENANT_COUNT=1),
+    )
 
     if should_reject:
         with pytest.raises(ResourceLimitError):
@@ -664,7 +686,11 @@ def test_create_tenant_with_default_group_rejects_platform_tenant_limit(monkeypa
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
     monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
-    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_TENANT_COUNT=1),
+    )
 
     with pytest.raises(ResourceLimitError, match="Tenant limit"):
         create_tenant_with_default_group("tenant-101", "Tenant 101", "admin-1")

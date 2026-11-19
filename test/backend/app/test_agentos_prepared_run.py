@@ -40,7 +40,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(prepared_run, "runtime_state_service", SimpleNamespace(enabled=True))
     info = SimpleNamespace(
         attempt_outcome="completed", thread_future=None, workspace_path=None,
-        agent_config=SimpleNamespace(pre_run_tool_events=[]),
+        agent_config=SimpleNamespace(pre_run_tool_events=[]), observer=SimpleNamespace(),
     )
     io = SimpleNamespace(
         begin=Mock(), track=Mock(), journal=Mock(), finish=Mock(return_value=True), mark=Mock(return_value=True),
@@ -92,7 +92,7 @@ async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch
     response = await prepared_run.start_prepared_run(payload, ACTOR)
     assert response == AgentRunReference(conversation_id=42, run_id=RUN_ID)
     await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
-    runtime.journal.assert_called_once_with("tenant", "actor", 42, RUN_ID)
+    runtime.journal.assert_called_once_with("tenant", "actor", 42, RUN_ID, retain_for_projection=True)
     journal = runtime.journal.return_value
     assert [item.args for item in journal.append.call_args_list] == [
         (1, 'event: agentos_observer\ndata: {"type":"thought","content":"step"}\n\n'),

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 from pydantic import BaseModel, Field
 
-from contracts.constants.environment import MAX_EVALUATION_SET_FILE_SIZE_BYTES, MAX_EVALUATION_SET_FILE_SIZE_MB
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import CASE_ANSWER_MAX_LEN, CASE_QUERY_MAX_LEN, MAX_EVALUATION_SETS, SET_NAME_MAX_LEN, SET_NAME_MIN_LEN
 from contracts.errors.exceptions import AppException, UnauthorizedError
@@ -58,17 +58,19 @@ router = APIRouter(prefix="/evaluation-sets")
 def _validate_evaluation_set_file_size(raw: bytes, filename: str | None) -> None:
     """Reject an evaluation-set file before parsing when it exceeds the limit."""
     actual_bytes = len(raw)
-    if actual_bytes <= MAX_EVALUATION_SET_FILE_SIZE_BYTES:
+    limit_mb = get_config_snapshot().get("MAX_EVALUATION_SET_FILE_SIZE_MB")
+    limit_bytes = limit_mb * 1024 * 1024
+    if actual_bytes <= limit_bytes:
         return
 
     raise AppException(
         ErrorCode.FILE_TOO_LARGE,
-        f"Evaluation set file exceeds the maximum size of {MAX_EVALUATION_SET_FILE_SIZE_MB} MB",
+        f"Evaluation set file exceeds the maximum size of {limit_mb} MB",
         details={
             "resource": "evaluation_set_file",
             "filename": filename or "unknown",
-            "limit_mb": MAX_EVALUATION_SET_FILE_SIZE_MB,
-            "limit_bytes": MAX_EVALUATION_SET_FILE_SIZE_BYTES,
+            "limit_mb": limit_mb,
+            "limit_bytes": limit_bytes,
             "actual_bytes": actual_bytes,
         },
     )
@@ -207,7 +209,7 @@ async def evaluation_set_config_api(
 ):
     """Return effective evaluation-set upload limits for the web client."""
     get_current_user_id(authorization)
-    return _ok({"max_file_size_mb": MAX_EVALUATION_SET_FILE_SIZE_MB})
+    return _ok({"max_file_size_mb": get_config_snapshot().get("MAX_EVALUATION_SET_FILE_SIZE_MB")})
 
 
 @router.get("/{evaluation_set_id}")

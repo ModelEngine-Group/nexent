@@ -10,7 +10,9 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import EVENT_ID_PATTERN, REPLAY_COUNT_HEADER, AgentResume
 from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESSAGE, STREAM_STATUS_EVENT
+from contracts.constants.environment import NEXENT_AGENT_CORE
 from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
+from management.services.agent.stream import AssistantMessageProjection
 from nexent.core.concurrency import run_blocking
 
 _OBSERVER_LINE = b"event: agentos_observer"
@@ -78,6 +80,8 @@ async def _present_observer(data, request, user_id):
     payload = json.loads(data[6:])
     if not isinstance(payload, dict) or payload.get("type") == "skill_artifact":
         raise ValueError("Unsupported AgentOS observer data")
+    if payload.get("type") == "execution_result":
+        return None, False
     if payload.get("type") != "file_artifact":
         return data, payload.get("type") == "error"
     artifacts = _output_artifacts(payload.get("content"), user_id, request.run_id)
@@ -142,7 +146,7 @@ def present_ephemeral_stream(
                     continue
                 try:
                     event = json.loads(frame[6:])
-                    if not isinstance(event, dict) or event.get("type") == "skill_artifact":
+                    if not isinstance(event, dict) or event.get("type") in {"skill_artifact", "execution_result"}:
                         continue
                     if event.get("type") == "file_artifact":
                         for output in _output_artifacts(event.get("content"), user_id, run_id):
@@ -190,6 +194,8 @@ def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: 
                 cursor, _, body = frame.partition(b"\n")
                 if not cursor_pattern.fullmatch(cursor) or not body:
                     break
+                if body.startswith((b"event: agentos_execution_fact\n", b"event: agentos_execution_summary\n")):
+                    continue
                 if body.startswith(b"event: agentos_terminal\n"):
                     try:
                         status = json.loads(body.split(b"\n", 1)[1].removeprefix(b"data: ")).get("status")
@@ -209,9 +215,56 @@ def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: 
     return StreamingResponse(events(), media_type="text/event-stream", headers=headers, background=response.background)
 
 
+class _CompleteAnswer:
+    """Present live root previews and confirm only the durably completed answer."""
+
+    def __init__(self):
+        self.projection = AssistantMessageProjection(persist_units=True)
+        self.completion = None
+
+    def observer(self, data):
+        _, payload = self.projection.project(data[6:])
+        kind = payload.get("type")
+        if kind == "model_attempt_control" and payload.get("phase") == "rollback":
+            if self.completion and self.completion.get("attempt_id") == payload.get("attempt_id"):
+                self.completion = None
+        if kind != "final_answer":
+            return data
+        if payload.get("invocation_id"):
+            return None
+        if payload.get("answer_phase") != "delta":
+            self.completion = payload
+            return None
+        self.completion = None
+        if payload.get("content"):
+            return _public_sse({**payload, "type": "model_output_thinking", "answer_preview": True})[:-2]
+        return None
+
+    def final_frame(self):
+        if self.completion is None:
+            return None
+        step_id = self.completion.get("step_id")
+        units = [
+            unit for unit in self.projection.units
+            if unit["type"] == "final_answer" and not unit.get("invocation_id")
+            and (step_id is None or unit.get("_step_id") == step_id)
+        ]
+        if step_id is None:
+            units = units[-1:]
+        content = "".join(
+            "".join(unit.get("_content_fragments", [unit["content"]])) for unit in units
+        )
+        if not content.strip():
+            return None
+        return _public_sse({
+            **self.completion, "answer_phase": "complete", "content": content,
+            "unit_index": units[-1]["unit_index"],
+        })
+
+
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
-    on_terminal=None, created=False, include_journal_controls=True, opening_events=(),
+    on_terminal=None, created=False, include_journal_controls=True, opening_events=(), complete_answer=False,
 ) -> StreamingResponse:
     if response.status_code != 200:
         return response
@@ -220,6 +273,7 @@ def present_public_resume(
         error_presented = False
         announce_creation = created
         initial_events = iter(opening_events)
+        answer = _CompleteAnswer() if complete_answer and NEXENT_AGENT_CORE == "smolagents" else None
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
                 if announce_creation:
@@ -232,12 +286,19 @@ def present_public_resume(
                     yield b"data: " + encoded + b"\n\n"
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
+                if kind in {b"event: agentos_execution_fact", b"event: agentos_execution_summary"}:
+                    continue
                 if kind != _OBSERVER_LINE:
                     if kind == b"event: agentos_terminal" and cursor.startswith(f"id: {request.run_id}:".encode()):
                         if on_terminal is not None:
-                            await on_terminal()
-                            if not error_presented and json.loads(data.removeprefix(b"data: ")).get("status") == "failed":
+                            confirmed = await on_terminal()
+                            status = json.loads(data.removeprefix(b"data: ")).get("status")
+                            if not error_presented and (status == "failed" or (answer and confirmed is False)):
                                 yield _PUBLIC_ERROR + b"\n\n"
+                            if answer and confirmed is True and status == "completed":
+                                final_frame = answer.final_frame()
+                                if final_frame is not None:
+                                    yield final_frame
                         if not include_journal_controls:
                             continue
                     if not include_journal_controls and cursor == b"event: agentos_error":
@@ -255,6 +316,12 @@ def present_public_resume(
                 except (TypeError, ValueError):
                     data, is_error = _PUBLIC_ERROR, True
                 error_presented |= is_error
+                if data is None:
+                    continue
+                if answer:
+                    data = answer.observer(data)
+                    if data is None:
+                        continue
                 yield (cursor + b"\n" if include_journal_controls else b"") + data + b"\n\n"
 
     excluded_headers = {"content-length", REPLAY_COUNT_HEADER.lower()}
