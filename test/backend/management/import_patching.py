@@ -35,7 +35,6 @@ SPLIT_MODULES = (
         "management.services.knowledge_base.quota",
         "management.services.knowledge_base.quota_common",
         "management.services.knowledge_base.usage",
-        "management.services.configuration.platform.capacity",
         "management.services.configuration.tenant.quotas",
         "management.services.configuration.user.quotas",
     ),

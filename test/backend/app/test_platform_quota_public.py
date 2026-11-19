@@ -19,8 +19,8 @@ from test.backend.app.test_quota_app import client  # noqa: F401
 @pytest.fixture
 def overview(mocker):
     mocker.patch.object(module, 'get_current_user_id', return_value=('platform-admin', 'actual-tenant'))
-    mocker.patch.object(module, '_get_user_role', side_effect=AssertionError('Legacy role lookup'))
-    mocker.patch.object(module, '_require_platform_quota_manager', side_effect=AssertionError('Legacy role guard'))
+    assert not hasattr(module, '_get_user_role')
+    assert not hasattr(module, '_require_platform_quota_manager')
     read = mocker.patch.object(module, 'PlatformQuotaOverview').return_value.read = AsyncMock(
         return_value={'tenant_count': 0, 'tenants': []})
     return read

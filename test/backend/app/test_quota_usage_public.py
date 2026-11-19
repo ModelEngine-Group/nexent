@@ -19,7 +19,7 @@ from test.backend.app.test_quota_app import client  # noqa: F401
 @pytest.fixture
 def usage(mocker):
     mocker.patch.object(module, 'get_current_user_id', return_value=('actual', 'actual-tenant'))
-    mocker.patch.object(module, '_get_user_role', side_effect=AssertionError('Legacy role query'))
+    assert not hasattr(module, '_get_user_role')
     constructor = mocker.patch.object(module, 'TenantQuotaUsage')
     reader = constructor.return_value.read = AsyncMock(return_value=(('SU',), {'total_bytes': 27}))
     return reader

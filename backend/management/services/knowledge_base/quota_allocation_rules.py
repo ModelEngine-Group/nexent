@@ -1,8 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Finite quota decisions and their established public conflict details."""
 
+from threading import RLock
+
 from contracts.errors.exceptions import PlatformQuotaConflictError
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
+
+# Preserve process-local serialization while moving allocation writes to SI.
+allocation_lock = RLock()
 
 
 def validate_tenant_allocation(tenant, limit, inputs):

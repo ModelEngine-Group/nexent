@@ -10,7 +10,6 @@ Provides three-tier quota management:
 """
 
 import logging
-import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -89,11 +88,6 @@ DEFAULT_WARNING_THRESHOLD = 80
 DEFAULT_CRITICAL_THRESHOLD = 95
 
 _UNSET = object()
-
-# Config helpers use independent database sessions, so serialize allocation
-# validation and writes within a config-service process.
-_platform_allocation_lock = threading.RLock()
-
 
 MB = 1024 * 1024
 

@@ -4,17 +4,12 @@ from management.services.knowledge_base.quota_common import (
     _UNSET,
     ASSET_OWNER_TENANT_ID,
     CACHE_TTL_SECONDS,
-    DEFAULT_CRITICAL_THRESHOLD,
     DEFAULT_TENANT_ID,
-    DEFAULT_WARNING_THRESHOLD,
     GB,
-    KEY_CRITICAL_THRESHOLD_PCT,
     KEY_HARD_LIMIT_EDITABLE,
     KEY_PERSONAL_KB_QUOTA_DEFAULT,
     KEY_PLATFORM_CAPACITY_BYTES,
     KEY_TENANT_HARD_LIMIT_BYTES,
-    KEY_WARNING_ENABLED,
-    KEY_WARNING_THRESHOLD_PCT,
     MB,
     Any,
     AppException,
@@ -25,12 +20,10 @@ from management.services.knowledge_base.quota_common import (
     PlatformQuotaConflictError,
     QuotaExceededError,
     Tuple,
-    _bytes_to_readable,
     _gb_to_bytes,
     _is_displayable_tenant_id,
     _mb_to_bytes,
     _personal_quota_key,
-    _platform_allocation_lock,
     _usage_cache,
     bytes_to_readable,
     delete_config_by_tenant_config_id,
@@ -46,7 +39,6 @@ from management.services.knowledge_base.quota_common import (
     insert_config,
     logger,
     logging,
-    threading,
     time,
     update_config_by_tenant_config_id,
     update_knowledge_record,
@@ -95,87 +87,3 @@ class TenantQuotaPolicy:
         from management.services.knowledge_base.quota_rules import hard_limit_values
         return hard_limit_values(self._get_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES),
                                  self._get_tenant_config(KEY_HARD_LIMIT_EDITABLE))
-
-    def set_hard_limit(
-        self,
-        limit_gb: Optional[int] = None,
-        limit_mb: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """
-        Set the tenant hard storage limit. None = unlimited.
-        Accepts either limit_gb (GB) or limit_mb (MB) for testing with small quotas.
-        Also sets hard_limit_editable = true (admins can manage their own limit).
-        """
-        if limit_gb is None and limit_mb is None:
-            self._delete_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES)
-            self._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "true")
-            return {"hard_limit_bytes": None, "hard_limit_readable": None}
-
-        limit_bytes = self._quota_input_to_bytes(limit_gb, limit_mb)
-        with _platform_allocation_lock:
-            self._validate_tenant_hard_limit(limit_bytes)
-            self._set_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES, str(limit_bytes))
-            self._set_tenant_config(KEY_HARD_LIMIT_EDITABLE, "true")
-        return {
-            "hard_limit_bytes": limit_bytes,
-            "hard_limit_readable": _bytes_to_readable(limit_bytes),
-        }
-
-    def delete_hard_limit(self) -> bool:
-        """Remove the tenant hard storage limit."""
-        self._delete_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES)
-        self._delete_tenant_config(KEY_HARD_LIMIT_EDITABLE)
-        return True
-
-    def get_warning_config(self) -> Dict[str, Any]:
-        """Get warning configuration: enabled, warning_pct, critical_pct."""
-        from management.services.knowledge_base.quota_rules import warning_values
-        return warning_values(self._get_tenant_config(KEY_WARNING_ENABLED),
-            self._get_tenant_config(KEY_WARNING_THRESHOLD_PCT),self._get_tenant_config(KEY_CRITICAL_THRESHOLD_PCT),
-            default_warning=DEFAULT_WARNING_THRESHOLD,default_critical=DEFAULT_CRITICAL_THRESHOLD)
-
-    def set_warning_config(
-        self,
-        enabled: Optional[bool] = None,
-        warning_pct: Optional[int] = None,
-        critical_pct: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Set warning thresholds. Validates 1-100 range and warning < critical."""
-        if warning_pct is not None:
-            if not 1 <= warning_pct <= 100:
-                raise ValueError(f"warning_pct must be 1-100, got {warning_pct}")
-
-        if critical_pct is not None:
-            if not 1 <= critical_pct <= 100:
-                raise ValueError(f"critical_pct must be 1-100, got {critical_pct}")
-
-        # Reject inverted thresholds against the values effective after update.
-        effective_warning = (
-            warning_pct
-            if warning_pct is not None
-            else self.get_warning_config().get("warning_threshold_pct")
-        )
-        effective_critical = (
-            critical_pct
-            if critical_pct is not None
-            else self.get_warning_config().get("critical_threshold_pct")
-        )
-        if (
-            effective_warning is not None
-            and effective_critical is not None
-            and effective_warning >= effective_critical
-        ):
-            raise ValueError(
-                f"warning_threshold_pct ({effective_warning}) must be lower than "
-                f"critical_threshold_pct ({effective_critical})"
-            )
-
-        if warning_pct is not None:
-            self._set_tenant_config(KEY_WARNING_THRESHOLD_PCT, str(warning_pct))
-        if critical_pct is not None:
-            self._set_tenant_config(KEY_CRITICAL_THRESHOLD_PCT, str(critical_pct))
-
-        if enabled is not None:
-            self._set_tenant_config(KEY_WARNING_ENABLED, str(enabled).lower())
-
-        return self.get_warning_config()

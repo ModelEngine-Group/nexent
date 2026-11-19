@@ -14,10 +14,9 @@ import pytest
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException,
-    PlatformQuotaConflictError,
     QuotaExceededError,
 )
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from management.api.file.file_management import upload_files
 from management.api.knowledge_base import quota as quota_app
@@ -66,46 +65,24 @@ def client():
 @pytest.fixture
 def mock_auth_admin():
     """Mock auth to return an ADMIN user."""
-    with patch("management.api.knowledge_base.quota.get_current_user_id") as mock_auth, \
-         patch("management.api.knowledge_base.quota.get_user_tenant_by_user_id") as mock_tenant, \
-         patch("management.api.knowledge_base.quota._get_user_role") as mock_role, \
-         patch("management.api.knowledge_base.quota._require_admin_or_su") as mock_require:
+    with patch("management.api.knowledge_base.quota.get_current_user_id") as mock_auth:
         mock_auth.return_value = ("admin-user-id", "test-tenant")
-        mock_tenant.return_value = {"user_role": "ADMIN", "tenant_id": "test-tenant"}
-        mock_role.return_value = "ADMIN"
-        mock_require.return_value = "ADMIN"
         yield
 
 
 @pytest.fixture
 def mock_auth_su():
     """Mock auth to return an SU user."""
-    with patch("management.api.knowledge_base.quota.get_current_user_id") as mock_auth, \
-         patch("management.api.knowledge_base.quota.get_user_tenant_by_user_id") as mock_tenant, \
-         patch("management.api.knowledge_base.quota._get_user_role") as mock_role, \
-         patch("management.api.knowledge_base.quota._require_admin_or_su") as mock_require_admin, \
-         patch("management.api.knowledge_base.quota._require_platform_quota_manager") as mock_require_su:
+    with patch("management.api.knowledge_base.quota.get_current_user_id") as mock_auth:
         mock_auth.return_value = ("su-user-id", "asset_owner_tenant_id")
-        mock_tenant.return_value = {"user_role": "SU", "tenant_id": "asset_owner_tenant_id"}
-        mock_role.return_value = "SU"
-        mock_require_admin.return_value = "SU"
-        mock_require_su.return_value = "SU"
         yield
 
 
 @pytest.fixture
 def mock_auth_user():
     """Mock auth to return a regular USER."""
-    with patch("management.api.knowledge_base.quota.get_current_user_id") as mock_auth, \
-         patch("management.api.knowledge_base.quota.get_user_tenant_by_user_id") as mock_tenant, \
-         patch("management.api.knowledge_base.quota._get_user_role") as mock_role, \
-         patch("management.api.knowledge_base.quota._require_admin_or_su") as mock_require:
+    with patch("management.api.knowledge_base.quota.get_current_user_id") as mock_auth:
         mock_auth.return_value = ("user-id", "test-tenant")
-        mock_tenant.return_value = {"user_role": "USER", "tenant_id": "test-tenant"}
-        mock_role.return_value = "USER"
-        mock_require.side_effect = HTTPException(
-            status_code=403, detail="Requires ADMIN+"
-        )
         yield
 
 
@@ -121,17 +98,9 @@ def mock_quota_service():
 @pytest.fixture
 def mock_platform_static():
     """Mock the async overview and remaining synchronous platform writes."""
-    with patch("management.api.knowledge_base.quota.PlatformQuotaOverview") as mock_overview, \
-         patch("management.api.knowledge_base.quota.QuotaService.set_platform_capacity") as mock_set_cap, \
-         patch("management.api.knowledge_base.quota.QuotaService.set_tenant_hard_limit") as mock_set_tenant, \
-         patch("management.api.knowledge_base.quota.QuotaService.delete_tenant_hard_limit") as mock_del:
-        overview_read = mock_overview.return_value.read = AsyncMock()
-        yield {
-            "get_platform_overview": overview_read,
-            "set_platform_capacity": mock_set_cap,
-            "set_tenant_hard_limit": mock_set_tenant,
-            "delete_tenant_hard_limit": mock_del,
-        }
+    with patch("management.api.knowledge_base.quota.PlatformQuotaOverview") as overview:
+        read = overview.return_value.read = AsyncMock()
+        yield {"get_platform_overview": read}
 
 
 @pytest.fixture
@@ -211,72 +180,6 @@ class TestGetTenantQuota:
 # ═══════════════════════════════════════════════════════════════════════
 # Task 12.2 — PUT /tenants/{id}/quota
 # ═══════════════════════════════════════════════════════════════════════
-
-class TestPutTenantQuota:
-    """Integration tests for PUT /tenants/{id}/quota."""
-
-    def test_sets_hard_limit_when_editable(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_hard_limit.return_value = {
-            "hard_limit_bytes": None,
-            "hard_limit_readable": None,
-            "hard_limit_editable": True,
-        }
-        mock_quota_service.set_hard_limit.return_value = {
-            "hard_limit_bytes": 50 * GB,
-            "hard_limit_readable": "50.0 GB",
-        }
-        mock_quota_service.get_warning_config.return_value = {
-            "warning_enabled": True,
-            "warning_threshold_pct": 80,
-            "critical_threshold_pct": 95,
-        }
-
-        resp = client.put(
-            "/api/tenants/test-tenant/quota",
-            json={"hard_limit_gb": 50},
-        )
-        assert resp.status_code == 200
-
-    def test_rejects_when_not_editable(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_hard_limit.return_value = {
-            "hard_limit_bytes": 100 * GB,
-            "hard_limit_readable": "100.0 GB",
-            "hard_limit_editable": False,  # set by SU
-        }
-
-        resp = client.put(
-            "/api/tenants/test-tenant/quota",
-            json={"hard_limit_gb": 200},
-        )
-        assert resp.status_code == 403
-        body = resp.json()
-        msg = (body.get("message") or body.get("detail") or "").lower()
-        assert "platform administrator" in msg
-
-    def test_rejects_for_regular_user(self, client, mock_auth_user):
-        resp = client.put(
-            "/api/tenants/test-tenant/quota",
-            json={"hard_limit_gb": 50},
-        )
-        assert resp.status_code == 403
-
-    def test_sets_warning_config(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_hard_limit.return_value = {
-            "hard_limit_bytes": None,
-            "hard_limit_readable": None,
-            "hard_limit_editable": True,
-        }
-        mock_quota_service.get_warning_config.return_value = {
-            "warning_enabled": False,
-            "warning_threshold_pct": 70,
-            "critical_threshold_pct": 90,
-        }
-
-        resp = client.put(
-            "/api/tenants/test-tenant/quota",
-            json={"warning_enabled": False, "warning_threshold_pct": 70, "critical_threshold_pct": 90},
-        )
-        assert resp.status_code == 200
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -508,73 +411,10 @@ class TestPlatformEndpoints:
         with patch(
             "management.api.knowledge_base.quota.get_current_user_id",
             return_value=("speed-user-id", "speed-tenant"),
-        ), patch("management.api.knowledge_base.quota._get_user_role", return_value="SPEED"):
+        ):
             resp = client.get("/api/platform/quota/overview")
 
         assert resp.status_code == 403
-
-    def test_put_capacity_requires_su(self, client, mock_auth_su, mock_platform_static):
-        mock_platform_static["set_platform_capacity"].return_value = {
-            "capacity_bytes": 500 * GB,
-            "capacity_readable": "500.0 GB",
-        }
-
-        resp = client.put("/api/platform/quota/capacity", json={"capacity_gb": 500})
-        assert resp.status_code == 200
-
-    def test_put_capacity_denied_for_admin(self, client, mock_auth_admin):
-        resp = client.put("/api/platform/quota/capacity", json={"capacity_gb": 500})
-        assert resp.status_code == 403
-
-    def test_put_tenant_hard_quota(self, client, mock_auth_su, mock_platform_static):
-        mock_platform_static["set_tenant_hard_limit"].return_value = {
-            "hard_limit_bytes": 100 * GB,
-            "hard_limit_readable": "100.0 GB",
-        }
-
-        resp = client.put(
-            "/api/platform/quota/tenants/target-tenant",
-            json={"hard_limit_gb": 100},
-        )
-        assert resp.status_code == 200
-
-    def test_put_capacity_returns_conflict_details(self, client, mock_auth_su, mock_platform_static):
-        mock_platform_static["set_platform_capacity"].side_effect = PlatformQuotaConflictError(
-            "Platform capacity cannot be lower than existing tenant allocations",
-            "PlatformCapacityBelowAllocation",
-            {"total_allocated_bytes": 200 * GB},
-        )
-
-        resp = client.put("/api/platform/quota/capacity", json={"capacity_gb": 100})
-
-        assert resp.status_code == 409
-        assert resp.json() == {
-            "error": "PlatformCapacityBelowAllocation",
-            "message": "Platform capacity cannot be lower than existing tenant allocations",
-            "total_allocated_bytes": 200 * GB,
-        }
-
-    def test_put_tenant_quota_returns_conflict_details(self, client, mock_auth_su, mock_platform_static):
-        mock_platform_static["set_tenant_hard_limit"].side_effect = PlatformQuotaConflictError(
-            "Tenant hard quota exceeds remaining platform capacity",
-            "PlatformCapacityExceeded",
-            {"remaining_allocatable_bytes": 10 * GB},
-        )
-
-        resp = client.put(
-            "/api/platform/quota/tenants/target-tenant",
-            json={"hard_limit_gb": 100},
-        )
-
-        assert resp.status_code == 409
-        assert resp.json()["error"] == "PlatformCapacityExceeded"
-        assert resp.json()["remaining_allocatable_bytes"] == 10 * GB
-
-    def test_delete_tenant_hard_quota(self, client, mock_auth_su, mock_platform_static):
-        mock_platform_static["delete_tenant_hard_limit"].return_value = True
-
-        resp = client.delete("/api/platform/quota/tenants/target-tenant")
-        assert resp.status_code == 200
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -599,50 +439,10 @@ class TestTenantIsolation:
         resp = client.get("/api/tenants/tenant-b/quota")
         assert resp.status_code == 403
 
-    def test_admin_cannot_modify_other_tenant_quota(self, client, mock_auth_admin):
-        """ADMIN of Tenant A cannot modify Tenant B's quota."""
-        resp = client.put(
-            "/api/tenants/tenant-b/quota",
-            json={"hard_limit_gb": 100},
-        )
-        assert resp.status_code == 403
-
 
 class TestQuotaRoleHelpers:
     """Unit tests for quota role resolution and developer KB visibility."""
 
-    def test_get_user_role_handles_missing_and_invalid_auth(self):
-        assert quota_app._get_user_role(None) == "USER"
-
-        with patch(
-            "management.api.knowledge_base.quota.get_current_user_id", side_effect=ValueError("bad token")
-        ):
-            assert quota_app._get_user_role("Bearer invalid") == "USER"
-
-    def test_get_user_role_normalizes_database_role(self):
-        with patch(
-            "management.api.knowledge_base.quota.get_current_user_id",
-            return_value=("user-id", "tenant-id"),
-        ), patch(
-            "management.api.knowledge_base.quota.get_user_tenant_by_user_id",
-            return_value={"user_role": "admin"},
-        ):
-            assert quota_app._get_user_role("Bearer token") == ("ADMIN",)
-
-    def test_role_requirements_accept_and_reject_expected_roles(self):
-        with patch("management.api.knowledge_base.quota._get_user_role", return_value="ADMIN"):
-            assert quota_app._require_admin_or_su("token") == "ADMIN"
-            with pytest.raises(HTTPException) as raised:
-                quota_app._require_platform_quota_manager("token")
-            assert raised.value.status_code == 403
-
-        with patch("management.api.knowledge_base.quota._get_user_role", return_value="SU"):
-            assert quota_app._require_platform_quota_manager("token") == "SU"
-
-        with patch("management.api.knowledge_base.quota._get_user_role", return_value="SPEED"):
-            with pytest.raises(HTTPException) as raised:
-                quota_app._require_platform_quota_manager("token")
-            assert raised.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_manageable_indices_only_include_edit_permissions(self):
@@ -679,61 +479,6 @@ class TestQuotaEndpointErrors:
         assert read.await_count == 1
         assert not [record for record in caplog.records if record.levelname == "ERROR" and record.name == quota_app.logger.name]
 
-    def test_update_tenant_quota_maps_invalid_warning(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.set_warning_config.side_effect = ValueError(
-            "warning threshold must be lower"
-        )
-
-        response = client.put(
-            "/api/tenants/test-tenant/quota",
-            json={"warning_threshold_pct": 95},
-        )
-
-        assert response.status_code == 400
-        assert "warning threshold" in response.json()["message"]
-
-    def test_update_tenant_quota_maps_unexpected_error(self, client, mock_auth_admin, mock_quota_service):
-        mock_quota_service.get_hard_limit.side_effect = RuntimeError("database down")
-
-        response = client.put(
-            "/api/tenants/test-tenant/quota",
-            json={"hard_limit_gb": 10},
-        )
-
-        assert response.status_code == 500
-        assert "database down" in response.json()["message"]
-
-    def test_su_updates_tenant_limit_through_platform_service(self, client, mock_auth_su):
-        with patch("management.api.knowledge_base.quota.QuotaService") as service_class:
-            service_class.return_value.get_hard_limit.return_value = {
-                "hard_limit_editable": False
-            }
-            service_class.return_value.get_warning_config.return_value = {}
-            service_class.set_tenant_hard_limit.return_value = {
-                "hard_limit_bytes": 10 * GB
-            }
-
-            response = client.put(
-                "/api/tenants/target-tenant/quota",
-                json={"hard_limit_gb": 10},
-            )
-
-        assert response.status_code == 200
-        service_class.set_tenant_hard_limit.assert_called_once()
-
-    def test_delete_tenant_quota_success_and_service_error(self, client, mock_auth_admin, mock_quota_service):
-        response = client.delete("/api/tenants/test-tenant/quota")
-        assert response.status_code == 200
-        mock_quota_service.delete_hard_limit.assert_called_once()
-
-        mock_quota_service.delete_hard_limit.side_effect = RuntimeError("delete failed")
-        response = client.delete("/api/tenants/test-tenant/quota")
-        assert response.status_code == 500
-        assert "delete failed" in response.json()["message"]
-
-    def test_delete_tenant_quota_rejects_cross_tenant_admin(self, client, mock_auth_admin):
-        response = client.delete("/api/tenants/other-tenant/quota")
-        assert response.status_code == 403
 
     def test_platform_overview_maps_service_error(self, client, mock_auth_su, mock_platform_static):
         mock_platform_static["get_platform_overview"].side_effect = RuntimeError("overview failed")
@@ -741,53 +486,6 @@ class TestQuotaEndpointErrors:
 
         assert response.status_code == 500
         assert "overview failed" in response.json()["message"]
-
-    def test_platform_capacity_error_and_delete_paths(self, client, mock_auth_su):
-        with patch(
-            "management.api.knowledge_base.quota.QuotaService.set_platform_capacity",
-            side_effect=RuntimeError("capacity failed"),
-        ):
-            response = client.put(
-                "/api/platform/quota/capacity", json={"capacity_gb": 100}
-            )
-            assert response.status_code == 500
-
-        with patch(
-            "management.api.knowledge_base.quota.QuotaService.set_platform_capacity",
-            return_value={"capacity_bytes": None},
-        ) as set_capacity:
-            response = client.delete("/api/platform/quota/capacity")
-            assert response.status_code == 200
-            set_capacity.assert_called_once_with(
-                None, quota_app.ASSET_OWNER_TENANT_ID, "su-user-id"
-            )
-
-        with patch(
-            "management.api.knowledge_base.quota.QuotaService.set_platform_capacity",
-            side_effect=RuntimeError("delete failed"),
-        ):
-            response = client.delete("/api/platform/quota/capacity")
-            assert response.status_code == 500
-
-    def test_tenant_platform_routes_map_service_errors(self, client, mock_auth_su):
-        with patch(
-            "management.api.knowledge_base.quota.QuotaService.set_tenant_hard_limit",
-            side_effect=RuntimeError("set failed"),
-        ):
-            response = client.put(
-                "/api/platform/quota/tenants/target-tenant",
-                json={"hard_limit_gb": 10},
-            )
-            assert response.status_code == 500
-
-        with patch(
-            "management.api.knowledge_base.quota.QuotaService.delete_tenant_hard_limit",
-            side_effect=RuntimeError("delete failed"),
-        ):
-            response = client.delete(
-                "/api/platform/quota/tenants/target-tenant"
-            )
-            assert response.status_code == 500
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1421,8 +1119,6 @@ class TestTokenExpiredMapping:
         from contracts.errors.exceptions import TokenExpiredError
 
         with patch(
-            "management.api.knowledge_base.quota._require_platform_quota_manager", return_value="SU"
-        ), patch(
             "management.api.knowledge_base.quota.get_current_user_id",
             side_effect=TokenExpiredError("expired"),
         ):

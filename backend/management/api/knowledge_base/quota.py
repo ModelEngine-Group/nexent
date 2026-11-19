@@ -10,7 +10,6 @@ from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from contracts.constants.constants import (
-    ASSET_OWNER_TENANT_ID,
     PERSONAL_KB_CAPACITY_MANAGE_PERMISSION,
     PERSONAL_KB_CAPACITY_READ_PERMISSION,
     QUOTA_PAYLOAD_DESCRIPTION,
@@ -21,10 +20,9 @@ from contracts.errors.exceptions import (
     PlatformQuotaConflictError,
     TokenExpiredError,
 )
-from contracts.roles import has_any_role, roles_from_record
+from contracts.roles import has_any_role
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.knowledge_base.inventory import (
     knowledge_listing_operation,
     list_knowledge_indices,
@@ -34,6 +32,11 @@ from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.quota_read import read_tenant_quota
 from management.services.knowledge_base.quota_usage import TenantQuotaUsage
+from management.services.knowledge_base.quota_write import (
+    InvalidQuotaWarning,
+    QuotaWriteDenied,
+    write_quota,
+)
 from management.services.permission.identity.session import (
     authenticate,
     get_current_user_id,
@@ -66,40 +69,6 @@ def _platform_quota_conflict_response(exc: PlatformQuotaConflictError) -> JSONRe
 
 
 # ── Role Helpers ────────────────────────────────────────────────────────
-
-
-def _get_user_role(authorization: Optional[str]) -> str:
-    """Extract user role from the authorization token."""
-    if not authorization:
-        return "USER"
-    try:
-        user_id, _ = get_current_user_id(authorization)
-        user_info = get_user_tenant_by_user_id(user_id)
-        return roles_from_record(user_info)
-    except Exception:
-        return "USER"
-
-
-def _require_admin_or_su(authorization: Optional[str]) -> str:
-    """Require ADMIN, SU, or ASSET_OWNER role. Returns the role string."""
-    role = _get_user_role(authorization)
-    if not has_any_role(role, {'SU','ADMIN','ASSET_OWNER'}):
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires ADMIN, SU, or ASSET_OWNER role",
-        )
-    return role
-
-
-def _require_platform_quota_manager(authorization: Optional[str]) -> str:
-    """Require a role that can manage platform-level quotas."""
-    role = _get_user_role(authorization)
-    if not has_any_role(role, {'SU','ASSET_OWNER'}):
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires SU or ASSET_OWNER role",
-        )
-    return role
 
 
 async def _get_manageable_index_names(tenant_id, user_id, actor_tenant_id, *, context):
@@ -144,12 +113,12 @@ async def get_tenant_quota(
         logger.exception("Error getting tenant quota for %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting quota config: {str(exc)}",
+            detail=f"Error getting quota config: {exc!s}",
         )
 
 
 @tenant_quota_router.put("/{tenant_id}/quota")
-def update_tenant_quota(
+async def update_tenant_quota(
     tenant_id: str = Path(..., description="Tenant ID"),
     payload: Dict[str, Any] = Body(..., description="Quota config payload"),
     authorization: Optional[str] = Header(None),
@@ -161,73 +130,17 @@ def update_tenant_quota(
     """
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
-        role = _require_admin_or_su(authorization)
-
-        # Non-SU users can only modify their own tenant
-        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN,
-                detail="Cannot modify quota config for another tenant",
-            )
-
-        service = QuotaService(tenant_id, user_id)
-
-        # Apply hard limit
-        hard_limit_gb = payload.get("hard_limit_gb")
-        hard_limit_mb = payload.get("hard_limit_mb")
-
-        if hard_limit_gb is not None or hard_limit_mb is not None:
-            # Check if hard limit is editable (task 9.6)
-            hard_limit_info = service.get_hard_limit()
-            if not hard_limit_info.get("hard_limit_editable", True):
-                # Only allow SU to modify SU-set limits
-                if not has_any_role(role, {'SU','ASSET_OWNER'}):
-                    raise HTTPException(
-                        status_code=HTTPStatus.FORBIDDEN,
-                        detail="Tenant hard quota is managed by the platform administrator",
-                    )
-
-            # SU sets tenant hard limit → mark as non-editable for tenant admin
-            if has_any_role(role, {'SU','ASSET_OWNER'}):
-                QuotaService.set_tenant_hard_limit(
-                    tenant_id,
-                    limit_gb=hard_limit_gb,
-                    limit_mb=hard_limit_mb,
-                    su_user_id=user_id,
-                )
-            else:
-                service.set_hard_limit(
-                    limit_gb=hard_limit_gb,
-                    limit_mb=hard_limit_mb,
-                )
-
-        # Apply warning config
-        warning_enabled = payload.get("warning_enabled")
-        warning_pct = payload.get("warning_threshold_pct")
-        critical_pct = payload.get("critical_threshold_pct")
-
-        if any(v is not None for v in [warning_enabled, warning_pct, critical_pct]):
-            try:
-                service.set_warning_config(
-                    enabled=warning_enabled,
-                    warning_pct=warning_pct,
-                    critical_pct=critical_pct,
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
-
-        # Return updated config
-        updated_hard_limit = service.get_hard_limit()
-        updated_warning = service.get_warning_config()
+        result = await write_quota('update', tenant_id, ServicePrincipal(user_id, auth_tenant_id), payload)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                **updated_hard_limit,
-                **updated_warning,
+                **result,
                 "message": "Quota configuration updated successfully",
             },
         )
+    except InvalidQuotaWarning as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except PlatformQuotaConflictError as exc:
         return _platform_quota_conflict_response(exc)
     except HTTPException:
@@ -235,16 +148,26 @@ def update_tenant_quota(
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except QuotaWriteDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="This operation requires current authorized membership") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error updating quota config: {exc!s}",
+        )
+
     except Exception as exc:
         logger.exception("Error updating tenant quota for %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error updating quota config: {str(exc)}",
+            detail=f"Error updating quota config: {exc!s}",
         )
 
 
 @tenant_quota_router.delete("/{tenant_id}/quota")
-def delete_tenant_quota(
+async def delete_tenant_quota(
     tenant_id: str = Path(..., description="Tenant ID"),
     authorization: Optional[str] = Header(None),
 ):
@@ -254,16 +177,7 @@ def delete_tenant_quota(
     """
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
-        role = _require_admin_or_su(authorization)
-
-        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN,
-                detail="Cannot modify quota config for another tenant",
-            )
-
-        service = QuotaService(tenant_id, user_id)
-        service.delete_hard_limit()
+        await write_quota('remove', tenant_id, ServicePrincipal(user_id, auth_tenant_id), {})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -276,11 +190,21 @@ def delete_tenant_quota(
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except QuotaWriteDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="This operation requires current authorized membership") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting quota config: {exc!s}",
+        )
+
     except Exception as exc:
         logger.exception("Error deleting tenant quota for %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting quota config: {str(exc)}",
+            detail=f"Error deleting quota config: {exc!s}",
         )
 
 
@@ -320,7 +244,7 @@ async def get_tenant_quota_usage(
         logger.exception("Error getting usage for tenant %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting usage data: {str(exc)}",
+            detail=f"Error getting usage data: {exc!s}",
         )
 
 
@@ -357,12 +281,12 @@ async def get_platform_overview(
         logger.exception("Error getting platform overview")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting platform overview: {str(exc)}",
+            detail=f"Error getting platform overview: {exc!s}",
         )
 
 
 @platform_quota_router.put("/capacity")
-def set_platform_capacity(
+async def set_platform_capacity(
     payload: Dict[str, Any] = Body(..., description="Capacity payload"),
     authorization: Optional[str] = Header(None),
 ):
@@ -371,11 +295,8 @@ def set_platform_capacity(
     Restricted to SU and ASSET_OWNER roles.
     """
     try:
-        _require_platform_quota_manager(authorization)
-        user_id, _ = get_current_user_id(authorization)
-
-        capacity_gb = payload.get("capacity_gb")
-        result = QuotaService.set_platform_capacity(capacity_gb, ASSET_OWNER_TENANT_ID, user_id)
+        user_id, auth_tenant_id = get_current_user_id(authorization)
+        result = await write_quota('capacity', None, ServicePrincipal(user_id, auth_tenant_id), payload)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={**result, "message": "Platform capacity updated successfully"},
@@ -387,16 +308,26 @@ def set_platform_capacity(
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except QuotaWriteDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="This operation requires current authorized membership") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error setting platform capacity: {exc!s}",
+        )
+
     except Exception as exc:
         logger.exception("Error setting platform capacity")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error setting platform capacity: {str(exc)}",
+            detail=f"Error setting platform capacity: {exc!s}",
         )
 
 
 @platform_quota_router.delete("/capacity")
-def delete_platform_capacity(
+async def delete_platform_capacity(
     authorization: Optional[str] = Header(None),
 ):
     """
@@ -404,10 +335,8 @@ def delete_platform_capacity(
     Restricted to SU and ASSET_OWNER roles.
     """
     try:
-        _require_platform_quota_manager(authorization)
-        user_id, _ = get_current_user_id(authorization)
-
-        QuotaService.set_platform_capacity(None, ASSET_OWNER_TENANT_ID, user_id)
+        user_id, auth_tenant_id = get_current_user_id(authorization)
+        await write_quota('capacity', None, ServicePrincipal(user_id, auth_tenant_id), {})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Platform capacity removed successfully"},
@@ -417,16 +346,26 @@ def delete_platform_capacity(
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except QuotaWriteDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="This operation requires current authorized membership") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting platform capacity: {exc!s}",
+        )
+
     except Exception as exc:
         logger.exception("Error deleting platform capacity")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting platform capacity: {str(exc)}",
+            detail=f"Error deleting platform capacity: {exc!s}",
         )
 
 
 @platform_quota_router.put("/tenants/{tenant_id}")
-def set_tenant_hard_quota(
+async def set_tenant_hard_quota(
     tenant_id: str = Path(..., description="Target tenant ID"),
     payload: Dict[str, Any] = Body(..., description="Quota payload"),
     authorization: Optional[str] = Header(None),
@@ -436,17 +375,8 @@ def set_tenant_hard_quota(
     Restricted to SU and ASSET_OWNER roles.
     """
     try:
-        _require_platform_quota_manager(authorization)
-        user_id, _ = get_current_user_id(authorization)
-
-        hard_limit_gb = payload.get("hard_limit_gb")
-        hard_limit_mb = payload.get("hard_limit_mb")
-        result = QuotaService.set_tenant_hard_limit(
-            tenant_id,
-            limit_gb=hard_limit_gb,
-            limit_mb=hard_limit_mb,
-            su_user_id=user_id,
-        )
+        user_id, auth_tenant_id = get_current_user_id(authorization)
+        result = await write_quota('hard', tenant_id, ServicePrincipal(user_id, auth_tenant_id), payload)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -462,16 +392,26 @@ def set_tenant_hard_quota(
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except QuotaWriteDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="This operation requires current authorized membership") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error setting tenant hard quota: {exc!s}",
+        )
+
     except Exception as exc:
         logger.exception("Error setting tenant hard quota for %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error setting tenant hard quota: {str(exc)}",
+            detail=f"Error setting tenant hard quota: {exc!s}",
         )
 
 
 @platform_quota_router.delete("/tenants/{tenant_id}")
-def delete_tenant_hard_quota(
+async def delete_tenant_hard_quota(
     tenant_id: str = Path(..., description="Target tenant ID"),
     authorization: Optional[str] = Header(None),
 ):
@@ -480,10 +420,8 @@ def delete_tenant_hard_quota(
     Restricted to SU and ASSET_OWNER roles.
     """
     try:
-        _require_platform_quota_manager(authorization)
-        user_id, _ = get_current_user_id(authorization)
-
-        QuotaService.delete_tenant_hard_limit(tenant_id, user_id)
+        user_id, auth_tenant_id = get_current_user_id(authorization)
+        await write_quota('remove-platform', tenant_id, ServicePrincipal(user_id, auth_tenant_id), {})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -496,11 +434,24 @@ def delete_tenant_hard_quota(
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except QuotaWriteDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="This operation requires current authorized membership") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting tenant hard quota: {exc!s}",
+        )
+
+
+# Personal KB capacity endpoints
+
     except Exception as exc:
         logger.exception("Error deleting tenant hard quota for %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting tenant hard quota: {str(exc)}",
+            detail=f"Error deleting tenant hard quota: {exc!s}",
         )
 
 
@@ -524,7 +475,7 @@ def get_personal_self_capacity(
         logger.exception("Error getting current user's personal KB capacity")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting personal KB capacity: {str(exc)}",
+            detail=f"Error getting personal KB capacity: {exc!s}",
         )
 
 
@@ -577,7 +528,7 @@ def list_personal_capacity_users(
         logger.exception("Error listing personal KB capacity users")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error listing personal KB capacity: {str(exc)}",
+            detail=f"Error listing personal KB capacity: {exc!s}",
         )
 
 
@@ -607,7 +558,7 @@ def get_personal_capacity_kbs(
         logger.exception("Error getting personal KB details for user %s", user_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting personal KB details: {str(exc)}",
+            detail=f"Error getting personal KB details: {exc!s}",
         )
 
 
@@ -630,7 +581,7 @@ def get_personal_capacity_summary(
         logger.exception("Error getting personal KB capacity summary")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting personal KB capacity summary: {str(exc)}",
+            detail=f"Error getting personal KB capacity summary: {exc!s}",
         )
 
 
@@ -668,7 +619,7 @@ def set_personal_user_quota(
         logger.exception("Error setting personal KB quota")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error setting personal KB quota: {str(exc)}",
+            detail=f"Error setting personal KB quota: {exc!s}",
         )
 
 
@@ -698,7 +649,7 @@ def get_personal_default_quota(
         logger.exception("Error getting personal KB default quota")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting personal KB default quota: {str(exc)}",
+            detail=f"Error getting personal KB default quota: {exc!s}",
         )
 
 
@@ -732,5 +683,5 @@ def set_personal_default_quota(
         logger.exception("Error setting personal KB default quota")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error setting personal KB default quota: {str(exc)}",
+            detail=f"Error setting personal KB default quota: {exc!s}",
         )

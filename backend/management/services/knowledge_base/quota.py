@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from management.services.configuration.platform.capacity import PlatformCapacityPolicy
 from management.services.configuration.tenant.quotas import TenantQuotaPolicy
 from management.services.configuration.user.quotas import PersonalQuotaPolicy
 from management.services.knowledge_base.quota_common import (
@@ -29,7 +28,6 @@ from management.services.knowledge_base.quota_common import (
     _is_displayable_tenant_id,
     _mb_to_bytes,
     _personal_quota_key,
-    _platform_allocation_lock,
     _usage_cache,
     bytes_to_readable,
     delete_config_by_tenant_config_id,
@@ -45,7 +43,6 @@ from management.services.knowledge_base.quota_common import (
     insert_config,
     logger,
     logging,
-    threading,
     time,
     update_config_by_tenant_config_id,
     update_knowledge_record,
@@ -55,7 +52,6 @@ from management.services.knowledge_base.quota_common import invalidate_usage_cac
 
 
 class QuotaService(
-    PlatformCapacityPolicy,
     PersonalQuotaPolicy,
     TenantQuotaPolicy,
     KnowledgeUsageAccounting,
@@ -209,12 +205,3 @@ class QuotaService(
             upload_bytes,
             kb_record,
         )
-
-    def get_quota_summary(self) -> Dict[str, Any]:
-        """Return quota allocation summary with oversubscription ratio."""
-        from management.services.knowledge_base.quota_rules import allocation_summary
-        hard_limit=self.get_hard_limit()
-        quotas=self.get_all_kb_quotas()
-        allocated=sum(row['quota_limit_bytes'] for row in quotas if row['quota_limit_bytes'] is not None)
-        finite=sum(1 for row in quotas if row['quota_limit_bytes'] is not None)
-        return allocation_summary(hard_limit,allocated,len(quotas),finite)

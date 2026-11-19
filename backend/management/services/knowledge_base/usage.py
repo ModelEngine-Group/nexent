@@ -3,7 +3,6 @@
 from management.services.knowledge_base.quota_common import (
     _UNSET,
     ASSET_OWNER_TENANT_ID,
-    CACHE_TTL_SECONDS,
     DEFAULT_CRITICAL_THRESHOLD,
     DEFAULT_TENANT_ID,
     DEFAULT_WARNING_THRESHOLD,
@@ -29,31 +28,22 @@ from management.services.knowledge_base.quota_common import (
     _is_displayable_tenant_id,
     _mb_to_bytes,
     _personal_quota_key,
-    _platform_allocation_lock,
-    _usage_cache,
     bytes_to_readable,
     delete_config_by_tenant_config_id,
     get_committed_bytes_by_kb,
     get_committed_source_bytes_by_paths,
     get_configs_by_tenant_id_and_keys,
-    get_knowledge_info_by_tenant_id,
     get_private_knowledge_info_by_creator,
     get_private_knowledge_info_by_tenant_id,
     get_single_config_info,
-    get_tenant_committed_source_bytes,
     get_user_email_map,
     insert_config,
     logger,
     logging,
-    store_usage_cache,
-    threading,
-    time,
     update_config_by_tenant_config_id,
     update_knowledge_record,
-    usage_refresh_guard,
 )
 from management.services.knowledge_base.quota_formatting import parse_store_size
-from management.services.knowledge_base.usage_projection import project_usage
 
 
 class KnowledgeUsageAccounting:
@@ -494,47 +484,3 @@ class KnowledgeUsageAccounting:
             for source, file_size in source_sizes.items()
             if source not in committed_sizes
         )
-
-    def get_usage(
-        self,
-        force_refresh: bool = False,
-        detail: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Aggregate storage usage across all tenant KBs from MinIO/ES.
-        Results are cached with 60s TTL. force_refresh bypasses cache.
-        """
-        with usage_refresh_guard(self.tenant_id) as generation:
-            cache_key = self.tenant_id
-
-            # Check cache
-            now = time.time()
-            cached = _usage_cache.get(cache_key)
-            if not force_refresh and cached is not None:
-                cached_time, cached_data = cached
-                if now - cached_time < CACHE_TTL_SECONDS:
-                    if not detail:
-                        # Return without breakdown for non-detail requests
-                        result = dict(cached_data)
-                        result.pop("breakdown", None)
-                        return result
-                    return dict(cached_data)
-
-            # Compute usage by querying file sizes from MinIO/ES
-            usage_data = self._compute_usage()
-            store_usage_cache(cache_key, now, usage_data, generation)
-
-            if not detail:
-                result = dict(usage_data)
-                result.pop("breakdown", None)
-                return result
-            return dict(usage_data)
-
-    def _compute_usage(self) -> Dict[str, Any]:
-        """Keep remaining synchronous consumers on the shared response rules."""
-        kb_list = get_knowledge_info_by_tenant_id(self.tenant_id)
-        warning = self.get_warning_config()
-        hard = self.get_hard_limit()
-        storage_stats = self._get_kb_storage_stats(kb_list, exclude_datamate=True)
-        source_bytes = get_tenant_committed_source_bytes(self.tenant_id)
-        return project_usage(kb_list, storage_stats, source_bytes, hard, warning, self.get_quota_summary())

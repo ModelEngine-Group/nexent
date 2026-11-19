@@ -16,6 +16,17 @@ from infrastructure.knowledge_search import knowledge_search_revision
 from test.backend.services.test_cleanse_jobs import context
 
 
+async def test_empty_tenant_preserves_zero_totals_without_runtime_request(usage):
+    s = usage
+    s.inputs.update(knowledge_bases=[], source_bytes_by_kb={}, tenant_source_bytes=0)
+    s.inputs['summary'].update(soft_allocated_total_bytes=0, soft_allocated_readable='0 B',
+                               oversubscription_ratio=0.0, kbs_with_quota=0)
+    result = (await s.service.read('resource', s.actor, detail=True, context=context()))[1]
+    assert result['total_bytes'] == result['file_count'] == result['kb_count'] == result['es_physical_bytes'] == 0
+    assert result['breakdown'] == []
+    s.client.knowledge_collection_usage.assert_not_awaited()
+
+
 @pytest.fixture
 def usage(mocker):
     from management.services.knowledge_base import quota_usage as module
