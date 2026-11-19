@@ -173,6 +173,8 @@ MIGRATED_MODULES = {
     'knowledge_base/providers/configuration.py',
     'knowledge_base/quota_rules.py',
     'knowledge_base/quota_read.py',
+    'knowledge_base/quota_allocation_read.py',
+    'knowledge_base/quota_allocation_rules.py',
     'knowledge_base/quota_usage_read.py',
     'knowledge_base/quota_usage.py',
     'knowledge_base/platform_quota.py',

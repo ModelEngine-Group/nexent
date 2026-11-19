@@ -47,7 +47,7 @@ def bind_platform_quota_discovery(actor, engine):
 
 
 @contextmanager
-def platform_quota_read_ports(actor, *, context):
+def platform_quota_read_ports(actor, *, context, usage_tenant=None):
     engine, owned = record_engine(context), []
     try:
         identity = bind_quota_identity(actor, engine)
@@ -59,7 +59,9 @@ def platform_quota_read_ports(actor, *, context):
             return port
 
         def records(tenant):
-            port = bind_tenant_quota_records(actor, tenant, engine)
+            port = (bind_tenant_quota_records(actor, tenant, engine, usage=True)
+                    if usage_tenant is not None and tenant == usage_tenant
+                    else bind_tenant_quota_records(actor, tenant, engine))
             owned.append(port)
             return port
 
