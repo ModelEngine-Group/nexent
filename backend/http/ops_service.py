@@ -1,6 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Launch the independent operations backend using the shared backend image."""
 
+import logging  # noqa: F401 - load the stdlib package before backend.http.logging
+import logging.config  # noqa: F401
+
 import uvicorn
 
 from contracts.constants.environment import OPS_PORT
