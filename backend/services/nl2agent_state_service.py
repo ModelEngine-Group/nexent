@@ -34,9 +34,21 @@ class ResourceScope:
     run_id: str
 
     @property
-    def key(self) -> str:
+    def legacy_key(self) -> str:
         owner = json.dumps([self.tenant_id, self.user_id, self.agent_id], ensure_ascii=False)
         return "nl2agent:resources:" + hashlib.sha256(owner.encode()).hexdigest()
+
+    @property
+    def key(self) -> str:
+        conversation = hashlib.sha256(self.conversation_id.encode()).hexdigest()
+        return self.legacy_key + ":" + conversation
+
+
+def _decode_state(raw, legacy_raw, scope: ResourceScope) -> ResourceState | None:
+    if raw:
+        return json.loads(raw)
+    legacy = json.loads(legacy_raw) if legacy_raw else None
+    return legacy if legacy and legacy.get("conversation_id") == scope.conversation_id else None
 
 
 def _update(scope: ResourceScope, change: Callable[[ResourceState | None], ResourceState]) -> ResourceState:
@@ -49,7 +61,13 @@ def _update(scope: ResourceScope, change: Callable[[ResourceState | None], Resou
                 try:
                     pipe.watch(scope.key)
                     raw = pipe.get(scope.key)
-                    next_state = change(json.loads(raw) if raw else None)
+                    legacy_raw = None
+                    if not raw:
+                        # Protect the source during migration without coupling
+                        # subsequent conversation-local writes to old workers.
+                        pipe.watch(scope.legacy_key)
+                        legacy_raw = pipe.get(scope.legacy_key)
+                    next_state = change(_decode_state(raw, legacy_raw, scope))
                     pipe.multi()
                     pipe.set(scope.key, json.dumps(next_state, ensure_ascii=False),
                              ex=NL2AGENT_RESOURCE_STATE_TTL_SECONDS)
@@ -77,7 +95,8 @@ def _read(scope: ResourceScope) -> ResourceState | None:
         if client is None:
             raise ResourceStateError("resource_state_unavailable", retryable=True)
         raw = client.get(scope.key)
-        return json.loads(raw) if raw else None
+        legacy_raw = client.get(scope.legacy_key) if not raw else None
+        return _decode_state(raw, legacy_raw, scope)
     except (RedisError, ValueError) as exc:
         raise ResourceStateError("resource_state_unavailable", retryable=True) from exc
 

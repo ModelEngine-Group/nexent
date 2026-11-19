@@ -21,6 +21,7 @@ acceptance_bindings:
   - test_coverage_return_and_generation
   AC-RETURN-AND-CONTINUE:
   - test_coverage_return_and_generation
+  - test_search_alternatives_runtime
   AC-LINKED-RECHECK:
   - test_linked_installation_reenters_verification
   AC-BILINGUAL-RECALL:

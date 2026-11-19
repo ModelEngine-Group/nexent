@@ -32,9 +32,10 @@ case:
     expected: Only the requirement with newly available MCP tools is rechecked. Binding uses the actual tool and the returned
       card preserves the accepted requirements.
   - order: 3
-    action: Attempt a stale card action, then confirm the current card and continue after a valid binding.
+    action: Attempt a stale card action, then confirm the current card and continue after a valid binding. Generate cards in
+      two conversations on the same draft and submit an older-conversation action after the newer card was issued.
     expected: The stale action does not advance the run. Continue uses the saved binding before Prompt and conversation settings
-      are saved and verified.
+      are saved and verified. Both conversations retain independently valid cards and confirmation succeeds without draft writes.
   - order: 4
     action: Claim installation of a recommendation twice, recover the installed resource, then link a manually created resource
       from clarification.
@@ -165,6 +166,7 @@ case:
     - 1
   - id: AC-RETURN-AND-CONTINUE
     description: Binding returns to clarification with prior requirements and only a valid current card advances generation.
+      Different conversations on the same draft retain independent cards despite interleaved older-conversation writes.
     steps:
     - 2
     - 3

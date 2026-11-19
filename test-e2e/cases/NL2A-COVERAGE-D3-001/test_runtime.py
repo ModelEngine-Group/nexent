@@ -62,7 +62,7 @@ def test_search_alternatives_runtime(monkeypatch):
         before = runtime.draft()
 
         def verify():
-            snapshot = json.loads(redis.get(scope.key))
+            snapshot = json.loads(redis.get(_state_key(runtime)))
             offered = flow._candidates_in_batch(snapshot["requirements"]["r1"])
             assert [row["candidate_ref"] for row in snapshot["requirements"]["r1"]["installed"]] == ["tool:701", "tool:702", "tool:703"]
             check = assessed_check(snapshot, "r1", [item["candidate_ref"] for item in offered])
@@ -71,7 +71,7 @@ def test_search_alternatives_runtime(monkeypatch):
             invalid = {**check, "assessments": check["assessments"][:-1]}
             with pytest.raises(flow.ResourceStateError, match="verification_assessments_incomplete"):
                 flow.validate_checks(snapshot, snapshot["batch"]["id"], [VerificationCheck(**invalid)])
-            assert json.loads(redis.get(scope.key)) == snapshot
+            assert json.loads(redis.get(_state_key(runtime))) == snapshot
             return (f"<code>print(nl2a_verify_requirements(verification_batch_id={snapshot['batch']['id']!r}, "
                     f"checks={[check]!r}))</code>")
 
@@ -86,6 +86,13 @@ def test_search_alternatives_runtime(monkeypatch):
         assert {item["candidate_ref"] for item in card["requirements"][0]["covered_resources"]} == expected
         assert {item["candidate"]["candidate_ref"] for item in card["resources"]} == expected
         assert sum(item["recommendation"] == "recommended" for item in card["resources"]) == 1
+        other_cid, other_events = post(runtime, "Find alternatives in another conversation.", [
+            f"<code>print(nl2a_discover_requirements(requirements={req!r}))</code>", verify,
+        ])
+        other_card = get_card(other_events)
+        assert other_cid != cid
+        other_state = redis.get(_state_key(runtime, other_cid))
+        # An older conversation writes after the newer card was issued.
         _, events = post(runtime, action(card, "return_requirements"), [], cid)
         clarification = get_card(events)
         assert clarification["subtype"] == "requirement_clarification"
@@ -93,10 +100,16 @@ def test_search_alternatives_runtime(monkeypatch):
                  for row in clarification["requirements"]]
         _, events = post(runtime, action(clarification, "confirm_requirements", requirements=edits), [], cid)
         assert get_card(events)["subtype"] == "installed_resource_binding"
-        assert json.loads(redis.get(scope.key))["submitted_batches"] == {}
-        saved = json.loads(redis.get(scope.key))["requirements"]["r1"]["candidate_assessments"]
+        assert json.loads(redis.get(_state_key(runtime, cid)))["submitted_batches"] == {}
+        saved = json.loads(redis.get(_state_key(runtime, cid)))["requirements"]["r1"]["candidate_assessments"]
         assert set(saved) == expected
         assert all(item["satisfies"] and item["reason"] for item in saved.values())
+        assert redis.get(_state_key(runtime, other_cid)) == other_state
+        _, events = post(runtime, action(other_card, "return_requirements"), [], other_cid)
+        other_clarification = get_card(events)
+        assert other_clarification["subtype"] == "requirement_clarification"
+        _, events = post(runtime, action(other_clarification, "confirm_requirements", requirements=edits), [], other_cid)
+        assert get_card(events)["subtype"] == "installed_resource_binding"
         assert runtime.draft() == before
 
 
@@ -123,7 +136,7 @@ def test_bilingual_recall_and_edited_requirement(monkeypatch):
         scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
         before = runtime.draft()
         def verify(edited=False):
-            state = json.loads(redis.get(scope.key))
+            state = json.loads(redis.get(_state_key(runtime)))
             checks = []
             expected = {"r1": [] if edited else ["tool:701"], "r2": ["tool:703"], "r3": []}
             for key in state["batch"]["requirements"]:
@@ -144,14 +157,14 @@ def test_bilingual_recall_and_edited_requirement(monkeypatch):
         rows = card["requirements"]
         assert [row["coverage_status"] for row in rows] == ["covered", "covered", "uncovered"]
         assert [item["candidate_ref"] for item in rows[0]["covered_resources"]] == ["tool:701"]
-        unchanged = json.loads(redis.get(scope.key))["requirements"]["r2"]
-        legacy = json.loads(redis.get(scope.key))
+        unchanged = json.loads(redis.get(_state_key(runtime)))["requirements"]["r2"]
+        legacy = json.loads(redis.get(_state_key(runtime)))
         legacy["requirements"]["r3"].pop("search_queries")
-        redis.set(scope.key, json.dumps(legacy))
+        redis.set(_state_key(runtime), json.dumps(legacy))
         edits = [{"requirement_id": row["requirement_id"], "query": row["query"]} for row in rows]
         edits[0]["query"] = "搜索实时新闻"
         def prepare():
-            state = json.loads(redis.get(scope.key))
+            state = json.loads(redis.get(_state_key(runtime)))
             assert state["requirements"]["r1"]["query"] == "搜索实时新闻"
             assert "search_queries" not in state["requirements"]["r1"]
             assert "installed" not in state["requirements"]["r1"]
@@ -165,12 +178,12 @@ def test_bilingual_recall_and_edited_requirement(monkeypatch):
         _, events = post(runtime, action(card, "confirm_requirements", requirements=edits), [
             "<code>print(nl2a_discover_requirements())</code>", prepare, lambda: verify(True),
         ], cid)
-        assert events, json.loads(redis.get(scope.key))
+        assert events, json.loads(redis.get(_state_key(runtime)))
         edited_card = get_card(events)
         assert edited_card["requirements"][0]["query"] == "搜索实时新闻"
         assert edited_card["requirements"][0]["coverage_status"] == "uncovered"
         assert edited_card["requirements"][1]["coverage_status"] == "covered"
-        assert json.loads(redis.get(scope.key))["requirements"]["r3"]["search_queries"] == requirements[2]["search_queries"]
+        assert json.loads(redis.get(_state_key(runtime)))["requirements"]["r3"]["search_queries"] == requirements[2]["search_queries"]
         assert runtime.draft() == before
 
 
@@ -210,8 +223,11 @@ def owned_runtime(monkeypatch):
         finally:
             if runtime is not None:
                 scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
-                redis.delete(scope.key)
-                assert not redis.exists(scope.key)
+                owner = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
+                keys = list(redis.scan_iter(owner.legacy_key + "*"))
+                if keys:
+                    redis.delete(*keys)
+                assert not list(redis.scan_iter(owner.legacy_key + "*"))
                 assert not inspect(runtime.storage["engine"]).has_schema(runtime.storage["schema"])
                 assert not runtime.provider.thread.is_alive()
                 for run in runtime.runs:
@@ -220,6 +236,13 @@ def owned_runtime(monkeypatch):
                     with socket.socket() as client:
                         client.settimeout(1)
                         assert client.connect_ex((mcp.hostname, mcp.port)) != 0
+
+
+def _state_key(runtime, conversation_id=None):
+    if conversation_id is None:
+        conversation_id = runtime.runs[-1].mcp_host[0]["headers"]["X-Nexent-NL2Agent-Conversation-ID"]
+    return ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id,
+                         str(conversation_id), "").key
 
 
 def post(runtime, query, actions, conversation_id=None, **values):
@@ -267,7 +290,7 @@ def test_coverage_return_and_generation(monkeypatch):
         scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
         before = runtime.draft()
         def verify():
-            state = json.loads(redis.get(scope.key))
+            state = json.loads(redis.get(_state_key(runtime)))
             batch = state["batch"]
             checks = []
             accepted = {"r1": "tool:9", "r3": "tool:17" if mcp_record["enabled"] else repository_mcp["candidate_ref"]}
@@ -294,7 +317,7 @@ def test_coverage_return_and_generation(monkeypatch):
         coverage = get_card(events)
         assert coverage["subtype"] == "requirement_coverage"
         assert any(
-            message["role"] == "user" and "<CODE_EXEC_RESULT>" in str(message["content"])
+            message["role"] == "user" and '<completed_action_history read_only="true">' in str(message["content"])
             and "installed_candidates" in str(message["content"])
             for request in runtime.provider.wire for message in request["messages"]
         )
@@ -348,7 +371,7 @@ def test_coverage_return_and_generation(monkeypatch):
             ))
 
         _, events = post(runtime, action(latest, "continue", selected_resource_refs=["tool:9"]), [
-            "<code>context = nl2a_read_generation_context()\n"
+            "<code>context = nl2a_read_generation_context(goal='complete')\n"
             f"print(nl2a_save_agent_draft_fields(agent_id={runtime.agent_id}, fields={{'prompt':'Call weather.'}}))</code>",
             f"<code>print(nl2a_save_agent_draft_fields(agent_id={runtime.agent_id}, "
             "fields={'greeting_message':'Hello','example_questions':['What is the weather?']}))</code>",
@@ -390,7 +413,7 @@ def test_linked_installation_reenters_verification(monkeypatch):
         before = runtime.draft()
 
         def verify(expected):
-            state = json.loads(redis.get(scope.key))
+            state = json.loads(redis.get(_state_key(runtime)))
             batch = state["batch"]
             [requirement_id] = batch["requirements"]
             row = state["requirements"][requirement_id]
@@ -441,7 +464,7 @@ def test_linked_installation_reenters_verification(monkeypatch):
         link_response = runtime.client.post("/api/agent/nl2agent/resource_links",
                                            json={**link, "resource_type": "skill", "resource_id": 17}, headers=auth)
         assert link_response.status_code == 200, link_response.text
-        state = json.loads(redis.get(scope.key))
+        state = json.loads(redis.get(_state_key(runtime)))
         assert state["requirements"][row["requirement_id"]]["accepted"] == [candidate["candidate_ref"]]
         edits = [{key: row[key] for key in ("requirement_id", "query", "required")}]
         confirmation = action(card, "confirm_requirements", requirements=edits)
@@ -453,7 +476,7 @@ def test_linked_installation_reenters_verification(monkeypatch):
             json.loads(line[6:])["type"] == "error"
             for line in interrupted.text.splitlines() if line.startswith("data: ")
         )
-        pending = json.loads(redis.get(scope.key))
+        pending = json.loads(redis.get(_state_key(runtime)))
         assert pending["card"] is None and pending["version"] == card["state_version"] + 1
         assert pending["requirements"][row["requirement_id"]]["linked_refs"] == ["skill:17"]
         stale = runtime.post(PATH, query=confirmation, conversation_id=cid)
@@ -476,7 +499,7 @@ def test_linked_installation_reenters_verification(monkeypatch):
                       client_key="manual-row", resource_type="skill", resource_id=17)
         manual_link = runtime.client.post("/api/agent/nl2agent/resource_links", json=manual, headers=auth)
         assert manual_link.status_code == 200, manual_link.text
-        state = json.loads(redis.get(scope.key))
+        state = json.loads(redis.get(_state_key(runtime)))
         assert state["pending_links"] == {"manual-row": ["skill:17"]}
         _, manual_events = post(runtime, action(returned, "confirm_requirements", requirements=[
             {"client_key": "manual-row", "query": "Manually added weather resource", "required": True},
@@ -570,7 +593,7 @@ def test_knowledge_priority_runtime(monkeypatch, aidp, owned_resource_es):
                             tenant_id=scope.tenant_id, user_id=scope.user_id, enabled=True,
                             created_by=scope.user_id, updated_by=scope.user_id, version_no=0))
                 def verify():
-                    state = json.loads(redis.get(scope.key))
+                    state = json.loads(redis.get(_state_key(runtime)))
                     row = state["requirements"]["r1"]
                     refs = [item["candidate_ref"] for item in row["installed"]]
                     assert len(refs) == len(set(refs))
@@ -585,7 +608,7 @@ def test_knowledge_priority_runtime(monkeypatch, aidp, owned_resource_es):
                 req = [{"query": active_query, "search_queries": {"zh": active_query, "en": "corporate archive"}}]
                 def actions():
                     yield f"<code>print(nl2a_discover_requirements(requirements={req!r}, purpose='bind'))</code>"
-                    while json.loads(redis.get(scope.key))["batch"] is not None:
+                    while json.loads(redis.get(_state_key(runtime)))["batch"] is not None:
                         yield verify
                 _, events = post(runtime, active_query, actions())
                 card = get_card(events)
@@ -604,7 +627,7 @@ def test_knowledge_priority_runtime(monkeypatch, aidp, owned_resource_es):
                 if mode in ("text", "hybrid", "early_native", "fallback", "empty", "provider_error", "bound"):
                     assert set(refs) == {"tool:9", "tool:17"}
                 knowledge_provider.assert_not_called()
-                safe_state = json.dumps(json.loads(redis.get(scope.key)), ensure_ascii=False)
+                safe_state = json.dumps(json.loads(redis.get(_state_key(runtime))), ensure_ascii=False)
                 assert "owned-private-index" not in safe_state
                 assert "owned-private-index" not in json.dumps(wire)
                 assert runtime.draft() == before
@@ -662,7 +685,7 @@ def test_top3_hybrid_uncovered_runtime(monkeypatch, owned_resource_es, empty):
         checked = []
         wire_at_verification = []
         def verify():
-            snapshot = json.loads(redis.get(scope.key))
+            snapshot = json.loads(redis.get(_state_key(runtime)))
             row = snapshot["requirements"]["r1"]
             if not wire_at_verification:
                 wire_at_verification.append(len(wire))
@@ -678,12 +701,12 @@ def test_top3_hybrid_uncovered_runtime(monkeypatch, owned_resource_es, empty):
         req = [{"query": pair["zh"], "search_queries": pair}]
         def actions():
             yield f"<code>print(nl2a_discover_requirements(requirements={req!r}, purpose='recommend'))</code>"
-            while json.loads(redis.get(scope.key))["batch"] is not None:
+            while json.loads(redis.get(_state_key(runtime)))["batch"] is not None:
                 yield verify
         _, events = post(runtime, "Find resources", actions())
         card = get_card(events)
         assert card["requirements"][0]["coverage_status"] == "uncovered"
-        state = json.loads(redis.get(scope.key))
+        state = json.loads(redis.get(_state_key(runtime)))
         assert state["batch"] is None and state["requirements"]["r1"]["accepted"] == []
         assert len(checked) == len(set(checked)) == (0 if empty else 10)
         assert searches == [{"r1": pair}]
@@ -717,7 +740,7 @@ def test_semantic_recall_runtime(monkeypatch, owned_resource_es):
         scope = ResourceScope(runtime.storage["tenant"], runtime.storage["owner"], runtime.agent_id, "", "")
         before = runtime.draft()
         def verify():
-            state = json.loads(redis.get(scope.key))
+            state = json.loads(redis.get(_state_key(runtime)))
             if state["batch"] is None:
                 return "<final_answer>Recommended.</final_answer>"
             row = state["requirements"]["r1"]

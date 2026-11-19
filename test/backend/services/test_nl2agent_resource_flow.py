@@ -305,11 +305,12 @@ async def test_retry_accepts_the_same_selection_without_echoing_legacy_checked_r
         await flow.verify(scope, "batch", [VerificationCheck(requirement_id="r1", accepted=["tool:9"])])
 
 
-def test_resource_state_key_is_isolated_by_tenant_user_and_agent():
+def test_resource_state_key_is_isolated_by_tenant_user_agent_and_conversation():
     base = ResourceScope("tenant", "user", 1, "conversation", "run")
     scopes = [base, ResourceScope("other", "user", 1, "conversation", "run"),
               ResourceScope("tenant", "other", 1, "conversation", "run"),
-              ResourceScope("tenant", "user", 2, "conversation", "run")]
+              ResourceScope("tenant", "user", 2, "conversation", "run"),
+              ResourceScope("tenant", "user", 1, "other", "run")]
     assert len({scope.key for scope in scopes}) == len(scopes)
 
 
