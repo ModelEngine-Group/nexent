@@ -64,6 +64,18 @@ _RUNTIME_METADATA_ERROR_CODE_MAP = {
 
 
 
+async def create_knowledge_base_for_northbound(*, ctx, knowledge_name, embedding_dim=None,
+    embedding_model_id, ingroup_permission=None, group_ids=None, preserve_source_file=None):
+    """Preserve the Northbound creation contract with the actual API-key actor."""
+    from management.services.knowledge_base.creation import create_knowledge_base
+
+    from infrastructure.agentos_identity import ServicePrincipal
+
+    return await create_knowledge_base(knowledge_name, ServicePrincipal(ctx.user_id, ctx.tenant_id),
+        embedding_dim=embedding_dim, embedding_model_id=embedding_model_id, ingroup_permission=ingroup_permission,
+        group_ids=group_ids, preserve_source_file=preserve_source_file)
+
+
 async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
     """Keep the northbound file contract while supplying the current actor."""
     return await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core,

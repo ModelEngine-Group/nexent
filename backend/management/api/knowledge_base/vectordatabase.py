@@ -48,6 +48,7 @@ from management.services.knowledge_base.service import (
     get_vector_db_core,
 )
 from management.services.knowledge_base.deletion_public import with_cleanup_summary
+from management.services.knowledge_base.creation import create_knowledge_base
 from management.services.knowledge_base.file_reader import read_document_error
 from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
 from management.services.knowledge_base.chunk_deletion import delete_manual_chunk
@@ -115,14 +116,13 @@ async def check_knowledge_base_exist(
 
 
 @router.post("/{index_name}")
-def create_new_index(
+async def create_new_index(
     http_request: Request,
     index_name: str = Path(..., description="Name of the index to create"),
     embedding_dim: Optional[int] = Query(None, description="Dimension of the embedding vectors"),
     request: Dict[str, Any] = Body(
         None, description="Request body containing embedding_model_id and optional knowledge-base settings"
     ),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Create a new vector index and store it in the knowledge table"""
@@ -146,12 +146,10 @@ def create_new_index(
             raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
-        result = ElasticSearchService.create_knowledge_base(
+        result = await create_knowledge_base(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
-            vdb_core=vdb_core,
-            user_id=user_id,
-            tenant_id=tenant_id,
+            actor=ServicePrincipal(user_id, tenant_id),
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
             embedding_model_id=embedding_model_id,

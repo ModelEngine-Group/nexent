@@ -9,7 +9,7 @@ import pytest
 from contracts.agent import KnowledgeBaseSeedDoc
 from management.db.identity import group
 from management.db.knowledge_base import repository
-from management.services.knowledge_base import common, seed_documents
+from management.services.knowledge_base import common, creation, seed_documents
 from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model import resolver
 from management.services.repository.agent import official
@@ -24,7 +24,8 @@ async def test_install_stops_after_text_write_failure_without_starting_binary_or
     mocker.patch.object(repository, "get_knowledge_record", return_value=None)
     mocker.patch.object(common, "get_vector_db_core")
     mocker.patch.object(resolver, "get_embedding_model_by_id", return_value=(SimpleNamespace(model="model"), 2))
-    create = mocker.patch.object(ElasticSearchService, "create_knowledge_base", return_value={"id": "actual"})
+    create = mocker.patch.object(creation, "create_knowledge_base", new=AsyncMock(return_value={"id": "actual"}))
+    mocker.patch.object(seed_documents, "get_seed_model_name", new=AsyncMock(return_value="model"))
     legacy = mocker.patch.object(ElasticSearchService, "index_documents")
     text = mocker.patch.object(seed_documents, "index_seed_texts", new=AsyncMock(side_effect=error))
     binary = mocker.patch.object(official, "_index_binary_docs", new_callable=AsyncMock)

@@ -564,18 +564,12 @@ async def _create_knowledge_bases(
     from management.db.identity.group import query_groups_by_tenant
     from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record
     from management.utils.serialization import convert_string_to_list
-    from management.services.knowledge_base.service import ElasticSearchService
-    from management.services.knowledge_base.common import (
-        get_vector_db_core,
-    )
-    from management.services.model.resolver import (
-        get_embedding_model_by_id,
-    )
-    from management.services.knowledge_base.seed_documents import index_seed_texts
+    from management.services.knowledge_base.creation import create_knowledge_base
+    from management.services.knowledge_base.seed_documents import index_seed_texts, get_seed_model_name
     from infrastructure.agentos_identity import ServicePrincipal
 
-    vdb_core = get_vector_db_core()
-    embedding_model, _ = get_embedding_model_by_id(tenant_id, embedding_model_id)
+    actor = ServicePrincipal(user_id, tenant_id)
+    model_name = await get_seed_model_name(embedding_model_id, actor)
     mapping: Dict[str, str] = {}
     resolution_map = {
         item.knowledge_name: item.action
@@ -645,12 +639,10 @@ async def _create_knowledge_bases(
                 suffix += 1
             kb_name = candidate
 
-        created = ElasticSearchService.create_knowledge_base(
+        created = await create_knowledge_base(
             knowledge_name=kb_name,
             embedding_dim=None,
-            vdb_core=vdb_core,
-            user_id=user_id,
-            tenant_id=tenant_id,
+            actor=actor,
             embedding_model_id=embedding_model_id,
             ingroup_permission="READ_ONLY",
             group_ids=[
@@ -669,7 +661,7 @@ async def _create_knowledge_bases(
             if text_docs:
                 await index_seed_texts(
                     actual_index, text_docs, ServicePrincipal(user_id, tenant_id),
-                    embedding_model_name=embedding_model.model,
+                    embedding_model_name=model_name,
                 )
                 logger.info(
                     "Indexed %d text seed document(s) into knowledge base '%s'",

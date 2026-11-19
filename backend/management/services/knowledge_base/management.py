@@ -21,14 +21,13 @@ from uuid import uuid4
 from fastapi import Body, Depends, Path, Query
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE, PERMISSION_READ
-from contracts.errors.exceptions import AppException, DuplicateError
+from contracts.errors.exceptions import AppException
 from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.knowledge_base.repository import (
     create_knowledge_record,
-    delete_knowledge_record,
     get_knowledge_info_by_tenant_id,
     get_knowledge_record,
     update_embedding_model_by_index_name,
@@ -63,7 +62,6 @@ from management.services.knowledge_base.permission import (
 )
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import (
-    create_embedding_model,
     get_embedding_model_by_id,
     get_model_descriptor,
 )
@@ -156,135 +154,6 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             raise
         except Exception as e:
             raise Exception(f"Error creating index: {str(e)}")
-
-    @staticmethod
-    def create_knowledge_base(
-        knowledge_name: str,
-        embedding_dim: Optional[int],
-        vdb_core: VectorDatabaseCore,
-        user_id: Optional[str],
-        tenant_id: Optional[str],
-        ingroup_permission: Optional[str] = None,
-        group_ids: Optional[List[int]] = None,
-        embedding_model_id: Optional[int] = None,
-        preserve_source_file: Optional[bool] = None,
-        quota_limit_bytes: Optional[int] = None,
-        user_role: Optional[str] = None,
-    ):
-        """
-        Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
-
-        For new data:
-        - Store the user-facing name in knowledge_name column.
-        - Generate index_name as ``knowledge_id + '-' + uuid`` (digits and lowercase letters only).
-        - Use generated index_name as the Elasticsearch index name.
-
-        Args:
-            knowledge_name: User-facing knowledge base name
-            embedding_dim: Dimension of the embedding vectors (optional)
-            vdb_core: VectorDatabaseCore instance
-            user_id: User ID who creates the knowledge base
-            tenant_id: Tenant ID
-            ingroup_permission: Permission level (optional)
-            group_ids: List of group IDs (optional)
-            embedding_model_id: Unique ID of the selected embedding model.
-            preserve_source_file: Whether to preserve uploaded source documents after
-                                   vectorization (optional; defaults to True when omitted).
-            user_role: Normalized user role. USER callers are forced to PRIVATE.
-
-        For backward compatibility, legacy callers can still use create_index() directly
-        with an explicit index_name.
-        """
-        try:
-            knowledge_name = knowledge_name.strip()
-            if not knowledge_name:
-                raise ValueError("Knowledge base name is required")
-            if embedding_model_id is None:
-                raise ValueError("embedding_model_id is required")
-
-            model = get_model_by_model_id(embedding_model_id, tenant_id)
-            if not model:
-                raise ValueError(
-                    f"Embedding model with id {embedding_model_id} not found"
-                )
-            if model.get("model_type") not in ["embedding", "multi_embedding"]:
-                raise ValueError(
-                    f"Model with id {embedding_model_id} is not an embedding model"
-                )
-
-            embedding_model = create_embedding_model(model)
-            saved_embedding_model_name = model.get("display_name") or model.get(
-                "model_name"
-            )
-
-            # Create knowledge record first to obtain knowledge_id and generated index_name
-            knowledge_data = {
-                "knowledge_name": knowledge_name,
-                "knowledge_describe": "",
-                "user_id": user_id,
-                "tenant_id": tenant_id,
-                "embedding_model_name": saved_embedding_model_name,
-                "embedding_model_id": embedding_model_id,
-            }
-
-            # Add group permission and group IDs if provided.
-            if has_any_role(user_role, {"USER"}) and not has_any_role(user_role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"}):
-                knowledge_data["ingroup_permission"] = PERMISSION_PRIVATE
-                knowledge_data["group_ids"] = None
-            else:
-                if ingroup_permission is not None:
-                    knowledge_data["ingroup_permission"] = ingroup_permission
-                if group_ids is not None:
-                    knowledge_data["group_ids"] = group_ids
-            if preserve_source_file is not None:
-                knowledge_data["preserve_source_file"] = preserve_source_file
-            if quota_limit_bytes is not None:
-                knowledge_data["quota_limit_bytes"] = quota_limit_bytes
-
-            record_info = create_knowledge_record(knowledge_data)
-            index_name = record_info["index_name"]
-
-            # Create Elasticsearch index with generated internal index_name.
-            # If this fails (e.g. ES auth/connectivity), roll back the just-inserted
-            # record so we don't leave an orphan row pointing at a missing index.
-            try:
-                success = vdb_core.create_index(
-                    index_name,
-                    embedding_dim=embedding_dim
-                    or (embedding_model.embedding_dim if embedding_model else 1024),
-                )
-                if not success:
-                    raise Exception(f"Failed to create index {index_name}")
-            except Exception:
-                try:
-                    delete_knowledge_record(
-                        {"index_name": index_name, "user_id": user_id}
-                    )
-                except Exception as rollback_error:
-                    logger.warning(
-                        "Failed to roll back knowledge record %s after index "
-                        "creation error: %s",
-                        index_name,
-                        rollback_error,
-                    )
-                raise
-
-            return {
-                "status": "success",
-                "message": f"Index {index_name} created successfully",
-                "id": index_name,
-                "embedding_model_name": saved_embedding_model_name,
-                "model_type": model.get("model_type"),
-                "knowledge_id": record_info["knowledge_id"],
-                "name": record_info.get("knowledge_name", knowledge_name),
-            }
-        except AppException:
-            # Preserve structured resource-limit errors for the application layer.
-            raise
-        except (DuplicateError, ValueError):
-            raise
-        except Exception as e:
-            raise Exception(f"Error creating knowledge base: {str(e)}")
 
     @staticmethod
     def update_knowledge_base(

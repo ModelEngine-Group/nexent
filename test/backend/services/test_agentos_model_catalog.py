@@ -56,6 +56,7 @@ async def test_catalog_projects_metadata_without_credentials_or_endpoint(mocker)
     query = ModelListQuery(model_type="rerank", page_size=20)
     result = await service.list(query, actor)
     assert result.models[0].model_id == 7 and result.models[0].qualified_name == "repo/ranker"
+    assert result.models[0].model_name == "ranker"
     assert "private-key" not in result.model_dump_json() and "private.example" not in result.model_dump_json()
     assert loader.call_count == 1 and loader.call_args.args == (query, actor)
     assert loader.call_args.kwargs["context"].remaining() > 0

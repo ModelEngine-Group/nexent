@@ -5,14 +5,7 @@ from dataclasses import replace
 from time import monotonic
 from uuid import uuid4
 
-from contracts.constants.environment import (
-    MAX_KNOWLEDGE_BASES_PER_TENANT,
-    MAX_KNOWLEDGE_BASES_PER_USER,
-    MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER,
-)
-from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, DuplicateError
-from contracts.roles import has_any_role, normalize_roles
+from management.services.knowledge_base.catalog_policy import enforce_catalog_creation
 from nexent.storage.errors import Conflict, OutcomeUnknown, ScopeDenied
 from nexent.storage.models import (
     Comparison,
@@ -26,7 +19,7 @@ from nexent.storage.models import (
 )
 
 from infrastructure.agentos_identity import ServicePrincipal
-from infrastructure.datamate_catalog import ACTOR, CATALOG, datamate_catalog_ports
+from infrastructure.knowledge_catalog import CATALOG, knowledge_catalog_ports
 
 
 def _operation(context):
@@ -64,56 +57,7 @@ def _confirmed(receipt, context, *, deleted=False):
         raise Conflict()
 
 
-def _limit(scope, limit, count, role=None):
-    details = {
-        "resource": "knowledge_bases",
-        "scope": scope,
-        "limit": limit,
-        "current_count": count,
-    }
-    if role:
-        details["role"] = role
-    raise AppException(
-        ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED,
-        f"Knowledge base {scope} limit reached: maximum {limit} knowledge bases per {scope}",
-        details=details,
-    )
-
-
-def _create_policy(records, actor, name, context):
-    count = records.count(CATALOG, RecordQuery(), context=context)
-    if count >= MAX_KNOWLEDGE_BASES_PER_TENANT:
-        _limit("tenant", MAX_KNOWLEDGE_BASES_PER_TENANT, count)
-    identities = records.query(
-        ACTOR, RecordQuery(), PageRequest(limit=2), context=context
-    )
-    try:
-        role = normalize_roles(
-            identities.items[0]["user_roles"] if len(identities.items) == 1 else "USER"
-        )
-    except ValueError:
-        role = ("USER",)
-    limit = (
-        MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
-        if has_any_role(role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"})
-        else MAX_KNOWLEDGE_BASES_PER_USER
-    )
-    count = records.count(
-        CATALOG,
-        RecordQuery(where=Comparison("created_by", "eq", actor.user_id)),
-        context=context,
-    )
-    if count >= limit:
-        _limit("user", limit, count, role)
-    if records.count(
-        CATALOG,
-        RecordQuery(where=Comparison("knowledge_name", "eq", name)),
-        context=context,
-    ):
-        raise DuplicateError(f"Knowledge base name '{name}' already exists")
-
-
-def upsert_datamate_record(data, *, ports=datamate_catalog_ports, context=None):
+def upsert_datamate_record(data, *, ports=knowledge_catalog_ports, context=None):
     context = _operation(context)
     actor = ServicePrincipal(data["user_id"], data["tenant_id"])
     name = data.get("knowledge_name") or data["index_name"]
@@ -130,7 +74,7 @@ def upsert_datamate_record(data, *, ports=datamate_catalog_ports, context=None):
         }
         if current is None:
             values["knowledge_name"] = name.strip()
-            _create_policy(tx, actor, values["knowledge_name"], context)
+            enforce_catalog_creation(tx, actor, values["knowledge_name"], context)
             row = tx.create(
                 CATALOG,
                 {
@@ -157,7 +101,7 @@ def upsert_datamate_record(data, *, ports=datamate_catalog_ports, context=None):
 
 
 def list_datamate_records(
-    tenant_id, user_id, *, ports=datamate_catalog_ports, context=None
+    tenant_id, user_id, *, ports=knowledge_catalog_ports, context=None
 ):
     context = _operation(context)
     actor = ServicePrincipal(user_id, tenant_id)
@@ -182,7 +126,7 @@ def list_datamate_records(
             cursor = page.next_cursor
 
 
-def delete_datamate_record(data, *, ports=datamate_catalog_ports, context=None):
+def delete_datamate_record(data, *, ports=knowledge_catalog_ports, context=None):
     context = _operation(context)
     actor = ServicePrincipal(data["user_id"], data["tenant_id"])
     with (

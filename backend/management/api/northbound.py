@@ -85,6 +85,7 @@ from management.services.permission.api_keys import (
 from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
+    create_knowledge_base_for_northbound,
     list_knowledge_chunks_for_northbound,
     delete_knowledge_base_for_northbound,
     list_knowledge_files_for_northbound,
@@ -790,7 +791,6 @@ async def create_new_index(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
 
         ingroup_permission = None
         group_ids = None
@@ -805,12 +805,10 @@ async def create_new_index(
         if isinstance(embedding_model_id, bool) or not isinstance(embedding_model_id, int):
             raise ValueError("embedding_model_id must be an integer")
 
-        return ElasticSearchService.create_knowledge_base(
+        return await create_knowledge_base_for_northbound(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
-            vdb_core=vdb_core,
-            user_id=ctx.user_id,
-            tenant_id=ctx.tenant_id,
+            ctx=ctx,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
             embedding_model_id=embedding_model_id,

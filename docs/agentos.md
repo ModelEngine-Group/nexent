@@ -347,7 +347,11 @@ Model.get 的 qualified_name 使用现有模型名称函数从 Runtime 私有 SI
 
 Runtime 使用现有 KB 状态行中的 collection_setup 作为当前初始化围栏，快照只含操作 ID、真实 actor、资源修订、维度、模型绑定、phase 和 writer_ended。接纳与原文件、分块、删除共用事务锁；活动初始化阻止其他写入、不稳定读取及集合删除。确认完成时清空并推进 epoch，明确未生效的失败释放且不推进 epoch。可能已写入的错误保留 unknown，禁止自动重放；父预算耗尽时不延长记账时间，可能保留 writing 且结束未确认，须显式维护。未启动的初始化不能直接确认成功，其他编辑者不能接管原操作。
 
-部署该能力前须应用 `deploy/sql/migrations/v2.9.0_031_runtime_collection_setup.sql`。迁移仅为已有状态表增加 nullable JSONB 字段及注释，可重复执行，001 至 030 保持不变。当前还未完成新建 KB 的 Management 元数据创建接线、公开 documents 路由切换及 P4 未知初始化的维护处理。
+部署该能力前须应用 `deploy/sql/migrations/v2.9.0_031_runtime_collection_setup.sql`。迁移仅为已有状态表增加 nullable JSONB 字段及注释，可重复执行，001 至 030 保持不变。公开 documents 路由切换及 P4 未知初始化的维护处理尚待完成。
+
+普通 API、Northbound 和官方安装的新建 KB 已统一使用 Management 的异步创建门面。Management 通过 Model.get 读取模型 ID、版本、类型及配置维度，再通过共用 RecordStore 创建目录，最后以实际用户请求 AgentOS 初始化集合。租户/用户额度及同名检查保留原 PostgreSQL 事务锁；Northbound 在 northbound_service 中适配，公开七字段成功回执保持。ModelMetadata 的 model_name 是原裸名称，display_name or model_name 沿用旧 KB 展示规则，qualified_name 保留 repo/name，供种子 source 使用。Management 不创建模型适配器，不探测维度。
+
+创建请求结果未知、取消或超时时，已提交的目录保留供显式核对，不执行旧的盲目软删回滚，也不自动重试。Runtime 的 collection_setup 继续限制未知集合写入；未到达 Runtime 的已提交目录也由 P4 维护核对。旧 create_knowledge_base 实现已删除，create_index 仍由尚未切换的公开 documents 使用。X-Task-Id 按用户决定保留作追踪，公开 documents 切换后进度统一使用新文件任务，不保留旧任务 ID 查询兼容层。
 
 旧公开 documents 的图片准备已改用 Management 的授权读取和单键只读 StorageInterface，显式接收实际用户、租户及共享截止时间，保留原始字节。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。该入口的向量化和进度投影仍待迁移，当前读取证明不能代替完整图片写入验收。
 

@@ -56,6 +56,7 @@ northbound_service_module.list_knowledge_files_for_northbound = AsyncMock(return
 northbound_service_module.process_uploaded_knowledge_for_northbound = AsyncMock()
 northbound_service_module.delete_knowledge_document_for_northbound = AsyncMock()
 northbound_service_module.delete_knowledge_base_for_northbound = AsyncMock()
+northbound_service_module.create_knowledge_base_for_northbound = AsyncMock(side_effect=lambda **kw: {"index_name": kw["knowledge_name"]})
 sys.modules["management.services.northbound"] = northbound_service_module
 
 file_mgmt_module = types.ModuleType("management.services.file.service")
@@ -303,7 +304,7 @@ class TestCreateIndex:
             new_callable=AsyncMock,
             return_value=ASSET_CTX,
         ), patch(
-            "management.api.northbound.ElasticSearchService.create_knowledge_base",
+            "management.api.northbound.create_knowledge_base_for_northbound",
             side_effect=app_exception,
         ):
             with pytest.raises(AppException) as exc_info:
@@ -635,7 +636,7 @@ class TestIndexManagement:
     def test_create_index_forwards_optional_settings(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.create_knowledge_base",
+            "management.api.northbound.create_knowledge_base_for_northbound",
             return_value={"index_name": "kb1"},
         ) as mock_create:
             response = client.post(
@@ -681,7 +682,7 @@ class TestIndexManagement:
     ):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.create_knowledge_base",
+            "management.api.northbound.create_knowledge_base_for_northbound",
             side_effect=exception,
         ):
             response = client.post(

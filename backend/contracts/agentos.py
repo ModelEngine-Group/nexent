@@ -900,6 +900,7 @@ ModelInvocation = Annotated[
 class ModelMetadata(ModelReference):
     model_type: str
     display_name: str | None
+    model_name: str | None = None
     revision: str
     profile_version: str | None = None
     embedding_dimensions: int | None = Field(default=None, gt=0, strict=True)

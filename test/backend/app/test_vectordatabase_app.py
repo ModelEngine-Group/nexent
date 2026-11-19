@@ -202,7 +202,7 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base") as mock_create:
+            patch("management.api.knowledge_base.vectordatabase.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
                              "index_name": auth_data["index_name"]}
@@ -225,8 +225,8 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         called_kwargs = mock_create.call_args[1]
         assert called_kwargs["knowledge_name"] == auth_data["index_name"]
         assert called_kwargs["embedding_dim"] == 768
-        assert called_kwargs["user_id"] == auth_data["user_id"]
-        assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+        assert called_kwargs["actor"].user_id == auth_data["user_id"]
+        assert called_kwargs["actor"].tenant_id == auth_data["tenant_id"]
         assert called_kwargs["user_role"] == "ADMIN"
 
 
@@ -239,7 +239,7 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base") as mock_create:
+            patch("management.api.knowledge_base.vectordatabase.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
                              "index_name": auth_data["index_name"]}
@@ -261,8 +261,8 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
         called_kwargs = mock_create.call_args[1]
         assert called_kwargs["knowledge_name"] == auth_data["index_name"]
         assert called_kwargs["embedding_dim"] == 768
-        assert called_kwargs["user_id"] == auth_data["user_id"]
-        assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+        assert called_kwargs["actor"].user_id == auth_data["user_id"]
+        assert called_kwargs["actor"].tenant_id == auth_data["tenant_id"]
         assert called_kwargs["user_role"] == "ADMIN"
         # Verify group permissions were passed
         assert called_kwargs["ingroup_permission"] == "EDIT"
@@ -277,7 +277,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base") as mock_create:
+            patch("management.api.knowledge_base.vectordatabase.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
                              "index_name": auth_data["index_name"]}
@@ -303,7 +303,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
 async def test_create_new_index_passes_embedding_model_id(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base") as mock_create:
+            patch("management.api.knowledge_base.vectordatabase.create_knowledge_base") as mock_create:
 
         mock_create.return_value = {"status": "success", "index_name": auth_data["index_name"]}
 
@@ -328,7 +328,7 @@ async def test_create_new_index_error(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base") as mock_create:
+            patch("management.api.knowledge_base.vectordatabase.create_knowledge_base") as mock_create:
 
         mock_create.side_effect = Exception("Test error")
 
@@ -357,16 +357,15 @@ async def test_create_new_index_propagates_app_exception(vdb_core_mock, auth_dat
         "management.api.knowledge_base.vectordatabase.get_current_user_id",
         return_value=(auth_data["user_id"], auth_data["tenant_id"]),
     ), patch(
-        "management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base",
+        "management.api.knowledge_base.vectordatabase.create_knowledge_base",
         side_effect=app_exception,
     ):
         with pytest.raises(AppException) as exc_info:
-            create_new_index(
+            await create_new_index(
                 http_request=None,
                 index_name=auth_data["index_name"],
                 embedding_dim=768,
                 request={"embedding_model_id": 101},
-                vdb_core=vdb_core_mock,
                 authorization=auth_data["auth_header"]["Authorization"],
             )
 
@@ -379,7 +378,7 @@ async def test_create_new_index_name_conflict_returns_409(vdb_core_mock, auth_da
         "management.api.knowledge_base.vectordatabase.get_current_user_context",
         return_value=(auth_data["user_id"], auth_data["tenant_id"], "USER"),
     ), patch(
-        "management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base",
+        "management.api.knowledge_base.vectordatabase.create_knowledge_base",
         side_effect=DuplicateError("Knowledge base name 'test_index' already exists"),
     ):
         response = client.post(
@@ -3209,7 +3208,7 @@ class TestVectordatabaseAuditEntries:
         with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
                 patch("management.api.knowledge_base.vectordatabase.get_current_user_context",
                       return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
-                patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_knowledge_base") as mock_create:
+                patch("management.api.knowledge_base.vectordatabase.create_knowledge_base") as mock_create:
             mock_create.return_value = {"status": "success"}
 
             with caplog.at_level(logging.INFO, logger="audit.security"):

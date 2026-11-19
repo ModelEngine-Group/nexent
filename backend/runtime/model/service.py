@@ -85,6 +85,7 @@ class ModelService:
             model_id=model_id,
             model_type=record.get("model_type") or "",
             display_name=record.get("display_name"),
+            model_name=record.get("model_name"),
             revision=revision or "legacy",
             profile_version=record.get("capability_profile_version"),
             embedding_dimensions=_configured_embedding_dimensions(record),
@@ -112,6 +113,7 @@ class ModelService:
                     result.append(ModelCatalogEntry(model_id=row["model_id"], model_type=row.get("model_type") or "",
                                                     display_name=row.get("display_name"), revision=(
                                                         revision.isoformat() if isinstance(revision, datetime) else revision),
+                                                    model_name=row.get("model_name"),
                                                     profile_version=row.get("capability_profile_version"),
                                                     embedding_dimensions=_configured_embedding_dimensions(row), qualified_name=(
                                                         f"{row['model_repo']}/{row['model_name']}" if row.get("model_repo")

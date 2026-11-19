@@ -17,8 +17,8 @@ from infrastructure.storage.catalog import (
     FieldDefinition,
 )
 
-CATALOG = "datamate_catalog"
-ACTOR = "datamate_catalog_actor"
+CATALOG = "knowledge_catalog"
+ACTOR = "knowledge_catalog_actor"
 knowledge = KnowledgeRecord.__table__.to_metadata(sa.MetaData())
 knowledge.append_column(
     sa.Column("version", sa.Integer, nullable=False, server_default="0")
@@ -46,7 +46,7 @@ FIELDS = [
 ]
 
 
-def bind_datamate_catalog(actor, engine, *, writable=False, knowledge_name=None):
+def bind_knowledge_catalog(actor, engine, *, writable=False, knowledge_name=None):
     scope = StorageScope("management", actor.tenant_id, actor.user_id, {CATALOG, ACTOR})
     accounts, members = UserAccount.__table__, UserTenant.__table__
     roles = (
@@ -117,10 +117,10 @@ def bind_datamate_catalog(actor, engine, *, writable=False, knowledge_name=None)
 
 
 @contextmanager
-def datamate_catalog_ports(actor, *, context, writable=False, knowledge_name=None):
+def knowledge_catalog_ports(actor, *, context, writable=False, knowledge_name=None):
     engine, records = record_engine(context), None
     try:
-        records = bind_datamate_catalog(
+        records = bind_knowledge_catalog(
             actor, engine, writable=writable, knowledge_name=knowledge_name
         )
         yield records

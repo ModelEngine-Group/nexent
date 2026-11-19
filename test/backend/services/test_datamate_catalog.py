@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from contracts.errors.exceptions import AppException, DuplicateError
+from management.services.knowledge_base import catalog_policy
 from management.services.knowledge_base.providers import catalog
 from nexent.storage.errors import Conflict, OutcomeUnknown, ScopeDenied
 from nexent.storage.models import WriteOutcome
@@ -120,8 +121,8 @@ def test_existing_local_or_deleting_resources_are_not_overwritten(boundary, row)
 @pytest.mark.parametrize("counts,scope", [([3], "tenant"), ([0, 2], "user")])
 def test_original_quotas_prevent_insert(boundary, monkeypatch, counts, scope):
     records, ports, _ = boundary
-    monkeypatch.setattr(catalog, "MAX_KNOWLEDGE_BASES_PER_TENANT", 3)
-    monkeypatch.setattr(catalog, "MAX_KNOWLEDGE_BASES_PER_USER", 2)
+    monkeypatch.setattr(catalog_policy, "MAX_KNOWLEDGE_BASES_PER_TENANT", 3)
+    monkeypatch.setattr(catalog_policy, "MAX_KNOWLEDGE_BASES_PER_USER", 2)
     records.count.side_effect = counts
     with pytest.raises(AppException) as error:
         catalog.upsert_datamate_record(request(), ports=ports)
@@ -131,8 +132,8 @@ def test_original_quotas_prevent_insert(boundary, monkeypatch, counts, scope):
 
 def test_privileged_role_keeps_original_higher_limit(boundary, monkeypatch):
     records, ports, _ = boundary
-    monkeypatch.setattr(catalog, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
-    monkeypatch.setattr(catalog, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 3)
+    monkeypatch.setattr(catalog_policy, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
+    monkeypatch.setattr(catalog_policy, "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 3)
     records.query.side_effect = [
         SimpleNamespace(items=()),
         SimpleNamespace(items=({"user_roles": ["DEV"]},)),
