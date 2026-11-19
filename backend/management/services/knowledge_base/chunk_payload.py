@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Keep public source merging and document-key conversion at the Management boundary."""
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -13,6 +14,15 @@ def build_chunk_payload(base_fields, metadata, ensure_create_time=True):
     if ensure_create_time and "create_time" not in payload:
         payload["create_time"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     return payload
+
+
+def merge_chunk_source(source, patch):
+    result = deepcopy(source)
+    for name, value in patch.items():
+        result[name] = (merge_chunk_source(result[name], value)
+                        if isinstance(result.get(name), dict) and isinstance(value, dict)
+                        else deepcopy(value))
+    return result
 
 
 def public_chunk_key(value):

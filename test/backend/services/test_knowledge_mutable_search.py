@@ -120,7 +120,9 @@ async def test_plaintext_is_excluded_from_semantic_branch_but_kept_in_hybrid_lex
 ):
     s, request, _, hit, service = search
     receipt = await change(search, "create", standalone=True)
-    s.vectors.search.return_value = (independent(hit, receipt),)
+    # KNN returns only documents with actual vectors; lexical search can return plaintext.
+    s.vectors.search.side_effect = lambda collection, query, **kwargs: (
+        () if query.vector is not None else (independent(hit, receipt),))
     result = await service.search(
         request.model_copy(update={"search_mode": mode}), s.actor
     )

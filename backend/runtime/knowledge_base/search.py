@@ -142,9 +142,12 @@ class KnowledgeSearchService:
                 raise ScopeDenied()
             if request.file_versions and request.file_versions[reference.file_id] != reference.file_version:
                 raise ScopeDenied()
-            if require_embedding and (hit.payload.get("embedding_model_id") != request.embedding_model.model_id
-                or normalize_model_revision(hit.payload.get("embedding_revision"))
-                != normalize_model_revision(request.embedding_model.revision)):
+            matches_model = (hit.payload.get("embedding_model_id") == request.embedding_model.model_id
+                and normalize_model_revision(hit.payload.get("embedding_revision"))
+                == normalize_model_revision(request.embedding_model.revision))
+            if require_embedding and not matches_model and (
+                hit.payload.get("embedding_model_id") is not None or hit.payload.get("embedding_revision") is not None
+                or not views[reference.knowledge_id].has_manual_create(hit, context=context)):
                 continue
             if (hit.generation
                 and (reference.file_id is None or policy.is_visible(reference, hit.generation.value, context=context))
@@ -185,7 +188,9 @@ class KnowledgeSearchService:
             if request.search_mode in {"accurate", "hybrid"}:
                 lexical.extend(port.search(resource.collection, SearchQuery(text=request.query, mode="weighted_text", where=where, limit=limit), context=context))
             if request.search_mode in {"semantic", "hybrid"} and info.dimensions is not None:
-                semantic_where = Junction("and", (terms[0], Comparison("embedding_model_id", "eq", request.embedding_model.model_id), *terms[1:]))
+                model_scope = Junction("or", (Comparison("embedding_model_id", "eq", request.embedding_model.model_id),
+                    Junction("and", (Comparison("embedding_model_id", "is_null", True), Comparison("embedding_revision", "is_null", True)))))
+                semantic_where = Junction("and", (terms[0], model_scope, *terms[1:]))
                 semantic.extend(port.search(resource.collection, SearchQuery(vector=query_vector, where=semantic_where, limit=limit), context=context))
         return lexical, semantic
 

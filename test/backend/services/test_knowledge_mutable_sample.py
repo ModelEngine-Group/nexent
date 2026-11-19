@@ -75,6 +75,36 @@ def standalone(s, key, path=None, vector=()):
     )
 
 
+def test_sample_preserves_unlabelled_user_supplied_standalone_vector(sample_view):
+    s = sample_view
+    standalone(s, "unbound", vector=(0.0, 1.0))
+    s.rows[-1] = replace(s.rows[-1], payload={**s.rows[-1].payload,
+        "embedding_model_id": None, "embedding_revision": None})
+    documents = s.sample()
+    chunk = next(chunk for doc in documents for chunk in doc.chunks if chunk.chunk_id == "unbound")
+    assert chunk.embedding == [0.0, 1.0]
+    assert s.rows[-1].payload["embedding_model_id"] is None
+
+
+def test_sample_preserves_unlabelled_manual_file_vector(sample_view):
+    s = sample_view
+    s.mutate("create", "manual-vector", 3, 1)
+    s.rows.append(replace(s.rows[-1], key=VectorKey("collection", "manual-vector"), vector=(0.0, 1.0),
+        payload={**s.rows[-1].payload, "chunk_index": 3, "embedding_model_id": None, "embedding_revision": None}))
+    chunk = next(chunk for doc in s.sample() for chunk in doc.chunks if chunk.chunk_id == "manual-vector")
+    assert chunk.embedding == [0.0, 1.0]
+
+
+@pytest.mark.parametrize("model_id,revision", [(9, "r1"), (2, None), (None, "r1")])
+def test_sample_does_not_reinterpret_declared_or_partial_model_as_unbound(sample_view, model_id, revision):
+    s = sample_view
+    standalone(s, "wrong-model", vector=(0.0, 1.0))
+    s.rows[-1] = replace(s.rows[-1], payload={**s.rows[-1].payload,
+        "embedding_model_id": model_id, "embedding_revision": revision})
+    with pytest.raises(Conflict):
+        s.sample()
+
+
 def test_sample_keeps_sparse_and_repeated_display_indices_with_real_chunk_ids(
     sample_view,
 ):

@@ -5,8 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from contracts.knowledge import ChunkCreateRequest
+from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest
 from management.services.knowledge_base.chunk_creation import create_manual_chunk
+from management.services.knowledge_base.chunk_update import update_manual_chunk
 from nexent.core.concurrency import (
     LanePolicy,
     ThreadManager,
@@ -44,32 +45,41 @@ async def client():
         assert not (await manager.shutdown(timeout=3)).stuck_execution_ids
 
 
+@pytest.fixture(params=["create", "update"])
+def public_write(request):
+    async def invoke(index_name, actor, *, reader, client):
+        if request.param == "create":
+            return await create_manual_chunk(index_name, ChunkCreateRequest(content="body"), actor, reader=reader, client=client)
+        return await update_manual_chunk(index_name, "manual", ChunkUpdateRequest(content="body"), actor, reader=reader, client=client)
+    return invoke
+
+
 @pytest.mark.parametrize("changes", [
     {"created_by": "other", "ingroup_permission": "READ_ONLY"},
     {"created_by": "other", "ingroup_permission": "PRIVATE"},
     {"deletion_request": {"scope": "full"}},
     {"knowledge_sources": "datamate"},
 ])
-async def test_unauthorized_or_closed_resource_prevents_all_runtime_requests(reader, client, changes):
+async def test_unauthorized_or_closed_resource_prevents_all_runtime_requests(reader, client, changes, public_write):
     reader.update("cleanse_knowledge", **changes)
     with pytest.raises(ScopeDenied):
-        await create_manual_chunk("kb-one", ChunkCreateRequest(content="body"), reader.actor,
+        await public_write("kb-one", reader.actor,
                                   reader=reader.service, client=client)
     client.inspect_knowledge_chunk.assert_not_awaited()
     client.mutate_knowledge_chunk.assert_not_awaited()
 
 
-async def test_shared_read_does_not_grant_create_permission(reader, client):
+async def test_shared_read_does_not_grant_create_permission(reader, client, public_write):
     with pytest.raises(ScopeDenied):
-        await create_manual_chunk("shared", ChunkCreateRequest(content="body"), reader.actor,
+        await public_write("shared", reader.actor,
                                   reader=reader.service, client=client)
     client.inspect_knowledge_chunk.assert_not_awaited()
 
 
 @pytest.mark.parametrize("failure", [Unavailable(), DeadlineExceeded()])
-async def test_resource_failures_never_become_plaintext_writes(reader, client, monkeypatch, failure):
+async def test_resource_failures_never_become_plaintext_writes(reader, client, monkeypatch, failure, public_write):
     monkeypatch.setattr(reader.service, "knowledge", Mock(side_effect=failure))
     with pytest.raises(type(failure)):
-        await create_manual_chunk("kb-one", ChunkCreateRequest(content="body"), reader.actor,
+        await public_write("kb-one", reader.actor,
                                   reader=reader.service, client=client)
     client.inspect_knowledge_chunk.assert_not_awaited()

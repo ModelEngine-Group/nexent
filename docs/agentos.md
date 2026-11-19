@@ -293,9 +293,9 @@ KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_k
 
 Runtime 使用标准 `authorize-chunks` 回调获取 Management 的 `KnowledgeChunksGrant`，其中只含 KB、集合、资源租户及 revision。Management 按实际调用者的活动账号、租户成员和原 own/shared DAC 授权，拒绝 KB 删除意图；无需 embedding 模型配置。Runtime 的只读 SI 端口限定该 KB 与资源所属租户，actor_id 仍为实际用户。签名 user_id/tenant_id 始终保持原请求身份，不使用创建者身份，也不扩大为跨租户模型或写入权限。
 
-普通及 Northbound 的原分块浏览已调用该入口。Management 将文件身份还原为原路径、创建时间及公开字段，同时保留 page/page_size、path_or_url 和响应格式。公开 page/page_size 同时提供才分页，单次内部窗口最多 1000；返回前复核资源与文件映射，整个操作最多 180 秒。北向适配位于 northbound service。普通 db_type=datamate 继续返回原远端文件清单，由 `get_external_file_chunks` 适配；ES 路径没有旧索引回退。公开分块创建与删除已迁入AgentOS；公开更新、旧 documents 向量化入口和通用权限仓库旁路仍待迁移，整个 data-process 退役未完成。
+普通及 Northbound 的原分块浏览已调用该入口。Management 将文件身份还原为原路径、创建时间及公开字段，同时保留 page/page_size、path_or_url 和响应格式。公开 page/page_size 同时提供才分页，单次内部窗口最多 1000；返回前复核资源与文件映射，整个操作最多 180 秒。北向适配位于 northbound service。普通 db_type=datamate 继续返回原远端文件清单，由 `get_external_file_chunks` 适配；ES 路径没有旧索引回退。公开分块写入已迁入AgentOS；旧 documents 向量化入口和通用权限仓库旁路仍待迁移，整个 data-process 退役未完成。
 
-### KnowledgeBase 手工分块创建与删除
+### KnowledgeBase 手工分块写入
 
 Management 保留原公开路径、metadata 非null覆盖、默认时间和响应ID。创建先按真实存储键查询目标，删除允许显式 `resolve_public_id=true`，按原规则先查真实键，再匹配source展示ID。`ChunkMutationTarget` 返回当前分块、真实文件引用、generation和change_epoch；Management将这些绑定传入写意图的 `file_ref`、`generation`、`chunk_index` 和 `expected_change_epoch`。新建计数+1，已有键覆盖0，删除-1。创建响应返回实际存储键，删除响应保持原请求路径ID。
 
@@ -303,11 +303,15 @@ Management 保留原公开路径、metadata 非null覆盖、默认时间和响�
 
 原始source放在location的 `nexent_public_chunk_v1`，不重复保存content或embedding。它可保留原metadata中的展示ID、数组filename和自定义字段；公开浏览仍只返回原九字段。可信执行身份来自独立的KB/file/generation字段，SI审计使用实际actor。带路径浏览对显式source路径先筛选再分页，未设置source时使用原文件映射，因此文件分块的路径覆盖也能按原值查询。此分支需要扫描当前文件元数据，仍受总预算和epoch限制。
 
-Runtime按Management的实时编辑grant执行，创建在模型调用后再次授权。普通及共享资产创建、删除保持原签名user_id/tenant_id，SI namespace可由精确grant选择固定资产租户，审计用户不替换。共享更新尚未迁移，不开放该写路径。公共适配的180秒总预算包含元数据与两次AgentOS HTTP；超时取消，未完成或未知回执不返回成功，也不重试或重放。
+Runtime按Management的实时编辑grant执行，创建在模型调用后再次授权。普通及共享资产写入保持原签名user_id/tenant_id，SI namespace可由精确grant选择固定资产租户，审计用户不替换。公共适配的180秒总预算包含元数据与两次AgentOS HTTP；超时取消，未完成或未知回执不返回成功，也不重试或重放。
 
 Runtime标准 `update` 已支持 `changes.embedding` 与正文/payload的同次条件替换。缺少embedding字段时只patch payload并保留原向量；显式向量需要非空、非零且数值有限，使用已有VectorStore.put并核对业务generation，计数为0。纯正文集合可补齐匹配的向量映射。可信文件身份及既有模型绑定保持，不调用模型，不将缺失键转成create；未知结果只返回原状态，不重放。
 
-公开更新仍使用旧写入，保留原不重算向量行为，metadata递归合并与显式向量更新待下一批迁移。历史旧索引还需按退役SPEC迁入确认来源，当前混合状态不代表完整退役或可直接部署切流，最终镜像和公开服务验收仍待完成。
+公开更新已通过 `update_manual_chunk` 使用同一标准写链。Management执行原ES doc递归对象合并，数组和标量替换，顶层metadata null忽略，嵌套null保留。更新先按真实键/展示ID查询目标，响应保持实际存储ID；原审计展示值可被metadata覆盖，SI审计仍实际actor。旧静态create/update/delete方法均已移除。缺少原始source的发布文件从授权文件映射还原路径和时间，metadata不能改可信文件身份。
+
+用户显式提供的手工向量可以没有模型标签。语义检索允许两个模型标签均空且有当前已确认手工create来源的实际KNN命中，继续检查当前文件、代次、epoch和集合维度。固定标签按原ID/版本规范化规则匹配，其他已声明模型不进入这个手工分支；不会补写模型标签或改用另一模型。纯正文没有KNN命中，无来源/已删除记录也不返回。采样复用同一确认来源规则保留未标注模型的真实手工向量，继续为原摘要算法提供已存向量，不补标签或重新推理。
+
+共享资产的标准搜索namespace还需补齐，当前KnowledgeSearchGrant没有资源租户且搜索端口使用调用者租户；共享写入验证不代表共享检索完成。历史旧索引、旧documents/search_hybrid及其他存储旁路仍需按退役SPEC迁移，最终镜像和完整部署验收继续待完成。
 
 ### KnowledgeBase 已登记文件清单
 

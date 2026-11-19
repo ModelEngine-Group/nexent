@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 import pytest
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_chunk_mutation import ChunkMutationGrant, ChunkMutationLookup
-from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import DeleteReceipt
 from runtime.knowledge_base.chunk_admission import ChunkMutationAdmission
 from runtime.knowledge_base.chunk_write import ChunkMutationService
@@ -89,15 +88,45 @@ async def test_shared_asset_lookup_and_delete_keep_actor_and_resource_separate(c
     assert row["user_id"] == row["created_by"] == row["updated_by"] == actor.user_id
 
 
-@pytest.mark.parametrize("operation", ["update"])
-async def test_unmigrated_shared_writes_remain_rejected(creation, operation):
+async def test_shared_update_keeps_actual_actor_and_resource_scope(creation, shared_ports):
+    from nexent.storage.models import WriteReceipt
+
     s = creation
+    actor = s.s.actor
+    s.vectors.scope = replace(s.vectors.scope, tenant_id=ASSET_OWNER_TENANT_ID)
+
+    @contextmanager
+    def records(principal, *, resource_tenant_id, context):
+        assert principal == actor and resource_tenant_id == ASSET_OWNER_TENANT_ID
+        yield s.s.mutation_records
+
+    @contextmanager
+    def create(principal, collection, dimensions, *, resource_tenant_id, context):
+        assert principal == actor and resource_tenant_id == ASSET_OWNER_TENANT_ID
+        yield s.vectors
+
+    @contextmanager
+    def maintain(principal, collection, *, resource_tenant_id, context):
+        assert principal == actor and resource_tenant_id == ASSET_OWNER_TENANT_ID
+        yield s.vectors
+
     client = SimpleNamespace(authorize_knowledge_chunk_mutation=AsyncMock(return_value=ChunkMutationGrant(
-        knowledge_id=1, chunk_id="manual", operation=operation, collection="collection",
+        knowledge_id=1, chunk_id="manual", operation="create", collection="collection",
         resource_tenant_id=ASSET_OWNER_TENANT_ID, revision="a" * 64)))
-    service = ChunkMutationService(client, s.models)
-    with pytest.raises(ScopeDenied):
-        await service._grant(s.value.model_copy(update={"operation": operation}), s.s.actor)
+    service = ChunkMutationService(client, s.models, records=records, creation_ports=create, maintenance_ports=maintain)
+    await service.mutate(s.value, actor)
+    client.authorize_knowledge_chunk_mutation.return_value = client.authorize_knowledge_chunk_mutation.return_value.model_copy(
+        update={"operation": "update"})
+    s.vectors.patch_payload.return_value = WriteReceipt("patch", True)
+    result = await service.mutate(s.value.model_copy(update={"operation": "update", "request_key": "update",
+        "changes": {"content": "changed"}}), actor)
+    assert result.status == "completed" and result.count_delta == 0
+    row = await s.db(s.s.mutation_records.get, "runtime_knowledge_chunk_changes", result.mutation_id, context=context())
+    assert row["tenant_id"] == ASSET_OWNER_TENANT_ID
+    assert row["user_id"] == row["created_by"] == row["updated_by"] == actor.user_id
+    s.models.invoke.assert_not_awaited()
+
+
 
 
 async def test_shared_creation_uses_actual_actor_for_model_and_resource_for_storage(creation, shared_ports):

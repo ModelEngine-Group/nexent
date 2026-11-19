@@ -162,7 +162,7 @@ def test_hybrid_preserves_existing_digit_weight_and_keeps_collection_identity(qu
 async def test_file_filter_is_applied_in_storage_before_visibility(search):
     s, request, _, _, service = search
     await service.search(request.model_copy(update={"file_ids": [s.request.file_id]}), s.actor)
-    assert any(t.field == "file_id" and t.value == [s.request.file_id]
+    assert any(getattr(t, "field", None) == "file_id" and t.value == [s.request.file_id]
                for t in s.vectors.search.call_args.args[1].where.terms)
 
 

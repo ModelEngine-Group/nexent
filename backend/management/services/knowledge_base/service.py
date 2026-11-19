@@ -13,10 +13,8 @@ Main features include:
 """
 
 import time
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from contracts.knowledge import ChunkUpdateRequest
 from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record, update_last_summary_time
 from fastapi import Body, Depends, Path, Query
 from management.services.knowledge_base.common import (
@@ -32,7 +30,6 @@ from management.services.knowledge_base.common import (
 from management.services.knowledge_base.deletion import (
     KnowledgeBaseDocumentDeletionService,
 )
-from management.services.knowledge_base.chunk_payload import build_chunk_payload
 from nexent.vector_database.base import VectorDatabaseCore
 
 __all__ = (
@@ -257,51 +254,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             raise Exception(error_msg)
 
 
-    @staticmethod
-    def update_chunk(
-        index_name: str,
-        chunk_id: str,
-        chunk_request: ChunkUpdateRequest,
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-    ):
-        """
-        Update a chunk document.
-        """
-        try:
-            update_fields = chunk_request.dict(exclude_unset=True, exclude={"metadata"})
-            metadata = chunk_request.metadata or {}
-            update_payload = build_chunk_payload(
-                base_fields={
-                    **update_fields,
-                    "updated_by": user_id,
-                    "update_time": datetime.now(timezone.utc).strftime(
-                        "%Y-%m-%dT%H:%M:%S"
-                    ),
-                },
-                metadata=metadata,
-                ensure_create_time=False,
-            )
-
-            if not update_payload:
-                raise ValueError("No update fields supplied.")
-
-            result = vdb_core.update_chunk(index_name, chunk_id, update_payload)
-            return {
-                "status": "success",
-                "message": f"Chunk {result.get('id')} updated successfully",
-                "chunk_id": result.get("id"),
-            }
-        except Exception as exc:
-            logger.error(
-                "Error updating chunk %s in index %s: %s",
-                chunk_id,
-                index_name,
-                exc,
-                exc_info=True,
-            )
-            raise Exception(f"Error updating chunk: {exc}")
 
 
     @staticmethod

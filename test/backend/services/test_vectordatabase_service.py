@@ -12,7 +12,7 @@ import types
 import unittest
 from enum import Enum
 from pathlib import Path
-from unittest.mock import MagicMock, ANY, AsyncMock, call
+from unittest.mock import MagicMock, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
 from types import ModuleType, SimpleNamespace
@@ -3468,44 +3468,6 @@ class TestElasticSearchService(unittest.TestCase):
 
 
 
-    def test_update_chunk_builds_payload_and_calls_core(self):
-        """
-        Test update_chunk builds update payload and delegates to vdb_core.update_chunk.
-        """
-
-        class DummyUpdate:
-            def __init__(self, **fields):
-                self._fields = fields
-                # Expose metadata attribute like real Pydantic model
-                self.metadata = fields.get("metadata")
-
-            def dict(self, exclude_unset=True, exclude=None):
-                data = dict(self._fields)
-                if exclude:
-                    for key in exclude:
-                        data.pop(key, None)
-                return data
-
-        self.mock_vdb_core.update_chunk.return_value = {"id": "chunk-1"}
-        chunk_request = DummyUpdate(
-            content="updated",
-            filename="updated.txt",
-            metadata={"lang": "en"},
-        )
-
-        result = ElasticSearchService.update_chunk(
-            index_name="kb-index",
-            chunk_id="chunk-1",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["chunk_id"], "chunk-1")
-        self.mock_vdb_core.update_chunk.assert_called_once_with(
-            "kb-index", "chunk-1", ANY
-        )
 
 
 
@@ -4599,41 +4561,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             self.get_rerank_model_patcher.start()
 
 
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    def test_update_chunk_minimal_payload_still_updates(self, mock_get_knowledge_record):
-        """update_chunk without business fields still sends update_time/updated_by payload."""
-        mock_get_knowledge_record.return_value = None
-        self.mock_vdb_core.update_chunk.return_value = {"id": "c1"}
-        from management.services.knowledge_base.service import ChunkUpdateRequest
-        empty_req = ChunkUpdateRequest()
 
-        result = ElasticSearchService.update_chunk(
-            index_name="idx",
-            chunk_id="c1",
-            chunk_request=empty_req,
-            vdb_core=self.mock_vdb_core,
-            user_id="u1",
-            tenant_id="t1",
-        )
-        self.assertEqual(result["status"], "success")
-        self.mock_vdb_core.update_chunk.assert_called_once()
-
-    def test_update_chunk_core_error_is_wrapped(self):
-        """update_chunk should wrap core exceptions with consistent message."""
-        self.mock_vdb_core.update_chunk.side_effect = RuntimeError("core failed")
-        from management.services.knowledge_base.service import ChunkUpdateRequest
-        req = ChunkUpdateRequest(content="new-content")
-
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.update_chunk(
-                index_name="idx",
-                chunk_id="c2",
-                chunk_request=req,
-                vdb_core=self.mock_vdb_core,
-                user_id="u1",
-                tenant_id=None,
-            )
-        self.assertIn("Error updating chunk", str(ctx.exception))
 
 
 class TestNewEmbeddingModelMethods(unittest.TestCase):
@@ -5463,19 +5391,6 @@ class TestCoverageImprovement(unittest.TestCase):
     # This line can only be reached if those fields are somehow falsy, which is unlikely.
 
     # Tests for update_chunk exception (lines 1899-1902)
-    def test_update_chunk_vdb_exception(self):
-        """Test update_chunk handles exception from vdb_core (lines 1899-1902)."""
-        from contracts.knowledge import ChunkUpdateRequest
-        self.mock_vdb_core.update_chunk.side_effect = Exception("ES error")
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.update_chunk(
-                index_name="test-index",
-                chunk_id="chunk-1",
-                chunk_request=ChunkUpdateRequest(title="New title"),
-                vdb_core=self.mock_vdb_core,
-                user_id="user-1",
-            )
-        self.assertIn("ES error", str(ctx.exception))
 
     # Tests for delete_chunk exception (lines 1923-1926)
 
@@ -5700,20 +5615,6 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for create_chunk - embedding generation exception (lines 1829-1830)
 
     # Tests for update_chunk - empty payload (line 1890)
-    def test_update_chunk_empty_payload(self):
-        """Test update_chunk raises when no update fields supplied (line 1890)."""
-        from contracts.knowledge import ChunkUpdateRequest
-        # Mock _build_chunk_payload to return empty dict
-        with patch('management.services.knowledge_base.service.build_chunk_payload', return_value={}):
-            with self.assertRaises(Exception) as ctx:
-                ElasticSearchService.update_chunk(
-                    index_name="test-index",
-                    chunk_id="chunk-1",
-                    chunk_request=ChunkUpdateRequest(),  # All fields None
-                    vdb_core=self.mock_vdb_core,
-                    user_id="user-1",
-                )
-            self.assertIn("No update fields supplied", str(ctx.exception))
 
     # Tests for list_indices - no user tenant (line 879)
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')

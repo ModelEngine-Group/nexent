@@ -1421,7 +1421,7 @@ async def test_update_chunk_success(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.update_chunk") as mock_update:
+            patch("management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock) as mock_update:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
         mock_update.return_value = expected_response
@@ -1443,33 +1443,17 @@ async def test_update_chunk_success(vdb_core_mock, auth_data):
 
 @pytest.mark.asyncio
 async def test_update_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
-    """Read-only users must not be able to update chunks."""
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
-                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.require_knowledge_base_edit_permission",
-                side_effect=HTTPException(
-                    status_code=403,
-                    detail="No permission to modify this knowledge base",
-                ),
-            ) as mock_require_permission, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.update_chunk") as mock_update:
-
-        response = client.put(
-            f"/indices/{auth_data['index_name']}/chunk/chunk-1",
-            json={"content": "Updated content"},
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 403
-        assert response.json()["detail"] == "No permission to modify this knowledge base"
-        mock_require_permission.assert_called_once_with(
-            auth_data["index_name"],
-            auth_data["user_id"],
-            auth_data["tenant_id"],
-        )
-        mock_update.assert_not_called()
+    """The Management SI edit denial keeps the public forbidden response."""
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"])), patch(
+        "management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock,
+        side_effect=ScopeDenied(),
+    ) as mock_update:
+        response = client.put(f"/indices/{auth_data['index_name']}/chunk/chunk-1",
+            json={"content": "Updated content"}, headers=auth_data["auth_header"])
+        assert response.status_code == 403 and response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_update.assert_awaited_once()
+        vdb_core_mock.update_chunk.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1481,7 +1465,7 @@ async def test_update_chunk_value_error(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.update_chunk") as mock_update:
+            patch("management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock) as mock_update:
 
         mock_update.side_effect = ValueError("Invalid update payload")
 
@@ -1510,7 +1494,7 @@ async def test_update_chunk_exception(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.update_chunk") as mock_update:
+            patch("management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock) as mock_update:
 
         mock_update.side_effect = Exception("Update failed")
 

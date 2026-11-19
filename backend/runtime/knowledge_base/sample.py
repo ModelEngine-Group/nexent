@@ -43,10 +43,10 @@ def _snapshot(records, knowledge_id, *, context):
 
 
 
-def _sample_chunk(record, model):
+def _sample_chunk(record, model, *, allow_unbound=False):
     data = record.payload
     if record.vector:
-        if (data.get('embedding_model_id') != model.model_id
+        if not allow_unbound and (data.get('embedding_model_id') != model.model_id
             or normalize_model_revision(data.get('embedding_revision')) != normalize_model_revision(model.revision)):
             raise Conflict()
     elif data.get('embedding_model_id') is not None:
@@ -96,7 +96,9 @@ def _sample_documents(records, vectors, resource, model, limit, *, context):
         documents.append(KnowledgeSampleDocument(file_ref=reference,
             standalone_key=independent[0] if independent else None, path_or_url=independent[1] if independent else None,
             filename=public_chunk_value(rows[0].payload.get('location', {}), 'filename', rows[0].payload.get('filename', '')),
-            chunks=[_sample_chunk(row, model) for row in rows]))
+            chunks=[_sample_chunk(row, model, allow_unbound=bool(row.vector)
+                and row.payload.get('embedding_model_id') is None and row.payload.get('embedding_revision') is None
+                and view.has_manual_create(row, context=context)) for row in rows]))
     view.stable(context=context)
     return documents
 

@@ -77,7 +77,6 @@ class ChunkMutationService:
         if (
             not isinstance(grant, ChunkMutationGrant)
             or grant.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}
-            or grant.resource_tenant_id != actor.tenant_id and intent.operation == "update"
             or any(
                 getattr(grant, field) != getattr(intent, field)
                 for field in ("knowledge_id", "chunk_id", "operation")
