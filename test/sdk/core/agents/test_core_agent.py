@@ -373,7 +373,6 @@ def test_ut_sdk_cftp_003_core_agent_removes_framework_final_answer_tool():
     )
 
     assert "final_answer" not in agent.tools
-    assert "final_answer" not in agent._verification_tool_names()
     assert "final_answer" not in agent.python_executor.static_tools
     assert agent.python_executor.static_tools["print"] is print
 
@@ -523,27 +522,45 @@ def test_final_verification_pass_message_explains_reason():
     assert any("最终自检通过" in message and "轻量对话无需外部证据" in message for message in messages)
 
 
-def test_verification_feedback_does_not_count_as_tool_error():
-    """Self-verification feedback should not poison the next final-answer check."""
-    controller, _ = _make_verification_controller()
-    memory_summary = """
-Step 1:
-Observation:
-Verification feedback:
-- Event: final_answer
-- Severity: blocking
-- Failed criteria: evidence_grounding, tool_error_handling
-- Repair instruction: Provide more evidence.
-"""
-
-    result = controller.verify_before_final_answer(
-        candidate="你好！有什么我可以帮你的吗？",
-        observation=memory_summary,
-        step_number=2,
+@pytest.mark.parametrize("execution_failed", [False, True])
+def test_final_verifier_uses_executor_status(execution_failed):
+    controller, model = _make_verification_controller()
+    model.return_value.content = '{"passed": true, "score": 1, "criteria": []}'
+    controller._build_verifier_messages = MagicMock(wraps=controller._build_verifier_messages)
+    controller.verify_final_answer(
+        task="Produce a report.",
+        candidate="Done.",
+        memory_summary="Observation: no error: all good; failed is a column name.",
+        round_number=2,
+        execution_failed=execution_failed,
     )
 
-    assert result.passed is True
-    assert "previous_errors_acknowledged" not in result.failed_criteria
+    policy = controller._build_verifier_messages.call_args.args[3]
+    assert policy["tool_error_check_required"] is execution_failed
+
+
+@pytest.mark.parametrize("code", [
+    'print("subprocess")',
+    'value = 2  # eval( is quoted here as documentation',
+    'items = sorted([2, 1])',
+])
+def test_action_precheck_allows_literals_comments_and_preparation(code):
+    controller, _ = _make_verification_controller(strictness="strict")
+
+    result = controller.verify_before_tool_call(code, step_number=1)
+
+    assert result.passed and not result.failed_criteria
+
+
+def test_final_verification_allows_template_examples():
+    controller, _ = _make_verification_controller(strictness="strict")
+
+    result = controller.verify_before_final_answer(
+        "Use {{name}} in the template. TODO: document the literal `<code>` tag.",
+        step_number=1,
+    )
+
+    assert result.passed and not result.failed_criteria
 
 
 def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
@@ -3379,11 +3396,13 @@ class TestRunStreamRealExecution:
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
 
-    def test_cmsr_007_enabled_plain_text_still_requires_explicit_protocol(self):
+    @pytest.mark.parametrize("supports_stop", [True, False])
+    def test_cmsr_007_enabled_plain_text_still_requires_explicit_protocol(self, supports_stop):
         """CMSR-007 / AC-020: disabling the strict path is Agent-scoped."""
         module = core_agent_module
         agent, action_step, response = self._create_cmsr_007_step_agent("答案是 4")
         agent.enable_protocol_repair_retry = True
+        agent.model.supports_stop_parameter = supports_stop
 
         with pytest.raises(module.NonterminalThoughtTurn):
             list(agent._step_stream(action_step))
@@ -3391,7 +3410,8 @@ class TestRunStreamRealExecution:
         agent.observer.commit_model_attempt.assert_not_called()
         agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
         assert response.model_attempt_commit_deferred is False
-        assert agent.model.call_args.kwargs["stop_sequences"] is None
+        expected_stops = ["<RESULT>", "</code>"] if supports_stop else None
+        assert agent.model.call_args.kwargs["stop_sequences"] == expected_stops
 
     @pytest.mark.parametrize("content", [
         "A complete plain answer.",

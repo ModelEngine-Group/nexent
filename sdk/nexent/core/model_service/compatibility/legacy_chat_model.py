@@ -146,6 +146,11 @@ class LegacyChatModel(Model):
         return cls(profile, service, observer=observer, cancellation_scope=cancellation_scope)
 
     @property
+    def supports_stop_parameter(self) -> bool:
+        """Use the outlet's declared wire binding for Agent stop sequences."""
+        return any(rule["key"] == "stop" and rule.get("api_binding") for rule in self.profile.parameter_rules)
+
+    @property
     def context_budget_snapshot(self):
         return self._context_budget_snapshot
 
