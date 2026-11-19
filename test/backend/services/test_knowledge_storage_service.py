@@ -335,7 +335,7 @@ def test_release_storage_charge_invalidates_only_after_ledger_release():
         side_effect=[True, False],
     ) as mark, patch.object(
         storage_service,
-        "invalidate_storage_usage_cache",
+        "invalidate_usage_cache",
     ) as invalidate:
         assert release_storage_charge(
             tenant_id="tenant-a", bucket_name="test-bucket", object_name="one.pdf"
@@ -346,6 +346,40 @@ def test_release_storage_charge_invalidates_only_after_ledger_release():
 
     assert mark.call_count == 2
     invalidate.assert_called_once_with("tenant-a")
+
+
+def test_release_uses_shared_cache_without_importing_retired_quota(mocker):
+    """QUOTA-RETIRE-01 preserves tenant isolation without the old quota facade."""
+    import builtins
+
+    from management.services.knowledge_base import usage_cache
+
+    original_import = builtins.__import__
+
+    def no_old_quota(name, *args, **kwargs):
+        if name == 'management.services.knowledge_base.quota':
+            raise AssertionError('Retired quota facade imported')
+        return original_import(name, *args, **kwargs)
+
+    mocker.patch.object(builtins, '__import__', side_effect=no_old_quota)
+    mocker.patch.object(storage_service, 'mark_storage_object_deleted', side_effect=[True, False])
+    usage_cache.invalidate_usage_cache()
+    try:
+        usage_cache._usage_cache.update({'tenant-a': (0, {'total_bytes': 1}), 'tenant-b': (0, {'total_bytes': 2})})
+        assert release_storage_charge(tenant_id='tenant-a', bucket_name='owned', object_name='one')
+        assert 'tenant-a' not in usage_cache._usage_cache and 'tenant-b' in usage_cache._usage_cache
+        assert not release_storage_charge(tenant_id='tenant-b', bucket_name='owned', object_name='two')
+        assert 'tenant-b' in usage_cache._usage_cache
+    finally:
+        usage_cache.invalidate_usage_cache()
+
+
+def test_cache_invalidation_error_keeps_successful_release_result(mocker, caplog):
+    mocker.patch.object(storage_service, 'mark_storage_object_deleted', return_value=True)
+    invalidate = mocker.patch.object(storage_service, 'invalidate_usage_cache', side_effect=RuntimeError('owned cache fault'))
+    assert release_storage_charge(tenant_id='tenant-a', bucket_name='owned', object_name='one')
+    invalidate.assert_called_once_with('tenant-a')
+    assert len([r for r in caplog.records if 'Failed to invalidate quota cache' in r.message]) == 1
 
 
 def test_compensation_releases_only_successfully_deleted_objects(storage_context):

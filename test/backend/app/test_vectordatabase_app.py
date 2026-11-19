@@ -2649,9 +2649,9 @@ async def test_create_index_documents_personal_kb_quota_unavailable(
 
 @pytest.mark.asyncio
 async def test_create_index_documents_skips_personal_quota_for_shared_kb(
-    vdb_core_mock, auth_data
+    vdb_core_mock, auth_data, document_admission_boundary
 ):
-    """Non-PRIVATE KB uploads must not invoke the personal quota check."""
+    """Shared uploads use current admission; its non-PRIVATE rule has service tests."""
     with patch(
         "management.api.knowledge_base.vectordatabase.get_vector_db_core",
         return_value=vdb_core_mock,
@@ -2662,8 +2662,6 @@ async def test_create_index_documents_skips_personal_quota_for_shared_kb(
         "management.api.knowledge_base.vectordatabase.get_knowledge_record",
         return_value={"ingroup_permission": "PUBLIC"},
     ), patch(
-        "management.services.knowledge_base.quota.QuotaService"
-    ) as mock_quota_class, patch(
         "management.services.model.resolver.get_embedding_model_by_id",
         return_value=MagicMock(),
     ), patch(
@@ -2683,7 +2681,8 @@ async def test_create_index_documents_skips_personal_quota_for_shared_kb(
         )
 
     assert response.status_code == 200
-    mock_quota_class.assert_not_called()
+    document_admission_boundary.assert_called_once()
+    assert document_admission_boundary.call_args.args[0] == auth_data['index_name']
     mock_index.assert_called_once()
 
 

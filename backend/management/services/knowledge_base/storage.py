@@ -16,6 +16,7 @@ from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.knowledge_base.storage_object import aggregate_committed_bytes_by_kb, get_committed_source_bytes_by_object_names, get_storage_object_by_identity, get_tenant_committed_bytes, mark_storage_object_deleted
 
 from management.services.knowledge_base.source_reference import resolve_storage_reference
+from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 
 logger = logging.getLogger(__name__)
 
@@ -201,16 +202,6 @@ def get_tenant_committed_source_bytes(tenant_id: str) -> int:
     return int(get_tenant_committed_bytes(tenant_id=tenant_id) or 0)
 
 
-def invalidate_storage_usage_cache(tenant_id: str) -> None:
-    """Invalidate quota usage lazily to avoid a module import cycle."""
-    try:
-        from management.services.knowledge_base.quota import QuotaService
-
-        QuotaService.invalidate_usage_cache(tenant_id)
-    except Exception:
-        logger.exception("Failed to invalidate quota cache for tenant %s", tenant_id)
-
-
 def release_storage_charge(
     *,
     tenant_id: str,
@@ -226,7 +217,10 @@ def release_storage_charge(
         updated_by=updated_by,
     )
     if released:
-        invalidate_storage_usage_cache(tenant_id)
+        try:
+            invalidate_usage_cache(tenant_id)
+        except Exception:
+            logger.exception("Failed to invalidate quota cache for tenant %s", tenant_id)
     return released
 
 

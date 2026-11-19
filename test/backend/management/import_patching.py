@@ -31,13 +31,6 @@ SPLIT_MODULES = (
         "service", "health", "provisioning", "registration", "tools", "common")),
     tuple("management.services.tool." + name for name in (
         "configuration", "discovery", "validation", "common")) + ("management.services.mcp.openapi",),
-    (
-        "management.services.knowledge_base.quota",
-        "management.services.knowledge_base.quota_common",
-        "management.services.knowledge_base.usage",
-        "management.services.configuration.tenant.quotas",
-        "management.services.configuration.user.quotas",
-    ),
 )
 
 

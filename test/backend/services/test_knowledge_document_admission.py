@@ -197,17 +197,12 @@ def test_quota_bindings_reject_every_write(admission):
         assert STORAGE_LEDGER_DATASET in stores[1].scope.namespaces
 
 
-def test_original_pending_oracle_preserves_zero_valued_reference_keys(admission, mocker):
-    from management.services.knowledge_base import storage
-    from management.services.knowledge_base.quota import QuotaService
-
+def test_pending_preserves_zero_valued_reference_keys(admission):
     s = admission
-    mocker.patch.object(storage, 'get_committed_source_bytes_by_object_names', return_value={})
     data = [{'path_or_url': 's3://files/missing.txt', 'file_size': 999},
             {'filename': 'plain.txt', 'file_size': 2}, {'filename': 'plain.txt', 'file_size': 1}]
-    original = QuotaService(s.actor.tenant_id, s.actor.user_id).get_pending_personal_upload_bytes(data, s.row)
     with s.ports(s.actor, context=context()) as (_, ledger, _):
-        assert module._pending(ledger, s.row, data, context()) == original == 2
+        assert module._pending(ledger, s.row, data, context()) == 2
 
 
 def test_duplicate_private_catalog_is_not_arbitrarily_collapsed(admission):
