@@ -13,6 +13,7 @@ import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
 import ResourceCard from "@/components/resource/ResourceCard";
+import { AgentCardTags } from "@/components/resource/AgentCardTags";
 import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import type {
   SkillRepositoryListingItem,
@@ -80,11 +81,7 @@ export function SkillRepositoryCard({
   const tagChips = tags.map((tag) => (
     <span
       key={tag}
-      className={
-        presentation
-          ? "h-5 rounded bg-[rgba(25,25,25,0.05)] px-2 text-xs leading-5 font-normal text-[#393939]"
-          : "rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-      }
+      className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
     >
       {tag}
     </span>
@@ -123,7 +120,7 @@ export function SkillRepositoryCard({
           // Always reserve the tag row so repository cards keep equal heights
           // across tabs (agent/MCP reserve the same h-6 row).
           <div className="flex h-6 w-full min-w-0 items-center gap-2">
-            {tags.length > 0 ? <>{tagChips}</> : null}
+            {tags.length > 0 ? <AgentCardTags labels={tags} maxVisible={5} /> : null}
           </div>
         ) : tags.length > 0 ? (
           <>{tagChips}</>

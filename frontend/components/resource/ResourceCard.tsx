@@ -83,6 +83,8 @@ export default function ResourceCard({
     presentation?.resourceType === "mcp" && !repositoryView;
   const footerInHeader = compact && !measuredMineMcp;
   const measuredSkill = presentation?.resourceType === "skill";
+  const uniformRepositorySize =
+    measuredAgent || measuredMcp || (measuredSkill && repositoryView);
   const actionsInFooter =
     measuredSkill && repositoryView && footerLayout === "inline";
   const titleId = `resource-card-title-${useId()}`;
@@ -119,7 +121,8 @@ export default function ResourceCard({
         measuredMineMcp &&
           "min-h-[142px] rounded-xl border-[rgba(201,201,201,0.4)] bg-white px-6 py-4",
         measuredSkill &&
-          "min-h-[154px] rounded-xl border-[rgba(201,201,201,0.4)] px-6 py-4"
+          "min-h-[154px] rounded-xl border-[rgba(201,201,201,0.4)] px-6 py-4",
+        uniformRepositorySize && "min-h-0 h-[240px] @min-[440px]:h-[216px]"
       )}
       onDoubleClick={onDoubleClick}
     >

@@ -142,6 +142,10 @@ export default function ResourceCardGrid<T>({
     presentation?.resourceType === "mcp" &&
     presentation.query?.get("view") === "mine";
   const useRepositoryCardLayout = isAgentRepository || isMcpRepository;
+  const uniformRepositoryGrid =
+    useRepositoryCardLayout ||
+    (presentation?.resourceType === "skill" &&
+      presentation.query?.get("view") !== "mine");
   const useResponsiveCards =
     useRepositoryCardLayout || presentation?.resourceType === "mcp";
   const { t } = useTranslation("common");
@@ -560,17 +564,17 @@ export default function ResourceCardGrid<T>({
           <div
             className={`grid ${
               presentation
-                ? useResponsiveCards
+                ? useResponsiveCards || uniformRepositoryGrid
                   ? "gap-4"
                   : "gap-x-4 gap-y-3"
                 : "gap-5"
             } ${
               columns === undefined
                 ? presentation
-                  ? presentation.resourceType === "skill"
-                    ? "grid-cols-1 @min-[720px]:grid-cols-2 @min-[1200px]:grid-cols-3"
-                    : useResponsiveCards
-                      ? "grid-cols-[repeat(auto-fill,minmax(min(100%,max(440px,calc((100%_-_48px)/4))),1fr))]"
+                  ? useResponsiveCards || uniformRepositoryGrid
+                    ? "grid-cols-[repeat(auto-fill,minmax(min(100%,max(440px,calc((100%_-_48px)/4))),1fr))]"
+                    : presentation.resourceType === "skill"
+                      ? "grid-cols-1 @min-[720px]:grid-cols-2 @min-[1200px]:grid-cols-3"
                       : "grid-cols-1 @min-[1200px]:grid-cols-[repeat(auto-fill,592px)]"
                   : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                 : "grid-cols-1 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))]"

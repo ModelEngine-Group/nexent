@@ -154,6 +154,27 @@ async function mockRepository(page: Page, kind: ResourceKind, mine = false) {
   return { requests, writes };
 }
 
+test("agent, MCP and skill repository cards use the same dimensions", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const sizes: Array<{ width: number; height: number }> = [];
+  for (const kind of ["agent", "mcp", "skill"] as const) {
+    await page.unroute("**/api/**");
+    await mockRepository(page, kind);
+    await page.goto(`${baseUrl}/zh/resource-space?tab=${kind}&view=repository`);
+    const heading = page.getByRole("heading", { name: new RegExp(`^Layout ${kind}`) }).first();
+    const card = heading.locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' group ')][1]");
+    await expect(card).toBeVisible();
+    const bounds = (await card.boundingBox())!;
+    sizes.push({ width: bounds.width, height: bounds.height });
+  }
+  for (const size of sizes.slice(1)) {
+    expect(size.width).toBeCloseTo(sizes[0].width, 0);
+    expect(size.height).toBeCloseTo(sizes[0].height, 0);
+  }
+});
+
 // The unified repository hosts every listing view; the personal agent view
 // retired, so agents only keep the repository combination.
 const layoutCombinations: Array<{
