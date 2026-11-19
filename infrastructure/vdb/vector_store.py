@@ -98,6 +98,7 @@ class ElasticsearchVectorStore:
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
         if any(binding.writable and binding.mutable_fields for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.patch.payload'})
+        self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.group'})
         self._closed = False
 
     @property
@@ -206,6 +207,11 @@ class ElasticsearchVectorStore:
         from infrastructure.vdb.vector_statistics import collection_statistics
 
         return collection_statistics(self, collection, fields, context=context)
+
+    def group(self, collection, query, *, where=None, context):
+        from infrastructure.vdb.vector_group import collection_groups
+
+        return collection_groups(self, collection, query, where=where, context=context)
 
     def collection_exists(self, collection, *, context):
         binding = self._binding(collection, maintenance=True)

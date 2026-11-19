@@ -261,7 +261,7 @@ class VectorCollectionInfo:
 
 @dataclass(frozen=True)
 class VectorSummaryField:
-    """Select the first present scalar payload path, without a provider expression."""
+    """Select the first present payload path, without a provider expression."""
 
     name: str
     paths: tuple[tuple[str, ...], ...]
@@ -278,6 +278,34 @@ class VectorSummaryField:
         if len(set(paths)) != len(paths):
             raise InvalidInput()
         object.__setattr__(self, 'paths', paths)
+
+
+@dataclass(frozen=True)
+class VectorGroupQuery:
+    """Group a scalar payload value and retain bounded representative metadata."""
+
+    by: VectorSummaryField
+    sample_fields: tuple[VectorSummaryField, ...] = ()
+    limit: int = 1000
+
+    def __post_init__(self):
+        if not isinstance(self.sample_fields, (tuple, list)):
+            raise InvalidInput()
+        fields = tuple(self.sample_fields)
+        if (not isinstance(self.by, VectorSummaryField) or len(fields) > 10
+            or any(not isinstance(value, VectorSummaryField) for value in fields)
+            or len({value.name for value in fields}) != len(fields)
+            or type(self.limit) is not int or not 1 <= self.limit <= 1000):
+            raise InvalidInput()
+        object.__setattr__(self, 'sample_fields', fields)
+
+
+@dataclass(frozen=True)
+class VectorGroup:
+    collection: str
+    key: str
+    count: int
+    sample: Record = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

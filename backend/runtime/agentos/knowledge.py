@@ -23,6 +23,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionsDescribe,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppend
+from contracts.knowledge_sources import KnowledgeSources
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
@@ -35,6 +36,10 @@ from backend.http.server.knowledge_errors import knowledge_error
 def create_knowledge_router(service=None):
     router = APIRouter()
     service = service or default_service()
+
+    @router.post(KnowledgeOperation.SOURCES.value, include_in_schema=False)
+    async def sources(request: Request):
+        return await dispatch(request, KnowledgeSources, service.list_sources, 200)
 
     async def dispatch(request, schema, action, status):
         principal = request.scope.get(PRINCIPAL_KEY)

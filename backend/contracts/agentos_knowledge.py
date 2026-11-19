@@ -517,6 +517,7 @@ class FileCleanseReleased(FileCleanseLookup):
 
 
 class KnowledgeOperation(str, Enum):
+    SOURCES = '/internal/agentos/v1/knowledge/bases/sources/list'
     DESCRIBE_COLLECTIONS = '/internal/agentos/v1/knowledge/bases/collections/describe'
     ENSURE_COLLECTION = '/internal/agentos/v1/knowledge/bases/collection/ensure'
     INSPECT_COLLECTION = '/internal/agentos/v1/knowledge/bases/collection/state'

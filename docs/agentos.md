@@ -436,3 +436,12 @@ Agent 编译只读最终工具白名单内的摘要，在受管 control-io 中�
 Management 的内部 `KnowledgeFileGrant` 必须包含 `source_display`。upload/execute 返回 `KnowledgeFileSourceDisplay(size_bytes, created_at)`，inspect/delete 返回None；缺字段不兼容。大小是已授权生命周期记录的可空非负int8，时间是其可空UTC上传时间，历史缺值不补零或当前时刻。最终部署须同步更新两个服务的契约版本。
 
 Runtime 使用 grant.source.key 作为向量 location.path_or_url，使用有效 grant.filename，并固定 file_size、create_time 和逻辑 source_type=file。文本、表格、JSON及图片走同一写入位置，解析器不能覆盖来源或嵌套公共展示块。批次授权复查包含快照，变化时停止写入。公开上传参数不变，也不传Management的本地路径。历史向量维护和公开文件列表的标准摘要迁移仍按退役SPEC推进。
+
+
+### KnowledgeBase 物理源摘要
+
+Management 可调用 `AgentOSClient.list_knowledge_sources(KnowledgeSources(...), user_id, tenant_id)`。内部路径是 `POST /internal/agentos/v1/knowledge/bases/sources/list`，参数为 knowledge_id、当前资源 expected_revision 和最多1000的 limit。Runtime 使用已有 authorize_knowledge_chunks 在读前/读后复查实际调用者，运营清单权限不授予源读取。接口不接受字段选择器或provider查询，不要求模型，也不返回正文或向量。
+
+响应 `KnowledgeSourcesResult` 包含 knowledge_id、revision、present 和 sources。每项包含唯一 source_key、chunk_count，以及代表记录的 path_or_url、filename、file_size、create_time，后四项保留原JSON类型。缺物理集合返回present=false及空sources，读取错误显式报告。排序为物理分组count降序、key升序，最多1000组；这些计数不证明文件已发布或清理完成。当前默认30秒覆盖两次授权与受管I/O，超时504并停止后续读取，无重试。
+
+Infrastructure 的中立 `VectorStore.group` 负责命名空间条件、有限路径分组和样本投影。Runtime只冻结源展示字段，不把查询DSL传给外部调用者。公开files接口及Northbound/上传重命名/标签资源调用方仍在迁移，文件状态、标签和对象可用性由Management负责装配。

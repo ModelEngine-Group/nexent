@@ -73,6 +73,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionStatus,
 )
 from contracts.knowledge_documents import KnowledgeDocumentsAppended
+from contracts.knowledge_sources import KnowledgeSourcesResult
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -190,6 +191,9 @@ class AgentOSClient:
 
     async def knowledge_chunks(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.CHUNKS, payload, user_id, tenant_id, KnowledgeChunksResult)
+
+    async def list_knowledge_sources(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.SOURCES, payload, user_id, tenant_id, KnowledgeSourcesResult)
 
     async def inspect_knowledge_base(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.INSPECT_BASE, payload, user_id, tenant_id, KnowledgeBaseState)

@@ -63,6 +63,11 @@ class KnowledgeService:
 
         return await KnowledgeChunksService(self.client).chunks(payload, actor, context=context)
 
+    async def list_sources(self, payload, actor, *, context=None):
+        from runtime.knowledge_base.sources import KnowledgeSourcesService
+
+        return await KnowledgeSourcesService(self.client).list_sources(payload, actor, context=context)
+
     async def mutate_chunk(self, payload, actor, *, context=None):
         from runtime.knowledge_base.chunk_write import ChunkMutationService
 

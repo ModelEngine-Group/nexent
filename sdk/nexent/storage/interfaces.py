@@ -30,6 +30,8 @@ from .models import (
     StorageScope,
     VectorCollectionInfo,
     VectorCollectionStatistics,
+    VectorGroup,
+    VectorGroupQuery,
     VectorKey,
     VectorRecord,
     VectorSummaryField,
@@ -164,6 +166,11 @@ class ObjectStore(StoragePort, Protocol):
 
 
 class VectorStore(StoragePort, Protocol):
+    def group(self, collection: str, query: VectorGroupQuery, *, where: Comparison | Junction | None = None,
+              context: OperationContext) -> tuple[VectorGroup, ...]:
+        """Read bounded groups ordered by descending count and ascending scalar key."""
+        ...
+
     def collection_exists(self, collection: str, *, context: OperationContext) -> bool: ...
 
     def delete_empty_collection(self, collection: str, *, context: OperationContext) -> DeleteReceipt: ...
