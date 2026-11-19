@@ -9,12 +9,12 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_io import (
     Directory,
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     TrajectoryFileStore,
     component,
     parse_time,

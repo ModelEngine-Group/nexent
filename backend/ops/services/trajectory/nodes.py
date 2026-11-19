@@ -6,8 +6,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from infrastructure.observability.trajectory_io import TrajectoryCorrupt
-from infrastructure.observability.trajectory_reader import Text
+from infrastructure.trace.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_reader import Text
 from nexent.monitor.agent_version import valid_agent_version
 
 from .code_nodes import simplify_code_nodes

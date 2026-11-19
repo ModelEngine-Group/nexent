@@ -18,14 +18,9 @@ NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
-OPS_MONITORING_ENABLED = os.getenv('OPS_MONITORING_ENABLED', 'false').lower() == 'true'
+OPS_MONITORING_ENABLED = (os.getenv('OPS_MONITORING_ENABLED') or 'true').lower() == 'true'
 OPS_MONITORING_TIMEZONE = os.getenv('OPS_MONITORING_TIMEZONE', 'UTC')
 OPS_MONITORING_REPLICAS = int(os.getenv('OPS_MONITORING_REPLICAS', '0'))
-OPS_POSTGRES_HOST = os.getenv('OPS_POSTGRES_HOST')
-OPS_POSTGRES_PORT = parse_port(os.getenv('OPS_POSTGRES_PORT'), 'OPS_POSTGRES_PORT', 5432)
-OPS_POSTGRES_USER = os.getenv('OPS_POSTGRES_USER')
-OPS_POSTGRES_PASSWORD = os.getenv('OPS_POSTGRES_PASSWORD')
-OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB')
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
@@ -36,6 +31,11 @@ ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
+# Downstream verification settings; Gateway owns its upstream configuration.
+# Staged compatibility flag; shipped deployment and the standalone image enable it.
+GATEWAY_AUTH_ENABLED = _require_choice(os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower(), ('true', 'false'), 'GATEWAY_AUTH_ENABLED must be true or false') == 'true'
+GATEWAY_SIGNING_SECRET = os.getenv('GATEWAY_SIGNING_SECRET', '')
+GATEWAY_SERVICE_URL = os.getenv('GATEWAY_SERVICE_URL', 'http://localhost:5013').rstrip('/')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv('TABLE_TRANSFORMER_MODEL_PATH')
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv('UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH')
@@ -194,6 +194,8 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv('CAPACITY_VISIBILITY_ENABLED', 'true').l
 
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = validate_deployment_version(os.getenv('DEPLOYMENT_VERSION', 'full'))
+# Retired speed mode is rejected by validate_deployment_version above.
+IS_SPEED_MODE = False
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv('ENABLE_AIDP_KNOWLEDGE', 'false').lower() in ('true', '1', 'yes', 'on')
@@ -221,6 +223,14 @@ NEXENT_POSTGRES_PASSWORD = os.getenv('NEXENT_POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
+# Ops reuses the Nexent PostgreSQL connection and changes only the database name.
+OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_ops"
+if OPS_MONITORING_ENABLED:
+    if OPS_POSTGRES_DB == (POSTGRES_DB or 'nexent'):
+        raise ValueError('OPS_POSTGRES_DB must differ from POSTGRES_DB')
+    if len(OPS_POSTGRES_DB.encode('utf-8')) > 63:
+        raise ValueError('OPS_POSTGRES_DB must not exceed 63 UTF-8 bytes')
+
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_BACKEND_URL = os.getenv('REDIS_BACKEND_URL')
@@ -230,6 +240,7 @@ RUNTIME_STREAM_TTL_SECONDS = int(os.getenv('RUNTIME_STREAM_TTL_SECONDS', '86400'
 RUNTIME_STREAM_MAX_LEN = int(os.getenv('RUNTIME_STREAM_MAX_LEN', '10000'))
 RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES = int(os.getenv('RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES', str(8 * 1024 * 1024)))
 RUNTIME_RUN_TTL_SECONDS = int(os.getenv('RUNTIME_RUN_TTL_SECONDS', '86400'))
+RUNTIME_CREATOR_LEASE_SECONDS = int(os.getenv('RUNTIME_CREATOR_LEASE_SECONDS', '30'))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv('RUNTIME_CANCEL_TTL_SECONDS', '86400'))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv('RUNTIME_COMPLETED_TTL_SECONDS', '300'))
 RUNTIME_CANCEL_POLL_INTERVAL_SECONDS = float(os.getenv('RUNTIME_CANCEL_POLL_INTERVAL_SECONDS', '1.0'))
@@ -248,9 +259,6 @@ RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = float(os.getenv('RUNTIME_MCP_CLOSE_TIMEOUT_S
 _VALIDATED_RUNTIME_MCP_TOOL_TIMEOUT_SECONDS = _require_positive(RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, 'RUNTIME_MCP_TOOL_TIMEOUT_SECONDS must be greater than zero')
 _VALIDATED_RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = _require_positive(RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, 'RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS must be greater than zero')
 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = float(os.getenv('RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS', '30'))
-NORTHBOUND_CONTROL_THREAD_MAX_WORKERS = int(os.getenv('NORTHBOUND_CONTROL_THREAD_MAX_WORKERS', '8'))
-NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE = int(os.getenv('NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE', '64'))
-NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = float(os.getenv('NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS', '15'))
 NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv('NORTHBOUND_IDEMPOTENCY_TTL_SECONDS', '600'))
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv('NORTHBOUND_RATE_LIMIT_ENABLED', 'true').lower() == 'true'
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv('NORTHBOUND_RATE_LIMIT_PER_MINUTE', '120'))
@@ -368,6 +376,7 @@ _VALIDATED_JWT_EXPIRY_SECONDS = _require_positive(JWT_EXPIRY_SECONDS, 'JWT_EXPIR
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 
+
 # Telemetry and Monitoring Configuration (OTLP Protocol)
 MONITORING_PROVIDER = _require_choice((os.getenv('MONITORING_PROVIDER') or 'otlp').strip().lower(), ('local_file', 'otlp', 'phoenix', 'langfuse', 'langsmith'), 'Unsupported MONITORING_PROVIDER')
 ENABLE_TELEMETRY_RAW = os.getenv('ENABLE_TELEMETRY')
@@ -407,6 +416,13 @@ MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
 TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
 TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
 TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
+# ZIP exchange budgets shared by temporary and saved trajectory imports.
+TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES', 33554432)
+TRAJECTORY_EXCHANGE_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_BYTES', 134217728)
+TRAJECTORY_EXCHANGE_MAX_META_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_META_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_META_BYTES', 8388608)
+TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES'), 'TRAJECTORY_EXCHANGE_MAX_RESPONSE_BYTES', 134217728)
+TRAJECTORY_EXCHANGE_MAX_FILES = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_MAX_FILES'), 'TRAJECTORY_EXCHANGE_MAX_FILES', 10000)
+TRAJECTORY_EXCHANGE_SECONDS = parse_positive_int(os.getenv('TRAJECTORY_EXCHANGE_SECONDS'), 'TRAJECTORY_EXCHANGE_SECONDS', 30)
 TRAJECTORY_ROOT_DIR = os.getenv('TRAJECTORY_ROOT_DIR') or '/mnt/nexent-data/trajectory'
 TRAJECTORY_STORAGE_MODE = _require_choice(os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower(), ('single_node', 'shared_directory'), 'TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
 TRAJECTORY_RETENTION_DAYS = parse_positive_int(os.getenv('TRAJECTORY_RETENTION_DAYS'), 'TRAJECTORY_RETENTION_DAYS', 30)

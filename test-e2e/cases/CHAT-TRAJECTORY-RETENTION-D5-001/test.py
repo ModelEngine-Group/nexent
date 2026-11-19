@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryConflict,
     TrajectoryFileStore,

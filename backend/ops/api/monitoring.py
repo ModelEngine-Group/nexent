@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from contracts.constants.environment import JWT_SECRET
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from ops.monitoring.model import summarize
 from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_models
 from permissions.models import CurrentUser

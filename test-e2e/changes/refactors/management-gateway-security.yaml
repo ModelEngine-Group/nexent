@@ -1,0 +1,54 @@
+schema_version: '1.0'
+change:
+  change_id: MGWI-GATEWAY-SECURITY-20261102
+  change_type: refactor
+  title: Consolidate external security mechanisms in Gateway and retain downstream
+    trust guards
+  description: User confirmed Gateway owns external credential verification while
+    downstream services retain service-signature and resource permission enforcement.
+    Consolidate security mechanisms, keep account/session data business in Management,
+    and prevent production identity adapters from falling back to external credentials.
+  affected_features:
+    existing:
+    - GW-AUTH
+    - AUTH-LOCAL
+    - F-013
+    added: []
+    modified:
+    - GW-AUTH
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-001
+    - UT-BE-001
+    - UT-BE-002
+    - UT-BE-006
+    - AUTH-LOCAL-D2-001
+    - AUTH-LOCAL-D5-001
+    added: []
+    modified:
+    - GW-AUTH-D3-001
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Gateway owns external credential parsing and cryptographic mechanisms.
+    - Enabled downstream trust adapters reject missing verified principals without
+      local credential lookup.
+    - Downstream signature verification and resource permission checks remain active.
+    - Account provisioning and signed session issuance retain their existing business
+      behavior.
+    - Gateway source and dependency closure contain no backend business imports.
+    - MCP delegates external credentials to Gateway and retains tenant authorization
+      and context cleanup.
+    reason: Reuse credential, native account, permission and signed-protocol regressions;
+      update lookup sites after ownership moves and add focused no-fallback assertions.
+    test_selectors:
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/utils/test_auth_utils.py
+    - test/backend/gateway/test_central_authentication.py
+    - test/backend/gateway/test_configuration.py
+    - test/backend/management/test_production_identity_boundary.py
+    - test/backend/gateway/test_mcp_delegation.py
+    - test/backend/services/test_mcp_service.py

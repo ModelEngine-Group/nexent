@@ -10,7 +10,7 @@ from sqlalchemy import String, cast, func, or_, text
 # isort: split
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.trajectory import QueryError
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation.classification import is_workbench_history
 from management.db.conversation.models import ConversationMessage, ConversationRecord
 from management.db.models import AgentInfo, TenantConfig, UserAccount, UserTenant

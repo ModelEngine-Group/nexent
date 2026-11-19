@@ -4,6 +4,7 @@
 from fastapi import FastAPI
 
 from contracts.constants.environment import APP_VERSION, OPS_MONITORING_ENABLED
+from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.utils.exception_handlers import register_exception_handlers
 from ops.api.access import router as access_router
 from ops.api.health import router as health_router
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(application)
     application.include_router(access_router)
     application.include_router(health_router)
+    application.add_middleware(GatewayIdentityMiddleware, audience="ops")
     application.include_router(system_configuration_router)
     if trajectory_enabled():
         from ops.api.trajectory import router as trajectory_router
@@ -30,6 +32,10 @@ def create_app() -> FastAPI:
 
         application.include_router(trajectory_router)
         application.include_router(directory_router)
+    else:
+        from ops.api.trajectory import imports_router
+
+        application.include_router(imports_router, prefix="/trajectory")
     if OPS_MONITORING_ENABLED:
         from ops.api.monitoring import ops_router
 

@@ -11,7 +11,7 @@ from contracts.errors.exceptions import (
     ValidationError,
 )
 from contracts.roles import has_any_role
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import create_account
 from management.db.identity.group import add_user_to_group, query_groups
 from management.db.identity.token import (

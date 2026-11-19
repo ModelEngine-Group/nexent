@@ -4,7 +4,7 @@ change:
   change_type: bugfix
   bug_id: OPS-MONITORING-DEPLOYED-ACCESS-20261117
   title: Restore model monitoring through the deployed Ops entry points
-  description: Route Web requests to Ops, read service credentials from the Helm sources, and compact the signed refresh target for the supported date range.
+  description: Route Web requests through the Gateway to Ops with a signed session identity, read service credentials from the Helm sources, and compact the signed refresh target for the supported date range.
   observed_behavior: Web dispatched monitoring requests to Config, standalone Ops read the Elasticsearch endpoint and credentials from the environment Secret, and a full date range could create an oversized status URL.
   expected_behavior: The Web path is handled by Ops, Helm obtains the service settings with trajectory capture off or on, and the refresh status URL stays bounded while retaining individual day targets.
   escaped_stage: D3
@@ -24,6 +24,6 @@ change:
     retired: []
   traditional_ut:
     decision: strengthen
-    behaviors: [Exercise the full year and legacy refresh targets, Check the proxy routing and neighboring paths, Check Helm service references with or without trajectory]
+    behaviors: [Exercise the full year and legacy refresh targets, Check the proxy routing and neighboring paths, Check Helm service references with or without trajectory, Verify Gateway session exposure and signed Ops identity with role and tenant restrictions, Preserve legacy monitoring persistence across the backend package split]
     reason: Existing tests covered short refresh targets and the trajectory proxy but lacked these model monitoring deployment cases.
-    test_selectors: [test/backend/ops/test_monitoring_api.py, test/backend/ops/test_trajectory_proxy.py, test/backend/deploy/test_ops_chart.py, frontend/tests/apiProxyRouting.test.mjs]
+    test_selectors: [test/backend/ops/test_monitoring_api.py, test/backend/ops/test_trajectory_proxy.py, test/backend/deploy/test_ops_chart.py, test/backend/gateway/test_model_monitoring.py, test/sdk/core/model_service/test_monitoring_persistence.py, frontend/tests/apiProxyRouting.test.mjs]

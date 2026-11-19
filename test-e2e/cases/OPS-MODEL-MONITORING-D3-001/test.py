@@ -45,7 +45,7 @@ from ops.monitoring.runtime import Producer
 from ops.monitoring.search import DAILY, FACTS, PointInTime, filters, install_templates, partition, snapshot
 from ops.monitoring.service import Monitoring, bulk_write
 from ops.monitoring.store import DAY, ControlStore
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from permissions import rbac
 from permissions.models import CurrentUser
 
@@ -106,7 +106,7 @@ def ops_store():
             cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
         subprocess.run(
             ["bash", str(project / "deploy/common/run-ops-sql-migrations.sh")], check=True, timeout=30,
-            env={**os.environ, "OPS_POSTGRES_HOST": host, "OPS_POSTGRES_USER": "postgres",
+            env={**os.environ, "POSTGRES_HOST": host, "POSTGRES_USER": "postgres", "POSTGRES_PORT": "5432",
                  "OPS_POSTGRES_DB": database, "POSTGRES_DB": "nexent"},
             stdout=subprocess.DEVNULL,
         )
@@ -266,6 +266,7 @@ def test_model_attempt_publication(ops_store, upstream, monkeypatch):
     assert ops_store.store.states(tenant, "model", day, day)[0]["publish_id"] == before
 
     monkeypatch.setattr(ops_application, "OPS_MONITORING_ENABLED", True)
+    monkeypatch.setattr("ops.lifespan.config.OPS_MONITORING_ENABLED", False)
     app = ops_application.create_app()
     app.state.monitoring = ops_store
     app.dependency_overrides[authenticate] = lambda: CurrentUser("operator", tenant, "OPS")

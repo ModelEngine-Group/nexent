@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-SAVED-IMPORT-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: CHAT-TRAJECTORY-SAVED-IMPORT-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained owned native source and import directories, controlled authentication
+  boundary, real managed services and format parser. Browser journey uses a real frontend
+  with controlled API fixtures; D3 separately proves persistence across service instances.
+  Cleanup closes files, clients, workers, routes, cookies and browser contexts. No
+  shared preparation family is required.
+acceptance_bindings:
+  AC-01: &id001
+  - CHAT-TRAJECTORY-SAVED-IMPORT-D4-001
+  AC-02: *id001
+  AC-03: *id001

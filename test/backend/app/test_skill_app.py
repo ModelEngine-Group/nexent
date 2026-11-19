@@ -6,6 +6,8 @@ Unit tests for management.api.skill.skill module.
 from test.common.contract_stubs import install_shared_contract_stub
 from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 from contracts import skill as skill_app_management_skill_skill_skill
+# Resolve ownership exceptions before this endpoint suite replaces environment modules.
+from management.services.agent.lifecycle import AgentRunAlreadyActiveError  # noqa: F401
 import sys
 import os
 import io
@@ -205,6 +207,7 @@ class MockSkillResponse(BaseModel):
 
 class MockNL2SkillRunRequest(BaseModel):
     query: str
+    request_id: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     conversation_id: Optional[int] = None
@@ -290,10 +293,10 @@ services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=Tru
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('gateway.authentication.auth')
+utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.session')
 utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_auth_utils_mock
+sys.modules['management.services.permission.identity.session'] = utils_auth_utils_mock
 sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))

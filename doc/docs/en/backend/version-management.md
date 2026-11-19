@@ -83,7 +83,7 @@ v2.5.0
 
 ### 📺 Version Display
 
-When backend services start, they print version information in the logs (`backend/config_service.py` and `backend/runtime_service.py`):
+When backend services start, they print version information in the logs (`backend/http/config_service.py` and `backend/http/runtime_service.py`):
 
 ```python
 logger.info(f"APP version is: {APP_VERSION}")
@@ -102,8 +102,8 @@ v2.5.0
 
    ```bash
    # Start the backend service
-   cd backend
-   python config_service.py
+   export PYTHONPATH="$PWD/backend"
+   python -m backend.http.config_service
 
    # Check the version information in the startup logs
    # Output example: APP version is: v2.5.0

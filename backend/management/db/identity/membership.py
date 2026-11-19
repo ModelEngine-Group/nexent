@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional
 from sqlalchemy import func, select, text
 
 from contracts.errors.exceptions import RoleAssignmentConflict
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import UserAccount, UserTenant
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 
 def lock_tenants(session, tenant_ids):

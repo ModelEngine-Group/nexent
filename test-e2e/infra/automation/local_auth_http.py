@@ -33,11 +33,11 @@ def native_runtime():
         }.items():
             patch.setenv(name, value)
         from contracts.errors.exceptions import AppException
-        from gateway.authentication import auth as helpers
+        from management.services.permission.identity import session as helpers
         from management.api.identity import user_management as routes
         from management.configuration.runtime import stop_system_configuration
         from management.db import models
-        from management.db.client import db_client
+        from infrastructure.rdb.client import db_client
         from management.services.permission.identity import authentication as auth
 
         tables = [
@@ -86,7 +86,7 @@ def native_runtime():
 @pytest.fixture
 def runtime(native_runtime):
     client, auth, helpers, models = native_runtime
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
 
     with get_db_session() as session:
         for model in [
@@ -137,7 +137,7 @@ def bearer(token):
 
 def seed_membership_roles(user_id, roles):
     """Fixture setup for identity/API-key contracts, not an authorization bypass in product code."""
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.models import UserAccount
     from sqlalchemy import update
     with get_db_session() as session:

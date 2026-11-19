@@ -170,7 +170,7 @@ def test_no_archives_publishes_empty_ttft_without_discarding_database_durations(
 
 
 def test_summary_queue_limit_allows_replacing_existing_owner(caplog):
-    from infrastructure.observability.trajectory_store import CaptureIdentity
+    from infrastructure.trace.trajectory_store import CaptureIdentity
 
     worker = SummaryWorker(Mock(), Mock())
     for index in range(1001):

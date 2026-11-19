@@ -8,7 +8,7 @@ from typing import Any
 
 from contracts.agent import WorkbenchSessionConfig
 from contracts.conversation import MessageRequest, MessageUnit
-from infrastructure.runtime_output import is_runtime_event
+from management.services.conversation.runtime_output import is_runtime_event
 from management.db.conversation.repository import get_conversation_history
 from management.services.conversation.creator_targets import bind_creator_target
 from management.services.conversation.service import (

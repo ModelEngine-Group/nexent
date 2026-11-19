@@ -57,8 +57,11 @@ def context_database(monkeypatch):
         else:
             raise AssertionError("Isolated history PostgreSQL did not start")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres")
-        from management.db import client
+        from infrastructure.rdb import client
+        from management.configuration import runtime as configuration_runtime
+        from management.configuration.catalog import DEFAULT_CATALOG
         from management.db.conversation import repository as conversation_db
+        from management.db.identity.models import UserTenant
         from management.db.models import (
             AgentInfo,
             ConversationMessage,
@@ -67,14 +70,23 @@ def context_database(monkeypatch):
             ConversationSourceSearch,
             ConversationSourceImage,
         )
+        from management.db.trajectory.models import TrajectoryExecution
 
         monkeypatch.setattr(client.db_client, "session_maker", sessionmaker(bind=engine))
+
+        # These fixtures bypass service startup and use the default configuration snapshot.
+        async def load_configuration():
+            return DEFAULT_CATALOG.defaults
+
+        configuration = configuration_runtime.SystemConfigurationRuntime(loader=load_configuration)
+        configuration.store_snapshot(DEFAULT_CATALOG.defaults)
+        monkeypatch.setattr(configuration_runtime, "_process_runtime", configuration)
         # Authentication lookup is the controlled external boundary, not the history DAL.
         monkeypatch.setattr(conversation_db, "_get_user_tenant", lambda _: {"tenant_id": "spike-tenant"})
         with engine.begin() as connection:
             connection.execute(text("CREATE SCHEMA nexent"))
         for model in (AgentInfo, ConversationRecord, ConversationMessage, ConversationMessageUnit,
-                      ConversationSourceSearch, ConversationSourceImage):
+                      ConversationSourceSearch, ConversationSourceImage, UserTenant, TrajectoryExecution):
             model.__table__.create(engine)
         yield engine
     finally:

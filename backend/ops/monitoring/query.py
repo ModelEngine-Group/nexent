@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.model.models import ModelRecord
 from ops.monitoring.model import summarize
 from ops.monitoring.search import filters

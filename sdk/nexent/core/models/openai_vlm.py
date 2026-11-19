@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import base64
 import logging
@@ -19,8 +20,8 @@ class OpenAIVLModel(OpenAIModel):
     def __init__(
         self,
         observer: MessageObserver,
-        temperature: float = 0.7,
-        top_p: float = 0.7,
+        temperature: float | None = None,
+        top_p: float | None = None,
         frequency_penalty: float = 0.5,
         max_tokens: int = 512,
         ssl_verify: bool = True,
@@ -30,9 +31,8 @@ class OpenAIVLModel(OpenAIModel):
         """
         Initialize VLM model. Accepts `ssl_verify` and forwards it to parent.
         """
-        super().__init__(observer=observer, ssl_verify=ssl_verify, *args, **kwargs)
+        super().__init__(observer=observer, ssl_verify=ssl_verify, top_p=top_p, *args, **kwargs)
         self.temperature = temperature
-        self.top_p = top_p
         self.frequency_penalty = frequency_penalty
         self.max_tokens = max_tokens
         self._current_request = None  # Used to store the current request

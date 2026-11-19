@@ -112,7 +112,6 @@ change:
     - frontend/tests/component/agentImportPrompt.test.tsx
     - frontend/tests/component/agentEditorDraft.test.tsx
     - frontend/tests/component/agentSinglePrompt.test.tsx
-    - test/backend/app/test_prompt_app.py
   notes: 'SPEC: nexent-doc/docs/Developing/chat-nl2agent-unified-prompt. 2026-10-22
     follow-up removes runtime compatibility; existing API/model/browser regressions
     are retained. Deployment Case adds market snapshot migration proof with isolated

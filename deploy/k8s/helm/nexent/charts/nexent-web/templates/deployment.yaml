@@ -44,13 +44,11 @@ spec:
             - name: HOSTNAME
               value: "0.0.0.0"
             - name: HTTP_BACKEND
-              value: "http://nexent-config:5010"
+              value: "http://nexent-gateway:5013"
             - name: WS_BACKEND
-              value: "ws://nexent-runtime:5014"
+              value: "ws://nexent-gateway:5013"
             - name: RUNTIME_HTTP_BACKEND
-              value: "http://nexent-runtime:5014"
-            - name: OPS_HTTP_BACKEND
-              value: {{ default "http://nexent-ops:5016" .Values.config.opsHttpBackend | quote }}
+              value: "http://nexent-gateway:5013"
             - name: MINIO_ENDPOINT
               value: "http://nexent-minio:9000"
             - name: DEPLOYMENT_VERSION

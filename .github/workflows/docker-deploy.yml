@@ -103,6 +103,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Build Gateway image on the deployment runner
+        env:
+          APP_VERSION: ${{ inputs.app_version }}
+        run: |
+          docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple \
+            -t "nexent/nexent-gateway:$APP_VERSION" -t nexent/nexent-gateway:latest \
+            -f deploy/images/dockerfiles/gateway/Dockerfile .
       - name: Copy project to $HOME/nexent
         run: |
           rm -rf $HOME/nexent

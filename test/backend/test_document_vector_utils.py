@@ -14,11 +14,11 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# Mock consts module before patching management.db.client to avoid ImportError
-# management.db.client imports from contracts.constants.environment, so we need to mock it first
+# Mock consts module before patching infrastructure.rdb.client to avoid ImportError
+# infrastructure.rdb.client imports from contracts.constants.environment, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
-# Set required constants that management.db.client might use
+# Set required constants that infrastructure.rdb.client might use
 consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
 consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
@@ -57,7 +57,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 from management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, analyze_cluster_coherence, merge_duplicate_documents_in_clusters
 from management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries, get_documents_from_es, process_documents_for_clustering

@@ -17,7 +17,7 @@ from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.client import minio_client
+from infrastructure.object_storage.client import minio_client
 from management.db.knowledge_base.repository import (
     get_knowledge_name_map_by_index_names,
 )

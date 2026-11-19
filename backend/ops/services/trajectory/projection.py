@@ -1,9 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Reconcile durable manifests with the small PG execution projection."""
 
-from infrastructure.observability.trajectory_io import TrajectoryCorrupt
-from infrastructure.observability.trajectory_reader import JSONReader
-from infrastructure.observability.trajectory_store import parse_time
+from infrastructure.trace.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_reader import JSONReader
+from infrastructure.trace.trajectory_store import parse_time
 
 from .archive import Archive
 from .nodes import build_nodes
