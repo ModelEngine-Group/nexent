@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -69,6 +69,12 @@ case:
   - order: 17
     action: Replay terminal observations and query existing summaries, resource pages and daily trends, including a selection with no matching executions.
     expected: Published counters and rates remain identical after replay, all interfaces agree, and the empty covered selection returns zero counts and a null rate.
+  - order: 18
+    action: Execute a real main Agent that invokes children against an HTTP model peer reporting complete, zero and missing usage, then publish model observations and read Agent Token views.
+    expected: Every request carries the executing Agent and execution identity. Main and child Tokens match their own model facts and model daily rows. Combined Tokens count each request once, with provider missing usage preserved.
+  - order: 19
+    action: Replay model terminal facts, add cross-day attributed requests and orphan requests, and compare Agent summaries, directory and trends before and after publication.
+    expected: Replay leaves usage and eligibility unchanged. Filters use request start dates and groups. Orphans are excluded and Token publication time, coverage and lag remain independent of Agent metrics.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -82,6 +88,7 @@ case:
   - Agent directory, trends and rankings agree with published metrics and distinguish current metadata from historical usage.
   - Actual child invocations preserve their independent identity and timing through source facts, daily publication and queries with trajectory disabled.
   - Ended-result success metrics follow the confirmed outcome contract across dates and remain idempotent through all existing query surfaces.
+  - Agent Token views match attributed published model usage and provider coverage independently of parent execution and publication timing.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -90,6 +97,7 @@ case:
   - Inflated current totals from published snapshots or lost historical usage for absent catalog entries.
   - An extra child execution or duration sample from terminal replay, or child attribution to its parent's execution ID.
   - A success denominator containing cancelled, ongoing or unknown executions, a guessed timeout, or a mean of daily success rates.
+  - Double-counting child usage under the parent, including unassociated model requests, replacing missing usage with zero, or inheriting Agent publication status for Tokens.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -126,3 +134,8 @@ case:
     steps: [16, 17]
     expected_results: [12]
     forbidden_side_effects: [7]
+  - id: AC-08
+    description: Agent Token queries reuse actual model usage with correct execution attribution and independent publication metadata.
+    steps: [18, 19]
+    expected_results: [13]
+    forbidden_side_effects: [8]

@@ -255,6 +255,53 @@ rate. Normal recomputation of a changed day fills the result counters from
 source facts. Existing historical publications require recomputation before
 their success metrics become available.
 
+## Agent Token usage
+
+Agent summary responses include `tokens` and `token_status` beside `data`.
+Each item in the Agent directory and each day in Agent trends has its own
+`tokens` and `token_status`. Directory and trend responses also include the
+overall `token_status` for the requested scope.
+
+```json
+{
+  "tokens": {
+    "input_tokens": {"value": "130", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75},
+    "output_tokens": {"value": "5", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75},
+    "total_tokens": {"value": "135", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75}
+  },
+  "token_status": {
+    "data_as_of": "2026-11-19T08:00:00+00:00",
+    "coverage_state": "partial",
+    "is_stale": false
+  }
+}
+```
+
+Tokens come from published model request statistics, filtered by tenant,
+initiating groups, optional Agent ID and model request start dates in the Ops
+timezone. A request belongs to the Agent that actually sends it. Child usage
+belongs to the child, and the combined total counts each request once. A row
+needs both an Agent ID and the model reducer's execution association flag.
+Historical attributed usage can appear without a current Agent catalog entry
+or Agent fact, with `is_current=false` and unavailable execution metrics.
+
+The three fields reuse the model monitoring structures. `value` is the decimal
+string sum of known provider usage. An entirely missing field has null `value`,
+zero `known_count`, the actual attributed request count as `eligible_count` and
+zero `coverage_rate`. Reported zero increments the known count. Values are
+independent per field. A covered zero-use selection returns string zero with
+zero known/eligible counts and null reporting coverage. An uncovered selection
+with no published usage returns null Token fields.
+
+`token_status` describes the model publication and collection coverage. Reporting
+coverage remains in each Token field. Pending model revisions and failed model
+batches mark Token data stale independently of Agent publication. Failed batches
+in the requested date range conservatively mark that range's day views stale.
+The normal publication tick clears pending revisions once published. Clicking
+refresh reads these latest published results. Counts and duration keep their
+Agent execution start-day semantics, so their daily window can differ from
+the model request window.
+
 ## Storage and process resources
 
 Both Runtime and ops must see the same `TRAJECTORY_ROOT_DIR`, default

@@ -234,15 +234,16 @@ def model_peer(request):
 
     class ModelPeer(BaseHTTPRequestHandler):
         def do_POST(self):
-            received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            received.append(payload)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
             if not release.wait(20):
                 return
             content = "<final_answer>ops-agent-ready</final_answer>"
-            if getattr(request, "param", None) == "children":
-                model = received[-1]["model"]
+            if getattr(request, "param", None) in {"children", "tokens"}:
+                model = payload["model"]
                 if model == "child-model":
                     content = "<final_answer>child-ready</final_answer>"
                 elif sum(item["model"] == model for item in received) == 1:
@@ -252,6 +253,11 @@ def model_peer(request):
                 "model": "model", "choices": [{"index": 0, "finish_reason": "stop",
                                                "delta": {"content": content}}],
             }
+            if getattr(request, "param", None) == "tokens":
+                ordinal = sum(item["model"] == model for item in received)
+                usage = ({1: (10, 2, 12), 2: (20, 3, 23)} if model == "model" else {1: (100, 0, 100)})
+                if ordinal in usage:
+                    chunk["usage"] = dict(zip(("prompt_tokens", "completion_tokens", "total_tokens"), usage[ordinal]))
             self.wfile.write(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode())
 
     with ThreadingHTTPServer(("127.0.0.1", 0), ModelPeer) as server:
@@ -699,9 +705,9 @@ async def test_mixed_agent_results_merge_across_days_and_replay(isolated_monitor
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model_peer", ["children"], indirect=True)
+@pytest.mark.parametrize("model_peer", ["children", "tokens"], indirect=True)
 async def test_real_parent_and_child_facts_publish_and_replay(
-    isolated_monitoring, model_peer, monkeypatch, record_property,
+    isolated_monitoring, model_peer, monkeypatch, record_property, request,
 ):
     from contracts.constants import environment
     from gateway.authentication import auth
@@ -709,6 +715,7 @@ async def test_real_parent_and_child_facts_publish_and_replay(
     from permissions import rbac
 
     service, tenant = isolated_monitoring
+    token_run = request.node.callspec.params["model_peer"] == "tokens"
     base, requests, release = model_peer
     release.set()
     manager = get_monitoring_manager()
@@ -730,12 +737,15 @@ async def test_real_parent_and_child_facts_publish_and_replay(
         lane: LanePolicy(lane, 2, 4) for lane in ("agent-run", "model-tool-io", "sandbox", "control-io")
     })
     events = []
+    model_events = []
     async with runtime.producer_lifespan():
         sink = get_fact_sink()
 
         def capture(event):
             if event["fact_kind"] == "agent":
                 events.append(dict(event))
+            elif event["fact_kind"] == "model":
+                model_events.append(dict(event))
             sink(event)
 
         set_fact_sink(capture)
@@ -765,7 +775,12 @@ async def test_real_parent_and_child_facts_publish_and_replay(
             assert root["duration_ms"] >= sum(event["duration_ms"] for event in children)
             async with asyncio.timeout(15):
                 while True:
-                    service.tick()
+                    if token_run:
+                        while service.apply_batch(tenant, "agent") or service.apply_batch(tenant, "model"):
+                            pass
+                        service.publish(tenant, "agent")
+                    else:
+                        service.tick()
                     hits = service.es.search(index=f"{FACTS}-*", query=filters(tenant_id=tenant, fact_kind="agent"))
                     sources = {hit["_id"]: hit["_source"] for hit in hits["hits"]["hits"]}
                     if len(sources) == 3 and all(source["record_revision"] == 2 for source in sources.values()):
@@ -780,7 +795,10 @@ async def test_real_parent_and_child_facts_publish_and_replay(
             for event in terminals.values():
                 emit_fact(event)
                 await _wait_for_agent_batch(service, tenant)
-            service.tick()
+            if token_run:
+                service.publish(tenant, "agent")
+            else:
+                service.tick()
             replayed = service.es.search(index=f"{FACTS}-*", query=filters(tenant_id=tenant, fact_kind="agent"))
             assert {hit["_id"]: hit["_source"] for hit in replayed["hits"]["hits"]} == sources
             day = date.fromisoformat(root["started_at"][:10])
@@ -827,7 +845,129 @@ async def test_real_parent_and_child_facts_publish_and_replay(
                 assert summary["data"]["success_rate"] == 1
                 trend = (await client.get("/ops/v1/monitoring/agents/trends", params=params)).json()["data"]
                 assert len(trend) == 1 and all(trend[0][key] == value for key, value in summary["data"].items())
+                if token_run:
+                    evidence = await _verify_real_agent_tokens(client, service, tenant, day, terminals, model_events)
+                    record_property("agent_token_verification", json.dumps(evidence))
             record_property("parent_child_metrics", json.dumps({"agents": expected, "combined": summary}))
         finally:
             await threads.shutdown(timeout=8)
             set_fact_sink(sink)
+
+
+async def _wait_for_model_batch(service, tenant):
+    async with asyncio.timeout(15):
+        while not service.apply_batch(tenant, "model"):
+            await asyncio.sleep(0.05)
+
+
+async def _verify_real_agent_tokens(client, service, tenant, day, agent_ends, model_events):
+    model_ends = [event for event in model_events if event["record_revision"] == 2]
+    assert len(model_events) == 8 and len({event["fact_id"] for event in model_ends}) == 4
+    assert [event["agent_id"] for event in model_ends].count(21) == 2
+    assert [event["agent_id"] for event in model_ends].count(22) == 2
+    root_id, = [event["fact_id"] for event in agent_ends.values() if event["is_root"]]
+    for event in model_ends:
+        assert event["agent_id"] == agent_ends[event["agent_run_id"]]["agent_id"]
+        assert event["root_run_id"] == root_id and event["initiator_group_ids"] == (12, 13)
+    assert sorted(event["total_tokens"] for event in model_ends if event["agent_id"] == 21) == [12, 23]
+    child = [event for event in model_ends if event["agent_id"] == 22]
+    assert sum("total_tokens" in event for event in child) == 1
+    assert next(event for event in child if "total_tokens" in event)["output_tokens"] == 0
+    async with asyncio.timeout(15):
+        while True:
+            while service.apply_batch(tenant, "model"):
+                pass
+            hits = service.es.search(index=f"{FACTS}-*", size=100, query=filters(tenant_id=tenant, fact_kind="model"))
+            sources = {hit["_source"]["fact_id"]: hit["_source"] for hit in hits["hits"]["hits"]}
+            if len(sources) == 4 and all(source["record_revision"] == 2 for source in sources.values()):
+                break
+            await asyncio.sleep(0.1)
+    for event in model_ends:
+        source = sources[event["fact_id"]]
+        assert source["agent_run_id"] == event["agent_run_id"] and source["agent_id"] == event["agent_id"]
+        for field in ("input_tokens", "output_tokens", "total_tokens"):
+            assert source.get(field) == event.get(field)
+    params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "group_ids": [12, 13]}
+    base = "/ops/v1/monitoring/agents"
+
+    async def read(suffix="/summary", **selection):
+        response = await client.get(base + suffix, params={**params, **selection})
+        assert response.status_code == 200
+        return response.json()
+
+    unpublished = await read()
+    assert unpublished["tokens"] == dict.fromkeys(("input_tokens", "output_tokens", "total_tokens"))
+    assert unpublished["token_status"]["coverage_state"] == "uncovered"
+    assert unpublished["token_status"]["is_stale"] and not unpublished["is_stale"]
+    service.publish(tenant, "model")
+    published = await read()
+    assert published["data"] == unpublished["data"] and published["data_as_of"] == unpublished["data_as_of"]
+    assert published["tokens"]["input_tokens"]["value"] == "130"
+    assert published["tokens"]["output_tokens"]["value"] == "5"
+    assert published["tokens"]["total_tokens"] == {
+        "value": "135", "known_count": 3, "eligible_count": 4, "coverage_rate": 0.75,
+    }
+    assert not published["token_status"]["is_stale"]
+    assert published["token_status"]["data_as_of"] != published["data_as_of"]
+    parent_usage = (await read(agent_id=21))["tokens"]["total_tokens"]
+    child_usage = (await read(agent_id=22))["tokens"]["total_tokens"]
+    assert parent_usage == {"value": "35", "known_count": 2, "eligible_count": 2, "coverage_rate": 1.0}
+    assert child_usage == {"value": "100", "known_count": 1, "eligible_count": 2, "coverage_rate": 0.5}
+    with service.publication_snapshot(tenant, "model", day, day) as (states, point):
+        state, = states
+        daily = list(point.documents(filters(tenant_id=tenant, fact_kind="model", publish_id=str(state["publish_id"]))))
+    assert {(row["agent_id"], row["request_count"], row["total_tokens_sum"], row["total_tokens_known_count"])
+            for row in daily} == {(21, 2, 35, 2), (22, 2, 100, 1)}
+    assert all(row["has_agent_run"] for row in daily)
+    for event in model_ends:
+        emit_fact(event)
+    await _wait_for_model_batch(service, tenant)
+    service.publish(tenant, "model")
+    assert await read() == published
+    replay = service.es.search(index=f"{FACTS}-*", size=100, query=filters(tenant_id=tenant, fact_kind="model"))
+    assert {hit["_source"]["fact_id"]: hit["_source"] for hit in replay["hits"]["hits"]} == sources
+    previous = day - timedelta(days=1)
+    anchor = datetime.combine(day, time.min, timezone.utc) - timedelta(milliseconds=100)
+    extras = [dict(model_ends[0], fact_id=uuid4().hex, call_context_id=uuid4().hex,
+                   agent_id=24, agent_run_id=uuid4().hex, root_run_id=uuid4().hex,
+                   started_at=anchor.isoformat(), ended_at=(anchor + timedelta(milliseconds=200)).isoformat(),
+                   duration_ms=200, input_tokens=5, output_tokens=2, total_tokens=7)]
+    for identity in ({"agent_id": None, "agent_run_id": None}, {"agent_id": 21, "agent_run_id": None},
+                     {"agent_id": None, "agent_run_id": uuid4().hex}, {"initiator_group_ids": [99]}):
+        extras.append(dict(model_ends[0], fact_id=uuid4().hex, call_context_id=uuid4().hex,
+                           input_tokens=999, output_tokens=999, total_tokens=1998, **identity))
+    for event in extras:
+        emit_fact(event)
+    await _wait_for_model_batch(service, tenant)
+    while service.apply_batch(tenant, "model"):
+        pass
+    stale = await read(start_date=previous.isoformat())
+    assert stale["tokens"]["total_tokens"]["value"] == "135" and stale["token_status"]["is_stale"]
+    assert stale["data_as_of"] == published["data_as_of"]
+    service.publish(tenant, "model")
+    final = await read(start_date=previous.isoformat())
+    assert final["tokens"]["total_tokens"] == {
+        "value": "142", "known_count": 4, "eligible_count": 5, "coverage_rate": 0.8,
+    }
+    assert not final["token_status"]["is_stale"]
+    assert (await read())["tokens"] == published["tokens"]
+    prior = await read(start_date=previous.isoformat(), end_date=previous.isoformat())
+    assert prior["tokens"]["total_tokens"]["value"] == "7"
+    assert (await read(agent_id=24, start_date=previous.isoformat()))["tokens"] == prior["tokens"]
+    directory = (await read("", start_date=previous.isoformat()))["data"]
+    assert directory["current_agent_count"] == 2 and directory["total"] == 3
+    token_only, = [item for item in directory["items"] if item["agent_id"] == 24]
+    assert token_only["is_current"] is False and token_only["metrics"] is None
+    assert token_only["tokens"]["total_tokens"]["value"] == "7"
+    assert sum(int(item["tokens"]["total_tokens"]["value"]) for item in directory["items"]) == 142
+    trends = (await read("/trends", start_date=previous.isoformat()))["data"]
+    assert [item["tokens"]["total_tokens"]["value"] for item in trends] == ["7", "135"]
+    assert [item["token_status"]["coverage_state"] for item in trends] == ["partial", "covered"]
+    zero = await read(group_ids=[555])
+    assert zero["tokens"]["total_tokens"] == {"value": "0", "known_count": 0, "eligible_count": 0, "coverage_rate": None}
+    assert zero["token_status"]["coverage_state"] == "covered"
+    missing = previous - timedelta(days=1)
+    assert (await read(start_date=missing.isoformat(), end_date=missing.isoformat()))["tokens"]["total_tokens"] is None
+    assert (await client.get(base + "/summary", params=dict(params, tenant_id=tenant + "-other"))).status_code == 403
+    return {"unpublished": unpublished, "published": published, "stale": stale, "final": final,
+            "parent": parent_usage, "child": child_usage, "trends": trends, "zero": zero}

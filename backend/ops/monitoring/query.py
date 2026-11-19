@@ -46,12 +46,13 @@ def _read_published_rows(service, *, tenant, kind, start, end, **criteria):
     return rows, states, published
 
 
-def _publication_status(service, *, kind, start, end, tenants, states, published, write_failed):
+def _publication_status(service, *, kind, start, end, tenants, states, published, write_failed,
+                        coverage_starts=None):
     tenants = tenants | {row["tenant_id"] for row in states}
     whole_days = (end - start).days + 1
     coverage = "uncovered"
     if published:
-        starts = service.store.coverage_starts(tenants, kind)
+        starts = service.store.coverage_starts(tenants, kind) if coverage_starts is None else coverage_starts
         complete = len(published) == whole_days * len(tenants) and all(
             row["tenant_id"] in starts and starts[row["tenant_id"]] <=
             datetime.combine(row["statistic_date"], time.min, tzinfo=service.zone)

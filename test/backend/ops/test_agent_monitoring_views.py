@@ -14,6 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 from gateway.authentication.auth import authenticate
 from ops.api import monitoring
+from ops.monitoring.agent_tokens import AgentTokenUsage
 from ops.monitoring import query
 from permissions import rbac
 from permissions.models import CurrentUser
@@ -150,6 +151,7 @@ def view_app(monkeypatch):
     items += [{"tenant_id": "a", "agent_id": 9, "name": "unknown", "metrics": None}]
     reader = Mock(return_value=(items, 9, [], {"coverage_state": "covered", "is_stale": False, "data_as_of": None}))
     monkeypatch.setattr(monitoring, "read_agent_views", reader)
+    monkeypatch.setattr(monitoring, "read_agent_tokens", Mock(return_value=AgentTokenUsage({}, {}, {}, {})))
     return app, reader
 
 

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from contracts.constants.environment import JWT_SECRET
 from management.services.permission.identity.session import authenticate
+from ops.monitoring.agent_tokens import read_agent_tokens
 from ops.monitoring.model import summarize
 from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_agent_views, read_agents, read_models
 from permissions.models import CurrentUser
@@ -151,20 +152,34 @@ def agent_summary(request: Request, scope: Annotated[AgentSelection, Depends(age
     try:
         values, status = read_agents(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
                                      groups=scope.group_ids, agent_id=scope.agent_id)
+        token_usage = read_agent_tokens(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
+                                        groups=scope.group_ids, agent_id=scope.agent_id)
     except Exception as error:
         logger.warning("Agent monitoring query failed error=%s", type(error).__name__)
         raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
-    return {"data": values, **status}
+    return {"data": values, **status, "tokens": token_usage.tokens, "token_status": token_usage.status}
 
 
-def _read_agent_views(request, scope, user):
+def _read_agent_views(request, scope, user, *, include_tokens=True):
     tenant = operations_scope(user, scope.tenant_id)
     service = getattr(request.app.state, "monitoring", None)
     if service is None:
         raise HTTPException(503, "Agent monitoring is unavailable")
     try:
-        return read_agent_views(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
-                                groups=scope.group_ids, agent_id=scope.agent_id)
+        items, current_count, history, status = read_agent_views(
+            service, tenant=tenant, start=scope.start_date, end=scope.end_date,
+            groups=scope.group_ids, agent_id=scope.agent_id,
+        )
+        if not include_tokens:
+            return items, current_count, history, status
+        resources = {(item["tenant_id"], item["agent_id"]): dict(item) for item in items}
+        token_usage = read_agent_tokens(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
+                                        groups=scope.group_ids, agent_id=scope.agent_id, identities=resources)
+        for key, usage in token_usage.agents.items():
+            resources.setdefault(key, {"tenant_id": key[0], "agent_id": key[1], "is_current": False, "metrics": None})
+            resources[key].update(usage)
+        history = [{**row, **token_usage.days[row["statistic_date"]]} for row in history]
+        return list(resources.values()), current_count, history, {**status, "token_status": token_usage.status}
     except Exception as error:
         logger.warning("Agent monitoring view failed error=%s", type(error).__name__)
         raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
@@ -203,7 +218,7 @@ def agent_trends(request: Request, scope: Annotated[AgentSelection, Depends(agen
 @ops_router.get("/agents/rankings", tags=["agent monitoring"])
 def agent_rankings(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
                    user: Annotated[CurrentUser, Depends(authenticate)]):
-    items, _, _, status = _read_agent_views(request, scope, user)
+    items, _, _, status = _read_agent_views(request, scope, user, include_tokens=False)
     ordered = _agent_items(items, "execution_count")
     return {"data": [item for item in ordered if metric_value(item, "execution_count") is not None][:5], **status}
 
