@@ -98,6 +98,9 @@ class AgentOSClient:
     async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME, request, user_id, tenant_id)
 
+    async def acknowledge_projection(self, request: AgentRunReference, user_id: str, tenant_id: str) -> None:
+        await self._post_json(AgentOperation.ACKNOWLEDGE_PROJECTION, request, user_id, tenant_id)
+
     async def resume_legacy(self, request: AgentLegacyResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME_LEGACY, request, user_id, tenant_id)
 

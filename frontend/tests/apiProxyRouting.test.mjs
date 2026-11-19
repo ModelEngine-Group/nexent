@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
@@ -7,28 +8,81 @@ import vm from "node:vm";
 // Exercise the production handler without starting Next.js or opening sockets.
 const source = readFileSync(new URL("../server.js", import.meta.url), "utf8");
 
-test("session and OAuth cookies require secure transport when set or cleared", () => {
-  const context = vm.createContext({
-    BASE_PATH: "/nexent",
-    process: { env: { NODE_ENV: "production" } },
-    cookie: { serialize: (name, value, options) => ({ name, value, ...options }) },
-  });
-  const cookieStart = source.indexOf("const COOKIE_NAMES");
-  const cookieEnd = source.indexOf("function getPreferredLocale", cookieStart);
-  vm.runInContext(source.slice(cookieStart, cookieEnd), context);
-  let cookies = [];
-  const response = {
-    getHeader: () => cookies,
-    setHeader: (_name, value) => { cookies = value; },
-  };
-  context.setAuthCookies(response, { access_token: "access", refresh_token: "refresh" });
-  context.setPendingOAuthCookie(response, "pending");
-  assert.equal(cookies.length, 3);
-  assert.ok(cookies.every((entry) => entry.secure && entry.httpOnly));
+for (const [setting, secure] of [[undefined, true], ["true", true], ["false", false], ["invalid", true]]) {
+  test(`session and OAuth cookies use the configured transport (${setting})`, () => {
+    const context = vm.createContext({
+      BASE_PATH: "/nexent",
+      process: { env: { NODE_ENV: "production", NEXENT_AUTH_COOKIE_SECURE: setting } },
+      cookie: { serialize: (name, value, options) => ({ name, value, ...options }) },
+    });
+    const cookieStart = source.indexOf("const COOKIE_NAMES");
+    const cookieEnd = source.indexOf("function getPreferredLocale", cookieStart);
+    vm.runInContext(source.slice(cookieStart, cookieEnd), context);
+    let cookies = [];
+    const response = {
+      getHeader: () => cookies,
+      setHeader: (_name, value) => { cookies = value; },
+    };
+    context.setAuthCookies(response, { access_token: "access", refresh_token: "refresh", expires_at: 42 });
+    context.setPendingOAuthCookie(response, "pending");
+    assert.equal(cookies.length, 4);
+    assert.ok(cookies.every((entry) => entry.secure === secure && entry.sameSite === "lax"));
+    assert.ok(cookies.every((entry) => entry.httpOnly === (entry.name !== "nexent_token_expires_at")));
 
-  context.clearAuthCookies(response);
-  context.clearPendingOAuthCookie(response);
-  assert.ok(cookies.every((entry) => entry.secure && entry.maxAge === 0 && entry.path === "/nexent"));
+    context.clearAuthCookies(response);
+    context.clearPendingOAuthCookie(response);
+    assert.ok(cookies.every((entry) => entry.secure === secure && entry.maxAge === 0 && entry.path === "/nexent"));
+
+    cookies = [];
+    context.setAuthCookies(response, { access_token: "access" });
+    assert.equal(cookies[1].name, "nexent_refresh_token");
+    assert.equal(cookies[1].secure, secure);
+    assert.equal(cookies[1].maxAge, 0);
+  });
+}
+
+test("auth proxy replaces chunked encoding with the buffered response length", async () => {
+  const payload = Buffer.from(JSON.stringify({ data: { has_pending: true } }));
+  const upstream = Object.assign(new EventEmitter(), {
+    statusCode: 200,
+    headers: { "transfer-encoding": "chunked", "content-type": "application/json" },
+  });
+  const context = vm.createContext({
+    Buffer,
+    URL,
+    COOKIE_NAMES: { ACCESS_TOKEN: "access", OAUTH_PENDING: "pending" },
+    collectRequestBody: async () => Buffer.alloc(0),
+    prepareAuthRequestBody: (_path, body) => body,
+    parseCookies: () => ({}),
+    http: {
+      request: (_options, receive) => Object.assign(new EventEmitter(), {
+        write() {},
+        end() {
+          receive(upstream);
+          upstream.emit("data", payload);
+          upstream.emit("end");
+        },
+      }),
+    },
+  });
+  const start = source.indexOf("function forwardAuthRequest(");
+  const end = source.indexOf("\n}\n", start) + 2;
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(source.slice(start, end), context);
+
+  let responseHeaders;
+  const body = await new Promise((resolve) => {
+    context.forwardAuthRequest({
+      method: "GET", url: "/api/user/oauth/pending", parsedPathname: "/api/user/oauth/pending", headers: {},
+    }, {
+      getHeader: () => undefined,
+      writeHead: (_status, headers) => { responseHeaders = headers; },
+      end: resolve,
+    }, "http://management:5010");
+  });
+  assert.equal(responseHeaders["transfer-encoding"], undefined);
+  assert.equal(responseHeaders["content-length"], String(payload.length));
+  assert.deepEqual(body, payload);
 });
 
 const start = source.indexOf("function handleAllApiProxy(");

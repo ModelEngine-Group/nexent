@@ -43,7 +43,7 @@ def flow(mocker):
     ))
     client = SimpleNamespace(start_prepared_run=AsyncMock(return_value=REFERENCE), inspect_run=AsyncMock(
         return_value=SimpleNamespace(**REFERENCE.model_dump(), status="running", latest_event_id=REFERENCE.run_id + ":1"),
-    ), resume=AsyncMock())
+    ), resume=AsyncMock(), acknowledge_projection=AsyncMock())
     return SimpleNamespace(**locals())
 
 

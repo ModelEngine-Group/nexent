@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Replay a signed Runtime journal into Management-owned assistant history."""
 
+import asyncio
 import json
 import logging
 from contextlib import aclosing
@@ -10,7 +11,7 @@ import httpx
 
 from contracts.agentos import AgentResume, AgentRunReference, HistoryCheckpointCandidate
 from contracts.conversation import MessageSource
-from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.db.conversation.repository import persist_prepared_assistant_projection
 from management.services.agent.agentos_events import iter_sse_frames
 from management.services.agent.artifacts import is_run_output_object, transform_skill_files_to_standard_format
@@ -27,6 +28,15 @@ class ProjectedRun:
     assistant_message_id: int
     status: str
     chunks: int
+
+
+async def acknowledge_projection(client, reference, user_id, tenant_id):
+    """Release extended replay retention after the projection receipt is committed."""
+    try:
+        async with asyncio.timeout(2):
+            await client.acknowledge_projection(reference, user_id, tenant_id)
+    except (TimeoutError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError) as exc:
+        logger.warning("Deferred projection journal cleanup run_id=%s error=%s", reference.run_id, type(exc).__name__)
 
 
 async def _frames(response):

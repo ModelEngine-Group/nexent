@@ -26,7 +26,10 @@ def automation(mocker):
         "started_at": datetime.now(timezone.utc),
     }
     task = {**run, "agent_id": 2, "instruction": "question", "status": "ACTIVE"}
-    client = SimpleNamespace(start_prepared_run=AsyncMock(return_value=REFERENCE), inspect_run=AsyncMock())
+    client = SimpleNamespace(
+        start_prepared_run=AsyncMock(return_value=REFERENCE), inspect_run=AsyncMock(),
+        acknowledge_projection=AsyncMock(),
+    )
     mocker.patch.object(runner, "_agentos_client", return_value=client)
 
     async def inline(_task, function, *args, lane, owner, **kwargs):

@@ -77,6 +77,7 @@ class AgentOperation(str, Enum):
     RUN_EPHEMERAL = NAMESPACE + "v1/agent/run-ephemeral"
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
     RESUME = NAMESPACE + "v1/agent/resume"
+    ACKNOWLEDGE_PROJECTION = NAMESPACE + "v1/agent/acknowledge-projection"
     RESUME_LEGACY = NAMESPACE + "v1/agent/resume-legacy"
     INSPECT = NAMESPACE + "v1/agent/inspect"
     STOP = NAMESPACE + "v1/agent/stop"

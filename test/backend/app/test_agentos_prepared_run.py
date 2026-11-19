@@ -92,7 +92,7 @@ async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch
     response = await prepared_run.start_prepared_run(payload, ACTOR)
     assert response == AgentRunReference(conversation_id=42, run_id=RUN_ID)
     await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
-    runtime.journal.assert_called_once_with("tenant", "actor", 42, RUN_ID)
+    runtime.journal.assert_called_once_with("tenant", "actor", 42, RUN_ID, retain_for_projection=True)
     journal = runtime.journal.return_value
     assert [item.args for item in journal.append.call_args_list] == [
         (1, 'event: agentos_observer\ndata: {"type":"thought","content":"step"}\n\n'),

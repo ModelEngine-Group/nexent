@@ -16,7 +16,7 @@ from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServi
 from management.db.automation import repository as agent_automation_db
 from management.db.conversation.repository import get_prepared_projection_receipt
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
-from management.services.agent.prepared_projection import ProjectedRun, resume_assistant_projection
+from management.services.agent.prepared_projection import ProjectedRun, acknowledge_projection, resume_assistant_projection
 from management.services.agent.runtime_client import (
     _agentos_client, forward_active_run, forward_scoped_stop, forward_tracked_background,
 )
@@ -256,16 +256,19 @@ class AgentAutomationRunner:
             user_id=run["user_id"], tenant_id=run["tenant_id"], lane="control-io", owner="management",
         )
         if receipt is not None:
-            return ProjectedRun(receipt[0], receipt[1], 0)
-        memory_scope = {}
-        if run.get("projection_memory_agent_id") is not None:
-            memory_scope = {
-                "memory_agent_id": run["projection_memory_agent_id"], "memory_source_message_id": run["user_message_id"],
-            }
-        return await resume_assistant_projection(
-            client.resume, reference, run["user_id"], run["tenant_id"],
-            message_index=run["projection_message_index"], message_source=MessageSource.AUTOMATION, **memory_scope,
-        )
+            projected = ProjectedRun(receipt[0], receipt[1], 0)
+        else:
+            memory_scope = {}
+            if run.get("projection_memory_agent_id") is not None:
+                memory_scope = {
+                    "memory_agent_id": run["projection_memory_agent_id"], "memory_source_message_id": run["user_message_id"],
+                }
+            projected = await resume_assistant_projection(
+                client.resume, reference, run["user_id"], run["tenant_id"],
+                message_index=run["projection_message_index"], message_source=MessageSource.AUTOMATION, **memory_scope,
+            )
+        await acknowledge_projection(client, reference, run["user_id"], run["tenant_id"])
+        return projected
 
     async def recover_prepared_run(self, run: dict) -> None:
         if run["run_id"] in self._local_runs:

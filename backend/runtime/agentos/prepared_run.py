@@ -214,7 +214,9 @@ async def _start_journal(identity):
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_EXECUTION_STORE_UNAVAILABLE"}) from exc
 
     track_execution(identity)
-    journal = RunJournal(identity.tenant_id, identity.user_id, identity.conversation_id, identity.run_id)
+    journal = RunJournal(
+        identity.tenant_id, identity.user_id, identity.conversation_id, identity.run_id, retain_for_projection=True,
+    )
     try:
         await _control_io("agentos-prepared-journal", journal.start)
     except (RedisError, RuntimeError) as exc:

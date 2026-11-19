@@ -27,7 +27,7 @@ from management.db.conversation.repository import get_conversation, get_prepared
 from management.services.agent.agentos_events import knowledge_scope_event_content, present_legacy_journal, present_public_resume
 from management.services.agent.context import strip_current_time_prefix
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
-from management.services.agent.prepared_projection import resume_assistant_projection
+from management.services.agent.prepared_projection import acknowledge_projection, resume_assistant_projection
 from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
@@ -452,6 +452,7 @@ async def _finish_projection(turn, client):
             client.resume, reference, turn.user_id, turn.tenant_id, message_index=turn.message_index,
             message_source=source, assistant_message_id=turn.assistant_message_id, **memory_scope,
         )
+    await acknowledge_projection(client, reference, turn.user_id, turn.tenant_id)
     await _io("prepared-turn-finished", store.close_turn, turn)
 
 

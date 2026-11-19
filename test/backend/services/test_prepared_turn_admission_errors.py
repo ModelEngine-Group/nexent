@@ -139,6 +139,10 @@ async def test_terminal_projection_only_closes_the_bound_assistant(flow, mocker,
         )
     else:
         project.assert_not_awaited()
+    if case == "wrong-message":
+        runtime.acknowledge_projection.assert_not_awaited()
+    else:
+        runtime.acknowledge_projection.assert_awaited_once_with(REFERENCE, *ACTOR)
 
 
 @pytest.mark.parametrize("requested", ["workbench", "native"])

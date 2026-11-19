@@ -29,6 +29,8 @@ Gateway 验证外部身份并路由请求。Management 检查资源权限、用�
 
 `AgentResume.after_event_id` 使用 `<run_id>:<sequence>` 格式。Management 应保留 Last-Event-ID 对应关系和已投影位置。SSE 断开后运行可以继续，重连只订阅已有运行。HITL 当前会结束原运行，用户补充内容后创建下一次 run，不能把 SSE resume 当作 HITL 继续执行。
 
+Runtime 为待保存的 AgentOS 会话保留从起始标记开始的完整日志，长度可以超过 `RUNTIME_STREAM_MAX_LEN`。日志在每次写入时续期，终态后仍使用 `RUNTIME_STREAM_TTL_SECONDS`（默认 24 小时）供后台恢复。Management 提交消息和回执后，通过签名的 `Agent.acknowledge-projection` 将该日志的剩余保留时间缩短到常规终态窗口，窗口内还能继续重放。
+
 ## 资源快照
 
 | 类型 | 内容 | 所有者 |
