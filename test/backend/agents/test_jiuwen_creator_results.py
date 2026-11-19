@@ -46,7 +46,9 @@ def test_successful_workflow_carriers_publish_the_same_card(carrier):
     adapter._resource_result(carrier(CARD))
     cards = [event for event in drain(observer) if event["type"] == "nl2a"]
     assert len(cards) == 1 and json.loads(cards[0]["content"])["agent_id"] == 42
-    assert observer.boundary_reached and stop.is_set()
+    assert observer.boundary_reached and observer.turn_complete
+    # A delivered interaction ends this turn without cancelling its producer.
+    assert not stop.is_set()
 
 
 def test_native_mcp_draft_state_is_published_without_ending_the_turn():

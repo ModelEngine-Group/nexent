@@ -7,7 +7,7 @@ import sys
 import time
 
 import httpx
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
 from management.services.permission.identity.authentication_helpers import generate_session_jwt
 

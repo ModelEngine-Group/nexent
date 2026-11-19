@@ -9,13 +9,11 @@ trap 'rm -f -- "$EVENT_LOG"; rmdir -- "$TEST_TMP"' EXIT
 export EVENT_LOG
 
 mock_account_command() {
-  [ "${MSYS_NO_PATHCONV:-}" = 1 ] || { echo "Container path conversion is enabled" >&2; return 10; }
-  [ "${MSYS2_ARG_CONV_EXCL:-}" = '*' ] || { echo "MSYS argument conversion is enabled" >&2; return 11; }
   if [ -n "${NEXENT_NATIVE_PATH_PROBE:-}" ]; then
-    "$NEXENT_NATIVE_PATH_PROBE" -c 'import sys; assert "/opt/backend/account_admin.py" in sys.argv[1:], sys.argv[1:]' "$@" || return 12
+    "$NEXENT_NATIVE_PATH_PROBE" -c 'import sys; args = sys.argv[1:]; i = args.index("python"); assert args[i:i+4] == ["python", "-m", "management.cli.account", "bootstrap-su"], args' "$@" || return 12
   fi
   case "$*" in
-    *"/opt/backend/account_admin.py bootstrap-su"*) ;;
+    *"python -m management.cli.account bootstrap-su"*) ;;
     *) echo "Unexpected bootstrap command" >&2; return 9 ;;
   esac
   case "$*" in

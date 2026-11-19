@@ -81,7 +81,7 @@ def _coalesce(*vals: Any) -> Any:
     """Return the first non-``None`` value, or ``None`` if all are ``None``.
 
     Unlike ``a or b``, this preserves falsy-but-valid values such as
-    ``temperature=0`` or ``top_p=0`` — an explicit ``0`` must reach the
+    ``temperature=0`` — an explicit temperature of ``0`` must reach the
     adapter rather than being silently replaced by the cfg/default fallback.
     """
     for v in vals:

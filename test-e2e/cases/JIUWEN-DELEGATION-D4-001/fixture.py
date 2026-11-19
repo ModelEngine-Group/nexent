@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import httpx
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord
 
 

@@ -9,7 +9,7 @@ case:
   title: section optimize：选择范围、feedback、mode、资源上下文｜核心流程
   type: AGENT-IT
   priority: P1
-  status: active
+  status: retired
   automation: automated
   objective: section optimize：选择范围、feedback、mode、资源上下文｜核心流程
   preconditions:

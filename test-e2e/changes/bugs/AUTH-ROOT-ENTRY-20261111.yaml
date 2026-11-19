@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-ROOT-ENTRY-20261111
+  change_type: bugfix
+  bug_id: AUTH-ROOT-ENTRY-20261111
+  title: Allow the root entry to resolve an authorized destination
+  description: Keep the root path available while the homepage selects an authorized default route.
+  observed_behavior: An OPS_ADMIN with only /system-config permission sees a permission-denied dialog before the homepage can redirect to system-config.
+  expected_behavior: The root entry does not trigger a denial dialog; the homepage resolves /system-config, while other unauthorized routes remain guarded.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Default-entry tests cover section ordering but do not cover an account whose only granted route is not the root path.
+  feature_contract_changed: false
+  affected_features:
+    existing: [NAV-MENU-VISIBILITY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    - frontend/tests/component/homepageRedirect.test.tsx
+    behaviors:
+    - Allow the root entry to resolve an authorized default destination without opening a denial dialog.
+    - Preserve route denial for unauthorized non-root paths and existing authorization recovery behavior.
+    reason: Root-entry coordination uses the real AuthorizationProvider and Homepage components; no new formal Case is needed.
+  notes: Reuses AUTH-DEFAULT-ENTRY-20261019 and AUTH-SECTION-ENTRY-20261111 contracts. No permission grant or formal Case contract changes.

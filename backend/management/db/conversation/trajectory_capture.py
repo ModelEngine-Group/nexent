@@ -4,7 +4,7 @@
 from contextlib import contextmanager
 
 from contracts.errors.trajectory import QueryError
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation.models import ConversationMessage, ConversationRecord
 from management.db.identity.models import UserAccount, UserTenant
 from sqlalchemy import text

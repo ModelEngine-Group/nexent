@@ -12,6 +12,7 @@ import nexent.core.agent_names  # noqa: F401 - Load before dependency namespace 
 
 # Load the real compatibility helpers before this fixture replaces SDK model packages.
 import nexent.core.model_service.compatibility.legacy_config
+from test.backend.configuration.helpers import system_config_snapshot
 
 from test.common.test_mocks import bootstrap_test_env
 
@@ -175,7 +176,7 @@ utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.services.agent.context'] = utils_mock.context_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -193,11 +194,12 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = _create_stub_module(
-    "management.db.client",
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = _create_stub_module(
+    "infrastructure.rdb.client",
     minio_client=MagicMock(),
     postgres_client=MagicMock(),
     db_client=MagicMock(),
@@ -205,9 +207,9 @@ sys.modules['management.db.client'] = _create_stub_module(
     as_dict=MagicMock(),
 )
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock external dependencies before imports
 mock_message_observer = MagicMock()
@@ -314,7 +316,7 @@ sys.modules['management.services.knowledge_base.service'].ElasticSearchService.f
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['management.services.agent.prompt'] = MagicMock()
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
-sys.modules['infrastructure.http.client'] = MagicMock()
+sys.modules['backend.http.client'] = MagicMock()
 sys.modules['management.services.tool.langchain'] = MagicMock()
 sys.modules['management.services.model.names'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
@@ -548,9 +550,9 @@ _utils_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "utils")]
 sys.modules["utils"] = _utils_pkg
 
 # Mock all utils submodules that create_agent_info.py imports
-_redis_utils_mod = _create_stub_module("infrastructure.redis")
+_redis_utils_mod = _create_stub_module("infrastructure.redis.client")
 _redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
-sys.modules["infrastructure.redis"] = _redis_utils_mod
+sys.modules["infrastructure.redis.client"] = _redis_utils_mod
 setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
 
 _model_name_utils_mod = _create_stub_module("management.services.model.names")
@@ -623,6 +625,16 @@ from management.services.agent.resource_resolver import _resolve_runtime_tool_re
 from management.services.model.run_budget import _resolve_input_budget
 from management.services.model.run_budget import _resolve_context_budget
 from management.services.agent.preparation.compiler import _get_external_provider_service_for_search
+
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    for module in (preparation_compiler, run_preparation, model_bindings):
+        monkeypatch.setattr(
+            module,
+            "get_config_snapshot",
+            lambda: system_config_snapshot(),
+        )
 
 
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
@@ -2578,7 +2590,8 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("protocol_repair", [False, True])
-    async def test_create_agent_config_basic(self, protocol_repair):
+    @pytest.mark.parametrize("parallel_timeout", [240, 0.25])
+    async def test_create_agent_config_basic(self, protocol_repair, parallel_timeout):
         """UT-BE-DPR-010: basic agent keeps parallel tool's bilingual metadata."""
         # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
@@ -2595,7 +2608,7 @@ class TestCreateAgentConfig:
                 patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
                 patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('management.services.agent.preparation.compiler.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS', 240):
+                patch('management.services.agent.preparation.compiler.get_config_snapshot', return_value=system_config_snapshot(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS=parallel_timeout)):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2662,8 +2675,8 @@ class TestCreateAgentConfig:
             assert pe_calls[0][1]["source"] == "local"
             assert pe_calls[0][1]["description_zh"] == _mock_parallel_executor_tool_cls.description_zh
             assert pe_calls[0][1]["description"] == _mock_parallel_executor_tool_cls.description
-            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": 240}
-            assert '"default": 240' in pe_calls[0][1]["inputs"]
+            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": parallel_timeout}
+            assert f'"default": {parallel_timeout}' in pe_calls[0][1]["inputs"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):

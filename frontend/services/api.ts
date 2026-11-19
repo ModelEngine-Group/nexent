@@ -19,8 +19,15 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  systemConfigurations: `${API_BASE_URL}/system_configurations`,
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
+    importArchive: `${API_BASE_URL}/trajectory/import`,
+    imports: `${API_BASE_URL}/trajectory/imports`,
+    savedImport: (id: string) =>
+      `${API_BASE_URL}/trajectory/imports/${encodeURIComponent(id)}`,
+    exportArchive: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/export`,
     conversation: (id: string) =>
       `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}`,
     snapshot: (id: string) =>
@@ -204,10 +211,6 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
     updateLabels: `${API_BASE_URL}/tool/labels`,
-  },
-  prompt: {
-    optimize: `${API_BASE_URL}/prompt/optimize`,
-    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
@@ -823,7 +826,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
-      if (params?.lang) queryParams.append("lang", (params as any).lang);
+      if (params?.lang) queryParams.append("lang", params.lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
@@ -972,7 +975,11 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
-          errorDetails = errorDetail.details;
+          errorDetails =
+            errorDetail.details ??
+            (typeof errorDetail.field === "string"
+              ? { field: errorDetail.field }
+              : undefined);
         } else if (Array.isArray(errorData?.detail)) {
           errorMessage = "Validation failed";
           errorDetails = {

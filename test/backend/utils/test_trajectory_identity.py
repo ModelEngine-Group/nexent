@@ -2,7 +2,7 @@
 """Unavailable framework identity must not become an invented parent invocation."""
 
 import pytest
-from infrastructure.observability.trajectory_identity import (
+from infrastructure.trace.trajectory_identity import (
     INVOCATION,
     PARENT_INVOCATION,
     invocation_attributes,

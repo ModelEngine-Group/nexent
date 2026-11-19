@@ -52,7 +52,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceRequirement,
 )
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +70,10 @@ def shared_creator_definition(mocker):
         'agent_id': 77, 'version_no': 0, 'agent_origin': 'SYSTEM', 'max_steps': 8,
         'prompt': json.dumps({lang: build_nl2agent_system_prompt(lang) for lang in ('zh', 'en')}),
     })
+    mocker.patch(
+        'services.nl2agent_service.get_config_snapshot',
+        return_value={'MCP_REQUEST_TIMEOUT_SECONDS': 10},
+    )
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
@@ -136,7 +140,8 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     )
 
     messages = [json.loads(item) for item in observer.get_cached_message()]
-    assert stop_event.is_set()
+    assert not stop_event.is_set()
+    assert observer.turn_complete is True
     assert observer.boundary_reached is True
     assert [item["type"] for item in messages] == [
         ProcessType.NL2A.value,

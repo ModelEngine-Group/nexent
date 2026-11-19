@@ -45,6 +45,9 @@ fake_compose() {
   return "$FAIL_COMPOSE"
 }
 docker_compose_command=fake_compose
+    prepare_core_service_deployment() { return 0; }
+    stop_old_business_services() { return 0; }
+    publish_shared_workbench() { return 0; }
 '''
     harness += '\n' + function.group(0) + '\nFAIL_COMPOSE="$5"\ndeploy_core_services\n'
     for components, policy, suffix, failure in [
@@ -66,7 +69,7 @@ docker_compose_command=fake_compose
             assert args[:8] == [
                 '--env-file', '/controlled/env', '-p', 'nexent', '-f',
                 f'/controlled/compose/docker-compose{suffix}', 'up', '-d',
-            ]
+            ], result.stdout + result.stderr
             assert 'nexent-ops' in args[8:]
             assert 'nexent-runtime' in args[8:]
             assert 'nexent-elasticsearch' not in args[8:]
@@ -103,6 +106,7 @@ deployment_render_helm_chart_values
         assert result.returncode == 0, result.stderr
         values = yaml.safe_load(result.stdout)
         values['global'] = {'namespace': 'ops-proof', 'rolloutChecksums': {'backendImage': 'image-rev-1'}}
+        values.setdefault('nexent-common', {}).setdefault('secrets', {})['jwtSecret'] = 'controlled-fixture'
         values_path.write_text(yaml.safe_dump(values), encoding='utf-8')
         rendered = subprocess.run(
             [helm, 'template', 'ops-proof', str(chart), '-f', str(values_path)],
@@ -141,6 +145,16 @@ deployment_render_helm_chart_values
             assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
                 'name': 'nexent-env', 'key': name, 'optional': True,
             }
+        for name in (
+            'POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_DB', 'POSTGRES_PORT',
+            'NEXENT_POSTGRES_PASSWORD', 'REDIS_URL', 'JWT_SECRET',
+        ):
+            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
+                'name': 'nexent-env', 'key': name,
+            }
+        assert next(env for env in container['env'] if env['name'] == 'JWT_ISSUER')['valueFrom']['secretKeyRef'] == {
+            'name': 'nexent-env', 'key': 'JWT_ISSUER', 'optional': True,
+        }
         assert container['ports'] == [{'name': 'http', 'containerPort': 15016}]
         assert container['startupProbe']['httpGet'] == {'path': '/health/live', 'port': 'http'}
         assert container['livenessProbe']['httpGet'] == {'path': '/health/live', 'port': 'http'}

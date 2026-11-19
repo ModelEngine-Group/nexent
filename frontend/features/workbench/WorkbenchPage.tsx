@@ -24,6 +24,7 @@ import type {
   Nl2SkillStreamEvent,
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
+import { useWorkbenchComposerDraft } from "./hooks/useWorkbenchComposerDraft";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
 import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pins";
 import {
@@ -105,8 +106,11 @@ type CreatedAgentResult = {
 };
 
 export default function WorkbenchPage() {
+  const { user } = useAuthorizationContext();
   return (
-    <Nl2AgentFlowProvider>
+    <Nl2AgentFlowProvider
+      draftScope={user ? JSON.stringify([user.tenantId, user.id]) : undefined}
+    >
       <WorkbenchSessionProvider>
         <HomeContent />
       </WorkbenchSessionProvider>
@@ -369,6 +373,16 @@ const HomeContent: FC = () => {
   const numericConversationId = Number(activeConversationId);
   const isPersistedConversation =
     Number.isInteger(numericConversationId) && numericConversationId > 0;
+  const composerDraft = useWorkbenchComposerDraft({
+    runtime,
+    identity: user ? JSON.stringify([user.tenantId, user.id]) : undefined,
+    threadId: activeThreadId,
+    conversationId: isPersistedConversation ? activeConversationId : undefined,
+    enabled: ready && workbenchState.config.mode === "generic_chat" && !workbenchState.resolving,
+    isRunning: isThreadRunning,
+    mode: chatMode,
+    setMode: setChatMode,
+  });
   const localSnapshot =
     activeThreadId && !isPersistedConversation
       ? localThreadSnapshots.get(activeThreadId)
@@ -1143,6 +1157,7 @@ const HomeContent: FC = () => {
         ? {
             workbenchConfig: effectiveWorkbenchConfig,
             workbenchConfigVersion: workbenchState.configVersion,
+            onMessageAccepted: composerDraft.acknowledge,
           }
         : {}),
       ...(activeThreadId
@@ -1167,6 +1182,7 @@ const HomeContent: FC = () => {
     activeConversationId,
     activeThreadId,
     chatMode,
+    composerDraft.acknowledge,
     handleNl2AgentState,
     handleNl2SkillEvent,
     resetNl2AgentFlow,

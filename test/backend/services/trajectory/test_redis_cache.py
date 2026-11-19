@@ -138,7 +138,7 @@ def test_runtime_constructor_failure_closes_owned_redis_client(mocker):
         return_value=(client, Mock(), Mock()),
     )
     mocker.patch(
-        "infrastructure.observability.trajectory_store.TrajectoryFileStore",
+        "infrastructure.trace.trajectory_store.TrajectoryFileStore",
         side_effect=ValueError("private path"),
     )
     with pytest.raises(QueryError, match="trajectory_configuration_invalid"):

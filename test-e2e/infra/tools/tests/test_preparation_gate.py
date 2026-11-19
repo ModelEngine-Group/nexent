@@ -64,9 +64,17 @@ def test_offline_d1_and_preimplementation_design_do_not_require_declarations(tmp
 
 
 @pytest.mark.parametrize("preparation", [{}, {"families": ["unknown-factory"]}, {"families": "none"}])
-def test_malformed_preparation_stays_fatal(tmp_path, preparation):
+def test_malformed_preparation_fails_validation_and_blocks_its_case(tmp_path, preparation):
     issues, registry = inspect_case(tmp_path, "D5", preparation)
-    assert issues and not report(tmp_path, issues, registry["cases"])["ready"]
+    assert len(issues) == 1 and issues[0].code == "CASE_EXECUTION_INVALID"
+    cid = registry["cases"][0]["case_id"]
+    assert issues[0].location == "preparation" and issues[0].case_id == cid
+    records = registry["cases"] + [{"case_id": "OTHER-SMOKE-D1-001", "execution": {"test": True}}]
+    validation = report(tmp_path, issues, records)
+    assert validation["ready"] and validation["blocked_cases"] == [cid]
+    selected = apply_blocks(records, validation)
+    assert selected[0]["asset_blocked"] and selected[0]["execution"] is None
+    assert selected[1] == records[1] and registry["cases"][0]["execution"]
 
 
 def test_ops_declares_no_shared_factories_or_services():

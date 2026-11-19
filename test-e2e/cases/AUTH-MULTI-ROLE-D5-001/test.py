@@ -11,7 +11,7 @@ def test_concurrent_admin_invariants_and_invite_capacity(role_runtime, caplog):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
     from fastapi.testclient import TestClient
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.roles import active_admin_count
 
     r = role_runtime

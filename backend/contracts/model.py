@@ -6,9 +6,9 @@ import math
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 from enum import Enum
 
 
@@ -205,6 +205,15 @@ class ModelResponse(BaseModel):
     data: Any
 
 
+def _reject_boolean_sampling(value: object) -> object:
+    if isinstance(value, bool):
+        raise ValueError("Sampling parameters must be numeric")
+    return value
+
+
+_LegacySamplingNumber = Annotated[float, BeforeValidator(_reject_boolean_sampling)]
+
+
 class ModelRequest(BaseModel):
     model_factory: Optional[str] = "OpenAI-API-Compatible"
     model_name: str
@@ -232,8 +241,8 @@ class ModelRequest(BaseModel):
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
     # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
+    temperature: Optional[_LegacySamplingNumber] = Field(default=None, ge=0, le=2)
+    top_p: Optional[_LegacySamplingNumber] = Field(default=None, gt=0, le=1)
     # v2.6.0 fixed inference params without dedicated columns (key-value pairs
     # constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.
     extra_params: Optional[Dict[str, Any]] = None
@@ -505,11 +514,11 @@ class _ManageTenantModelCommonFields(BaseModel):
         None, description="Version of the approved capability profile"
     )
     # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
-    temperature: Optional[float] = Field(
-        None, description="Default sampling temperature for LLM/VLM models"
+    temperature: Optional[_LegacySamplingNumber] = Field(
+        None, ge=0, le=2, description="Default sampling temperature for LLM/VLM models"
     )
-    top_p: Optional[float] = Field(
-        None, description="Default nucleus sampling probability for LLM/VLM models"
+    top_p: Optional[_LegacySamplingNumber] = Field(
+        None, gt=0, le=1, description="Default nucleus sampling probability for LLM/VLM models"
     )
     extra_params: Optional[Dict[str, Any]] = Field(
         None,

@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: ROOT-CLARIFICATION-20261117
+  change_type: bugfix
+  bug_id: ROOT-CLARIFICATION-20261117
+  title: Enforce shared root-only clarification across agent Cores
+  description: Propagate internal run identity, authorize root clarification and return child missing information
+    to the parent.
+  observed_behavior: Jiuwen children expose ask_user; factory-dispatched smolagents children lose the old managed
+    restriction.
+  expected_behavior: Only roots expose clarification and publish cards; children return missing information without
+    duplicating user prompts.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing tests cover ordinary forms and legacy managed children, not factory identity and mixed-Core
+      root-only clarification.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    added: []
+    modified:
+    - JIUWEN-RESOURCES
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-OUTPUT-D3-001
+    added: []
+    modified:
+    - JIUWEN-RESOURCES-D3-002
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Identity, tool registration and emitter isolation are unit contracts; existing D3 proves real runtime
+      collaboration without duplicate D1.
+    behaviors:
+    - Root default and immutable child dispatch role across nested calls.
+    - Both Cores expose clarification only to root ordinary chat; children return missing inputs.
+    - Context-local output guard prevents child cards without affecting concurrent roots or legacy managed agents.
+    test_selectors:
+    - test/sdk/core/agents/test_root_clarification.py
+    - test/sdk/core/agents/test_jiuwen_clarification.py
+    - test/sdk/core/agents/test_core_child_dispatch.py
+  notes: RC-01..04 in runtime-agent-core-factory/design.md. JIUWEN-RESOURCES inherits runtime responsibility. Self-contained
+    families=[]; owned local model HTTP and workers drain in fixtures. No SQL/API/frontend changes or deployment/commit/push.

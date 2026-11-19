@@ -4,7 +4,7 @@
 import json
 
 import pytest
-from infrastructure.nexent_output import (
+from management.services.conversation.nexent_output import (
     NexentOutputAdapter,
     NexentSSEAdapter,
     adapt_nexent_stream,

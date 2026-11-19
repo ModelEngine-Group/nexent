@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: PR4314-GATEWAY-BOUNDARIES-20261118
+  change_type: bugfix
+  bug_id: PR4314-GATEWAY-BOUNDARIES-20261118
+  title: Restore Web and Ops requests through the Gateway authentication boundary
+  description: Register existing Web operations, route trajectory requests through
+    Gateway with an Ops-specific signed identity, and synchronize Kubernetes signing
+    keys. Repair the D3 account role fixture.
+  observed_behavior: Existing Web operations return 404 at the exposure filter.
+    The Web trajectory proxy bypasses Gateway. The Kubernetes .env signing key can
+    reach downstream services without reaching Gateway. The D3 account fixture has
+    roles only on tenant membership records.
+  expected_behavior: Existing Web operations keep their public URL and reach their
+    owning service with the required session. Ops verifies request-bound signatures.
+    Gateway and downstream use the same Kubernetes signing key. The D3 test traverses
+    the identity, delegation, revocation, and WebSocket assertions.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Tests did not exercise the restored Web exposures, the signed
+      Gateway-to-Ops hop, or the deployment-file signing key in the shared Secret.
+  feature_contract_changed: false
+  affected_features:
+    existing: [GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [GW-AUTH-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Existing Web operations are explicitly listed and require a session.
+    - Trajectories reach Ops with an audience-bound identity while ordinary conversation
+      directories remain on the existing service. Direct and wrong-audience requests
+      are rejected.
+    - Kubernetes renders the same signing key for Gateway and downstream, retaining
+      derived-key fallback when the dedicated key is absent.
+    test_selectors:
+    - test/backend/gateway/test_exposure.py
+    - test/backend/gateway/test_ops_trajectory.py
+    - test/backend/ops/test_trajectory_proxy.py
+    - test/backend/deploy/test_ops_chart.py
+    - test/backend/deploy/test_gateway_db_reuse.py
+    reason: Existing D3 proves auth protocol behavior with synthetic persistence.
+      The additional unit verification covers route selection, separate Ops audience,
+      and deployment rendering.
+  notes: Baseline 2191203a7 on PR 4314. SPEC management-gateway-independent-image
+    in nexent-doc. D3 uses loopback fixtures and the Management identity-query adapter.

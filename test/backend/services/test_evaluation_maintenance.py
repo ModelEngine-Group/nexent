@@ -24,18 +24,19 @@ def _register_package(name):
 # ---- stub chain: management.db.evaluation.runs / client / db_models ----
 database_pkg = _register_package("database")
 agent_evaluation_db = MagicMock(name="management.db.evaluation.runs")
-client = MagicMock(name="management.db.client")
+client = MagicMock(name="infrastructure.rdb.client")
 db_models = MagicMock(name="management.db.models")
 db_models.AgentEvaluation = MagicMock(name="AgentEvaluation")
 database_pkg.agent_evaluation_db = agent_evaluation_db
 database_pkg.client = client
 database_pkg.db_models = db_models
 sys.modules["management.db.evaluation.runs"] = agent_evaluation_db
-sys.modules["management.db.client"] = client
+sys.modules["infrastructure.rdb.client"] = client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules["management.db.models"] = db_models
 
 if "evaluation_maintenance" in sys.modules:

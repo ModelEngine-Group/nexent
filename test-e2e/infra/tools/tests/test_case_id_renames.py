@@ -16,15 +16,17 @@ from validate_execution import inspect
 
 REPO = Path(__file__).resolve().parents[4]
 MAPPING = REPO / "test-e2e/infra/migration/case-id-renames-20261102.json"
+NORTHBOUND_MAPPING = REPO / "test-e2e/infra/migration/case-id-renames-20261117.json"
 
 
 def renames():
-    return json.loads(MAPPING.read_text(encoding="utf-8"))["renames"]
+    return [row for path in (MAPPING, NORTHBOUND_MAPPING)
+            for row in json.loads(path.read_text(encoding="utf-8"))["renames"]]
 
 
 def test_mapping_is_bijective_and_matches_the_original_proving_stage():
     rows = renames()
-    assert len(rows) == 7
+    assert len(rows) == 8
     old = {row["old_case_id"] for row in rows}
     new = {row["new_case_id"] for row in rows}
     assert len(old) == len(new) == len(rows) and not old & new
