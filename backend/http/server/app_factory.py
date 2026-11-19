@@ -32,6 +32,7 @@ def create_app(
     enable_monitoring: bool = True,
     lifespan=None,
     gateway_identity_audience=None,
+    internal_runtime_request=None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -45,6 +46,9 @@ def create_app(
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
         lifespan: Optional FastAPI lifespan context manager
+        gateway_identity_audience: Downstream audience for signed gateway identity
+        internal_runtime_request: Predicate marking runtime-internal calls that
+            carry their own service JWT instead of the gateway identity ticket
 
     Returns:
         Configured FastAPI application
@@ -68,7 +72,11 @@ def create_app(
     if gateway_identity_audience:
         from gateway.downstream.middleware import GatewayIdentityMiddleware
 
-        app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
+        app.add_middleware(
+            GatewayIdentityMiddleware,
+            audience=gateway_identity_audience,
+            internal_runtime_request=internal_runtime_request,
+        )
 
     # Register exception handlers
     register_exception_handlers(app)
