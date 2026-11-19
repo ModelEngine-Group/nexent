@@ -25,7 +25,10 @@ from nexent.storage.models import Comparison, OperationContext, VectorKey
 from pydantic import ValidationError
 from runtime.knowledge_base.chunk_admission import ChunkMutationAdmission
 from runtime.knowledge_base.chunk_creation import ChunkCreationExecutor
-from runtime.knowledge_base.chunk_executor import ChunkMutationExecutor
+from runtime.knowledge_base.chunk_executor import (
+    ChunkMutationExecutor,
+    explicit_chunk_vector,
+)
 from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.jobs import KnowledgeJobs
 
@@ -224,6 +227,8 @@ class ChunkMutationService:
             )
             if payload.operation == "create":
                 ChunkCreateData.model_validate(payload.changes)
+            elif payload.operation == "update" and "embedding" in payload.changes:
+                explicit_chunk_vector(payload.changes["embedding"])
         except ValidationError as error:
             raise InvalidInput() from error
         context = context or OperationContext(
@@ -261,8 +266,11 @@ class ChunkMutationService:
 
                         def execute():
                             context.remaining()
+                            dimensions = {} if "embedding" not in payload.changes else {
+                                "dimensions": len(payload.changes["embedding"])
+                            }
                             with self.maintenance_ports(
-                                actor, grant.collection, context=context, **namespace
+                                actor, grant.collection, context=context, **namespace, **dimensions
                             ) as vectors:
                                 result = ChunkMutationExecutor(
                                     journal, vectors, grant.collection

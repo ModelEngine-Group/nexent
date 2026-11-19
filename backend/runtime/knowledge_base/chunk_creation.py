@@ -34,6 +34,7 @@ from nexent.storage.models import (
 )
 from runtime.knowledge_base.chunk_admission import ChunkMutationAdmission
 from runtime.knowledge_base.chunk_executor import (
+    explicit_chunk_vector,
     record_mutation_failure,
     require_chunk_identity,
     require_chunk_scope,
@@ -119,11 +120,8 @@ class ChunkCreationExecutor:
         values = data.supplied_embedding
         if values is None:
             return None, (), None, False
-        if (not isinstance(values, list) or not values
-            or any(type(value) not in {int, float} or not math.isfinite(value) for value in values)
-            or not any(values)):
-            raise InvalidInput()
-        return len(values), tuple(values), binding if isinstance(binding, ModelVersion) else None, False
+        vector = explicit_chunk_vector(values)
+        return len(vector), vector, binding if isinstance(binding, ModelVersion) else None, False
 
     async def _embedding(self, data, *, context):
         text = data.content if data.embedding_input is None else data.embedding_input

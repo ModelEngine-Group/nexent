@@ -93,7 +93,7 @@ def test_delete_uses_one_exact_key_and_commits_negative_effect(executor):
     vectors.delete.assert_not_called()
 
 
-@pytest.mark.parametrize("changes", [{"file_id": "other"}, {"embedding": [1.0]}, {}])
+@pytest.mark.parametrize("changes", [{"file_id": "other"}, {"embedding": [True]}, {}])
 def test_update_rejects_protected_or_empty_fields_without_storage(executor, changes):
     s, service, vectors, value = executor
     with pytest.raises(InvalidInput):

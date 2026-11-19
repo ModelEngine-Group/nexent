@@ -49,9 +49,10 @@ def test_foreign_resource_is_rejected_before_provider_access(monkeypatch):
     factory.assert_not_called()
 
 
-def test_shared_vectors_have_exact_namespace_and_no_actor_impersonation():
+@pytest.mark.parametrize("dimensions", [None, 3])
+def test_shared_vectors_have_exact_namespace_and_no_actor_impersonation(dimensions):
     actor = ServicePrincipal("editor", "tenant")
-    port = bind_knowledge_chunk_vectors(actor, "kb", resource_tenant_id=ASSET_OWNER_TENANT_ID)
+    port = bind_knowledge_chunk_vectors(actor, "kb", resource_tenant_id=ASSET_OWNER_TENANT_ID, dimensions=dimensions)
     try:
         assert port.scope.tenant_id == ASSET_OWNER_TENANT_ID and port.scope.actor_id == actor.user_id
         assert port.scope.namespaces == {"kb"}

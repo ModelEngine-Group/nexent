@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Execute existing chunk edits/deletes once; retain uncertain writes for explicit reconciliation."""
 
+import math
+
 from contracts.knowledge_chunk_mutation import ChunkMutationIntent
 from nexent.storage.errors import (
     CapabilityUnsupported,
@@ -90,8 +92,16 @@ def require_chunk_scope(journal, vectors, collection):
         raise ScopeDenied()
 
 
+def explicit_chunk_vector(values):
+    if (not isinstance(values, list) or not values
+        or any(type(value) not in {int, float} or not math.isfinite(value) for value in values)
+        or not any(values)):
+        raise InvalidInput()
+    return tuple(values)
+
+
 class ChunkMutationExecutor:
-    fields = frozenset({"content", "filename", "location"})
+    fields = frozenset({"content", "filename", "location", "embedding"})
 
     def __init__(self, journal, vectors, collection):
         require_chunk_scope(journal, vectors, collection)
@@ -112,6 +122,8 @@ class ChunkMutationExecutor:
             and (not intent.changes or not intent.changes.keys() <= self.fields)
         ):
             raise InvalidInput()
+        replacement = explicit_chunk_vector(intent.changes["embedding"]) if "embedding" in intent.changes else None
+        changes = {name: value for name, value in intent.changes.items() if name != "embedding"}
         row, admitted = self.journal.reserve(intent, context=context)
         if not admitted:
             return row
@@ -126,12 +138,14 @@ class ChunkMutationExecutor:
             return row
         try:
             if intent.operation == "update":
-                receipt = self.vectors.patch_payload(
-                    current.key,
-                    FieldPatch(set_values=intent.changes),
-                    expected_generation=current.generation,
-                    context=context,
-                )
+                if replacement is None:
+                    receipt = self.vectors.patch_payload(current.key, FieldPatch(set_values=changes),
+                        expected_generation=current.generation, context=context)
+                else:
+                    self.vectors.ensure_collection(self.collection, context=context)
+                    receipt = self.vectors.put(VectorRecord(current.key, replacement,
+                        {**current.payload, **changes}, current.generation),
+                        expected_generation=current.generation, context=context)
                 valid = isinstance(receipt, WriteReceipt)
                 matched = receipt.matched if valid else None
             else:

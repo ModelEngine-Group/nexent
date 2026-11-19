@@ -83,15 +83,15 @@ def bind_knowledge_vectors(actor, collection, dimensions, *, writable=True, reso
     )
 
 
-def bind_knowledge_chunk_vectors(actor, collection, *, resource_tenant_id=None):
-    """Grant exact-record maintenance without models, vectors or file identity edits."""
+def bind_knowledge_chunk_vectors(actor, collection, *, resource_tenant_id=None, dimensions=None):
+    """Grant exact-record maintenance with optional explicit vector replacement."""
     from contracts.constants.constants import ASSET_OWNER_TENANT_ID
     from nexent.storage.errors import ScopeDenied
 
     tenant = actor.tenant_id if resource_tenant_id is None else resource_tenant_id
     if tenant not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
         raise ScopeDenied()
-    binding = replace(vector_binding(tenant, collection, None),
+    binding = replace(vector_binding(tenant, collection, dimensions, allow_unembedded=dimensions is not None),
                       mutable_fields=frozenset({"content", "filename", "location"}))
     return ElasticsearchVectorStore(
         StorageScope("runtime", tenant, actor.user_id, {collection}),

@@ -305,6 +305,8 @@ Management 保留原公开路径、metadata 非null覆盖、默认时间和响�
 
 Runtime按Management的实时编辑grant执行，创建在模型调用后再次授权。普通及共享资产创建、删除保持原签名user_id/tenant_id，SI namespace可由精确grant选择固定资产租户，审计用户不替换。共享更新尚未迁移，不开放该写路径。公共适配的180秒总预算包含元数据与两次AgentOS HTTP；超时取消，未完成或未知回执不返回成功，也不重试或重放。
 
+Runtime标准 `update` 已支持 `changes.embedding` 与正文/payload的同次条件替换。缺少embedding字段时只patch payload并保留原向量；显式向量需要非空、非零且数值有限，使用已有VectorStore.put并核对业务generation，计数为0。纯正文集合可补齐匹配的向量映射。可信文件身份及既有模型绑定保持，不调用模型，不将缺失键转成create；未知结果只返回原状态，不重放。
+
 公开更新仍使用旧写入，保留原不重算向量行为，metadata递归合并与显式向量更新待下一批迁移。历史旧索引还需按退役SPEC迁入确认来源，当前混合状态不代表完整退役或可直接部署切流，最终镜像和公开服务验收仍待完成。
 
 ### KnowledgeBase 已登记文件清单
