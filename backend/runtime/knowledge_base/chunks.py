@@ -13,7 +13,10 @@ from contracts.agentos_knowledge import (
 )
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
-from contracts.knowledge_chunk_projection import public_path_matches
+from contracts.knowledge_chunk_projection import (
+    PUBLIC_CHUNK_SOURCE_KEY,
+    public_path_matches,
+)
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
 from runtime.knowledge_base.chunk_view import ChunkReadView
@@ -37,14 +40,23 @@ def _window(records, vectors, request, resource, *, context):
     total, result = 0, []
     refs = None if request.file_ids is None else set(request.file_ids)
     for manifest in published_files(records, request.knowledge_id, context=context):
-        if refs is not None and manifest['file_id'] not in refs:
+        selected = refs is None or manifest['file_id'] in refs
+        if not selected and request.standalone_path is None:
             continue
         job = published_job(records, resource, manifest, context=context)
         count = view.file_count(manifest, job, context=context)
+        filtered = None
+        if request.standalone_path is not None:
+            rows = view.file_window(vectors, resource, manifest, job, 0, count, context=context) if count else []
+            filtered = [row for row in rows if (
+                public_path_matches(row.location, request.standalone_path)
+                if PUBLIC_CHUNK_SOURCE_KEY in row.location else selected)]
+            count = len(filtered)
         start, end = max(0, request.offset-total), min(count, request.offset+request.limit-total)
         total += count
         if start < end:
-            result.extend(view.file_window(vectors, resource, manifest, job, start, end, context=context))
+            result.extend(filtered[start:end] if filtered is not None else
+                view.file_window(vectors, resource, manifest, job, start, end, context=context))
     if refs is None or request.standalone_path is not None:
         count = view.standalone_count(context=context)
         filtered = None

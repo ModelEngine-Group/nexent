@@ -186,6 +186,9 @@ Runtime 已挂载以下内部接口。上传返回持久 `queued`，删除返回
 | Runtime 查询 Management 的 KB 读权限 | `/internal/agentos/v1/knowledge/authorize-search` | `authorize_knowledge_search(KnowledgeSearchAuthorization, user_id, tenant_id)`，返回 `KnowledgeSearchGrant` |
 | Runtime 查询分块浏览只读授权 | `/internal/agentos/v1/knowledge/authorize-chunks` | `authorize_knowledge_chunks(KnowledgeChunksAuthorization, user_id, tenant_id)`，返回 `KnowledgeChunksGrant`，无模型配置依赖 |
 | 分页浏览已发布分块 | `/internal/agentos/v1/knowledge/chunks` | `knowledge_chunks(KnowledgeChunks, user_id, tenant_id)`，返回 `KnowledgeChunksResult`，HTTP 200 |
+| 查询真实分块写目标 | `/internal/agentos/v1/knowledge/chunks/inspect` | `inspect_knowledge_chunk(ChunkMutationLookup, user_id, tenant_id)`，返回 `ChunkMutationTarget`，元数据总预算10秒 |
+| 接纳并执行单键分块写入 | `/internal/agentos/v1/knowledge/chunks/mutate` | `mutate_knowledge_chunk(ChunkMutationIntent, user_id, tenant_id)`，返回 `ChunkMutationState`，总预算180秒 |
+| Runtime 查询实时分块编辑授权 | `/internal/agentos/v1/knowledge/authorize-chunk-mutation` | `authorize_knowledge_chunk_mutation(ChunkMutationAuthorization, user_id, tenant_id)`，返回精确 `ChunkMutationGrant` |
 | Runtime 查询来源/图片只读授权 | `/internal/agentos/v1/knowledge/authorize-content` | `authorize_knowledge_content(KnowledgeContentRequest, user_id, tenant_id)`，返回 `KnowledgeContentGrant` |
 | 删除已排空的 KB 物理集合 | `/internal/agentos/v1/knowledge/bases/delete` | `delete_knowledge_base(KnowledgeBaseDelete, user_id, tenant_id)`，返回 `KnowledgeBaseDeleteState`，HTTP 202 |
 | 核对 KB 集合删除结果 | `/internal/agentos/v1/knowledge/bases/inspect` | `inspect_knowledge_base_deletion(KnowledgeBaseDeleteLookup, user_id, tenant_id)`，HTTP 200 |
@@ -290,11 +293,19 @@ KB清洗状态补充 execution_ended、reconcile_required、artifact_ownership_k
 
 Runtime 使用标准 `authorize-chunks` 回调获取 Management 的 `KnowledgeChunksGrant`，其中只含 KB、集合、资源租户及 revision。Management 按实际调用者的活动账号、租户成员和原 own/shared DAC 授权，拒绝 KB 删除意图；无需 embedding 模型配置。Runtime 的只读 SI 端口限定该 KB 与资源所属租户，actor_id 仍为实际用户。签名 user_id/tenant_id 始终保持原请求身份，不使用创建者身份，也不扩大为跨租户模型或写入权限。
 
-普通及 Northbound 的原分块浏览已调用该入口。Management 将文件身份还原为原路径、创建时间及公开字段，同时保留 page/page_size、path_or_url 和响应格式。公开 page/page_size 同时提供才分页，单次内部窗口最多 1000；返回前复核资源与文件映射，整个操作最多 180 秒。北向适配位于 northbound service。普通 db_type=datamate 继续返回原远端文件清单，由 `get_external_file_chunks` 适配；ES 路径没有旧索引回退。分块 CRUD、旧 documents 向量化入口和通用权限仓库旁路仍待迁移，整个 data-process 退役未完成。
+普通及 Northbound 的原分块浏览已调用该入口。Management 将文件身份还原为原路径、创建时间及公开字段，同时保留 page/page_size、path_or_url 和响应格式。公开 page/page_size 同时提供才分页，单次内部窗口最多 1000；返回前复核资源与文件映射，整个操作最多 180 秒。北向适配位于 northbound service。普通 db_type=datamate 继续返回原远端文件清单，由 `get_external_file_chunks` 适配；ES 路径没有旧索引回退。公开分块创建与删除已迁入AgentOS；公开更新、旧 documents 向量化入口和通用权限仓库旁路仍待迁移，整个 data-process 退役未完成。
 
-手工分块创建的 embedding 前置已改用标准 `Model.invoke`。Management 仅经 SI 查询当前用户有编辑权限的 KB 和模型 ID，Runtime 读取自身模型记录、profile 并分派 embedding 或 multi_embedding 适配器，实际 user_id/tenant_id 保持。准备阶段共用 180 秒预算，模型 HTTP 停滞会取消并关闭客户端。模型未配置、失败或响应无效时沿用原有无向量保存正文行为，不选择其他模型；当前资源授权、删除意图或 SI 元数据读取失败会阻止写入。
+### KnowledgeBase 手工分块创建与删除
 
-手工创建仍使用旧 ES 写入，更新正文也仍沿用原有不重算向量的行为。手工分块可以没有文件引用，不能伪造成已有 `File.upload` 的清洗产物。完整 CRUD 迁移还需统一无文件实体、已发布文件的分块修改、计数/版本、浏览/检索/摘要和删除义务。当前新发布清单浏览不会读取这些旧写入，部署切流仍以退役 SPEC 的业务迁移和验收完成为前提；本批模型调用迁移不证明写链、并发发布围栏或 data-process 退役完成。
+Management 保留原公开路径、metadata 非null覆盖、默认时间和响应ID。创建先按真实存储键查询目标，删除允许显式 `resolve_public_id=true`，按原规则先查真实键，再匹配source展示ID。`ChunkMutationTarget` 返回当前分块、真实文件引用、generation和change_epoch；Management将这些绑定传入写意图的 `file_ref`、`generation`、`chunk_index` 和 `expected_change_epoch`。新建计数+1，已有键覆盖0，删除-1。创建响应返回实际存储键，删除响应保持原请求路径ID。
+
+创建的 `changes` 使用 `ChunkCreateData`。`content` 可以保留metadata覆盖后的原始JSON，`embedding_input` 始终传原请求文本。`embedding_model` 可以指定固定的 `{model_id, revision}`，或只传 `{model_id}` 由Runtime通过Model.get固定版本，再执行Model.invoke。`supplied_embedding` 承载原metadata提供的向量；模型成功时生成结果覆盖它，原无模型或模型失败时才使用它，没有显式向量则保存正文。实际使用的空向量、零向量或畸形向量拒绝，不转换为正文，不选择其他模型。资源权限或SI读取失败始终阻止写入。
+
+原始source放在location的 `nexent_public_chunk_v1`，不重复保存content或embedding。它可保留原metadata中的展示ID、数组filename和自定义字段；公开浏览仍只返回原九字段。可信执行身份来自独立的KB/file/generation字段，SI审计使用实际actor。带路径浏览对显式source路径先筛选再分页，未设置source时使用原文件映射，因此文件分块的路径覆盖也能按原值查询。此分支需要扫描当前文件元数据，仍受总预算和epoch限制。
+
+Runtime按Management的实时编辑grant执行，创建在模型调用后再次授权。普通及共享资产创建、删除保持原签名user_id/tenant_id，SI namespace可由精确grant选择固定资产租户，审计用户不替换。共享更新尚未迁移，不开放该写路径。公共适配的180秒总预算包含元数据与两次AgentOS HTTP；超时取消，未完成或未知回执不返回成功，也不重试或重放。
+
+公开更新仍使用旧写入，保留原不重算向量行为，metadata递归合并与显式向量更新待下一批迁移。历史旧索引还需按退役SPEC迁入确认来源，当前混合状态不代表完整退役或可直接部署切流，最终镜像和公开服务验收仍待完成。
 
 ### KnowledgeBase 已登记文件清单
 

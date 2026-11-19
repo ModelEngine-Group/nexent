@@ -9,8 +9,11 @@ from threading import Event
 from time import monotonic
 from uuid import uuid4
 
-from contracts.agentos import EmbeddingInvocation
+from contracts.agentos import EmbeddingInvocation, ModelMetadata, ModelReference
+from contracts.agentos_knowledge import ModelVersion
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_chunk_mutation import ChunkCreateData, ChunkMutationIntent
+from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
     CapabilityUnsupported,
@@ -69,7 +72,7 @@ class ChunkCreationExecutor:
             raise InvalidInput()
         if (
             actor.user_id != journal.records.scope.actor_id
-            or actor.tenant_id != journal.records.scope.tenant_id
+            or journal.records.scope.tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}
         ):
             raise ScopeDenied()
         self.journal, self.models, self.actor, self.collection = (
@@ -79,6 +82,9 @@ class ChunkCreationExecutor:
             collection,
         )
         self.ports, self.operation_seconds = ports, operation_seconds
+        self.namespace = {} if journal.records.scope.tenant_id == actor.tenant_id else {
+            "resource_tenant_id": journal.records.scope.tenant_id
+        }
 
     async def _blocking(self, action, *args, context):
         def execute():
@@ -95,7 +101,7 @@ class ChunkCreationExecutor:
         )
 
     def _existing(self, intent, *, context):
-        with self.ports(self.actor, self.collection, None, context=context) as vectors:
+        with self.ports(self.actor, self.collection, None, context=context, **self.namespace) as vectors:
             require_chunk_scope(self.journal, vectors, self.collection)
             row = vectors.get(
                 VectorKey(self.collection, intent.chunk_id),
@@ -108,19 +114,37 @@ class ChunkCreationExecutor:
                     raise Conflict()
             return row
 
+    @staticmethod
+    def _supplied(data, binding):
+        values = data.supplied_embedding
+        if values is None:
+            return None, (), None, False
+        if (not isinstance(values, list) or not values
+            or any(type(value) not in {int, float} or not math.isfinite(value) for value in values)
+            or not any(values)):
+            raise InvalidInput()
+        return len(values), tuple(values), binding if isinstance(binding, ModelVersion) else None, False
+
     async def _embedding(self, data, *, context):
         text = data.content if data.embedding_input is None else data.embedding_input
+        binding = data.embedding_model
         if data.embedding_model is None or not text:
-            return None, ()
+            return self._supplied(data, binding)
         try:
             async with asyncio.timeout(context.remaining()):
+                if isinstance(binding, ModelReference):
+                    metadata = await self.models.get(binding.model_id, self.actor)
+                    if (not isinstance(metadata, ModelMetadata) or metadata.model_id != binding.model_id
+                        or metadata.model_type not in {"embedding", "multi_embedding"}):
+                        raise ValueError("Invalid embedding model metadata")
+                    binding = ModelVersion(model_id=metadata.model_id, revision=metadata.revision)
                 dimensions = await self.models.embedding_dimensions(
-                    data.embedding_model, self.actor
+                    binding, self.actor
                 )
                 result = await self.models.invoke(
                     EmbeddingInvocation(
-                        model_id=data.embedding_model.model_id,
-                        expected_revision=data.embedding_model.revision,
+                        model_id=binding.model_id,
+                        expected_revision=binding.revision,
                         input=[text],
                     ),
                     self.actor,
@@ -128,7 +152,7 @@ class ChunkCreationExecutor:
             output = result.output
             if (
                 normalize_model_revision(result.revision)
-                != normalize_model_revision(data.embedding_model.revision)
+                != normalize_model_revision(binding.revision)
                 or not isinstance(output, list)
                 or len(output) != 1
                 or not isinstance(output[0], list)
@@ -141,7 +165,7 @@ class ChunkCreationExecutor:
                 raise ValueError("Invalid embedding response")
             if type(dimensions) is not int or dimensions <= 0:
                 raise ValueError("Missing embedding dimensions")
-            return dimensions, tuple(output[0])
+            return dimensions, tuple(output[0]), binding, True
         except Exception as error:  # noqa: BLE001 - Existing manual creation saves plaintext after model failures.
             context.remaining()
             # This is the existing manual-create behavior; resource checks stay outside this branch.
@@ -150,12 +174,12 @@ class ChunkCreationExecutor:
                 context.operation_id,
                 type(error).__name__,
             )
-            return None, ()
+        return self._supplied(data, binding)
 
-    def _write(self, intent, data, admitted, previous, dimensions, vector, *, context):
+    def _write(self, intent, data, admitted, previous, dimensions, vector, binding, generated, *, context):
         key = admitted["mutation_id"]
         with self.ports(
-            self.actor, self.collection, dimensions, context=context
+            self.actor, self.collection, dimensions, context=context, **self.namespace
         ) as vectors:
             try:
                 require_chunk_scope(self.journal, vectors, self.collection)
@@ -181,7 +205,10 @@ class ChunkCreationExecutor:
                 return state
             try:
                 vectors.ensure_collection(self.collection, context=context)
-                binding = data.embedding_model if vector else None
+                location = data.location
+                if generated and PUBLIC_CHUNK_SOURCE_KEY in location:
+                    location = {**location, PUBLIC_CHUNK_SOURCE_KEY: {
+                        **location[PUBLIC_CHUNK_SOURCE_KEY], "embedding_model_id": binding.model_id}}
                 ref = intent.file_ref
                 record = VectorRecord(
                     VectorKey(self.collection, intent.chunk_id),
@@ -196,7 +223,7 @@ class ChunkCreationExecutor:
                         "parser_version": None,
                         "content": data.content,
                         "filename": data.filename,
-                        "location": data.location,
+                        "location": location,
                     },
                     Revision(intent.generation if ref else key),
                 )
@@ -260,7 +287,7 @@ class ChunkCreationExecutor:
                     previous = await self._blocking(
                         self._existing, intent, context=context
                     )
-                    dimensions, vector = await self._embedding(data, context=context)
+                    embedding = await self._embedding(data, context=context)
                     if authorize is not None:
                         await authorize()
                         context.remaining()
@@ -282,8 +309,7 @@ class ChunkCreationExecutor:
                     data,
                     admitted,
                     previous,
-                    dimensions,
-                    vector,
+                    *embedding,
                     context=context,
                 )
         except (TimeoutError, DeadlineExceeded) as error:

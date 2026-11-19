@@ -99,10 +99,16 @@ def bind_knowledge_chunk_vectors(actor, collection, *, resource_tenant_id=None):
     )
 
 
-def bind_knowledge_creation_vectors(actor, collection, dimensions):
+def bind_knowledge_creation_vectors(actor, collection, dimensions, *, resource_tenant_id=None):
     """Explicitly grant payload-only creation and later compatible vector mapping upgrades."""
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from nexent.storage.errors import ScopeDenied
+
+    tenant = actor.tenant_id if resource_tenant_id is None else resource_tenant_id
+    if tenant not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
+        raise ScopeDenied()
     return ElasticsearchVectorStore(
-        StorageScope("runtime", actor.tenant_id, actor.user_id, {collection}),
-        (vector_binding(actor.tenant_id, collection, dimensions, allow_unembedded=True),),
+        StorageScope("runtime", tenant, actor.user_id, {collection}),
+        (vector_binding(tenant, collection, dimensions, allow_unembedded=True),),
         _configured_client,
     )

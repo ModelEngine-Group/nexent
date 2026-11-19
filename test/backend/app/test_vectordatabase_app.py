@@ -1351,105 +1351,36 @@ async def test_get_index_chunks_error(vdb_core_mock, auth_data):
 
 @pytest.mark.asyncio
 async def test_create_chunk_success(vdb_core_mock, auth_data):
-    """
-    Test creating a manual chunk successfully.
-    """
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
-                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_chunk") as mock_create:
-
-        expected_response = {"status": "success", "chunk_id": "chunk-1"}
-        mock_create.return_value = expected_response
-
-        payload = {
-            "content": "Hello world",
-            "path_or_url": "doc-1",
-        }
-
-        response = client.post(
-            f"/indices/{auth_data['index_name']}/chunk",
-            json=payload,
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 200
-        assert response.json() == expected_response
-        mock_create.assert_called_once()
-
-        # Verify that tenant_id was passed to the service
-        call_kwargs = mock_create.call_args[1]
-        assert "tenant_id" in call_kwargs
-        assert call_kwargs["tenant_id"] == auth_data["tenant_id"]
+    """The public route keeps its response and passes the actual principal."""
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"])), patch(
+        "management.api.knowledge_base.vectordatabase.create_manual_chunk", new_callable=AsyncMock,
+        return_value={"status": "success", "chunk_id": "chunk-1"},
+    ) as mock_create:
+        response = client.post(f"/indices/{auth_data['index_name']}/chunk", json={"content": "Hello world"},
+                               headers=auth_data["auth_header"])
+        assert response.status_code == 200 and response.json() == {"status": "success", "chunk_id": "chunk-1"}
+        index, request, actor = mock_create.await_args.args
+        assert index == auth_data["index_name"] and request.content == "Hello world"
+        assert (actor.user_id, actor.tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
+        mock_create.assert_awaited_once()
+        vdb_core_mock.create_chunk.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_create_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
-    """Read-only users must not be able to create chunks."""
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
-                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch(
-                "management.api.knowledge_base.vectordatabase.require_knowledge_base_edit_permission",
-                side_effect=HTTPException(
-                    status_code=403,
-                    detail="No permission to modify this knowledge base",
-                ),
-            ) as mock_require_permission, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_chunk") as mock_create:
-
-        response = client.post(
-            f"/indices/{auth_data['index_name']}/chunk",
-            json={"content": "Hello world", "path_or_url": "doc-1"},
-            headers=auth_data["auth_header"],
-        )
-
+    """The service's SI edit denial keeps the public forbidden response."""
+    with patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"])), patch(
+        "management.api.knowledge_base.vectordatabase.create_manual_chunk", new_callable=AsyncMock,
+        side_effect=ScopeDenied(),
+    ) as mock_create:
+        response = client.post(f"/indices/{auth_data['index_name']}/chunk", json={"content": "Hello world"},
+                               headers=auth_data["auth_header"])
         assert response.status_code == 403
         assert response.json()["detail"] == "No permission to modify this knowledge base"
-        mock_require_permission.assert_called_once_with(
-            auth_data["index_name"],
-            auth_data["user_id"],
-            auth_data["tenant_id"],
-        )
-        mock_create.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_chunk_passes_tenant_id_to_service(vdb_core_mock, auth_data):
-    """
-    Test that create_chunk endpoint passes tenant_id to the service method.
-    This is critical for the service to fetch the correct embedding model.
-    """
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
-                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_chunk") as mock_create:
-
-        mock_create.return_value = {"status": "success", "chunk_id": "chunk-1"}
-
-        payload = {
-            "content": "Test content for embedding",
-            "path_or_url": "doc-123",
-            "title": "Test Title"
-        }
-
-        response = client.post(
-            f"/indices/{auth_data['index_name']}/chunk",
-            json=payload,
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 200
-
-        # Verify tenant_id was passed
-        mock_create.assert_called_once()
-        call_args = mock_create.call_args
-        # Check both args and kwargs for tenant_id
-        assert ("tenant_id" in call_args.kwargs and call_args.kwargs["tenant_id"] == auth_data["tenant_id"]) or \
-               (len(call_args[0]) >= 4 and call_args[0][3] == auth_data["tenant_id"]), \
-            "tenant_id should be passed to the service method"
+        mock_create.assert_awaited_once()
+        vdb_core_mock.create_chunk.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1461,7 +1392,7 @@ async def test_create_chunk_error(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_chunk") as mock_create:
+            patch("management.api.knowledge_base.vectordatabase.create_manual_chunk", new_callable=AsyncMock) as mock_create:
 
         mock_create.side_effect = Exception("Create failed")
 
@@ -2454,7 +2385,7 @@ async def test_create_chunk_value_error(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
         patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
         patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
-        patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.create_chunk") as mock_create:
+        patch("management.api.knowledge_base.vectordatabase.create_manual_chunk", new_callable=AsyncMock) as mock_create:
 
         mock_create.side_effect = ValueError("Invalid chunk payload")
 

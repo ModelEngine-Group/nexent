@@ -3462,263 +3462,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn(
             "Error retrieving chunks from index kb-index: boom", str(exc.exception))
 
-    def test_create_chunk_builds_payload_and_calls_core(self):
-        """
-        Test create_chunk builds payload and delegates to vdb_core.create_chunk.
-        """
-        from types import SimpleNamespace
 
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        chunk_request = SimpleNamespace(
-            chunk_id=None,
-            title="My title",
-            filename="file.txt",
-            path_or_url="doc-1",
-            content="hello world",
-            metadata={"lang": "en"},
-        )
 
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-        )
 
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["chunk_id"], "chunk-1")
-        self.mock_vdb_core.create_chunk.assert_called_once()
-        # create_chunk is called positionally: (index_name, chunk_payload)
-        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
-        # Base fields
-        self.assertEqual(payload["content"], "hello world")
-        self.assertEqual(payload["path_or_url"], "doc-1")
-        self.assertEqual(payload["filename"], "file.txt")
-        self.assertEqual(payload["title"], "My title")
-        self.assertEqual(payload["created_by"], "user-1")
-        # Metadata merged
-        self.assertEqual(payload["lang"], "en")
-        self.assertIn("id", payload)
 
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_generates_embedding_when_tenant_provided(self, mock_get_embedding_model_by_id,
-                                                                   mock_get_knowledge_record):
-        """
-        Test create_chunk generates and stores embedding when tenant_id is provided.
-        """
-        from types import SimpleNamespace
 
-        # Setup mocks
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-
-        # Mock knowledge record with embedding model id
-        mock_get_knowledge_record.return_value = {
-            "index_name": "kb-index",
-            "embedding_model_id": 123
-        }
-
-        # Mock embedding model
-        mock_embedding = MagicMock()
-        mock_embedding.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
-        mock_get_embedding_model_by_id.return_value = (123, [0.1, 0.2, 0.3])
-
-        chunk_request = SimpleNamespace(
-            chunk_id=None,
-            title=None,
-            filename="file.txt",
-            path_or_url="doc-1",
-            content="This is test content that needs embedding",
-            metadata={},
-        )
-
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-123",
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["chunk_id"], "chunk-1")
-
-        mock_get_embedding_model_by_id.assert_called_once()
-        mock_get_knowledge_record.assert_not_called()
-
-        # Verify vdb_core was called with embedding in payload
-        self.mock_vdb_core.create_chunk.assert_called_once()
-        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
-        self.assertIn("embedding", payload)
-        self.assertEqual(payload["embedding"], [0.1, 0.2, 0.3])
-
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_without_tenant_no_embedding_generated(self, mock_get_embedding_model_by_id,
-                                                                mock_get_knowledge_record):
-        """
-        Test create_chunk does not generate embedding when tenant_id is not provided.
-        """
-        from types import SimpleNamespace
-
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-
-        chunk_request = SimpleNamespace(
-            chunk_id=None,
-            title=None,
-            filename="file.txt",
-            path_or_url="doc-1",
-            content="Content without embedding",
-            metadata={},
-        )
-
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id=None,  # No tenant_id
-        )
-
-        self.assertEqual(result["status"], "success")
-
-        # Verify no embedding-related calls were made
-        mock_get_knowledge_record.assert_not_called()
-        mock_get_embedding_model_by_id.assert_not_called()
-
-        # Verify payload has no embedding
-        self.mock_vdb_core.create_chunk.assert_called_once()
-        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
-        self.assertNotIn("embedding", payload)
-
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_handles_embedding_failure_gracefully(self, mock_get_embedding_model_by_id,
-                                                               mock_get_knowledge_record):
-        """
-        Test create_chunk handles embedding generation failure gracefully.
-        """
-        from types import SimpleNamespace
-
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-
-        mock_get_knowledge_record.return_value = {
-            "index_name": "kb-index",
-            "embedding_model_id": 123
-        }
-
-        # Embedding model raises exception
-        mock_get_embedding_model_by_id.return_value = (123, None)
-
-        chunk_request = SimpleNamespace(
-            chunk_id=None,
-            title=None,
-            filename="file.txt",
-            path_or_url="doc-1",
-            content="Content that would need embedding",
-            metadata={},
-        )
-
-        # Embedding failures are tolerated; chunk creation still succeeds.
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-123",
-        )
-        self.assertEqual(result["status"], "success")
-        self.mock_vdb_core.create_chunk.assert_called_once()
-        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
-        self.assertNotIn("embedding", payload)
-
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_handles_empty_embedding_result(self, mock_get_embedding_model_by_id, mock_get_knowledge_record):
-        """
-        Test create_chunk handles empty embedding result gracefully.
-        """
-        from types import SimpleNamespace
-
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-
-        mock_get_knowledge_record.return_value = {
-            "index_name": "kb-index",
-            "embedding_model_id": 123
-        }
-
-        # Embedding returns empty list
-        mock_embedding = MagicMock()
-        mock_embedding.get_embeddings.return_value = []
-        mock_get_embedding_model_by_id.return_value = (123, [])
-
-        chunk_request = SimpleNamespace(
-            chunk_id=None,
-            title=None,
-            filename="file.txt",
-            path_or_url="doc-1",
-            content="Content with empty embedding",
-            metadata={},
-        )
-
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-123",
-        )
-
-        # Result should still be successful
-        self.assertEqual(result["status"], "success")
-
-        # Verify payload has no embedding when embedding is empty
-        self.mock_vdb_core.create_chunk.assert_called_once()
-        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
-        self.assertNotIn("embedding", payload)
-
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_with_unknown_model_name_still_calls_embedding_model(self, mock_get_embedding_model_by_id,
-                                                                              mock_get_knowledge_record):
-        """
-        Test create_chunk when knowledge record has embedding_model_id.
-        The backend calls get_embedding_model_by_id with the model_id.
-        """
-        from types import SimpleNamespace
-
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-
-        # Knowledge record returns embedding_model_id
-        mock_get_knowledge_record.return_value = {
-            "index_name": "kb-index",
-            "embedding_model_id": 123
-        }
-
-        # Embedding model returns empty (model doesn't exist)
-        mock_embedding = MagicMock()
-        mock_embedding.get_embeddings.return_value = []
-        mock_get_embedding_model_by_id.return_value = (123, [])
-
-        chunk_request = SimpleNamespace(
-            chunk_id=None,
-            title=None,
-            filename="file.txt",
-            path_or_url="doc-1",
-            content="Content with embedding model",
-            metadata={},
-        )
-
-        result = ElasticSearchService.create_chunk(
-            index_name="kb-index",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-123",
-        )
-
-        # Should succeed, embedding model IS called but returns empty
-        self.assertEqual(result["status"], "success")
 
     def test_update_chunk_builds_payload_and_calls_core(self):
         """
@@ -4850,29 +4598,6 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('management.services.knowledge_base.service.embed_manual_chunk', return_value=(None, None))
-    def test_create_chunk_embedding_exception_without_explicit_model_is_tolerated(
-        self, mock_get_knowledge_record
-    ):
-        """create_chunk should continue when embedding generation fails and no explicit model name exists."""
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        from management.services.knowledge_base.service import ChunkCreateRequest
-        chunk_request = ChunkCreateRequest(
-            content="abc",
-            title="t",
-            filename="f.txt",
-            path_or_url="p/f.txt",
-            metadata={}
-        )
-        result = ElasticSearchService.create_chunk(
-            index_name="idx",
-            chunk_request=chunk_request,
-            vdb_core=self.mock_vdb_core,
-            user_id="u1",
-            tenant_id="t1",
-        )
-        self.assertEqual(result["status"], "success")
-        self.mock_vdb_core.create_chunk.assert_called_once()
 
     @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_update_chunk_minimal_payload_still_updates(self, mock_get_knowledge_record):
@@ -5731,20 +5456,6 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Database error", str(ctx.exception))
 
     # Tests for create_chunk exception (lines 1858-1861)
-    @patch('management.services.knowledge_base.service.embed_manual_chunk', return_value=(1, None))
-    def test_create_chunk_vdb_exception(self, mock_get_record):
-        """Test create_chunk handles exception from vdb_core.create_chunk (lines 1858-1861)."""
-        self.mock_vdb_core.create_chunk.side_effect = Exception("ES error")
-        from contracts.knowledge import ChunkCreateRequest
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.create_chunk(
-                index_name="test-index",
-                chunk_request=ChunkCreateRequest(chunk_id="c1", content="test content"),
-                vdb_core=self.mock_vdb_core,
-                user_id="user-1",
-                tenant_id="tenant-1",
-            )
-        self.assertIn("ES error", str(ctx.exception))
 
     # Tests for update_chunk - no update payload (lines 1889-1890)
     # Note: The check `if not update_payload` is effectively dead code because
@@ -5985,47 +5696,15 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Connection lost", str(ctx.exception))
 
     # Tests for create_chunk - knowledge_record exception (lines 1812-1813)
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_knowledge_record_exception(self, prepare):
-        """Unavailable current SI authorization must prevent the chunk write."""
-        from contracts.knowledge import ChunkCreateRequest
-        prepare.side_effect = RuntimeError("resource unavailable")
-        with self.assertRaises(Exception) as error:
-            ElasticSearchService.create_chunk(index_name="test-index",
-                chunk_request=ChunkCreateRequest(chunk_id="c1", content="test"),
-                vdb_core=self.mock_vdb_core, user_id="user-1", tenant_id="tenant-1")
-        self.assertIn("resource unavailable", str(error.exception))
-        self.mock_vdb_core.create_chunk.assert_not_called()
 
     # Tests for create_chunk - embedding generation exception (lines 1829-1830)
-    @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.service.embed_manual_chunk')
-    def test_create_chunk_embedding_exception(self, mock_get_model, mock_get_record):
-        """Test create_chunk handles exception when generating embedding (lines 1829-1830)."""
-        mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
-        mock_model = MagicMock()
-        mock_model.get_embeddings.side_effect = Exception("Embedding service error")
-        mock_get_model.return_value = (1, None)
-        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        from contracts.knowledge import ChunkCreateRequest
-        result = ElasticSearchService.create_chunk(
-            index_name="test-index",
-            chunk_request=ChunkCreateRequest(chunk_id="c1", content="test"),
-            vdb_core=self.mock_vdb_core,
-            user_id="user-1",
-            tenant_id="tenant-1",
-        )
-
-        # Should succeed even when embedding generation fails
-        self.assertEqual(result["status"], "success")
-        self.mock_vdb_core.create_chunk.assert_called_once()
 
     # Tests for update_chunk - empty payload (line 1890)
     def test_update_chunk_empty_payload(self):
         """Test update_chunk raises when no update fields supplied (line 1890)."""
         from contracts.knowledge import ChunkUpdateRequest
         # Mock _build_chunk_payload to return empty dict
-        with patch.object(ElasticSearchService, '_build_chunk_payload', return_value={}):
+        with patch('management.services.knowledge_base.service.build_chunk_payload', return_value={}):
             with self.assertRaises(Exception) as ctx:
                 ElasticSearchService.update_chunk(
                     index_name="test-index",

@@ -11,7 +11,10 @@ from nexent.storage.models import OperationContext
 
 from infrastructure import knowledge_chunk_mutations as ports
 from infrastructure.agentos_identity import ServicePrincipal
-from infrastructure.knowledge_vectors import bind_knowledge_chunk_vectors
+from infrastructure.knowledge_vectors import (
+    bind_knowledge_chunk_vectors,
+    bind_knowledge_creation_vectors,
+)
 
 
 @pytest.mark.parametrize("resource", [None, "tenant", ASSET_OWNER_TENANT_ID])
@@ -41,6 +44,8 @@ def test_foreign_resource_is_rejected_before_provider_access(monkeypatch):
         pytest.fail("Foreign namespace was opened")
     with pytest.raises(ScopeDenied):
         bind_knowledge_chunk_vectors(actor, "kb", resource_tenant_id="other")
+    with pytest.raises(ScopeDenied):
+        bind_knowledge_creation_vectors(actor, "kb", 3, resource_tenant_id="other")
     factory.assert_not_called()
 
 
@@ -52,3 +57,9 @@ def test_shared_vectors_have_exact_namespace_and_no_actor_impersonation():
         assert port.scope.namespaces == {"kb"}
     finally:
         port.close()
+    creation = bind_knowledge_creation_vectors(actor, "kb", 3, resource_tenant_id=ASSET_OWNER_TENANT_ID)
+    try:
+        assert creation.scope.tenant_id == ASSET_OWNER_TENANT_ID and creation.scope.actor_id == actor.user_id
+        assert creation.scope.namespaces == {"kb"}
+    finally:
+        creation.close()

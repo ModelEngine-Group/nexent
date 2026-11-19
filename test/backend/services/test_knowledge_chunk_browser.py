@@ -57,6 +57,19 @@ async def test_standalone_public_chunk_keeps_null_filename_and_original_path(bro
     assert request.file_ids == [] and request.standalone_path == 'manual/source'
 
 
+async def test_file_source_override_can_match_outside_default_file_path(browser):
+    from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+    s = browser
+    result = s.page(0, 1, 1, None)
+    result.chunks[0].location = {PUBLIC_CHUNK_SOURCE_KEY: {'id': 'alias', 'path_or_url': ['manual/source']}}
+    s.client.knowledge_chunks.return_value = result
+    response = await s.service.browse('kb', s.actor, path_or_url='manual/source')
+    assert response['chunks'][0]['path_or_url'] == ['manual/source']
+    assert s.client.knowledge_chunks.await_args.args[0].file_ids == []
+    with pytest.raises(Conflict):
+        await s.service.browse('kb', s.actor, path_or_url='knowledge/a.txt')
+
+
 async def test_public_pagination_keeps_original_page_values_and_clamps_query(browser):
     s = browser
     s.client.knowledge_chunks.return_value = s.page(0, 1, 2, 1)

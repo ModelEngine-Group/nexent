@@ -33,9 +33,9 @@ def knowledge_chunk_mutation_ports(actor, *, context, resource_tenant_id=None):
 
 
 @contextmanager
-def knowledge_creation_vector_ports(actor, collection, dimensions, *, context):
+def knowledge_creation_vector_ports(actor, collection, dimensions, *, context, resource_tenant_id=None):
     context.remaining()
-    vectors = bind_knowledge_creation_vectors(actor, collection, dimensions)
+    vectors = bind_knowledge_creation_vectors(actor, collection, dimensions, resource_tenant_id=resource_tenant_id)
     try:
         yield vectors
     finally:

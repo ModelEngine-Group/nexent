@@ -5,6 +5,7 @@ import hashlib
 import json
 from typing import Literal
 
+from contracts.agentos import ModelReference
 from contracts.agentos_knowledge import (
     Contract,
     KnowledgeChunk,
@@ -23,8 +24,9 @@ class ChunkCreateData(Contract):
     content: JsonValue
     filename: str | None = None
     location: dict[str, JsonValue] = Field(default_factory=dict)
-    embedding_model: ModelVersion | None = None
+    embedding_model: ModelVersion | ModelReference | None = None
     embedding_input: str | None = None
+    supplied_embedding: JsonValue = None
 
     @model_validator(mode="after")
     def explicit_model_text(self):

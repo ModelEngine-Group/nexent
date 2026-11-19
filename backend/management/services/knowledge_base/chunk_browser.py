@@ -12,6 +12,7 @@ from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from contracts.knowledge_chunk_projection import (
     PUBLIC_CHUNK_FIELDS,
+    PUBLIC_CHUNK_SOURCE_KEY,
     public_chunk_source,
     public_path_matches,
 )
@@ -96,9 +97,11 @@ class KnowledgeChunkBrowser:
                     for chunk in result.chunks:
                         if chunk.knowledge_id != resource.knowledge_id:
                             raise ScopeDenied()
-                        if (chunk.chunk_id in seen
-                            or selected is not None and chunk.file_id is not None and chunk.file_id not in selected
-                            or path_or_url and chunk.file_id is None and not public_path_matches(chunk.location, path_or_url)):
+                        matches_path = not path_or_url or (
+                            public_path_matches(chunk.location, path_or_url)
+                            if chunk.file_id is None or PUBLIC_CHUNK_SOURCE_KEY in chunk.location
+                            else chunk.file_id in selected)
+                        if chunk.chunk_id in seen or not matches_path:
                             raise Conflict()
                         seen.add(chunk.chunk_id)
                         chunks.append(self._chunk(chunk, mapping))

@@ -13,11 +13,10 @@ Main features include:
 """
 
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest
+from contracts.knowledge import ChunkUpdateRequest
 from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record, update_last_summary_time
 from fastapi import Body, Depends, Path, Query
 from management.services.knowledge_base.common import (
@@ -33,9 +32,7 @@ from management.services.knowledge_base.common import (
 from management.services.knowledge_base.deletion import (
     KnowledgeBaseDocumentDeletionService,
 )
-from management.services.knowledge_base.chunk_embedding import embed_manual_chunk
-from infrastructure.agentos_identity import ServicePrincipal
-from nexent.storage.errors import DeadlineExceeded, ScopeDenied
+from management.services.knowledge_base.chunk_payload import build_chunk_payload
 from nexent.vector_database.base import VectorDatabaseCore
 
 __all__ = (
@@ -259,58 +256,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-    @staticmethod
-    def create_chunk(
-        index_name: str,
-        chunk_request: ChunkCreateRequest,
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-    ):
-        """
-        Create a manual chunk entry in the specified index.
-        Automatically generates and stores embedding for semantic search.
-        """
-        try:
-            embedding_model_id, embedding_vector = None, None
-            if chunk_request.content and user_id and tenant_id:
-                embedding_model_id, embedding_vector = embed_manual_chunk(
-                    index_name, chunk_request.content, ServicePrincipal(user_id, tenant_id))
-
-            # Build chunk payload
-            chunk_payload = ElasticSearchService._build_chunk_payload(
-                base_fields={
-                    "id": chunk_request.chunk_id
-                    or ElasticSearchService._generate_chunk_id(),
-                    "title": chunk_request.title,
-                    "filename": chunk_request.filename,
-                    "path_or_url": chunk_request.path_or_url,
-                    "content": chunk_request.content,
-                    "created_by": user_id,
-                },
-                metadata=chunk_request.metadata,
-                ensure_create_time=True,
-            )
-
-            # Add embedding if generated
-            if embedding_vector:
-                chunk_payload["embedding"] = embedding_vector
-                if embedding_model_id:
-                    chunk_payload["embedding_model_id"] = embedding_model_id
-
-            result = vdb_core.create_chunk(index_name, chunk_payload)
-            return {
-                "status": "success",
-                "message": f"Chunk {result.get('id')} created successfully",
-                "chunk_id": result.get("id"),
-            }
-        except (ScopeDenied, DeadlineExceeded):
-            raise
-        except Exception as exc:
-            logger.error(
-                "Error creating chunk in index %s: %s", index_name, exc, exc_info=True
-            )
-            raise Exception(f"Error creating chunk: {exc}")
 
     @staticmethod
     def update_chunk(
@@ -327,7 +272,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         try:
             update_fields = chunk_request.dict(exclude_unset=True, exclude={"metadata"})
             metadata = chunk_request.metadata or {}
-            update_payload = ElasticSearchService._build_chunk_payload(
+            update_payload = build_chunk_payload(
                 base_fields={
                     **update_fields,
                     "updated_by": user_id,
@@ -500,34 +445,3 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             if document.get("path_or_url")
             in allowed_paths_by_index.get(document.get("index"), set())
         ]
-
-    @staticmethod
-    def _generate_chunk_id() -> str:
-        """Generate a deterministic chunk id."""
-        return f"chunk_{uuid.uuid4().hex}"
-
-    @staticmethod
-    def _build_chunk_payload(
-        base_fields: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]],
-        ensure_create_time: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        Merge and sanitize chunk payload fields.
-        """
-        payload = {
-            key: value
-            for key, value in (base_fields or {}).items()
-            if value is not None
-        }
-        if metadata:
-            for key, value in metadata.items():
-                if value is not None:
-                    payload[key] = value
-
-        if ensure_create_time and "create_time" not in payload:
-            payload["create_time"] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%S"
-            )
-
-        return payload

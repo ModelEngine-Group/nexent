@@ -51,6 +51,7 @@ from management.services.knowledge_base.deletion_public import with_cleanup_summ
 from management.services.knowledge_base.file_reader import read_document_error
 from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
 from management.services.knowledge_base.chunk_deletion import delete_manual_chunk
+from management.services.knowledge_base.chunk_creation import create_manual_chunk
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
 from management.services.model.resolver import get_embedding_model_by_id
@@ -837,30 +838,22 @@ async def get_index_chunks(
 
 
 @router.post("/{index_name}/chunk")
-def create_chunk(
+async def create_chunk(
     index_name: str = Path(..., description=INTERNAL_INDEX_NAME_DESC),
     payload: ChunkCreateRequest = Body(..., description="Chunk data"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Create a manual chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
-        result = ElasticSearchService.create_chunk(
-            index_name=index_name,
-            chunk_request=payload,
-            vdb_core=vdb_core,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
+        result = await create_manual_chunk(index_name, payload, ServicePrincipal(user_id, tenant_id))
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except HTTPException:
         raise
     except ScopeDenied:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="You don't have permission to edit this knowledge base") from None
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="No permission to modify this knowledge base") from None
     except DeadlineExceeded:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Error creating chunk: storage operation timed out") from None
     except TokenExpiredError as exc:

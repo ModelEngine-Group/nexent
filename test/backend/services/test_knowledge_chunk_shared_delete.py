@@ -89,7 +89,7 @@ async def test_shared_asset_lookup_and_delete_keep_actor_and_resource_separate(c
     assert row["user_id"] == row["created_by"] == row["updated_by"] == actor.user_id
 
 
-@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize("operation", ["update"])
 async def test_unmigrated_shared_writes_remain_rejected(creation, operation):
     s = creation
     client = SimpleNamespace(authorize_knowledge_chunk_mutation=AsyncMock(return_value=ChunkMutationGrant(
@@ -98,3 +98,33 @@ async def test_unmigrated_shared_writes_remain_rejected(creation, operation):
     service = ChunkMutationService(client, s.models)
     with pytest.raises(ScopeDenied):
         await service._grant(s.value.model_copy(update={"operation": operation}), s.s.actor)
+
+
+async def test_shared_creation_uses_actual_actor_for_model_and_resource_for_storage(creation, shared_ports):
+    s = creation
+    actor = s.s.actor
+    s.vectors.scope = replace(s.vectors.scope, tenant_id=ASSET_OWNER_TENANT_ID)
+    opened = []
+
+    @contextmanager
+    def records(principal, *, resource_tenant_id, context):
+        assert principal == actor and resource_tenant_id == ASSET_OWNER_TENANT_ID
+        yield s.s.mutation_records
+
+    @contextmanager
+    def vectors(principal, collection, dimensions, *, resource_tenant_id, context):
+        assert principal == actor and resource_tenant_id == ASSET_OWNER_TENANT_ID
+        opened.append(dimensions)
+        yield s.vectors
+
+    client = SimpleNamespace(authorize_knowledge_chunk_mutation=AsyncMock(return_value=ChunkMutationGrant(
+        knowledge_id=1, chunk_id="manual", operation="create", collection="collection",
+        resource_tenant_id=ASSET_OWNER_TENANT_ID, revision="a" * 64, embedding_model_id=2)))
+    service = ChunkMutationService(client, s.models, records=records, creation_ports=vectors)
+    result = await service.mutate(s.value.model_copy(update={"changes": {**s.value.changes,
+        "embedding_model": {"model_id": 2, "revision": "r1"}}}), actor)
+    assert result.status == "completed" and opened == [None, 3]
+    assert s.models.invoke.await_args.args[1] == actor
+    row = await s.db(s.s.mutation_records.get, "runtime_knowledge_chunk_changes", result.mutation_id, context=context())
+    assert row["tenant_id"] == ASSET_OWNER_TENANT_ID
+    assert row["user_id"] == row["created_by"] == row["updated_by"] == actor.user_id

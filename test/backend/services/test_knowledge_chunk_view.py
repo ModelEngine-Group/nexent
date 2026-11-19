@@ -316,7 +316,11 @@ def test_private_path_selector_keeps_standalone_content_without_fake_file_ids(vi
                 Revision(receipt["mutation_id"]),
             )
         )
-    s.rows[:] = rows
+    def scoped_scan(collection, where, page, **kwargs):
+        file_term = next(term for term in where.terms if term.field == "file_id")
+        return Page(tuple(rows if file_term.operator == "is_null" else s.rows))
+
+    s.vectors.scan.side_effect = scoped_scan
     request = KnowledgeChunks(
         knowledge_id=1,
         expected_revision="a" * 64,
