@@ -479,7 +479,13 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         if conversation_preferences:
             assert payload.models.llm.conversation_parameters == conversation_preferences["11"]
             assert info.agent_config.model_name != info.agent_config.worker_agents[0].model_name
-            assert info.model_config_list[0].resolved_profile.parameter_values.get("temperature") == conversation_preferences["11"]["temperature"]
+            expected_temperature = conversation_preferences["11"]["temperature"]
+            if expected_temperature is None:
+                expected_temperature = (
+                    agent_model_overrides["11"]["parameter_values"]["temperature"]
+                    if persisted_parameters else model.temperature
+                )
+            assert info.model_config_list[0].resolved_profile.parameter_values.get("temperature") == expected_temperature
             assert info.model_config_list[1].resolved_profile.parameter_values.get("temperature") == model.temperature
         if use_workbench:
             root_tools = [call for call in compile_tools.await_args_list if call.args[0] == 7]

@@ -34,6 +34,7 @@ def test_health_follows_application_lifetime():
         assert set(client.get('/openapi.json').json()['paths']) == {
             '/system_configurations', '/system_configurations/recommendations',
             '/ops/authorization', '/ops/resources', '/ops/scope',
+            '/trajectory/imports', '/trajectory/imports/{import_id}',
         }
         assert client.get('/ops/authorization').status_code == 401
         assert client.get('/docs').status_code == 200

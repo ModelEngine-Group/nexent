@@ -201,6 +201,16 @@ def _validate(schema: dict, value: object, path: str) -> None:
                 _validate(additional, item, _path(path, key))
 
 
+def validate_sampling_parameters(values: Mapping[str, object]) -> None:
+    from nexent.core.models.sampling import SAMPLING_FIELDS, validate_sampling_value
+
+    for field in SAMPLING_FIELDS:
+        try:
+            validate_sampling_value(field, values.get(field))
+        except ValueError:
+            raise ParameterValidationError(f"{field.upper()}_OUT_OF_RANGE", f"/{field}") from None
+
+
 def validate_parameter_value(schema: CompiledParameterSchema, value: object, path: str = "") -> None:
     """Validate the submitted JSON value without defaulting or coercion."""
     try:

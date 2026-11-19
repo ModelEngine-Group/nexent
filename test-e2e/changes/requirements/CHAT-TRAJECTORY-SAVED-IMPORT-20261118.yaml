@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  title: 轨迹导入持久保存及独立列表
+  description: 本地文件保存、按导入者隔离、每次新增、保留至手动删除；旧临时API兼容。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-ARCHIVE-D2-001
+    - CHAT-TRAJECTORY-ARCHIVE-D3-001
+    added:
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D2-001
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D3-001
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D4-001
+    - CHAT-TRAJECTORY-SAVED-IMPORT-D5-001
+    modified:
+    - CHAT-TRAJECTORY-ARCHIVE-D4-001
+    - CHAT-TRAJECTORY-ARCHIVE-SECURITY-D5-001
+    - CHAT-TRAJECTORY-ARCHIVE-RECOVERY-D5-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 持久发布、列表分页、重复保存、可信归属、读取删除及故障回收。
+    - 页面列表、确认删除、刷新恢复、内存清理和错误重试。
+    reason: 既有exchange UT证明临时解析；新增持久状态和访问边界需独立UT，D2/D3/D4/D5各证明协议、真实文件集成、用户旅程和存储风险，无新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_saved_imports.py
+    - test/backend/ops/test_saved_import_lifespan.py
+    - test/backend/ops/test_bootstrap.py
+    - frontend/tests/component/trajectorySavedImports.test.tsx
+    - frontend/tests/component/trajectoryArchive.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+  notes: Inherits CHAT-TRAJECTORY runtime ownership. Cases own local roots, managed
+    services and browser contexts; self-contained preparation will declare empty families
+    and verified cleanup.

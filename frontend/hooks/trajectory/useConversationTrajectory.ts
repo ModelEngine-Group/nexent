@@ -18,10 +18,17 @@ interface Address {
 /** One execution segment per read; React Query bounds retained segment previews. */
 export function useConversationTrajectory(
   row: TrajectoryRecord,
-  queryId?: string
+  queryId?: string,
+  enabled = true
 ) {
   return useInfiniteQuery({
-    queryKey: ["trajectory-conversation", recordKey(row), queryId],
+    enabled,
+    queryKey: [
+      "trajectory-conversation",
+      recordKey(row),
+      queryId,
+      enabled ? "service" : "local",
+    ],
     initialPageParam: {} as Address,
     queryFn: async ({ pageParam: address, signal }) => {
       const directory = address.run

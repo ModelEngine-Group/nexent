@@ -99,7 +99,7 @@ class SystemConfigurationRuntime:
         await self.refresh()
 
     async def start(self) -> None:
-        if self._task is not None:
+        if self._task is not None and not self._task.done():
             return
         self._stop_event.clear()
         await self.refresh()
@@ -134,24 +134,34 @@ class SystemConfigurationRuntime:
     async def _close_connection(self) -> None:
         pubsub, redis = self._pubsub, self._redis
         self._pubsub, self._redis = None, None
-        if pubsub is not None:
-            close = getattr(pubsub, "aclose", None) or pubsub.close
-            result = close()
-            if result is not None:
-                await result
-        if redis is not None:
-            close = getattr(redis, "aclose", None) or redis.close
-            result = close()
-            if result is not None:
-                await result
+        for resource in (pubsub, redis):
+            if resource is None:
+                continue
+            try:
+                close = getattr(resource, "aclose", None) or resource.close
+                result = close()
+                if result is not None:
+                    await result
+            except Exception as error:  # noqa: BLE001 - cleanup must continue
+                logger.warning(
+                    "System configuration Redis cleanup failed: %s",
+                    type(error).__name__,
+                )
 
     async def stop(self) -> None:
         self._stop_event.set()
         task, self._task = self._task, None
         if task is not None:
             task.cancel()
-            with suppress(asyncio.CancelledError):
+            try:
                 await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as error:  # noqa: BLE001 - shutdown must continue
+                logger.error(
+                    "System configuration refresh task stopped with error: %s",
+                    type(error).__name__,
+                )
         await self._close_connection()
 
 

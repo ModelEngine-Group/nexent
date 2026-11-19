@@ -229,6 +229,7 @@ def _connectivity_request(profile):
 
 def _connectivity_changed(current, proposed, row, *, api_key, http_headers):
     """Never persist or log the credential comparison material."""
+    from nexent.core.model_service.adapters.openai_chat import ModelAdapterError
     from nexent.core.model_service.connection_headers import connection_headers
 
     if api_key is not _UNSET and (api_key or "") != (row.get("api_key") or ""):
@@ -244,7 +245,15 @@ def _connectivity_changed(current, proposed, row, *, api_key, http_headers):
     if (all(json_values_equal(old[field], new[field]) for field in fields)
             and json_values_equal(old["capabilities"]["sampling"], new["capabilities"]["sampling"])):
         return False
-    return not json_values_equal(_connectivity_request(current), _connectivity_request(proposed))
+    proposed_request = _connectivity_request(proposed)
+    try:
+        current_request = _connectivity_request(current)
+    except ModelAdapterError as error:
+        # Repairing an invalid historical value requires a new connectivity check.
+        if error.category not in {"TEMPERATURE_OUT_OF_RANGE", "TOP_P_OUT_OF_RANGE"}:
+            raise
+        return True
+    return not json_values_equal(current_request, proposed_request)
 
 
 def update_resolved_model_record(

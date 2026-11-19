@@ -71,7 +71,9 @@ async def test_prepared_profile_round_trip_keeps_child_model_defaults(mocker, se
     root = profiles[restored.agent_config.model_name]
     child = profiles[restored.agent_config.worker_agents[0].model_name]
     for name in ("temperature", "top_p"):
-        assert root.parameter_values.get(name) == (settings or {}).get(name, base.resolved_profile.parameter_values.get(name))
+        override = (settings or {}).get(name)
+        expected = base.resolved_profile.parameter_values.get(name) if override is None else override
+        assert root.parameter_values.get(name) == expected
     assert child == base.resolved_profile
     assert len(profiles) == (2 if settings else 1)
     assert lookup.call_args_list

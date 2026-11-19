@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import math
@@ -21,6 +20,13 @@ class TrajectoryConflict(RuntimeError):
 
 class TrajectoryCorrupt(RuntimeError):
     """A previously confirmed file or manifest failed validation."""
+
+
+def lock_exclusive(fd: int, *, blocking: bool) -> None:
+    """Acquire a file lock held until the descriptor is closed."""
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
 
 
 def write_all(fd: int, data: bytes) -> None:
@@ -174,7 +180,7 @@ class Directory:
         fd = self.open(name, os.O_RDWR | (os.O_CREAT if create else 0))
         try:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+                lock_exclusive(fd, blocking=blocking)
             except BlockingIOError as error:
                 raise TrajectoryConflict("Trajectory file is already locked") from error
             yield fd

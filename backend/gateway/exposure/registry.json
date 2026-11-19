@@ -5221,12 +5221,78 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/trajectory/conversations/{conversation_id}/export",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-942f9ae9ca4815e2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/trajectory/conversations/{conversation_id}/snapshot",
       "transport": "http",
       "target": "ops",
       "source": "backend/ops/api/trajectory.py",
       "route_id": "route-8141ef3d14ed625d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/trajectory/import",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-91d5aac9ac2c32e0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/imports",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-3277cf2c1e056a4c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/trajectory/imports",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-5416eeef2f5cf11c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/trajectory/imports/{import_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-e773f9a2803a964a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/trajectory/imports/{import_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/trajectory.py",
+      "route_id": "route-de95e48a3df60d70",
       "credential_kinds": [
         "session"
       ]

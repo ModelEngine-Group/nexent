@@ -122,6 +122,22 @@ def test_web_features_are_exposed_only_to_sessions(method, path):
     assert match.credential_kinds == ("session",)
 
 
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/api/trajectory/conversations/123/export"),
+    ("POST", "/api/trajectory/import"),
+    ("GET", "/api/trajectory/imports"),
+    ("POST", "/api/trajectory/imports"),
+    ("GET", "/api/trajectory/imports/123"),
+    ("DELETE", "/api/trajectory/imports/123"),
+])
+def test_trajectory_archives_are_routed_to_ops_only_for_sessions(method, path):
+    match = default_registry().match(method, path)
+    assert match is not None
+    assert match.target == "ops"
+    assert match.credential_kinds == ("session",)
+    assert default_registry().match("PATCH", path) is None
+
+
 def test_http_and_websocket_do_not_share_an_implicit_get_grant():
     assert select_upstream("GET", "/api/voice/stt/ws") is None
     assert select_upstream("GET", "/api/voice/stt/ws", transport="websocket") == "runtime"
