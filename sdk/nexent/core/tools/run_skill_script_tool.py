@@ -295,8 +295,11 @@ class RunSkillScriptTool(Tool):
                 )
             skill_id = self.skill_id_by_name.get(skill_name)
             if skill_id is not None:
-                from nexent.monitor.skill_usage import observe_skill_usage
-                observe_skill_usage(skill_id, skill_name, "script_started")
+                try:
+                    from nexent.monitor.skill_usage import observe_skill_usage
+                    observe_skill_usage(skill_id, skill_name, "script_started")
+                except Exception as error:
+                    logger.warning("Skill monitoring failed after script start error=%s", type(error).__name__)
             if self.on_complete is not None:
                 self.on_complete(result)
             artifacts = (

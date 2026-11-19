@@ -3,8 +3,12 @@
 """Load authorized skill snapshots with Jiuwen's native skill rail."""
 
 from pathlib import Path
+import logging
 
 from openjiuwen.harness.rails.skills.skill_use_rail import SkillUseRail
+
+
+logger = logging.getLogger(__name__)
 
 
 class NexentSkillRail(SkillUseRail):
@@ -35,8 +39,11 @@ class NexentSkillRail(SkillUseRail):
                    for root, allowed in self._authorized_by_root.items()):
             raise PermissionError("Skill path escapes the authorized snapshot")
         text = path.read_text(encoding="utf-8-sig")
-        from nexent.monitor.skill_usage import observe_skill_usage
-        observe_skill_usage(self._skill_name_to_id.get(path.parent.name), path.parent.name, "guide_read")
+        try:
+            from nexent.monitor.skill_usage import observe_skill_usage
+            observe_skill_usage(self._skill_name_to_id.get(path.parent.name), path.parent.name, "guide_read")
+        except Exception as error:
+            logger.warning("Skill monitoring failed after Jiuwen guide read error=%s", type(error).__name__)
         return "\n".join(text.splitlines()[:head]) if head is not None else text
 
     async def _load_yaml(self, path: Path):

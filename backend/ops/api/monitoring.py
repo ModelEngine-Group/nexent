@@ -17,7 +17,8 @@ from pydantic import BaseModel
 from contracts.constants.environment import JWT_SECRET
 from management.services.permission.identity.session import authenticate
 from ops.monitoring.model import summarize
-from ops.monitoring.query import days_inclusive, metric_value, model_rows, read_models
+from ops.monitoring.query import (days_inclusive, metric_value, model_rows, read_models, read_skills,
+                                  skill_metric_value, skill_rows)
 from permissions.models import CurrentUser
 from permissions.operations import operations_scope
 
@@ -35,15 +36,18 @@ class Selection(BaseModel):
     group_ids: list[int]
     model_id: int | None
     model_type: str | None
+    skill_id: str | None = None
+    skill_name: str | None = None
 
 
 def selection(start_date: date, end_date: date, tenant_id: str | None = None,
               group_ids: Annotated[list[int] | None, Query(max_length=100)] = None,
-              model_id: Annotated[int | None, Query(gt=0)] = None, model_type: str | None = None):
+              model_id: Annotated[int | None, Query(gt=0)] = None, model_type: str | None = None,
+              skill_id: str | None = None, skill_name: str | None = None):
     if not 0 <= (end_date - start_date).days < 366 or any(group <= 0 for group in group_ids or ()):
         raise HTTPException(422, "Invalid monitoring date range or group ID")
     return Selection(tenant_id=tenant_id, start_date=start_date, end_date=end_date, group_ids=group_ids or [],
-                     model_id=model_id, model_type=model_type)
+                     model_id=model_id, model_type=model_type, skill_id=skill_id, skill_name=skill_name)
 
 
 def ops_tenant(scope: Annotated[Selection, Depends(selection)], user: Annotated[CurrentUser, Depends(authenticate)]):
@@ -196,3 +200,64 @@ def model_refresh_status(request: Request, refresh_id: str,
         status = "timed_out" if elapsed >= 5 else "running"
     snapshot_at = min((row["source_snapshot_at"] for row in rows if row["source_snapshot_at"]), default=None)
     return {"data": {"status": status, "data_as_of": snapshot_at}}
+
+
+def _read_skill(request, scope, tenant):
+    service = getattr(request.app.state, "monitoring", None)
+    if service is None:
+        raise HTTPException(503, "Skill monitoring is unavailable")
+    try:
+        return read_skills(service, tenant=tenant, start=scope.start_date, end=scope.end_date,
+                           groups=scope.group_ids, skill_id=scope.skill_id, skill_name=scope.skill_name)
+    except Exception as error:
+        logger.warning("Skill monitoring query failed error=%s", type(error).__name__)
+        raise HTTPException(503, "Skill monitoring is temporarily unavailable") from None
+
+
+@ops_router.get("/skills")
+def skills(request: Request, scope: Annotated[Selection, Depends(selection)],
+           tenant: Annotated[str | None, Depends(ops_tenant)],
+           page: Annotated[int, Query(ge=1)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+           search: Annotated[str, Query(max_length=100)] = "", descending: bool = True):
+    rows, catalog, _, status = _read_skill(request, scope, tenant)
+    items = [item for item in skill_rows(rows, catalog, covered=status["coverage_state"] == "covered")
+             if search.casefold() in (item.get("skill_name") or "").casefold()]
+    items.sort(key=lambda item: (skill_metric_value(item) is None, -(skill_metric_value(item) or 0)
+                                 if descending else skill_metric_value(item) or 0))
+    start = (page - 1) * page_size
+    return {"data": {"items": items[start:start + page_size], "total": len(items)}, **status}
+
+
+@ops_router.get("/skills/summary")
+def skill_summary(request: Request, scope: Annotated[Selection, Depends(selection)],
+                  tenant: Annotated[str | None, Depends(ops_tenant)]):
+    rows, catalog, available, status = _read_skill(request, scope, tenant)
+    items = skill_rows(rows, catalog, covered=status["coverage_state"] == "covered")
+    usage_count = sum(skill_metric_value(item) or 0 for item in items)
+    return {"data": {"current_skill_count": len(catalog), "usage_count": usage_count,
+                      "skill_count": len([item for item in items if item["metrics"] is not None])}, **status}
+
+
+@ops_router.get("/skills/rankings")
+def skill_rankings(request: Request, scope: Annotated[Selection, Depends(selection)],
+                   tenant: Annotated[str | None, Depends(ops_tenant)]):
+    rows, catalog, _, status = _read_skill(request, scope, tenant)
+    items = skill_rows(rows, catalog, covered=status["coverage_state"] == "covered")
+    items = [item for item in items if skill_metric_value(item) is not None]
+    items.sort(key=skill_metric_value, reverse=True)
+    return {"data": items[:5], **status}
+
+
+@ops_router.get("/skills/trends")
+def skill_trends(request: Request, scope: Annotated[Selection, Depends(selection)],
+                 tenant: Annotated[str | None, Depends(ops_tenant)]):
+    rows, _, available, status = _read_skill(request, scope, tenant)
+    by_date = defaultdict(int)
+    for row in rows:
+        by_date[row["statistic_date"]] += row.get("usage_count", 0)
+    published = set(available)
+    history = []
+    for day in days_inclusive(scope.start_date, scope.end_date):
+        history.append({"statistic_date": day,
+                        "usage_count": by_date.get(day.isoformat(), 0) if day.isoformat() in published else None})
+    return {"data": history, **status}

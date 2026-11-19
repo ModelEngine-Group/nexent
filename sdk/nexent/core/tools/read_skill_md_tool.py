@@ -193,8 +193,11 @@ class ReadSkillMdTool(Tool):
 
             skill_id = self.skill_id_by_name.get(skill_name)
             if not additional_files and skill_id is not None:
-                from nexent.monitor.skill_usage import observe_skill_usage
-                observe_skill_usage(skill_id, skill_name, "guide_read")
+                try:
+                    from nexent.monitor.skill_usage import observe_skill_usage
+                    observe_skill_usage(skill_id, skill_name, "guide_read")
+                except Exception as error:
+                    logger.warning("Skill monitoring failed after guide read error=%s", type(error).__name__)
             return ''.join(result_parts)
 
         except Exception as e:

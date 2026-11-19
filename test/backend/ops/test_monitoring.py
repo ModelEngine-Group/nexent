@@ -12,9 +12,10 @@ import pytest
 
 from nexent.monitor.facts import emit_fact, set_fact_sink
 from nexent.monitor.model_fact import AttemptObservation
-from nexent.monitor.monitoring import _MonitoredChatCompletions
-from ops.monitoring.contracts import Fact, MonitoringKind, day_id
-from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, summarize
+from nexent.monitor.monitoring import AgentRunMetadata, _MonitoredChatCompletions, agent_monitoring_context
+from ops.monitoring.contracts import Fact, MonitoringKind, SkillFact, day_id
+from ops.monitoring.model import (MODEL_MONITORING, ModelFact, SKILL_MONITORING,
+                                  accumulate_model, accumulate_skill, summarize)
 from ops.monitoring.runtime import Producer
 from ops.monitoring.search import delete_documents, install_templates
 from ops.monitoring.service import CLEANUP_INTERVAL_SECONDS, Monitoring, _apply_revision
@@ -173,6 +174,34 @@ def test_shared_sink_accepts_a_non_model_fact():
         set_fact_sink(None)
     emit_fact(payload)
     assert events == [payload]
+
+
+def test_skill_usage_observation_is_run_scoped_and_atomically_deduplicated():
+    from nexent.monitor.skill_usage import SkillUsageObservation
+
+    events = []
+    set_fact_sink(events.append)
+    try:
+        with agent_monitoring_context(AgentRunMetadata(
+            tenant_id="tenant", agent_id=9, monitoring_run_id="run-skill-1",
+            monitoring_root_run_id="root-1", monitoring_group_ids=(3, 2),
+        )):
+            SkillUsageObservation.for_skill(17, "writer", "guide_read").trigger()
+            SkillUsageObservation.for_skill(17, "writer", "script_started").trigger()
+    finally:
+        set_fact_sink(None)
+
+    assert len(events) == 1
+    assert events[0]["skill_id"] == "17"
+    assert events[0]["trigger_kind"] == "guide_read"
+    assert events[0]["root_run_id"] == "root-1"
+    fact = SkillFact.model_validate(events[0]).document(ZoneInfo("UTC"))
+    assert list(accumulate_skill([fact]))[0][1]["usage_count"] == 1
+
+
+def test_skill_monitoring_is_registered_as_a_separate_kind():
+    assert SKILL_MONITORING.fact_model is SkillFact
+    assert SKILL_MONITORING.fact_fields["trigger_kind"] == "keyword"
 
 
 @pytest.mark.parametrize("stream", [False, True])

@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from infrastructure.rdb.client import get_db_session
 from management.db.model.models import ModelRecord
+from management.db.models import SkillInfo
 from ops.monitoring.model import summarize
 from ops.monitoring.search import filters
 
@@ -87,3 +88,77 @@ def metric_value(row, metric):
     if isinstance(value, dict):
         return int(value["value"]) if value["value"] is not None else None
     return value
+
+
+def skill_catalog(tenant: str | None) -> list[dict]:
+    columns = (SkillInfo.tenant_id, SkillInfo.skill_id, SkillInfo.skill_name)
+    statement = select(*columns).where(SkillInfo.delete_flag != "Y")
+    if tenant is not None:
+        statement = statement.where(SkillInfo.tenant_id == tenant)
+    with get_db_session() as session:
+        return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def read_skills(service, *, tenant, start: date, end: date, groups, skill_id, skill_name):
+    write_failed = service.store.has_failed_batches(tenant, "skill", start, end)
+    rows = []
+    with service.publication_snapshot(tenant, "skill", start, end) as (states, point):
+        published = [row for row in states if row["publish_id"]]
+        if point is not None:
+            for offset in range(0, len(published), 250):
+                selection = {"bool": {"should": [
+                    filters(tenant_id=state["tenant_id"], statistic_date=state["statistic_date"].isoformat(),
+                            publish_id=str(state["publish_id"]))
+                    for state in published[offset:offset + 250]
+                ], "minimum_should_match": 1}}
+                constraints = filters(fact_kind="skill")
+                for name, value in (("initiator_group_ids", groups), ("skill_id", skill_id),
+                                    ("skill_name", skill_name)):
+                    if value:
+                        constraints["bool"]["filter"].extend(filters(**{name: value})["bool"]["filter"])
+                constraints["bool"]["filter"].append(selection)
+                rows.extend(point.documents(constraints))
+    available = sorted({row["statistic_date"] for row in published})
+    inventory = [dict(row, skill_id=str(row["skill_id"])) for row in skill_catalog(tenant)
+                 if (skill_id is None or str(row["skill_id"]) == str(skill_id))
+                 and (skill_name is None or row["skill_name"] == skill_name)]
+    tenants = {row["tenant_id"] for row in inventory} | {row["tenant_id"] for row in states}
+    if tenant is not None:
+        tenants.add(tenant)
+    whole_days = (end - start).days + 1
+    coverage = "uncovered"
+    if published:
+        starts = service.store.coverage_starts(tenants, "skill")
+        complete = len(published) == whole_days * len(tenants) and all(
+            row["tenant_id"] in starts and starts[row["tenant_id"]] <=
+            datetime.combine(row["statistic_date"], time.min, tzinfo=service.zone)
+            for row in published
+        )
+        coverage = "covered" if complete else "partial"
+    status = {
+        "data_as_of": min((row["source_snapshot_at"] for row in published), default=None),
+        "coverage_state": coverage,
+        "is_stale": write_failed or any(row["source_revision"] != row["published_source_revision"] for row in states),
+    }
+    return rows, inventory, available, status
+
+
+def skill_rows(rows, inventory, *, covered):
+    by_skill = defaultdict(list)
+    identities = {(row["tenant_id"], row["skill_id"]): row for row in inventory}
+    for row in rows:
+        key = row["tenant_id"], row.get("skill_id")
+        if key[1] is None:
+            continue
+        by_skill[key].append(row)
+        identities.setdefault(key, {"tenant_id": key[0], "skill_id": key[1],
+                                    "skill_name": row.get("skill_name")})
+    result = []
+    for key, skill in identities.items():
+        usage_count = sum(row.get("usage_count", 0) for row in by_skill[key])
+        result.append({**skill, "metrics": {"usage_count": usage_count} if covered or key in by_skill else None})
+    return result
+
+
+def skill_metric_value(row, metric="usage_count"):
+    return (row["metrics"] or {}).get(metric)
