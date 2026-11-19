@@ -1,0 +1,12 @@
+schema_version: "1.0"
+case_id: AIDP-METADATA-D5-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+preparation:
+  families: []
+acceptance_bindings:
+  AC-01: [test_regular_user_cannot_change_field_definitions, test_annotation_requires_kb_edit_and_defined_keys, test_retrieval_metadata_reaches_the_source_display_chain]
+notes: >-
+  Self-contained case: it creates and releases its own loopback resources and uses logical assets only. No shared deployment or historical data is required.

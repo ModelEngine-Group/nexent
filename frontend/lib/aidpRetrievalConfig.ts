@@ -23,6 +23,8 @@ export const aidpDefaults: Record<string, unknown> = {
   full_text_score_threshold: 0,
   graph_score_threshold: 0,
   graph_reranking_enable: true,
+  ontology_enhance_enable: false,
+  rule_enable: false,
 };
 export const isAidpTool = (name?: string | null) =>
   name === "aidp_search" || name === "ind_aidp_search";
@@ -99,6 +101,12 @@ export function aidpErrors(
     errors.reranking_mode = "mode";
   if (c.graph_reranking_enable && !c.reranking_enable)
     errors.graph_reranking_enable = "reranking";
+  if (
+    c.ontology_enhance_enable &&
+    c.reranking_enable &&
+    c.reranking_mode === "jargon_coverage"
+  )
+    errors.ontology_enhance_enable = "jargon_conflict";
   const h = Number(c.hybrid_top_k),
     g = Number(c.graph_top_k),
     k = Number(c.top_k);

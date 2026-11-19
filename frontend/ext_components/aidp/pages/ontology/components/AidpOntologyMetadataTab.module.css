@@ -1,0 +1,27 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.switcherRow {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.switcher :global(.ant-segmented-item) {
+  min-height: 32px;
+  line-height: 32px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}

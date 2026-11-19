@@ -1,0 +1,78 @@
+schema_version: "1.0"
+stage: D5
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-ONTOLOGY-D5-001
+  feature_id: AIDP-ONTOLOGY
+  business_rule_ids: [AIDP-ONTOLOGY-RULE-01, AIDP-ONTOLOGY-RULE-02, AIDP-ONTOLOGY-RULE-03]
+  title: Ontology authorization and internal-task boundary
+  type: SECURITY
+  risk_type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: >-
+    Prove management-role gating, target-KB EDIT checks, cross-KB rejection, binding validation and the absence of internal task API calls.
+  preconditions:
+    - Authentication and KB permissions are substituted with fixed user/role inputs.
+  test_data:
+    profile: mock
+    data: "logical fixtures for AIDP-ONTOLOGY-D5-001"
+  steps:
+    - order: 1
+      action: >-
+        Attempt ontology definition writes as a regular USER.
+      expected: >-
+        Every definition write is 403 and no upstream service is called.
+    - order: 2
+      action: >-
+        Attempt a binding with READ_ONLY or unknown KB access.
+      expected: >-
+        The request is rejected before any upstream write; the existing binding is unchanged.
+    - order: 3
+      action: >-
+        Attempt chunk reads/writes across KBs and across ontology bindings.
+      expected: >-
+        READ is KB-scoped, EDIT is required to annotate, and a chunk from another KB is rejected with no batch call.
+    - order: 4
+      action: >-
+        Inspect the new proxy source for internal task endpoints.
+      expected: >-
+        No kmsctrl or ontology/tasks call exists; async acceptance is submission-only.
+  expected_results:
+    - Authorization is enforced at the backend, not only by hidden UI.
+    - Cross-KB and cross-ontology writes never reach AIDP.
+  forbidden_side_effects:
+    - Do not leak AIDP credentials or internal task URLs to the browser.
+  unit_boundary: HTTP permission boundaries with substituted auth/roles
+  inputs:
+    - users with USER/ADMIN roles
+    - KB permission maps
+  assertions:
+    - 403/404/400 are returned at the correct boundary.
+    - No upstream call occurs for denied requests.
+  acceptance:
+    - id: AC-01
+      description: >-
+        Ontology and annotation authorization and the no-internal-task rule are enforced.
+      steps: [1, 2, 3, 4]
+      expected_results: [1, 2]
+      forbidden_side_effects: [1]
+
+  risk: An unauthorized or cross-boundary caller changes ontology, binding or chunk metadata state.
+  condition:
+    - Regular USER attempts ontology definition writes.
+    - A READ_ONLY or unknown knowledge base is used for binding or annotation.
+    - A chunk from another knowledge base or an undefined metadata key is submitted.
+  metrics:
+    - HTTP status for each denied call.
+    - Upstream-call count for each rejected request.
+    - Presence of internal task endpoint strings in proxy source.
+  thresholds:
+    - Denied writes return 403 or 404; cross-boundary writes return 400/403.
+    - Rejected requests make zero upstream writes.
+    - No kmsctrl or ontology/tasks call exists.
+  recovery_expectations:
+    - Existing bindings, definitions and chunk values remain unchanged after rejection.
+    - The caller can retry with an authorized KB and a defined field.
+

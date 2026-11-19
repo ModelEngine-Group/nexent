@@ -1,0 +1,64 @@
+schema_version: "1.0"
+stage: D2
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-METADATA-D2-001
+  feature_id: AIDP-METADATA
+  business_rule_ids: [AIDP-METADATA-RULE-01, AIDP-METADATA-RULE-02]
+  title: Metadata field and chunk annotation HTTP contracts
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: >-
+    Prove the field-definition CRUD contract, 20-field limit, type checks, batch annotation validation and per-chunk result response.
+  preconditions:
+    - The ontology router runs with substituted auth/permission boundaries and an in-memory ontology store.
+  test_data:
+    profile: mock
+    data: "logical fixtures for AIDP-METADATA-D2-001"
+  steps:
+    - order: 1
+      action: >-
+        Create, list, rename and delete field definitions.
+      expected: >-
+        Only string/number/time are accepted; names use the conservative 63-character / 64-byte limit; duplicate names and the 21st field are rejected; rename changes only the name.
+    - order: 2
+      action: >-
+        Annotate a chunk with valid and invalid metadata.
+      expected: >-
+        Defined keys and matching types succeed; undefined keys, wrong types, over-limit keys/values and foreign chunks are rejected before the upstream batch call.
+    - order: 3
+      action: >-
+        Re-read the chunk after annotation.
+      expected: >-
+        The response carries AIDP's saved metadata rather than a local projection.
+  expected_results:
+    - Field definitions and annotations follow the documented HTTP contract, including 63-character / 64-byte field names and async rename/delete receipts.
+    - Invalid writes never reach AIDP.
+  forbidden_side_effects:
+    - Do not clear fields or call async annotation endpoints.
+  unit_boundary: FastAPI router with service boundary substituted
+  inputs:
+    - HTTP JSON requests
+    - fake field/chunk store
+  assertions:
+    - Limits, types and per-chunk results are enforced.
+    - Chunk ownership is checked before annotation.
+  acceptance:
+    - id: AC-01
+      description: >-
+        Field-definition and annotation APIs enforce the documented constraints.
+      steps: [1, 2, 3]
+      expected_results: [1, 2]
+      forbidden_side_effects: [1]
+  contract:
+    protocol: HTTP JSON
+    method: GET/POST/PATCH/DELETE
+    endpoint: /aidp-mgmt/ontology/domains/{id}/metadata-fields and /knowledge-bases/{id}/chunks
+    request_expectations:
+      - Field definitions carry field_name and one of string/number/time.
+      - Batch annotation carries domain_id, a non-empty metadata object and 1-100 chunk_ids.
+    response_expectations:
+      - Field lists expose limit; invalid definitions and values return 400 with a readable message.
+      - Batch annotation returns total, success_count, failed_count and per-chunk success/failure lists.

@@ -114,6 +114,7 @@ def test_wrappers_share_one_error_type_and_complete_parameter_descriptions():
         "vector_candidates", "full_text_candidates", "hybrid_top_k", "graph_top_k",
         "vector_score_threshold", "full_text_score_threshold", "graph_score_threshold",
         "graph_reranking_enable", "query_expansion_enable",
+        "ontology_enhance_enable", "rule_enable",
     )
     for tool in (AidpSearchTool, IndependentAidpSearchTool):
         for field in advanced:

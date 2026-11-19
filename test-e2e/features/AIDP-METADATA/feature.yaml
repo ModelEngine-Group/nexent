@@ -1,0 +1,28 @@
+schema_version: "1.0"
+module:
+  id: AIDP-KNOWLEDGE
+  name: AIDP knowledge and ontology management
+feature:
+  feature_id: AIDP-METADATA
+  name: AIDP ontology Metadata definitions and chunk annotation
+  status: active
+  description: >-
+    Define ontology Metadata fields, synchronously annotate chunks of bound knowledge
+    bases and read the saved values back from chunk list/detail and retrieval sources.
+  business_rules:
+    - rule_id: AIDP-METADATA-RULE-01
+      description: >-
+        Field definitions use string, number or time; names are unique within an ontology,
+        limited to 20 fields and at most 63 characters / 64 UTF-8 bytes. Rename changes only the name; AIDP rejects deleting a
+        field still used by a chunk and keeps the definition and values on failure.
+    - rule_id: AIDP-METADATA-RULE-02
+      description: >-
+        Synchronous batch annotation accepts only fields defined in the bound ontology,
+        matching value types and the 64-byte key / 256-byte value limits. Per-chunk success
+        and failure are reported; no async task UI or field-clearing operation is exposed.
+    - rule_id: AIDP-METADATA-RULE-03
+      description: >-
+        Chunk list and detail display AIDP's stored metadata. Retrieval hits keep the chunk
+        metadata returned by AIDP through the SDK and source panel; Nexent does not invent
+        missing keys or add retrieval filter parameters.
+  required_test_stages: [D1, D2, D3, D4, D5]

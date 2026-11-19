@@ -1,0 +1,639 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  App,
+  Button,
+  Checkbox,
+  Dropdown,
+  Empty,
+  Input,
+  Popover,
+  Skeleton,
+  Switch,
+  Table,
+  Tooltip,
+  type TableColumnsType,
+} from "antd";
+import { SearchOutlined, SettingOutlined } from "@ant-design/icons";
+
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
+import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import type {
+  AidpOntologyRule,
+  AidpOntologyRulePayload,
+} from "@/ext_components/aidp/shared/types/ontology";
+import styles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
+import AidpOntologyRuleDrawer from "./AidpOntologyRuleDrawer";
+import ruleStyles from "./AidpOntologyRulesTab.module.css";
+
+interface AidpOntologyRulesTabProps {
+  domainId: string;
+}
+
+const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
+const RULE_LIMIT = 100;
+
+const toPayload = (rule: AidpOntologyRule): AidpOntologyRulePayload => ({
+  name: rule.name,
+  description: rule.description,
+  enabled: rule.enabled,
+  condition: rule.condition,
+  action: rule.action,
+});
+
+/** Format an AIDP rule audit value with minutes, never inventing a time. */
+const formatAuditTime = (value?: string | null): string => {
+  if (!value) return "—";
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
+    return text.slice(0, 16).replace("T", " ");
+  }
+  return text || "—";
+};
+
+const OPERATOR_LABELS: Record<string, string> = {
+  is: "等于",
+  equals: "等于",
+  is_not: "不等于",
+  contains: "包含",
+  not_contains: "不包含",
+  starts_with: "开头是",
+  ends_with: "结尾是",
+  gt: "大于",
+  gte: "大于等于",
+  lt: "小于",
+  lte: "小于等于",
+  before: "早于",
+  after: "晚于",
+  exists: "存在",
+  not_exists: "不存在",
+  empty: "为空",
+  not_empty: "不为空",
+  "not empty": "不为空",
+};
+
+const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
+  domainId,
+}) => {
+  const { t } = useTranslation();
+  const { message, modal } = App.useApp();
+  const scope = useAidpQueryScope();
+  const queryClient = useQueryClient();
+  const demo = useAidpOntologyDemoMode();
+  const { user, isAuthzReady } = useAuthorizationContext();
+  const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState("");
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const [visibleColumns, setVisibleColumns] = useState({
+    description: true,
+    createTime: true,
+    updateTime: true,
+  });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
+
+  const queryKey = useMemo(
+    () => [...scope.key, "ontology-rules", domainId, { page, pageSize }],
+    [domainId, page, pageSize, scope.key]
+  );
+  const query = useQuery({
+    queryKey,
+    queryFn: () => aidpOntologyService.listRules(domainId, page, pageSize),
+    enabled: scope.enabled && !!domainId,
+    staleTime: 0,
+    retry: false,
+  });
+  const countQuery = useQuery({
+    queryKey: [...scope.key, "ontology-rule-count", domainId],
+    queryFn: () => aidpOntologyService.countRules(domainId),
+    enabled: scope.enabled && !!domainId,
+    staleTime: 0,
+    retry: false,
+  });
+
+  const rules = useMemo(() => query.data?.value ?? [], [query.data?.value]);
+  const total = query.data?.total_count ?? rules.length;
+  const totalReliable = query.data?.total_reliable !== false;
+  const hasMore = query.data?.has_more ?? false;
+  const count = countQuery.data?.count;
+  const atLimit = (count ?? 0) >= RULE_LIMIT;
+  const filteredRules = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return rules;
+    return rules.filter((rule) => rule.name.toLowerCase().includes(needle));
+  }, [rules, search]);
+  const selectedRules = rules.filter((rule) =>
+    selectedKeys.includes(rule.rule_id)
+  );
+  const errorMessage = query.error
+    ? getAidpErrorMessage(
+        query.error,
+        t,
+        t("aidpKnowledge.ontologyRulesLoadFailed")
+      )
+    : undefined;
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({
+      queryKey: [...scope.key, "ontology-rules", domainId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: [...scope.key, "ontology-rule-count", domainId],
+    });
+  };
+
+  const openCreate = () => {
+    setEditingRuleId(null);
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (rule: AidpOntologyRule) => {
+    setEditingRuleId(rule.rule_id);
+    setDrawerOpen(true);
+  };
+
+  const handleToggle = async (rule: AidpOntologyRule, enabled: boolean) => {
+    setTogglingRuleId(rule.rule_id);
+    try {
+      // PATCH is documented as a full overwrite, so read the complete rule and
+      // send every field back instead of only {enabled}.
+      const detail = await aidpOntologyService.getRule(domainId, rule.rule_id);
+      const payload = { ...toPayload(detail), enabled };
+      await aidpOntologyService.updateRule(domainId, rule.rule_id, payload);
+      message.success(
+        demo
+          ? t("aidpKnowledge.ontologyRulesToggleDemo")
+          : enabled
+            ? t("aidpKnowledge.ontologyRulesEnabledDone")
+            : t("aidpKnowledge.ontologyRulesDisabledDone")
+      );
+      refresh();
+    } catch (error) {
+      message.error(
+        getAidpErrorMessage(
+          error,
+          t,
+          t("aidpKnowledge.ontologyRulesToggleFailed")
+        )
+      );
+    } finally {
+      setTogglingRuleId(null);
+    }
+  };
+
+  const handleDelete = (rule: AidpOntologyRule) => {
+    modal.confirm({
+      title: t("aidpKnowledge.ontologyRulesDeleteTitleFixed"),
+      content: (
+        <div className={ruleStyles.confirmBody}>
+          <p>
+            {t("aidpKnowledge.ontologyRulesDeleteContentWithName", {
+              name: rule.name,
+            })}
+          </p>
+          <p>{t("aidpKnowledge.ontologyRulesDeleteIrreversible")}</p>
+        </div>
+      ),
+      width: 480,
+      okText: t("aidpKnowledge.ontologyDelete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: async () => {
+        try {
+          await aidpOntologyService.deleteRule(domainId, rule.rule_id);
+          message.success(t("aidpKnowledge.ontologyRulesDeleted"));
+          if (rules.length === 1 && page > 1) setPage(page - 1);
+          refresh();
+        } catch (error) {
+          message.error(
+            getAidpErrorMessage(
+              error,
+              t,
+              t("aidpKnowledge.ontologyRulesDeleteFailed")
+            )
+          );
+          throw error;
+        }
+      },
+    });
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedRules.length === 0) {
+      message.warning(t("aidpKnowledge.ontologyRulesSelectRequired"));
+      return;
+    }
+    modal.confirm({
+      title: t("aidpKnowledge.ontologyRulesBatchDeleteTitle", {
+        count: selectedRules.length,
+      }),
+      content: (
+        <div className={ruleStyles.confirmBody}>
+          <p>{t("aidpKnowledge.ontologyRulesBatchDeleteContent")}</p>
+          <AidpOntologyGapNote>
+            {t("aidpKnowledge.ontologyRulesBatchDeleteGap")}
+          </AidpOntologyGapNote>
+        </div>
+      ),
+      width: 520,
+      okText: t("aidpKnowledge.ontologyDelete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: async () => {
+        const outcomes = await Promise.allSettled(
+          selectedRules.map((rule) =>
+            aidpOntologyService.deleteRule(domainId, rule.rule_id)
+          )
+        );
+        const failed = outcomes.filter(
+          (outcome) => outcome.status === "rejected"
+        ).length;
+        if (failed > 0) {
+          message.warning(
+            t("aidpKnowledge.ontologyRulesBatchDeletePartial", {
+              count: failed,
+            })
+          );
+        } else {
+          message.success(t("aidpKnowledge.ontologyRulesDeleted"));
+        }
+        setSelectedKeys([]);
+        refresh();
+      },
+    });
+  };
+
+  const renderConditions = (rule: AidpOntologyRule) => {
+    const conditions = rule.condition?.value?.conditions ?? [];
+    if (conditions.length === 0) {
+      return <span className={ruleStyles.muted}>—</span>;
+    }
+    return (
+      <Popover
+        trigger="hover"
+        placement="topLeft"
+        content={
+          <div className={ruleStyles.conditionList}>
+            {conditions.map((condition, index) => (
+              <div key={`${condition.field}-${index}`}>
+                {condition.field}:{" "}
+                {OPERATOR_LABELS[condition.operator] ?? condition.operator}
+                {condition.value !== undefined &&
+                condition.value !== null &&
+                condition.value !== ""
+                  ? `: ${condition.value}`
+                  : ""}
+              </div>
+            ))}
+          </div>
+        }
+      >
+        <span className={ruleStyles.countTrigger}>
+          {t("aidpKnowledge.ontologyRulesConditionCount", {
+            count: conditions.length,
+          })}
+        </span>
+      </Popover>
+    );
+  };
+
+  const columns: TableColumnsType<AidpOntologyRule> = [
+    {
+      title: t("aidpKnowledge.ontologyRulesName"),
+      dataIndex: "name",
+      key: "name",
+      width: 180,
+      ellipsis: true,
+    },
+    ...(visibleColumns.description
+      ? [
+          {
+            title: t("aidpKnowledge.ontologyRulesDescription"),
+            dataIndex: "description",
+            key: "description",
+            ellipsis: true,
+            render: (value: string) => value || "—",
+          },
+        ]
+      : []),
+    {
+      title: t("aidpKnowledge.ontologyRulesEnabled"),
+      dataIndex: "enabled",
+      key: "enabled",
+      width: 110,
+      render: (enabled: boolean, record) => (
+        <Switch
+          checked={enabled}
+          size="small"
+          loading={togglingRuleId === record.rule_id}
+          disabled={!canManage}
+          onChange={(checked) => void handleToggle(record, checked)}
+        />
+      ),
+    },
+    {
+      title: t("aidpKnowledge.ontologyRulesCandidateRules"),
+      key: "conditions",
+      width: 120,
+      render: (_value: unknown, record) => renderConditions(record),
+    },
+    {
+      title: t("aidpKnowledge.ontologyRulesAggregation"),
+      key: "aggregation",
+      width: 120,
+      render: (_value: unknown, record) =>
+        record.action?.value?.effect_mode === "add"
+          ? t("aidpKnowledge.ontologyRulesAddShort")
+          : t("aidpKnowledge.ontologyRulesMultiplyShort"),
+    },
+    {
+      title: t("aidpKnowledge.ontologyRulesActionCoefficient"),
+      key: "coefficient",
+      width: 130,
+      render: (_value: unknown, record) =>
+        record.action?.value?.coefficient !== undefined &&
+        record.action?.value?.coefficient !== null
+          ? t("aidpKnowledge.ontologyRulesFixedCoefficientShort")
+          : t("aidpKnowledge.ontologyRulesFieldDerivedShort"),
+    },
+    ...(visibleColumns.createTime
+      ? [
+          {
+            title: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
+            key: "created_at",
+            width: 170,
+            render: (_value: unknown, record: AidpOntologyRule) => (
+              <span>{formatAuditTime(record.created_at)}</span>
+            ),
+          },
+        ]
+      : []),
+    ...(visibleColumns.updateTime
+      ? [
+          {
+            title: t("aidpKnowledge.ontologyMetadataColumnUpdateTime"),
+            key: "updated_at",
+            width: 170,
+            render: (_value: unknown, record: AidpOntologyRule) => (
+              <span>{formatAuditTime(record.updated_at)}</span>
+            ),
+          },
+        ]
+      : []),
+    {
+      title: t("aidpKnowledge.ontologyColumnActions"),
+      key: "actions",
+      width: 130,
+      fixed: "right",
+      render: (_value, record) => (
+        <div className={styles.rowActions}>
+          <Button
+            type="link"
+            size="small"
+            disabled={!canManage}
+            onClick={() => openEdit(record)}
+          >
+            {t("aidpKnowledge.ontologyEdit")}
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            danger
+            disabled={!canManage}
+            onClick={() => handleDelete(record)}
+          >
+            {t("aidpKnowledge.ontologyDelete")}
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  const renderBody = () => {
+    if (query.isLoading) {
+      return (
+        <div className={styles.stateBlock}>
+          <Skeleton active title={false} paragraph={{ rows: 5 }} />
+        </div>
+      );
+    }
+    if (query.isError) {
+      return (
+        <div className={styles.stateBlock}>
+          <div className={styles.errorText} role="alert">
+            {errorMessage}
+          </div>
+          <Button onClick={() => void query.refetch()}>
+            {t("aidpKnowledge.retry")}
+          </Button>
+        </div>
+      );
+    }
+    if (rules.length === 0) {
+      return (
+        <Empty
+          className={styles.emptyState}
+          description={t("aidpKnowledge.ontologyRulesEmpty")}
+        >
+          {canManage && (
+            <Button type="primary" onClick={openCreate}>
+              {t("aidpKnowledge.ontologyRulesCreateAction")}
+            </Button>
+          )}
+        </Empty>
+      );
+    }
+    return (
+      <Table<AidpOntologyRule>
+        rowKey="rule_id"
+        size="middle"
+        className={styles.table}
+        columns={columns}
+        dataSource={filteredRules}
+        pagination={false}
+        tableLayout="fixed"
+        scroll={{ x: 1180 }}
+        rowSelection={
+          canManage
+            ? {
+                selectedRowKeys: selectedKeys,
+                onChange: setSelectedKeys,
+              }
+            : undefined
+        }
+        locale={{
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_DEFAULT}
+              description={t("aidpKnowledge.ontologyRulesSearchEmpty")}
+            />
+          ),
+        }}
+      />
+    );
+  };
+
+  return (
+    <div className={styles.tab}>
+      <div className={styles.toolbar}>
+        <Input
+          allowClear
+          className={styles.searchInput}
+          prefix={<SearchOutlined />}
+          placeholder={t("aidpKnowledge.ontologyRulesSearchPlaceholder")}
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(1);
+          }}
+        />
+        <div className={styles.toolbarActions}>
+          <Button
+            danger
+            disabled={!canManage || selectedKeys.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyDelete")}
+          </Button>
+          <Tooltip
+            title={
+              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached") : undefined
+            }
+          >
+            <Button
+              type="primary"
+              disabled={!canManage || atLimit}
+              onClick={openCreate}
+            >
+              {t("aidpKnowledge.ontologyRulesCreateAction")}
+            </Button>
+          </Tooltip>
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                {
+                  key: "description",
+                  label: (
+                    <Checkbox
+                      checked={visibleColumns.description}
+                      onChange={(event) =>
+                        setVisibleColumns((previous) => ({
+                          ...previous,
+                          description: event.target.checked,
+                        }))
+                      }
+                    >
+                      {t("aidpKnowledge.ontologyRulesDescription")}
+                    </Checkbox>
+                  ),
+                },
+                {
+                  key: "createTime",
+                  label: (
+                    <Checkbox
+                      checked={visibleColumns.createTime}
+                      onChange={(event) =>
+                        setVisibleColumns((previous) => ({
+                          ...previous,
+                          createTime: event.target.checked,
+                        }))
+                      }
+                    >
+                      {t("aidpKnowledge.ontologyMetadataColumnCreateTime")}
+                    </Checkbox>
+                  ),
+                },
+                {
+                  key: "updateTime",
+                  label: (
+                    <Checkbox
+                      checked={visibleColumns.updateTime}
+                      onChange={(event) =>
+                        setVisibleColumns((previous) => ({
+                          ...previous,
+                          updateTime: event.target.checked,
+                        }))
+                      }
+                    >
+                      {t("aidpKnowledge.ontologyMetadataColumnUpdateTime")}
+                    </Checkbox>
+                  ),
+                },
+              ],
+            }}
+          >
+            <Button
+              aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
+              icon={<SettingOutlined />}
+            />
+          </Dropdown>
+        </div>
+      </div>
+      <AidpOntologyGapNote title={t("aidpKnowledge.ontologyRulesGapTitle")}>
+        {demo
+          ? t("aidpKnowledge.ontologyRulesDemoGap")
+          : t("aidpKnowledge.ontologyRulesRealGap")}
+      </AidpOntologyGapNote>
+      <AidpOntologyGapNote>
+        {t("aidpKnowledge.ontologyRulesSearchGap")}
+      </AidpOntologyGapNote>
+      <AidpOntologyGapNote>
+        {t("aidpKnowledge.ontologyRulesEffectiveGap")}
+      </AidpOntologyGapNote>
+      {!canManage && (
+        <AidpOntologyGapNote>
+          {t("aidpKnowledge.ontologyMetadataNoPermissionHint")}
+        </AidpOntologyGapNote>
+      )}
+
+      <div className={styles.tableArea}>{renderBody()}</div>
+      {rules.length > 0 && (
+        <div className={styles.paginationRow}>
+          <AidpPagination
+            currentPage={page}
+            pageSize={pageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+            total={total}
+            totalReliable={totalReliable}
+            hasMore={hasMore}
+            selectedCount={selectedKeys.length}
+            onPageChange={setPage}
+            onPageSizeChange={(nextSize) => {
+              setPageSize(nextSize);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
+
+      <AidpOntologyRuleDrawer
+        open={drawerOpen}
+        domainId={domainId}
+        ruleId={editingRuleId}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => {
+          setDrawerOpen(false);
+          refresh();
+        }}
+      />
+    </div>
+  );
+};
+
+export default AidpOntologyRulesTab;

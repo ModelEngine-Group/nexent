@@ -60,6 +60,7 @@ import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpR
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
 import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeInformationTab";
+import AidpKnowledgeOntologyTab from "./components/AidpKnowledgeOntologyTab";
 import {
   AIDP_DETAIL_PAGE_SIZE,
   FILE_COLUMN_MIN_WIDTHS,
@@ -78,7 +79,7 @@ interface AidpKnowledgeFilesPageProps {
   pollingPaused?: boolean;
 }
 
-type DetailTab = "files" | "tasks" | "information";
+type DetailTab = "files" | "tasks" | "information" | "ontology";
 
 // AIDP caps a single batch document removal request at 10 files.
 const AIDP_BATCH_DELETE_MAX = 10;
@@ -671,6 +672,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             key: "information",
             label: t("aidpKnowledge.detailTabInformation"),
           },
+          {
+            key: "ontology",
+            label: t("aidpKnowledge.detailTabOntology"),
+          },
         ]}
       />
 
@@ -784,6 +789,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           onEditPermissions={() => setEditingKbMode("permissions")}
           onRefreshDetail={() => detailQuery.refetch()}
         />
+      )}
+
+      {activeTab === "ontology" && (
+        <AidpKnowledgeOntologyTab kdsId={knowledgeBase.kds_id} />
       )}
 
       <AidpUpdateKbModal

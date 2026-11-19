@@ -1,0 +1,73 @@
+schema_version: "1.0"
+stage: D4
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-ONTOLOGY-D4-001
+  feature_id: AIDP-ONTOLOGY
+  business_rule_ids: [AIDP-ONTOLOGY-RULE-01, AIDP-ONTOLOGY-RULE-02, AIDP-ONTOLOGY-RULE-03]
+  title: Browser journey through ontology management
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: >-
+    Walk the AIDP ontology list, create/edit drawers, entity tab, binding tab, JSON import/export and responsive layouts at 1280, 1600 and 760 px.
+  preconditions:
+    - AIDP mode is enabled and the browser is signed in as a management user.
+  test_data:
+    profile: mock
+    data: "logical fixtures for AIDP-ONTOLOGY-D4-001"
+  steps:
+    - order: 1
+      action: >-
+        Open the ontology sub-navigation and list.
+      expected: >-
+        The selected tab is blue; the table shows name, description, bound count and row actions; loading, empty and error states are reachable.
+    - order: 2
+      action: >-
+        Open create/edit drawers and entity/field forms.
+      expected: >-
+        Drawers use the specified widths; labels, required marks, validation messages and footer actions are visible.
+    - order: 3
+      action: >-
+        Open the metadata chunk annotation and JSON import/export surfaces.
+      expected: >-
+        The four-level context is visible, selection is limited to the current page and async acceptance is distinct from completion.
+    - order: 4
+      action: >-
+        Repeat at 1280, 1600 and 760 px.
+      expected: >-
+        The table scrolls instead of breaking; drawers become full width below 768 px; actions remain keyboard reachable.
+  expected_results:
+    - The browser journey reaches the management outcomes without text overlap.
+    - All temporary UI dimensions and states are observable.
+  forbidden_side_effects:
+    - Do not add unsupported search boxes, gradients, card stacks or fake progress.
+  unit_boundary: Browser UI against the local AIDP mock stack
+  inputs:
+    - signed-in session
+    - seeded ontology data
+  assertions:
+    - List/detail/drawer states render at three widths.
+    - No raw i18n keys or fabricated values appear.
+  acceptance:
+    - id: AC-01
+      description: >-
+        The browser journey covers ontology management at the three required widths.
+      steps: [1, 2, 3, 4]
+      expected_results: [1, 2]
+      forbidden_side_effects: [1]
+
+  actor: Signed-in management user in AIDP mode
+  journey:
+    - Open the ontology sub-navigation and list.
+    - Open create/edit drawers and entity, metadata and binding tabs.
+    - Open JSON import/export and chunk annotation surfaces.
+    - Repeat at 1280, 1600 and 760 px.
+  final_business_result:
+    - The ontology management journey is usable at the three required widths.
+    - Drawers, tables, empty and error states follow the temporary UI specification.
+  failure_evidence:
+    - Playwright screenshots and console/network logs for each viewport.
+    - Failed selector or assertion output identifying the broken state.
+

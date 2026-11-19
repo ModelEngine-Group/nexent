@@ -1,0 +1,12 @@
+schema_version: "1.0"
+case_id: AIDP-METADATA-D1-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+preparation:
+  families: []
+acceptance_bindings:
+  AC-01: [test_string_field_accepts_text_and_rejects_other_types, test_number_field_accepts_numbers_only, test_batch_result_normalization_keeps_per_chunk_outcomes]
+notes: >-
+  Self-contained case: it creates and releases its own loopback resources and uses logical assets only. No shared deployment or historical data is required.

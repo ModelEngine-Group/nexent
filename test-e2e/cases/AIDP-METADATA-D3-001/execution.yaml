@@ -1,0 +1,12 @@
+schema_version: "1.0"
+case_id: AIDP-METADATA-D3-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+preparation:
+  families: []
+acceptance_bindings:
+  AC-01: [test_field_definition_create_read_and_unused_delete, test_annotation_is_visible_in_list_and_detail, test_partial_annotation_reports_success_and_failure]
+notes: >-
+  Self-contained case: it creates and releases its own loopback resources and uses logical assets only. No shared deployment or historical data is required.

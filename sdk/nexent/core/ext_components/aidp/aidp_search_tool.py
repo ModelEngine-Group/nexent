@@ -149,6 +149,14 @@ class AidpSearchTool(Tool):
         "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
         "graph_reranking_enable": {"description_zh": "图谱是否参与统一重排；固定布尔值"},
         "query_expansion_enable": {"description_zh": "是否启用查询扩展"},
+        "ontology_enhance_enable": {
+            "description": "Use the bound ontology's entities and relations to enhance retrieval",
+            "description_zh": "使用已关联本体库的实体及同义、上位、下位关系增强检索",
+        },
+        "rule_enable": {
+            "description": "Use enabled ontology rules to adjust candidate scores",
+            "description_zh": "使用本体库中已启用的规则调整候选结果分数",
+        },
     }
 
     output_type = "string"
@@ -183,6 +191,8 @@ class AidpSearchTool(Tool):
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
         graph_reranking_enable: bool = Field(default=True, description="Include graph results in unified reranking"),
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
+        ontology_enhance_enable: bool = Field(default=False, description="Enable ontology entity enhancement"),
+        rule_enable: bool = Field(default=False, description="Enable ontology rule enhancement"),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):
         super().__init__()
@@ -217,6 +227,8 @@ class AidpSearchTool(Tool):
             "graph_score_threshold": graph_score_threshold,
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
+            "ontology_enhance_enable": ontology_enhance_enable,
+            "rule_enable": rule_enable,
         }
         config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
         resolved = resolve_config(config)

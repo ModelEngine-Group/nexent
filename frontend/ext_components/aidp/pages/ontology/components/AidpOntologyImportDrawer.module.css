@@ -1,0 +1,150 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hint {
+  color: #595959;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.dropzone {
+  min-height: 160px;
+}
+
+.dropzone :global(.ant-upload-drag) {
+  min-height: 160px;
+  border: 1px dashed #c9c9c9;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.dropzone :global(.ant-upload-drag:hover) {
+  border-color: #0067d1;
+}
+
+.dropzoneIcon {
+  margin: 0;
+  color: #8c8c8c;
+  font-size: 32px;
+  line-height: 40px;
+}
+
+.dropzoneTitle {
+  margin: 4px 0 0;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.dropzoneNote {
+  margin: 2px 0 0;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #dfdfdf;
+  border-radius: 4px;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fileName {
+  min-width: 0;
+  overflow: hidden;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
+.counts div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.counts dt {
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.counts dd {
+  margin: 0;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+.target {
+  color: #595959;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.errorList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.errorList ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.errorList li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  word-break: break-word;
+}
+
+.errorField {
+  flex-shrink: 0;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+.asyncHint {
+  font-size: 12px;
+  line-height: 20px;
+}

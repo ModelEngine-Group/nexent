@@ -1,0 +1,127 @@
+.drawerTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.questionIcon {
+  color: #8c8c8c;
+  font-size: 13px;
+  cursor: help;
+}
+
+.labelWithQuestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 8px 0 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #191919;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.conditionHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 32px;
+  gap: 8px;
+  color: #595959;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.conditionList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conditionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.conditionRow :global(.ant-form-item) {
+  margin-bottom: 0;
+}
+
+.conditionField,
+.conditionOperator,
+.conditionValue {
+  min-width: 0;
+}
+
+.addCondition {
+  align-self: flex-start;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.logicalOperator {
+  margin-top: 4px;
+}
+
+.rangeBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rangeLabel {
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.rangeRow {
+  display: flex;
+  gap: 12px;
+}
+
+.rangeItem {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0 !important;
+}
+
+.rangeHint {
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .conditionHeader {
+    display: none;
+  }
+
+  .conditionRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rangeRow {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

@@ -1,0 +1,57 @@
+schema_version: "1.0"
+stage: D1
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-ONTOLOGY-D1-001
+  feature_id: AIDP-ONTOLOGY
+  business_rule_ids: [AIDP-ONTOLOGY-RULE-03]
+  title: Convert exported ontology JSON into the flat import request
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: >-
+    Prove the pure export-to-import conversion, kind tagging, endpoint resolution, pre-submit validation and async/result normalization before any upstream request.
+  preconditions:
+    - The ontology transform module is importable without a running backend or AIDP.
+  test_data:
+    profile: mock
+    data: "logical fixtures for AIDP-ONTOLOGY-D1-001"
+  steps:
+    - order: 1
+      action: >-
+        Convert a documented export document with a dynamic domain key.
+      expected: >-
+        ENTITIES contains types and entities in order with explicit kind; RELATIONS retain endpoint kinds; internal entity_id/relation_id/timestamps are dropped.
+    - order: 2
+      action: >-
+        Convert relations that omit endpoint kinds.
+      expected: >-
+        Unique endpoint kinds are derived; ambiguous endpoints require an explicit kind; missing endpoints produce a field-level error.
+    - order: 3
+      action: >-
+        Normalize asynchronous acknowledgments and synchronous import/export results.
+      expected: >-
+        Task IDs are exposed without counts or progress; import errors are display-friendly; unsafe filenames are sanitized.
+  expected_results:
+    - The request body uses DOMAIN_ID, ENTITIES and RELATIONS with types and entities merged.
+    - Every entity carries kind; every relation carries source_kind and object_kind.
+    - Invalid documents are rejected before any upstream request with field-level errors.
+  forbidden_side_effects:
+    - Do not call AIDP or the internal ontology task API from the transform module.
+  unit_boundary: aidp_ontology_transform pure functions
+  inputs:
+    - exported JSON documents
+    - async/sync AIDP envelopes
+  assertions:
+    - Kinds and relation endpoints are preserved.
+    - Validation rejects ambiguous or missing endpoints.
+    - Async payloads never fabricate counts or progress.
+  acceptance:
+    - id: AC-01
+      description: >-
+        Export-to-import conversion is faithful and pre-submit validation is complete.
+      steps: [1, 2, 3]
+      expected_results: [1, 2, 3]
+      forbidden_side_effects: [1]
+

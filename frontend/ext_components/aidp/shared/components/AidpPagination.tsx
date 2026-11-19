@@ -19,6 +19,10 @@ interface AidpPaginationProps {
   /** True when the backend reports a confirmed global total. */
   totalReliable: boolean;
   hasMore: boolean;
+  /** Tab toolbars already show the trusted total; hide the duplicate here. */
+  showTotal?: boolean;
+  /** When provided, render UCD-style "total / selected" instead of a plain total. */
+  selectedCount?: number;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
 }
@@ -31,6 +35,8 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
   total,
   totalReliable,
   hasMore,
+  showTotal = true,
+  selectedCount,
   onPageChange,
   onPageSizeChange,
 }) => {
@@ -52,9 +58,14 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
       locale={i18n.language.startsWith("zh") ? zhCN : enUS}
     >
       <div className={styles.pagination}>
-        {totalReliable && (
+        {totalReliable && showTotal && (
           <span className={styles.paginationTotal}>
-            {t("aidpKnowledge.showTotal", { count: total })}
+            {typeof selectedCount === "number"
+              ? t("aidpKnowledge.showTotalSelected", {
+                  total,
+                  selected: selectedCount,
+                })
+              : t("aidpKnowledge.showTotal", { count: total })}
           </span>
         )}
         <div className={styles.paginationControls}>

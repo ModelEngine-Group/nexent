@@ -308,3 +308,35 @@ def test_forward_emits_picture_messages_for_images():
         ind_aidp_search_tool_module.ProcessType.PICTURE_WEB,
         json.dumps({"images_url": ["/proxy/kb-1/p.png"]}, ensure_ascii=False),
     )
+
+
+@pytest.mark.parametrize("entity,rule", [
+    (False, False), (True, False), (False, True), (True, True),
+])
+def test_ontology_enhancement_flags_reach_the_http_body_only_when_enabled(entity, rule):
+    tool = make_tool(ontology_enhance_enable=entity, rule_enable=rule)
+    request = httpx.Request("POST", tool._retrieve_url())
+    tool._http_client = MagicMock()
+    tool._http_client.post.return_value = httpx.Response(200, request=request, json={"result": []})
+
+    tool._execute_request("question")
+    body = tool._http_client.post.call_args.kwargs["json"]
+
+    assert ("ontology_enhance_enable" in body) is entity
+    assert ("rule_enable" in body) is rule
+
+
+def test_old_configuration_and_disabled_flags_omit_enhancement_fields():
+    tool = make_tool()
+    body = tool._payload("question")
+    assert "ontology_enhance_enable" not in body
+    assert "rule_enable" not in body
+
+
+def test_entity_enhancement_with_effective_jargon_fails_before_posting():
+    tool = make_tool(
+        ontology_enhance_enable=True,
+        reranking_mode="jargon_coverage",
+    )
+    with pytest.raises(ValueError, match="ontology_enhance_enable"):
+        tool._payload("question")

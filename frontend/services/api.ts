@@ -453,6 +453,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbBatchRead: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/batch-read`,
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
@@ -476,6 +477,47 @@ export const API_ENDPOINTS = {
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+    ontology: {
+      domains: `${API_BASE_URL}/aidp-mgmt/ontology/domains`,
+      domain: (id: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(id)}`,
+      entities: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities`,
+      entity: (domainId: string, entityId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities/${encodeURIComponent(entityId)}`,
+      bindings: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings`,
+      allBindings: `${API_BASE_URL}/aidp-mgmt/ontology/bindings`,
+      unbind: (domainId: string, bindingId: string, kdsId?: string) => {
+        const base = `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(bindingId)}`;
+        return kdsId ? `${base}?kds_id=${encodeURIComponent(kdsId)}` : base;
+      },
+      bindingByKb: (kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/binding`,
+      metadataFields: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields`,
+      metadataField: (domainId: string, fieldRef: string | number) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/${encodeURIComponent(fieldRef)}`,
+      metadataBatchUnbind: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/batch-unbind`,
+      rules: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules`,
+      ruleCount: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/count`,
+      rule: (domainId: string, ruleId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/${encodeURIComponent(ruleId)}`,
+      chunks: (kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/chunks`,
+      chunk: (kdsId: string, chunkId: string | number) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/chunks/${encodeURIComponent(String(chunkId))}`,
+      batchMetadata: (kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/chunks/metadata`,
+      demoMode: `${API_BASE_URL}/aidp-mgmt/ontology/demo-mode`,
+      export: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/export`,
+      import: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/import`,
+    },
   },
   config: {
     frontend: `${API_BASE_URL}/frontend-config`,

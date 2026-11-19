@@ -1,0 +1,51 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-ONTOLOGY-METADATA-20261105
+  change_type: requirement
+  requirement_id: AIDP-ONTOLOGY-METADATA
+  title: AIDP ontology, binding, JSON and Metadata management
+  description: >-
+    Add authenticated AIDP proxies and the temporary UI for ontology domains,
+    Type/Entity objects, one-knowledge-base-to-one-ontology bindings, JSON
+    export/import, Metadata field definitions, synchronous chunk annotation
+    and Metadata read-back. AIDP remains the source of truth; the internal
+    ontology task API is not called and retrieval enhancement/filtering is out
+    of scope.
+  affected_features:
+    existing: []
+    added:
+      - AIDP-ONTOLOGY
+      - AIDP-METADATA
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+      - AIDP-ONTOLOGY-D1-001
+      - AIDP-ONTOLOGY-D2-001
+      - AIDP-ONTOLOGY-D3-001
+      - AIDP-ONTOLOGY-D4-001
+      - AIDP-ONTOLOGY-D5-001
+      - AIDP-METADATA-D1-001
+      - AIDP-METADATA-D2-001
+      - AIDP-METADATA-D3-001
+      - AIDP-METADATA-D4-001
+      - AIDP-METADATA-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Convert exported ontology JSON into the flat uppercase import request, derive relation endpoint kinds and reject invalid documents before submission.
+      - Validate Metadata value types and byte limits and normalize per-chunk batch results.
+      - Exercise the ontology/metadata HTTP boundary and the real backend-to-AIDP-mock runtime, including authorization and cross-KB rejection.
+    reason: >-
+      The new proxy, transform, validation and runtime paths have no existing
+      unit coverage. The formal D1/D2/D3/D5 cases provide the required isolated,
+      API, runtime and security evidence without duplicating legacy UT.
+    test_selectors:
+      - test/ext_components/aidp/test_aidp_mgmt_mock_server.py
+  notes: >-
+    Temporary UI design is local-docs/aidp-2026-11-sdd/09-10-ontology-metadata-temporary-ui.md.
+    Mock evidence and real-AIDP evidence are reported separately; real AIDP
+    deployment/contract confirmation remains outstanding.

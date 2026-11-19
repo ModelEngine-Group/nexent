@@ -32,10 +32,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
+import gateway.authentication.auth as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, UnauthorizedError
-from management.db.identity.user_tenant import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -78,7 +78,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-import gateway.authentication.auth as auth_utils_module
+from management.db.identity.user_tenant import get_user_role_by_tenant
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
@@ -825,6 +825,93 @@ async def create_knowledge_base(
     aidp_result = dict(aidp_result or {})
     aidp_result["permission"] = EDIT
     return JSONResponse(status_code=HTTPStatus.OK, content=aidp_result)
+
+
+class KnowledgeBaseBatchReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kds_ids: list[str] = Field(..., min_length=1, max_length=100)
+
+    @field_validator("kds_ids")
+    @classmethod
+    def normalize_ids(cls, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            stripped = value.strip()
+            if stripped and stripped not in deduped:
+                deduped.append(stripped)
+        if not deduped:
+            raise ValueError("kds_ids must contain at least one non-empty id")
+        return deduped
+
+
+@aidp_mgmt_router.post("/knowledge-bases/batch-read")
+async def batch_read_knowledge_bases(
+    request: Request,
+    body: KnowledgeBaseBatchReadRequest,
+) -> JSONResponse:
+    """Resolve KB names/descriptions for a bounded list of ids.
+
+    AIDP's own KB list has no ids filter, so this Nexent-side proxy intersects
+    the caller's accessible catalog with the requested ids and reuses the same
+    permission-aware detail loader as the normal list. It is a batch query for
+    Nexent callers, not a claim that upstream AIDP provides one.
+    """
+    user_id, tenant_id = await _auth(request)
+    server_url, api_key = _credentials()
+    rows = await run_blocking(
+        "aidp-kb-batch-access",
+        _current_accessible_rows,
+        user_id,
+        tenant_id,
+        lane="control-io",
+        owner="config",
+    )
+    row_map = {row["kb_id"]: row for row in rows}
+    semaphore = asyncio.Semaphore(5)
+
+    async def resolve(kb_id: str) -> dict | None:
+        row = row_map.get(kb_id)
+        if row is None:
+            return None
+        detail: dict = {}
+        resource_status = "ACTIVE"
+        if not _has_kb_card_metadata(row):
+            async with semaphore:
+                try:
+                    detail = await run_blocking(
+                        "aidp-kb-batch-detail",
+                        _load_cached_kb_detail,
+                        server_url,
+                        api_key,
+                        kb_id,
+                        lane="control-io",
+                        owner="config",
+                    )
+                except AppException as exc:
+                    logger.warning(
+                        "AIDP batch KB detail failed for %s: %s", kb_id, exc
+                    )
+                    resource_status = "UNAVAILABLE"
+        return {
+            "kds_id": kb_id,
+            "kds_name": detail.get("kds_name")
+            or detail.get("name")
+            or row.get("kds_name")
+            or row.get("name")
+            or "",
+            "description": detail.get("description")
+            or row.get("description")
+            or "",
+            "created_at": _timestamp_to_iso(row.get("create_time")),
+            "resource_status": resource_status,
+        }
+
+    results = await asyncio.gather(*(resolve(kb_id) for kb_id in body.kds_ids))
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={"value": [item for item in results if item is not None]},
+    )
 
 
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}")

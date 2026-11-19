@@ -1,0 +1,62 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.demoRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.accepted {
+  padding: 12px;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  background: #fffbe6;
+}
+
+.acceptedTitle {
+  color: #191919;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.acceptedText {
+  margin-top: 4px;
+  color: #595959;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.stateLine {
+  color: #595959;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.failText {
+  color: #a8071a;
+}
+
+.progressLabel {
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}

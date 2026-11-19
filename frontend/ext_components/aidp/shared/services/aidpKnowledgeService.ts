@@ -68,6 +68,29 @@ class AidpKnowledgeService {
     }
   }
 
+  async batchGetKbs(kdsIds: string[]): Promise<{
+    value: Array<{
+      kds_id: string;
+      kds_name: string;
+      description: string;
+      created_at: string | null;
+      resource_status: string;
+    }>;
+  }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbBatchRead,
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ kds_ids: kdsIds }),
+      }
+    );
+    return response.json();
+  }
+
   /**
    * List knowledge bases (paginated), optionally filtered by name.
    *

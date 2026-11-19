@@ -14,6 +14,7 @@ DEFAULTS = {
     "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0,
     "graph_top_k": 0, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
     "graph_score_threshold": 0.0, "graph_reranking_enable": True,
+    "ontology_enhance_enable": False, "rule_enable": False,
 }
 CONFIG_KEYS = frozenset(DEFAULTS)
 INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
@@ -51,7 +52,8 @@ def resolve_config(config):
 
 
 BOOLEAN_KEYS = frozenset({"reranking_enable", "rewrite_enable", "query_expansion_enable",
-                          "related_search_enable", "multi_modal", "graph_reranking_enable"})
+                          "related_search_enable", "multi_modal", "graph_reranking_enable",
+                          "ontology_enhance_enable", "rule_enable"})
 THRESHOLD_KEYS = frozenset({"score_threshold", "vector_score_threshold",
                             "full_text_score_threshold", "graph_score_threshold"})
 
@@ -86,6 +88,14 @@ def validate_config(config, inherited=None):
     ):
         raise ValueError("graph_reranking_enable: requires reranking_enable")
     result = resolve_config(merged)
+    if (
+        result["ontology_enhance_enable"]
+        and result["reranking_enable"]
+        and result["reranking_mode"] == "jargon_coverage"
+    ):
+        raise ValueError(
+            "ontology_enhance_enable: change reranking_mode before enabling entity enhancement"
+        )
     channels = active_channels(result["search_method"])
     hybrid = bool(channels & {"vector_search", "full_text_search"})
     graph = "graph_search" in channels
@@ -114,6 +124,14 @@ def prepare_config(config, inherited):
 
 
 def build_payload(config, query, kds_list):
+    if (
+        config.get("ontology_enhance_enable") is True
+        and config.get("reranking_enable") is True
+        and config.get("reranking_mode") == "jargon_coverage"
+    ):
+        raise ValueError(
+            "ontology_enhance_enable: change reranking_mode before enabling entity enhancement"
+        )
     channels = active_channels(config["search_method"])
     payload = {key: config[key] for key in (
         "search_method", "score_threshold", "reranking_enable", "rewrite_enable",
@@ -132,4 +150,8 @@ def build_payload(config, query, kds_list):
     if "graph_search" in channels:
         payload["graph_search_config"] = {key: config[key] for key in (
             "graph_top_k", "graph_score_threshold", "graph_reranking_enable")}
+    if config.get("ontology_enhance_enable") is True:
+        payload["ontology_enhance_enable"] = True
+    if config.get("rule_enable") is True:
+        payload["rule_enable"] = True
     return payload

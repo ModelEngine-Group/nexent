@@ -1,0 +1,114 @@
+.taskHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.taskTitle {
+  margin: 0;
+  color: #191919;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: #595959;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.statusCell {
+  min-width: 0;
+}
+
+.statusLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.progressTrack {
+  display: inline-block;
+  width: 70px;
+  height: 4px;
+  margin-left: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #f0f0f0;
+}
+
+.progressBar {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.progressValue {
+  width: 32px;
+  flex-shrink: 0;
+  color: #595959;
+  text-align: right;
+}
+
+.nameLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #0067d1;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.nameLink:hover {
+  color: #0052a8;
+}
+
+.failureDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  color: #595959;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.failureLabel {
+  margin-right: 8px;
+  color: #8c8c8c;
+}
+
+.muted {
+  color: #8c8c8c;
+}
+
+.footer {
+  padding-top: 12px;
+  color: #595959;
+  font-size: 13px;
+  line-height: 22px;
+}

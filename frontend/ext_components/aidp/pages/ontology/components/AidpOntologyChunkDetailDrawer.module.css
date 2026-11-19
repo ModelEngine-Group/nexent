@@ -1,0 +1,82 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+}
+
+.meta dt {
+  margin-bottom: 2px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.meta dd {
+  margin: 0;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-all;
+}
+
+.tag {
+  margin-inline-end: 0;
+  color: #595959;
+  background: #f3f3f3;
+  border-color: #e5e5e5;
+}
+
+.sectionTitle {
+  margin: 0 0 8px;
+  color: #191919;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.textBlock {
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 4px;
+  background: #f7f7f7;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.metadataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.metadataTable th,
+.metadataTable td {
+  padding: 8px;
+  border-bottom: 1px solid #f3f3f3;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-all;
+}
+
+.metadataTable th {
+  color: #191919;
+  background: #f3f3f3;
+  font-weight: 500;
+}
+
+.metadataTable td:first-child {
+  width: 40%;
+  color: #595959;
+}

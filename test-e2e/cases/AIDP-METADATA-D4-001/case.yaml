@@ -1,0 +1,72 @@
+schema_version: "1.0"
+stage: D4
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-METADATA-D4-001
+  feature_id: AIDP-METADATA
+  business_rule_ids: [AIDP-METADATA-RULE-01, AIDP-METADATA-RULE-02, AIDP-METADATA-RULE-03]
+  title: Browser journey through Metadata definitions and chunk annotation
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: >-
+    Walk the Metadata field-definition and chunk-annotation tabs, including detail display and responsive layouts.
+  preconditions:
+    - AIDP mode is enabled, a knowledge base is bound and the browser is signed in as a management user.
+  test_data:
+    profile: mock
+    data: "logical fixtures for AIDP-METADATA-D4-001"
+  steps:
+    - order: 1
+      action: >-
+        Open the Metadata tab and field definitions.
+      expected: >-
+        Defined count, type labels and add/rename/delete actions are visible; the 20-field limit disables adding with a reason.
+    - order: 2
+      action: >-
+        Open chunk annotation, select a KB and file, select current-page chunks and submit field values.
+      expected: >-
+        The four-level context is visible; only current-page chunks are selectable; per-chunk results are shown.
+    - order: 3
+      action: >-
+        Open the chunk detail drawer before and after annotation.
+      expected: >-
+        The drawer shows AIDP's metadata values, not unsaved edits.
+    - order: 4
+      action: >-
+        Repeat at 1280, 1600 and 760 px.
+      expected: >-
+        The context row wraps, the table scrolls and the annotation drawer becomes full width.
+  expected_results:
+    - The Metadata journey reaches definition and annotation outcomes.
+    - No emoji-like tags, fabricated keys or fake progress appear.
+  forbidden_side_effects:
+    - Do not add a clear-field button, async annotation progress or retrieval filter configuration.
+  unit_boundary: Browser UI against the local AIDP mock stack
+  inputs:
+    - signed-in session
+    - seeded chunks
+  assertions:
+    - Definition, annotation, detail and responsive states render as specified.
+  acceptance:
+    - id: AC-01
+      description: >-
+        The browser journey covers Metadata definitions, annotation and detail display.
+      steps: [1, 2, 3, 4]
+      expected_results: [1, 2]
+      forbidden_side_effects: [1]
+
+  actor: Signed-in management user in AIDP mode
+  journey:
+    - Open the ontology sub-navigation and list.
+    - Open create/edit drawers and entity, metadata and binding tabs.
+    - Open JSON import/export and chunk annotation surfaces.
+    - Repeat at 1280, 1600 and 760 px.
+  final_business_result:
+    - The ontology management journey is usable at the three required widths.
+    - Drawers, tables, empty and error states follow the temporary UI specification.
+  failure_evidence:
+    - Playwright screenshots and console/network logs for each viewport.
+    - Failed selector or assertion output identifying the broken state.
+

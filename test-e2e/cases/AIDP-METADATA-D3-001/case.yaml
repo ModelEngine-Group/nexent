@@ -1,0 +1,73 @@
+schema_version: "1.0"
+stage: D3
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-METADATA-D3-001
+  feature_id: AIDP-METADATA
+  business_rule_ids: [AIDP-METADATA-RULE-01, AIDP-METADATA-RULE-02, AIDP-METADATA-RULE-03]
+  title: Real backend to AIDP mock Metadata runtime
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: >-
+    Exercise field definitions, synchronous annotation, read-back, partial failure, in-use deletion and retrieval metadata against the running AIDP mock.
+  preconditions:
+    - The standalone AIDP mock runs on a loopback port with an isolated state file.
+  test_data:
+    profile: mock
+    data: "logical fixtures for AIDP-METADATA-D3-001"
+  steps:
+    - order: 1
+      action: >-
+        Create, list, rename and delete an unused field in a second ontology, including the 63-character / 64-byte name boundary.
+      expected: >-
+        AIDP persists the definition; the unused field can be removed.
+    - order: 2
+      action: >-
+        Annotate two seeded chunks and re-read list/detail.
+      expected: >-
+        The saved metadata appears in both reads.
+    - order: 3
+      action: >-
+        Force one chunk failure and retry an in-use field deletion.
+      expected: >-
+        The batch reports one success/one failure; deletion is rejected and existing values remain.
+    - order: 4
+      action: >-
+        Query the mock FusionSearch.
+      expected: >-
+        Retrieval hits carry the chunk metadata that the SDK/source chain displays.
+  expected_results:
+    - Writes and reads agree with AIDP state.
+    - Partial success is not reported as full success.
+    - Retrieval metadata is present for display.
+  forbidden_side_effects:
+    - Do not call async annotation or Metadata file import/export endpoints.
+  unit_boundary: Nexent router and service over real HTTP to the AIDP mock
+  inputs:
+    - seeded mock state
+    - HTTP requests
+  assertions:
+    - Field and chunk writes persist in AIDP.
+    - Partial failures and in-use deletion behave as specified.
+  acceptance:
+    - id: AC-01
+      description: >-
+        The metadata runtime writes, reads and reports partial outcomes correctly.
+      steps: [1, 2, 3, 4]
+      expected_results: [1, 2, 3]
+      forbidden_side_effects: [1]
+
+  integration_boundary:
+    - Nexent ontology router and service
+    - real HTTP to the standalone AIDP mock
+  observations:
+    - Created domain and Type/Entity objects are visible after re-query.
+    - The entity row count changes after binding and unbinding a knowledge base.
+    - Export/import round trips preserve types, entities and relation endpoint kinds; repeats skip existing pairs.
+    - Partial and asynchronous acknowledgments are distinguishable.
+  cleanup:
+    - Stop the loopback AIDP mock and remove its isolated state file.
+    - No shared deployment, historical data or browser state is touched.
+

@@ -1,0 +1,12 @@
+schema_version: "1.0"
+case_id: AIDP-ONTOLOGY-D3-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+preparation:
+  families: []
+acceptance_bindings:
+  AC-01: [test_domain_entity_and_binding_round_trip, test_export_import_round_trip_and_repeat_skip, test_async_import_accepts_without_counts_or_progress_polling]
+notes: >-
+  Self-contained case: it creates and releases its own loopback resources and uses logical assets only. No shared deployment or historical data is required.

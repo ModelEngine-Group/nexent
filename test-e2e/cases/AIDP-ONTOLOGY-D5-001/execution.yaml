@@ -1,0 +1,12 @@
+schema_version: "1.0"
+case_id: AIDP-ONTOLOGY-D5-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+preparation:
+  families: []
+acceptance_bindings:
+  AC-01: [test_regular_user_cannot_change_ontology_definitions, test_binding_requires_target_kb_edit_and_known_kb, test_async_acceptance_has_no_internal_task_endpoint]
+notes: >-
+  Self-contained case: it creates and releases its own loopback resources and uses logical assets only. No shared deployment or historical data is required.
