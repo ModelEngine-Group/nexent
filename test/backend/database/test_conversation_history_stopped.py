@@ -139,3 +139,22 @@ def test_completed_history_keeps_only_persisted_execution_evidence(history_db):
     assert "Saved result" in str(records) and "Saved failure" in str(records)
     assert all(text not in str(records) for text in ["Never replay", "Not committed", "Deleted error"])
     assert "s3://files/old.txt" in projected["attachments"]
+
+
+@pytest.mark.parametrize("boundary", ["message_id", "message_index"])
+def test_history_returns_resolved_boundary_and_excludes_current_and_future_rows(history_db, boundary):
+    module, message, _ = history_db
+    message(11, "user", "Prior task", index=0)
+    message(12, "assistant", "Prior answer", index=1)
+    message(23, "user", "Current task", index=2)
+    message(24, "assistant", "Future answer", index=3)
+    args = {"current_user_message_id": 23 if boundary == "message_id" else None}
+    if boundary == "message_index":
+        args["before_message_index"] = 2
+
+    result = module.get_historical_context(1, user_id="owner", tenant_id="tenant", **args)
+
+    assert result["current_user_message_index"] == 2
+    assert [turn["user_message"] for turn in result["conversation_turns"]] == ["Prior task"]
+    assert [turn["assistant_final_answer"] for turn in result["conversation_turns"]] == ["Prior answer"]
+    assert module.get_historical_context(1, user_id="other-owner", tenant_id="tenant", **args) is None
