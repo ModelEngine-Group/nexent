@@ -227,34 +227,12 @@ class QuotaService(
 
     def get_quota_summary(self) -> Dict[str, Any]:
         """Return quota allocation summary with oversubscription ratio."""
-        hard_limit = self.get_hard_limit()
-        kb_quotas = self.get_all_kb_quotas()
-
-        soft_allocated = sum(
-            q["quota_limit_bytes"]
-            for q in kb_quotas
-            if q["quota_limit_bytes"] is not None
-        )
-        kbs_with_quota = sum(1 for q in kb_quotas if q["quota_limit_bytes"] is not None)
-        kb_count = len(kb_quotas)
-
-        oversubscription_ratio = None
-        if hard_limit.get("hard_limit_bytes") and hard_limit["hard_limit_bytes"] > 0:
-            oversubscription_ratio = round(
-                soft_allocated / hard_limit["hard_limit_bytes"], 4
-            )
-
-        return {
-            "soft_allocated_total_bytes": soft_allocated,
-            "soft_allocated_readable": _bytes_to_readable(soft_allocated),
-            "hard_limit_bytes": hard_limit.get("hard_limit_bytes"),
-            "hard_limit_readable": hard_limit.get("hard_limit_readable"),
-            "total_bytes": None,  # filled in when usage is available
-            "total_readable": None,
-            "oversubscription_ratio": oversubscription_ratio,
-            "kb_count": kb_count,
-            "kbs_with_quota": kbs_with_quota,
-        }
+        from management.services.knowledge_base.quota_rules import allocation_summary
+        hard_limit=self.get_hard_limit()
+        quotas=self.get_all_kb_quotas()
+        allocated=sum(row['quota_limit_bytes'] for row in quotas if row['quota_limit_bytes'] is not None)
+        finite=sum(1 for row in quotas if row['quota_limit_bytes'] is not None)
+        return allocation_summary(hard_limit,allocated,len(quotas),finite)
 
     @staticmethod
     def _compute_kb_warning_level(

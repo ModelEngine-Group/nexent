@@ -169,6 +169,7 @@ MIGRATED_MODULES = {
     'knowledge_base/providers/catalog.py',
     'knowledge_base/providers/configuration.py',
     'knowledge_base/quota_rules.py',
+    'knowledge_base/quota_read.py',
     'knowledge_base/seed_documents.py',
     'knowledge_base/source_reference.py',
     'knowledge_base/summary_metadata.py',

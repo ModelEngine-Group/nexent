@@ -163,7 +163,7 @@ def mock_personal_auth():
 class TestGetTenantQuota:
     """Integration tests for GET /tenants/{id}/quota."""
 
-    def test_returns_config_structure(self, client, mock_auth_admin, mock_quota_service):
+    def test_returns_config_structure(self, client, mock_auth_admin, mock_quota_service, mocker):
         mock_quota_service.get_hard_limit.return_value = {
             "hard_limit_bytes": 100 * GB,
             "hard_limit_readable": "100.0 GB",
@@ -183,6 +183,11 @@ class TestGetTenantQuota:
             "kbs_with_quota": 1,
         }
 
+        read = mocker.patch.object(quota_app, "read_tenant_quota", return_value={
+            **mock_quota_service.get_hard_limit.return_value,
+            **mock_quota_service.get_warning_config.return_value,
+            "summary": mock_quota_service.get_quota_summary.return_value,
+        })
         resp = client.get("/api/tenants/test-tenant/quota")
         assert resp.status_code == 200
         data = resp.json()
@@ -192,8 +197,12 @@ class TestGetTenantQuota:
         assert data["warning_enabled"] is True
         assert data["warning_threshold_pct"] == 80
         assert "summary" in data
+        assert read.await_count == 1 and read.await_args.args[1].user_id == "admin-user-id"
+        assert read.await_args.args[1].tenant_id == "test-tenant"
 
-    def test_returns_forbidden_for_cross_tenant_access(self, client, mock_auth_user):
+    def test_returns_forbidden_for_cross_tenant_access(self, client, mock_auth_user, mocker):
+        from nexent.storage.errors import ScopeDenied
+        mocker.patch.object(quota_app, "read_tenant_quota", side_effect=ScopeDenied())
         resp = client.get("/api/tenants/other-tenant/quota")
         assert resp.status_code == 403
 
@@ -577,8 +586,10 @@ class TestTenantIsolation:
         resp = client.get("/api/tenants/tenant-b/quota/usage")
         assert resp.status_code == 403
 
-    def test_admin_cannot_access_other_tenant_config(self, client, mock_auth_user):
+    def test_admin_cannot_access_other_tenant_config(self, client, mock_auth_user, mocker):
         """Tenant A user cannot access Tenant B's quota config."""
+        from nexent.storage.errors import ScopeDenied
+        mocker.patch.object(quota_app, "read_tenant_quota", side_effect=ScopeDenied())
         resp = client.get("/api/tenants/tenant-b/quota")
         assert resp.status_code == 403
 
@@ -646,12 +657,21 @@ class TestQuotaEndpointErrors:
 
     def test_get_tenant_quota_maps_service_error(self, client, mock_auth_admin):
         with patch(
-            "management.api.knowledge_base.quota.QuotaService", side_effect=RuntimeError("database down")
+            "management.api.knowledge_base.quota.read_tenant_quota", side_effect=RuntimeError("database down")
         ):
             response = client.get("/api/tenants/test-tenant/quota")
 
         assert response.status_code == 500
         assert "database down" in response.json()["message"]
+
+    def test_get_tenant_quota_timeout_preserves_500_without_duplicate_error_log(self, client, mock_auth_admin, mocker, caplog):
+        from nexent.storage.errors import DeadlineExceeded
+        read = mocker.patch.object(quota_app, "read_tenant_quota", side_effect=DeadlineExceeded())
+        response = client.get("/api/tenants/test-tenant/quota")
+        assert response.status_code == 500
+        assert "Error getting quota config" in response.json()["message"]
+        assert read.await_count == 1
+        assert not [record for record in caplog.records if record.levelname == "ERROR" and record.name == quota_app.logger.name]
 
     def test_update_tenant_quota_maps_invalid_warning(self, client, mock_auth_admin, mock_quota_service):
         mock_quota_service.set_warning_config.side_effect = ValueError(

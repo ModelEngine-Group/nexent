@@ -92,26 +92,9 @@ class TenantQuotaPolicy:
         Get the tenant hard storage limit.
         Returns dict with _bytes and _readable fields, or defaults for unlimited.
         """
-        raw = self._get_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES)
-        editable_raw = self._get_tenant_config(KEY_HARD_LIMIT_EDITABLE)
-        editable = editable_raw != "false" if editable_raw else True
-
-        if raw is not None:
-            try:
-                limit_bytes = int(raw)
-                return {
-                    "hard_limit_bytes": limit_bytes,
-                    "hard_limit_readable": _bytes_to_readable(limit_bytes),
-                    "hard_limit_editable": editable,
-                }
-            except (ValueError, TypeError):
-                pass
-
-        return {
-            "hard_limit_bytes": None,
-            "hard_limit_readable": None,
-            "hard_limit_editable": editable,
-        }
+        from management.services.knowledge_base.quota_rules import hard_limit_values
+        return hard_limit_values(self._get_tenant_config(KEY_TENANT_HARD_LIMIT_BYTES),
+                                 self._get_tenant_config(KEY_HARD_LIMIT_EDITABLE))
 
     def set_hard_limit(
         self,
@@ -146,27 +129,10 @@ class TenantQuotaPolicy:
 
     def get_warning_config(self) -> Dict[str, Any]:
         """Get warning configuration: enabled, warning_pct, critical_pct."""
-        enabled_raw = self._get_tenant_config(KEY_WARNING_ENABLED)
-        warning_raw = self._get_tenant_config(KEY_WARNING_THRESHOLD_PCT)
-        critical_raw = self._get_tenant_config(KEY_CRITICAL_THRESHOLD_PCT)
-
-        enabled = enabled_raw.lower() == "true" if enabled_raw else True  # default on
-        try:
-            warning_pct = int(warning_raw) if warning_raw else DEFAULT_WARNING_THRESHOLD
-        except (ValueError, TypeError):
-            warning_pct = DEFAULT_WARNING_THRESHOLD
-        try:
-            critical_pct = (
-                int(critical_raw) if critical_raw else DEFAULT_CRITICAL_THRESHOLD
-            )
-        except (ValueError, TypeError):
-            critical_pct = DEFAULT_CRITICAL_THRESHOLD
-
-        return {
-            "warning_enabled": enabled,
-            "warning_threshold_pct": warning_pct,
-            "critical_threshold_pct": critical_pct,
-        }
+        from management.services.knowledge_base.quota_rules import warning_values
+        return warning_values(self._get_tenant_config(KEY_WARNING_ENABLED),
+            self._get_tenant_config(KEY_WARNING_THRESHOLD_PCT),self._get_tenant_config(KEY_CRITICAL_THRESHOLD_PCT),
+            default_warning=DEFAULT_WARNING_THRESHOLD,default_critical=DEFAULT_CRITICAL_THRESHOLD)
 
     def set_warning_config(
         self,

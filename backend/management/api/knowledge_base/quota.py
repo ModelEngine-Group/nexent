@@ -31,6 +31,7 @@ from management.services.knowledge_base.inventory import (
 )
 from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
+from management.services.knowledge_base.quota_read import read_tenant_quota
 from management.services.permission.identity.session import (
     authenticate,
     get_current_user_id,
@@ -111,7 +112,7 @@ async def _get_manageable_index_names(tenant_id, user_id, actor_tenant_id, *, co
 
 
 @tenant_quota_router.get("/{tenant_id}/quota")
-def get_tenant_quota(
+async def get_tenant_quota(
     tenant_id: str = Path(..., description="Tenant ID"),
     authorization: Optional[str] = Header(None),
 ):
@@ -121,32 +122,23 @@ def get_tenant_quota(
     """
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
-        # Use auth tenant_id if accessing own tenant; SU can see any
-        role = _get_user_role(authorization)
-        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN,
-                detail="Cannot access quota config for another tenant",
-            )
-
-        service = QuotaService(tenant_id, user_id)
-        hard_limit = service.get_hard_limit()
-        warning_config = service.get_warning_config()
-        summary = service.get_quota_summary()
+        result = await read_tenant_quota(tenant_id, ServicePrincipal(user_id, auth_tenant_id))
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={
-                **hard_limit,
-                **warning_config,
-                "summary": summary,
-            },
+            content=result,
         )
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                            detail="Cannot access quota config for another tenant") from exc
     except HTTPException:
         raise
     except TokenExpiredError as exc:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"Error getting quota config: {exc}") from None
     except Exception as exc:
         logger.exception("Error getting tenant quota for %s", tenant_id)
         raise HTTPException(
