@@ -4338,6 +4338,72 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/api/reviews",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/repository/reviews.py",
+      "route_id": "route-fd5425299d0dbe75",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reviews",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/repository/reviews.py",
+      "route_id": "route-f6f4592189bba039",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reviews/{review_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/repository/reviews.py",
+      "route_id": "route-2b22d15e1747c84a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reviews/{review_id}/decision",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/repository/reviews.py",
+      "route_id": "route-b3c548073860e187",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reviews/{resource_type}/{repository_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/repository/reviews.py",
+      "route_id": "route-ddfe3306f8406fcf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reviews/{resource_type}/{repository_id}/decision",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/repository/reviews.py",
+      "route_id": "route-872f9830bcd73635",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/api/share/conversation/{conversation_id}",
       "transport": "http",
@@ -6372,5 +6438,5 @@
       ]
     }
   ],
-  "revision": "2026-11-18.3"
+  "revision": "2026-11-19.1"
 }
