@@ -14,7 +14,7 @@ from nexent.core.concurrency.helpers import run_blocking
 
 @pytest.mark.parametrize("fail", [False, True])
 def test_mcp_default_blocking_lane_executes_and_drains(mocker, fail):
-    source = Path(__file__).resolve().parents[3] / "backend/infrastructure/concurrency.py"
+    source = Path(__file__).resolve().parents[3] / "backend/mcp/thread_management.py"
     spec = importlib.util.spec_from_file_location("mcp_policy_under_test", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
