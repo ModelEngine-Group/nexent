@@ -32,6 +32,9 @@ def resources(monkeypatch):
                     nullable=column.nullable,
                 )
             )
+        if name == "cleanse_knowledge":
+            # Current-reader metadata also includes the existing per-KB quota.
+            columns.append(sa.Column("quota_limit_bytes", sa.BigInteger, nullable=True))
         tables[name] = sa.Table(name, metadata, *columns)
     monkeypatch.setattr(cleanse_resources, "TABLES", tables)
     engine = sa.create_engine("sqlite://")

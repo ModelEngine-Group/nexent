@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from management.api.knowledge_base import vectordatabase as module
+from nexent.storage.errors import ScopeDenied
 
 from backend.http.server.exception_handlers import register_exception_handlers
 
@@ -23,12 +24,8 @@ def public(mocker):
     client = TestClient(app)
     events, contexts = [], []
     mocker.patch.object(module, 'get_current_user_id', return_value=('operator', 'tenant-a'))
-    permission = mocker.patch.object(module, 'require_knowledge_base_edit_permission',
-        side_effect=lambda *a: events.append('permission'))
-    row = {'knowledge_id': 1, 'index_name': 'kb', 'ingroup_permission': 'PRIVATE', 'embedding_model_id': 2}
-    record = mocker.patch.object(module, 'get_knowledge_record', return_value=row)
-    quota = mocker.patch.object(module, '_check_personal_kb_quota_before_indexing',
-        side_effect=lambda *a: events.append('quota'))
+    admission = mocker.patch.object(module, 'prepare_document_admission',
+        side_effect=lambda *a, **kw: events.append('admission'))
 
     async def blocking(name, action, *args, **kwargs):
         kwargs.pop('lane'); kwargs.pop('owner')
@@ -57,13 +54,14 @@ def test_document_header_is_tracking_only_and_original_input_reaches_standard_se
                                  headers={'X-Task-Id': 'trace-only'})
     assert response.status_code == 200 and response.json() == {
         'success': True, 'message': 'Successfully indexed 1 documents', 'total_indexed': 1, 'total_submitted': 1}
-    assert s.events == ['permission', 'quota', 'append']
+    assert s.events == ['admission', 'append']
     call = s.index.await_args
     assert call.args[:2] == ('kb', body)
     assert (call.args[2].user_id, call.args[2].tenant_id) == ('operator', 'tenant-a')
     assert set(call.kwargs) == {'context'} and call.kwargs['context'] is s.contexts[0]
     assert s.contexts[0].cancelled.is_set()
-    s.quota.assert_called_once_with(body, s.row, 'tenant-a', 'operator')
+    assert s.admission.call_args.args[:2] == ('kb', body)
+    assert s.admission.call_args.kwargs['context'] is s.contexts[0]
     s.native.assert_not_called(); s.model.assert_not_called()
     assert 'trace-only' in caplog.text
 
@@ -78,18 +76,23 @@ def test_empty_body_keeps_original_zero_counts(public):
     assert s.index.await_args.args[1] == []
 
 
-def test_edit_rejection_prevents_quota_and_execution(public):
+@pytest.mark.parametrize('error,status,message', [
+    (ScopeDenied(), 403, 'No permission to modify this knowledge base'),
+    (ValueError("Knowledge base 'kb' not found"), 404, "Knowledge base 'kb' not found"),
+])
+def test_edit_rejection_prevents_quota_and_execution(public, error, status, message):
     s = public
-    s.permission.side_effect = HTTPException(status_code=403, detail='No permission to modify this knowledge base')
+    s.admission.side_effect = error
     response = s.client.post('/indices/kb/documents', json=[{'content': 'text'}])
-    assert response.status_code == 403 and response.json()['message'] == 'No permission to modify this knowledge base'
-    s.record.assert_not_called(); s.quota.assert_not_called(); s.index.assert_not_awaited()
+    assert response.status_code == status and response.json()['message'] == message
+    assert s.admission.call_count == 1
+    s.index.assert_not_awaited()
 
 
 def test_original_quota_rejection_remains_structured_and_prevents_execution(public):
     s = public
     error = AppException(ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED, 'quota exceeded')
-    s.quota.side_effect = error
+    s.admission.side_effect = error
     response = s.client.post('/indices/kb/documents', json=[{'content': 'text'}])
     assert response.status_code == error.http_status and response.json()['message'] == 'quota exceeded'
     s.index.assert_not_awaited()
@@ -100,7 +103,7 @@ def test_existing_list_of_dict_validation_stays_422(public, body):
     s = public
     response = s.client.post('/indices/kb/documents', json=body)
     assert response.status_code == 422
-    s.permission.assert_not_called(); s.index.assert_not_awaited()
+    s.admission.assert_not_called(); s.index.assert_not_awaited()
 
 
 def test_preparation_error_preserves_public_500_without_retry(public):

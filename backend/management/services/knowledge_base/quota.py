@@ -20,9 +20,7 @@ from management.services.knowledge_base.quota_common import (
     KEY_WARNING_THRESHOLD_PCT,
     MB,
     Any,
-    AppException,
     Dict,
-    ErrorCode,
     List,
     Optional,
     PlatformQuotaConflictError,
@@ -163,22 +161,9 @@ class QuotaService(
         ).get(user_id, {"total_bytes": 0})
         user_usage_bytes = user_usage["total_bytes"]
         effective_quota, quota_source = self._get_personal_effective_quota(user_id)
-        if effective_quota is None:
-            return
-        if effective_quota <= 0:
-            if upload_bytes > 0:
-                raise AppException(
-                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
-                    f"Personal KB quota is disabled (0 bytes) for user {user_id}",
-                )
-            return
-        if user_usage_bytes + upload_bytes > effective_quota:
-            raise AppException(
-                ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
-                f"Personal KB quota exceeded: "
-                f"{_bytes_to_readable(user_usage_bytes + upload_bytes)} exceeds "
-                f"{quota_source} quota of {_bytes_to_readable(effective_quota)}",
-            )
+        from management.services.knowledge_base.quota_rules import check_user_capacity
+
+        check_user_capacity(user_usage_bytes, upload_bytes, effective_quota, quota_source, user_id)
 
     def _check_personal_kb_quota_from_usage(
         self,
@@ -196,21 +181,9 @@ class QuotaService(
 
         index_name = kb_record.get("index_name", "")
         kb_usage_bytes = usage_data["stats"].get(index_name, 0)
-        projected_bytes = kb_usage_bytes + upload_bytes
-        if kb_quota <= 0:
-            if upload_bytes > 0:
-                raise AppException(
-                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
-                    f"KB quota is disabled (0 bytes) for {index_name}",
-                )
-            return
-        if projected_bytes > kb_quota:
-            raise AppException(
-                ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
-                f"KB quota exceeded for {index_name}: "
-                f"{_bytes_to_readable(projected_bytes)} exceeds "
-                f"{_bytes_to_readable(kb_quota)}",
-            )
+        from management.services.knowledge_base.quota_rules import check_kb_capacity
+
+        check_kb_capacity(kb_usage_bytes, upload_bytes, kb_quota, index_name)
 
     def check_personal_user_quota(
         self,
@@ -241,15 +214,9 @@ class QuotaService(
         total_tenant_bytes = usage_data["total_bytes"]
 
         hard_limit_bytes = self.get_hard_limit().get("hard_limit_bytes")
-        if hard_limit_bytes is not None:
-            projected_bytes = total_tenant_bytes + upload_bytes
-            if projected_bytes > hard_limit_bytes:
-                raise AppException(
-                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
-                    f"Tenant personal KB storage full: "
-                    f"{_bytes_to_readable(projected_bytes)} exceeds hard limit of "
-                    f"{_bytes_to_readable(hard_limit_bytes)}",
-                )
+        from management.services.knowledge_base.quota_rules import check_tenant_capacity
+
+        check_tenant_capacity(total_tenant_bytes, upload_bytes, hard_limit_bytes)
 
         self._check_personal_user_quota_from_usage(usage_data, user_id, upload_bytes)
         self._check_personal_kb_quota_from_usage(

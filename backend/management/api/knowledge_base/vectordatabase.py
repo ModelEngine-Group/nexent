@@ -26,7 +26,6 @@ from contracts.constants.constants import (
     SUMMARY_FREQUENCY_OPTIONS_FOR_API,
     VALID_SUMMARY_FREQUENCIES,
 )
-from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, DuplicateError, TokenExpiredError
 from contracts.knowledge import (
     ChunkCreateRequest,
@@ -44,7 +43,6 @@ from management.db.knowledge_base.repository import (
 )
 from management.db.model.repository import get_model_by_model_id
 from management.services.file.service import check_file_access
-from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
@@ -62,7 +60,6 @@ from infrastructure.agentos_identity import ServicePrincipal
 from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
 from management.services.monitor.audit import record_security_event
 from management.services.file.service import check_file_access
-from management.services.knowledge_base.quota import QuotaService
 from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 from management.services.tag.projection import project_authorized_document_tags
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
@@ -71,6 +68,7 @@ from nexent.storage.errors import InvalidInput
 from nexent.storage.models import OperationContext
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from management.services.knowledge_base.documents import index_documents
+from management.services.knowledge_base.document_admission import prepare_document_admission
 from management.services.knowledge_base.summary_settings import configure_summary_schedule
 from nexent.vector_database.base import VectorDatabaseCore
 
@@ -574,40 +572,15 @@ def get_list_indices(
 # Document Operations
 
 
-def _check_personal_kb_quota_before_indexing(
-    data: List[Dict[str, Any]],
-    knowledge_record: Optional[Dict[str, Any]],
-    tenant_id: str,
-    user_id: str,
-) -> None:
-    """Validate personal quota before indexing documents into a private KB."""
-    if not knowledge_record or knowledge_record.get("ingroup_permission") != "PRIVATE":
-        return
-
-    try:
-        quota_service = QuotaService(tenant_id, user_id)
-        quota_service.check_personal_kb_quota(
-            user_id,
-            quota_service.get_pending_personal_upload_bytes(data, knowledge_record),
-            kb_record=knowledge_record,
-        )
-    except AppException:
-        raise
-    except Exception as exc:
-        logger.exception("Personal KB quota check failed")
-        raise AppException(
-            ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
-            f"Personal KB quota service unavailable: {str(exc)}",
-        ) from exc
-
-
 def _prepare_document_admission(index_name, data, actor, *, context):
-    """Preserve the current edit and PRIVATE quota checks in one managed read task."""
-    context.remaining()
-    require_knowledge_base_edit_permission(index_name, actor.user_id, actor.tenant_id)
-    row = get_knowledge_record({"index_name": index_name})
-    _check_personal_kb_quota_before_indexing(data, row, actor.tenant_id, actor.user_id)
-    context.remaining()
+    """Map current-reader DAC errors while the service owns SI quota policy."""
+    try:
+        prepare_document_admission(index_name, data, actor, context=context)
+    except ScopeDenied as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                            detail="No permission to modify this knowledge base") from error
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(error)) from error
 
 
 @router.post("/{index_name}/documents", response_model=IndexingResponse)

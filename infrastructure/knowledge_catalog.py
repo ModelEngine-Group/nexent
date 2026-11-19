@@ -47,7 +47,7 @@ FIELDS = [
 
 
 def bind_knowledge_catalog(actor, engine, *, writable=False, knowledge_name=None):
-    scope = StorageScope("management", actor.tenant_id, actor.user_id, {CATALOG, ACTOR})
+    scope = StorageScope("management", actor.tenant_id, actor.user_id, {CATALOG, ACTOR} if writable else {CATALOG})
     accounts, members = UserAccount.__table__, UserTenant.__table__
     roles = (
         sa.select(members.c.user_tenant_id, members.c.tenant_id, accounts.c.user_roles)
@@ -103,8 +103,8 @@ def bind_knowledge_catalog(actor, engine, *, writable=False, knowledge_name=None
             locks += (f"knowledge-name:{actor.tenant_id}:{knowledge_name}",)
     return SQLRecordStore(
         scope,
-        DatasetCatalog(definitions),
-        {CATALOG: knowledge, ACTOR: roles},
+        DatasetCatalog(definitions if writable else definitions[:1]),
+        {CATALOG: knowledge, ACTOR: roles} if writable else {CATALOG: knowledge},
         engine,
         revision_fields={CATALOG: "version"},
         audit_mappings={

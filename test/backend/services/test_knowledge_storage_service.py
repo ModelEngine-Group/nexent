@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from management.services.knowledge_base import storage as storage_service
+from management.services.knowledge_base import source_reference
 
 KnowledgeStorageContext = storage_service.KnowledgeStorageContext
 compensate_uploaded_objects = storage_service.compensate_uploaded_objects
@@ -22,11 +23,13 @@ resolve_storage_object_access = storage_service.resolve_storage_object_access
 @pytest.fixture(autouse=True)
 def default_bucket(monkeypatch):
     monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", "test-bucket")
+    monkeypatch.setattr(source_reference, "MINIO_DEFAULT_BUCKET", "test-bucket")
 
 
 @pytest.fixture(autouse=True)
 def default_bucket(monkeypatch):
     monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", "test-bucket")
+    monkeypatch.setattr(source_reference, "MINIO_DEFAULT_BUCKET", "test-bucket")
 
 
 @pytest.fixture

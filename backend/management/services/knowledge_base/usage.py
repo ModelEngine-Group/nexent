@@ -469,19 +469,11 @@ class KnowledgeUsageAccounting:
         if not kb_record:
             return 0
 
-        source_sizes: Dict[str, int] = {}
-        for item in data or []:
-            if not isinstance(item, dict):
-                continue
-            source = str(item.get("path_or_url") or item.get("filename") or "").strip()
-            if not source:
-                continue
-            try:
-                file_size = int(item.get("file_size"))
-            except (TypeError, ValueError):
-                continue
-            if file_size > 0:
-                source_sizes[source] = max(source_sizes.get(source, 0), file_size)
+        from management.services.knowledge_base.quota_rules import (
+            source_sizes as collect_source_sizes,
+        )
+
+        source_sizes = collect_source_sizes(data)
 
         if not source_sizes:
             return 0

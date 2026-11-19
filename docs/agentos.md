@@ -333,9 +333,9 @@ process_source=UniversalImageExtractor 的记录按原规则处理。普通 embe
 
 成功回执 `KnowledgeDocumentsAppended` 包含 knowledge_id、total_submitted、total_indexed、total_skipped 和独立 chunk_ids。indexed+skipped 必须等于 submitted，物理键数必须等于 indexed，全部跳过时返回空键列表；Management 仅允许图片提取项被跳过。Runtime 复用已有 cancellable_context，在退出时设置本次取消标记，并保留父上下文的截止与取消信号，防止后台读取继续处理后续分块。此同步追加操作保留重发追加语义，File.upload 的文件幂等协议单独保持。
 
-Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 POST /indices/{index_name}/documents 也已切换。原请求体和四字段响应保持，X-Task-Id 只作追踪，进度统一使用新文件任务；large_mode 查询参数继续接受，执行使用 Runtime 的有界批次，不临时调整旧 VDB settings。编辑与 PRIVATE 配额预检保留，并通过 ThreadManager 与标准准备共享180秒父预算。旧配额读取仍待 SI 整改，不能据此认定 data-process 已退役。
+Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 POST /indices/{index_name}/documents 也已切换。原请求体和四字段响应保持，X-Task-Id 只作追踪，进度统一使用新文件任务；large_mode 查询参数继续接受，执行使用 Runtime 的有界批次，不临时调整旧 VDB settings。编辑与 PRIVATE 配额预检保留，并通过 ThreadManager 与标准准备共享180秒父预算。公开预检使用当前 SI reader 检查实际用户的 edit 权限，再通过有限只读 RecordStore 汇总活动 PRIVATE 目录、COMMITTED 源文件账本和租户配置，执行租户、用户、KB 三层原配额规则。共享 KB 不读取私人配额。所有读取共用父截止与取消信号，失败不会当作零用量；重复配置和歧义目录显式报不可用。其他配额管理读写、历史维护及旧镜像清退仍待完成。
 
-Management 的 `knowledge_base.documents.index_documents` 提供标准准备编排。它先使用当前实际用户取得 KB edit 授权，通过 Model.get 取得模型版本与 qualified_name，使用标准 ensure 初始化集合，再按原字段和默认值准备 source、固定所有 metadata.image_url，最后调用 append_documents。空请求也初始化集合并保留原 0/0 响应。未绑定模型的旧空 KB 显式使用既有 1024 维默认值；已绑定模型要求有效配置维度，不探测或兜底。该服务不创建 SDK 适配器，不进行模型推理，公开路由接线仍需处理旧任务进度。
+Management 的 `knowledge_base.documents.index_documents` 提供标准准备编排。它先使用当前实际用户取得 KB edit 授权，通过 Model.get 取得模型版本与 qualified_name，使用标准 ensure 初始化集合，再按原字段和默认值准备 source、固定所有 metadata.image_url，最后调用 append_documents。空请求也初始化集合并保留原 0/0 响应。未绑定模型的旧空 KB 显式使用既有 1024 维默认值；已绑定模型要求有效配置维度，不探测或兜底。该服务不创建 SDK 适配器，不进行模型推理，公开路由已接通，X-Task-Id 仅用于追踪，进度统一使用新文件任务。
 
 Model.get 的 qualified_name 使用现有模型名称函数从 Runtime 私有 SI 记录投影仓库限定名称，缺名称时为 null，与执行 profile 的实际 request model ID 分别使用。它保留旧 source.embedding_model_name 的拼接规则，不用 display_name 替代，不返回凭据或构造 SDK。Management 标准准备要求有效名称并把该版本作为 ModelVersion 传给追加接口；KB 绑定 ID 变化在 Management 的 RPC 前拒绝，同模型版本变化由 Runtime 在推理前拒绝。原调用方可省略 model_binding，继续使用 ModelReference。
 
@@ -374,3 +374,5 @@ Management的 `KnowledgeIngestionIntent.legacy_snapshot` 只保存历史状态�
 Model.get 与 Model.invoke 的执行配置读取现使用 Runtime 专用只读 StorageInterface RecordStore。ModelService 向读取函数传入实际签名 user/tenant 和同一 OperationContext，模型路由、KB 默认模型及 Memory 的推理组合复用该实现。私有记录保留凭据和 profile 原结构，public metadata/catalog 仍只返回白名单字段。读取受既有 10 秒预算约束，超时返回 MODEL_TIMEOUT，并记录 model_id、operation_id 与 phase，不自动重试。
 
 SQL 时间字符串转换为原 get 使用的 ISO T 形式；revision 比较同时接受 catalog 已有的空格时间形式，普通版本 tag 保持。原 embedding 空 chunk 参数默认值保留在 Runtime，维度仍只取已配置 max_tokens，不探测或替换模型。此项没有迁移全部模型写入/健康检查或 Memory 配置读取，也不代表完整 data-process 流水线已验收。
+
+公开 documents 与旧配额管理复用纯配额判断、source 去重和对象路径解析。为保持原计量规则，可解析对象引用即使尚无账本行，也保留原零值键投影，不增加本次 pending bytes。此批不修正该历史行为，不新增预留、并发计量保证或重试。配额管理其他入口继续按退役 SPEC 迁移，不能据此认定全部存储访问已切至 SI。

@@ -190,6 +190,11 @@ def mock_current_user_id():
     ):
         yield
 
+@pytest.fixture(autouse=True)
+def document_admission_boundary(mocker):
+    return mocker.patch("management.api.knowledge_base.vectordatabase.prepare_document_admission")
+
+
 # Test cases using pytest-asyncio
 
 
@@ -967,11 +972,8 @@ async def test_create_index_documents_forbidden_for_read_only(vdb_core_mock, aut
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch(
-                "management.api.knowledge_base.vectordatabase.require_knowledge_base_edit_permission",
-                side_effect=HTTPException(
-                    status_code=403,
-                    detail="No permission to modify this knowledge base",
-                ),
+                "management.api.knowledge_base.vectordatabase.prepare_document_admission",
+                side_effect=ScopeDenied(),
             ) as mock_require_permission, \
             patch("management.api.knowledge_base.vectordatabase.index_documents") as mock_index:
 
@@ -983,11 +985,9 @@ async def test_create_index_documents_forbidden_for_read_only(vdb_core_mock, aut
 
         assert response.status_code == 403
         assert response.json()["detail"] == "No permission to modify this knowledge base"
-        mock_require_permission.assert_called_once_with(
-            auth_data["index_name"],
-            auth_data["user_id"],
-            auth_data["tenant_id"],
-        )
+        mock_require_permission.assert_called_once()
+        actor = mock_require_permission.call_args.args[2]
+        assert (actor.user_id, actor.tenant_id) == (auth_data["user_id"], auth_data["tenant_id"])
         mock_index.assert_not_called()
 
 
@@ -2472,7 +2472,7 @@ async def test_create_index_documents_delegates_saved_model_preparation_to_stand
         assert response.status_code == 200
 
         # Verify get_knowledge_record was called with correct index_name
-        mock_get_knowledge_record.assert_called_once_with({'index_name': index_name})
+        mock_get_knowledge_record.assert_not_called()
 
         mock_get_embedding.assert_not_called()
         mock_index.assert_awaited_once()
@@ -2886,7 +2886,7 @@ async def test_create_index_documents_personal_kb_quota_exceeded(
         "management.api.knowledge_base.vectordatabase.get_knowledge_record",
         return_value={"ingroup_permission": "PRIVATE"},
     ), patch(
-        "management.api.knowledge_base.vectordatabase.QuotaService.check_personal_kb_quota",
+        "management.api.knowledge_base.vectordatabase.prepare_document_admission",
         side_effect=AppException(
             ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED,
             "quota exceeded",
@@ -2921,7 +2921,7 @@ async def test_create_index_documents_personal_kb_quota_unavailable(
         "management.api.knowledge_base.vectordatabase.get_knowledge_record",
         return_value={"ingroup_permission": "PRIVATE"},
     ), patch(
-        "management.api.knowledge_base.vectordatabase.QuotaService.check_personal_kb_quota",
+        "management.api.knowledge_base.vectordatabase.prepare_document_admission",
         side_effect=AppException(
             ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE,
             "es down",
@@ -2956,7 +2956,7 @@ async def test_create_index_documents_skips_personal_quota_for_shared_kb(
         "management.api.knowledge_base.vectordatabase.get_knowledge_record",
         return_value={"ingroup_permission": "PUBLIC"},
     ), patch(
-        "management.api.knowledge_base.vectordatabase.QuotaService"
+        "management.services.knowledge_base.quota.QuotaService"
     ) as mock_quota_class, patch(
         "management.services.model.resolver.get_embedding_model_by_id",
         return_value=MagicMock(),
@@ -2981,43 +2981,8 @@ async def test_create_index_documents_skips_personal_quota_for_shared_kb(
     mock_index.assert_called_once()
 
 
-def test_personal_quota_helper_skips_missing_and_shared_records(mocker):
-    from management.api.knowledge_base import vectordatabase as vdb_app
-
-    check_quota = mocker.patch(
-        "management.api.knowledge_base.vectordatabase.QuotaService.check_personal_kb_quota"
-    )
-
-    vdb_app._check_personal_kb_quota_before_indexing(
-        data=[], knowledge_record=None, tenant_id="tenant-1", user_id="user-1"
-    )
-    vdb_app._check_personal_kb_quota_before_indexing(
-        data=[],
-        knowledge_record={"ingroup_permission": "EDIT"},
-        tenant_id="tenant-1",
-        user_id="user-1",
-    )
-
-    check_quota.assert_not_called()
 
 
-def test_personal_quota_helper_converts_unexpected_error_to_unavailable(mocker):
-    from management.api.knowledge_base import vectordatabase as vdb_app
-
-    mocker.patch(
-        "management.api.knowledge_base.vectordatabase.QuotaService.get_pending_personal_upload_bytes",
-        side_effect=RuntimeError("ledger unavailable"),
-    )
-
-    with pytest.raises(AppException) as raised:
-        vdb_app._check_personal_kb_quota_before_indexing(
-            data=[{"path_or_url": "knowledge_base/a.txt", "file_size": 10}],
-            knowledge_record={"ingroup_permission": "PRIVATE"},
-            tenant_id="tenant-1",
-            user_id="user-1",
-        )
-
-    assert raised.value.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
 
 
 @pytest.mark.asyncio

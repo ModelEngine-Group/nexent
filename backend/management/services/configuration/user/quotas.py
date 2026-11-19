@@ -57,12 +57,9 @@ class PersonalQuotaPolicy:
     @staticmethod
     def _parse_quota_value(raw: Any) -> Optional[int]:
         """Parse a quota config value; invalid values are treated as zero."""
-        if raw is None:
-            return None
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return 0
+        from management.services.knowledge_base.quota_rules import parse_personal_quota
+
+        return parse_personal_quota(raw)
 
     def get_personal_user_quota(self, user_id: str) -> Optional[int]:
         """Return a user's individual personal KB quota in bytes, or None."""

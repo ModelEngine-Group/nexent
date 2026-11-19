@@ -9,13 +9,14 @@ helpers unless :func:`resolve_storage_context` returns a valid tenant-owned KB.
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
-from urllib.parse import urlparse
 
-from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, PERMISSION_EDIT
+from contracts.constants.constants import PERMISSION_EDIT
 from contracts.constants.environment import MINIO_DEFAULT_BUCKET
 from management.db.file.attachment import delete_file
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.knowledge_base.storage_object import aggregate_committed_bytes_by_kb, get_committed_source_bytes_by_object_names, get_storage_object_by_identity, get_tenant_committed_bytes, mark_storage_object_deleted
+
+from management.services.knowledge_base.source_reference import resolve_storage_reference
 
 logger = logging.getLogger(__name__)
 
@@ -140,34 +141,6 @@ def resolve_storage_object_access(
         return False
 
     return str(knowledge_permission or "").upper() in {PERMISSION_EDIT, "CREATOR"}
-
-
-def resolve_storage_reference(path_or_url: Optional[str]) -> Optional[StorageObjectReference]:
-    """Normalize supported KB source paths to a bucket and object key."""
-    value = (path_or_url or "").strip()
-    if not value:
-        return None
-
-    if value.startswith("s3://"):
-        parsed = urlparse(value)
-        object_name = parsed.path.lstrip("/")
-        if parsed.netloc and object_name:
-            return StorageObjectReference(parsed.netloc, object_name)
-        return None
-
-    if value.startswith("/"):
-        bucket_name, separator, object_name = value.lstrip("/").partition("/")
-        if separator and bucket_name and object_name:
-            return StorageObjectReference(bucket_name, object_name)
-        return None
-
-    source_prefixes = (
-        "knowledge_base/",
-        f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/",
-    )
-    if value.startswith(source_prefixes) and MINIO_DEFAULT_BUCKET:
-        return StorageObjectReference(MINIO_DEFAULT_BUCKET, value)
-    return None
 
 
 def get_committed_source_bytes_by_paths(
