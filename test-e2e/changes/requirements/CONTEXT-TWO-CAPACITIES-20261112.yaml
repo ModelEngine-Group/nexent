@@ -31,6 +31,9 @@ change:
     - test/sdk/core/model_service/test_gateway_long_text_outlet.py
     - test/sdk/core/model_service/test_legacy_context_budget.py
     - test/sdk/core/agents/test_post_response_context.py
+    - test/sdk/core/agents/test_context_directory_boundaries.py
+    - test/sdk/core/agents/test_execution_history_compaction.py
+    - test/sdk/core/agents/test_execution_history_review_regressions.py
     - test/sdk/core/agents/test_jiuwen_context.py
     - test/sdk/core/agents/test_jiuwen_model_service.py
     - test/sdk/core/models/test_implicit_output_cap.py

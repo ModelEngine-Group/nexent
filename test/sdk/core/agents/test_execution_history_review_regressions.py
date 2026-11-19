@@ -292,13 +292,22 @@ def test_no_record_action_compacts_only_above_threshold_without_fake_reference(h
     history = None if history_mode == "none" else ExecutionHistory()
     manager = ContextManager(ContextManagerConfig(
         execution_history=history, effective_input_limit_tokens=10000,
+        compaction_trigger_threshold_tokens=10000, compaction_target_tokens=7500,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
     ))
     memory = SimpleNamespace(system_prompt=None, steps=[TaskStep(task="task"), step])
     model = Mock(side_effect=AssertionError("Unrecoverable results must not request an LLM summary"))
+    run_context = manager.prepare_run_context(memory, "", [])
+    before = manager.assemble_final_context(
+        model=model, memory=memory, current_run_start_idx=0, run_context=run_context,
+    )
+    assert before.evidence.current_action_compact_count == 0
+    if long_output:
+        assert "middle sentinel" in str(before.messages)
+    # The caller invokes maintenance only after accepting the response/tool step.
     result = manager.assemble_final_context(
         model=model, memory=memory, current_run_start_idx=0,
-        run_context=manager.prepare_run_context(memory, "", []),
+        run_context=run_context, maintenance=True,
     )
     rendered = '\n'.join(part['text'] for message in result.messages for part in message['content'])
     assert "head" in rendered and "tail" in rendered
