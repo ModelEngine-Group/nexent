@@ -497,7 +497,7 @@ def test_list_audits_none_datetime_fields(monkeypatch):
 def test_ac007_upsert_preserves_omitted_tolerance_and_honors_zero_and_reset(monkeypatch):
     session = _mock_session(monkeypatch)
     row = MemoryDreamingSchedule(
-        tenant_id="t", user_id="u", agent_id="__user__", long_term_length_tolerance_percent=9,
+        tenant_id="t", user_id="u", agent_id="__user__",
     )
     rows = {"DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT": MemoryUserConfig(
         user_id="u", value_type="single", config_key="DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT",
@@ -530,7 +530,7 @@ def test_ac007_upsert_preserves_omitted_tolerance_and_honors_zero_and_reset(monk
     ):
         schedule = memory_dreaming_db.upsert_schedule("t", "u", "__user__", **settings, **update)
         assert schedule["long_term_length_tolerance_percent"] == expected
-        assert row.long_term_length_tolerance_percent == 9
+        assert set(memory_dreaming_db._DREAMING_PARAMETER_TYPES).isdisjoint(row.__table__.columns.keys())
         config = rows["DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT"]
         assert config.config_value == (str(expected) if expected is not None else None)
         assert memory_dreaming_db.get_thresholds("t", "u", "__user__") == (
