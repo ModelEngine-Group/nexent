@@ -220,6 +220,8 @@ def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
     """TFP-D1-006: actual run construction stays cold by default and honors false."""
     import nexent.core.agents.orchestration.entry as run_module
     import nexent.core.agents.sandbox.execution as sandbox_module
+    # The runner owns the MCP collection lifecycle; patch its import site.
+    import nexent.core.agents.cores.smolagents.runner as runner_module
 
     acquisitions, releases, runtimes, outputs = [], [], [], []
     ordinary = OrdinaryExecutor()
@@ -231,7 +233,7 @@ def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
     monkeypatch.setattr(sandbox_module, "build_python_executor", acquire)
     monkeypatch.setattr(sandbox_module, "cleanup_executor", lambda executor, *args, **kwargs: releases.append(executor))
     monkeypatch.setattr(
-        run_module, "ManagedMCPToolCollection",
+        runner_module, "ManagedMCPToolCollection",
         lambda **kwargs: nullcontext(SimpleNamespace(tools=[])),
     )
 
@@ -246,7 +248,7 @@ def test_tfp_d1_006_run_defaults(monkeypatch, with_mcp, setting):
         monkeypatch.setattr(runtime, "agent_run_with_observer", execute)
         return runtime
 
-    monkeypatch.setattr(run_module, "NexentAgent", construct)
+    monkeypatch.setattr(runner_module, "NexentAgent", construct)
     info = AgentRunInfo(
         query="fixture", model_config_list=[], observer=MessageObserver(),
         agent_config=AgentConfig(

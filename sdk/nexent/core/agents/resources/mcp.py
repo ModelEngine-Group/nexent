@@ -95,7 +95,6 @@ class ManagedMCPToolCollection:
         self._async_close_event: asyncio.Event | None = None
         self._stack: AsyncExitStack | None = None
         self._startup_error: BaseException | None = None
-        self._public_collection = None
         self._sessions: Dict[str, Any] = {}
         self._session_locks: Dict[str, asyncio.Lock] = {}
         self._live_tool_names: Dict[str, set[str]] = {}
@@ -323,7 +322,6 @@ class ManagedMCPToolCollection:
             close_event = asyncio.Event()
             with self._lock:
                 self._async_close_event = close_event
-                self._public_collection = self
             if self._close_requested.is_set():
                 close_event.set()
             self._ready.set()
@@ -404,7 +402,7 @@ class ManagedMCPToolCollection:
         if startup_error is not None:
             self.close()
             raise startup_error
-        return self._public_collection
+        return self
 
     def _cancel_active_calls(self) -> None:
         with self._active_calls_lock:

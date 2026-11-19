@@ -141,10 +141,10 @@ def _assert_tool_call_timeout():
     collection = _make_collection(manager, scope, tool_timeout=1.0)
 
     tool = FakeTool('search')
-    wrapped = collection._wrap_tools([tool])
+    wrapped = collection.wrap_tool(tool)
 
     with pytest.raises(FutureTimeoutError):
-        wrapped[0].forward('query')
+        wrapped.forward('query')
 
     assert collection._close_requested.is_set()
 
@@ -190,9 +190,8 @@ def _assert_concurrent_close():
     assert in_flight.cancel_called is True
 
     collection._loop = object()
-    fake_session = object()
     with pytest.raises(RuntimeError, match='MCP session is closing'):
-        collection._call_tool(fake_session, 'search', {'q': 'x'})
+        collection.call_tool('fixture-server', 'search', {'q': 'x'})
 
 
 def _assert_startup_timeout():
@@ -230,7 +229,7 @@ def _assert_scope_registration():
 
     public = collection.__enter__()
 
-    assert public is None
+    assert public is collection
     assert len(scope.register_calls) == 1
     assert scope.register_calls[0] == collection.request_close
     assert collection._scope_token is scope._token
@@ -250,9 +249,9 @@ def _assert_no_secret_leakage(caplog):
         scope = FakeCancellationScope()
         collection = _make_collection(manager, scope, tool_timeout=1.0)
         tool = FakeTool('search')
-        wrapped = collection._wrap_tools([tool])
+        wrapped = collection.wrap_tool(tool)
         with pytest.raises(FutureTimeoutError):
-            wrapped[0].forward('query')
+            wrapped.forward('query')
 
     text = caplog.text
     assert 'event=mcp_tool_timeout' in text

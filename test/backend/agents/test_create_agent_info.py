@@ -1291,7 +1291,8 @@ class TestCreateToolConfigList:
                 output_type="string",
                 params={"param1": "value1"},
                 source="local",
-                usage=None
+                usage=None,
+                origin_name=None
             )
 
     @pytest.mark.asyncio
@@ -4778,7 +4779,8 @@ class TestCreateAgentRunInfo:
                 agent_config="agent_config",
                 mcp_host=[{
                     "url": "http://test.server",
-                    "transport": "streamable-http"
+                    "transport": "streamable-http",
+                    "name": "test_server"
                 }],
                 mcp_request_timeout_seconds=10,
                 collaboration_timeout_seconds=900,
@@ -4933,6 +4935,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://test.server",
                 "transport": "streamable-http",
+                "name": "test_server",
                 "headers": {"Authorization": "bearer_token_123"}
             }
 
@@ -4984,6 +4987,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://custom-header.server",
                 "transport": "streamable-http",
+                "name": "custom_header_server",
                 "headers": {"X-Custom-Header": "custom-value", "X-Another-Header": "another-value"}
             }
 
@@ -5086,7 +5090,8 @@ class TestCreateAgentRunInfo:
             assert len(mcp_host) == 1
             assert mcp_host[0] == {
                 "url": "http://null-headers.server",
-                "transport": "streamable-http"
+                "transport": "streamable-http",
+                "name": "null_headers_server"
             }
             assert "headers" not in mcp_host[0]
 
@@ -5138,6 +5143,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://string-headers.server",
                 "transport": "streamable-http",
+                "name": "string_headers_server",
                 "headers": {"Authorization": "bearer_token_789"}
             }
             assert mcp_host[0]["headers"]["Authorization"] == "bearer_token_789"
@@ -5183,6 +5189,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://nexent.mcp/sse",
                 "transport": "sse",
+                "name": "outer-apis",
                 "httpx_client_factory": run_preparation.create_httpx_client,
                 "headers": {
                     "X-Tenant-ID": "tenant_1",
@@ -5296,12 +5303,14 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://server1.com",
                 "transport": "streamable-http",
+                "name": "server1",
                 "headers": {"Authorization": "token1"}
             }
             # Second: dict with SSE transport, no authorization
             assert mcp_host[1] == {
                 "url": "http://server2.com/sse",
-                "transport": "sse"
+                "transport": "sse",
+                "name": "server2"
             }
             # Third: string format (fallback for unknown server)
             assert mcp_host[2] == "http://unknown.server"

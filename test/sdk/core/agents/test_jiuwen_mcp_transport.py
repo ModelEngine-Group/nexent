@@ -2,6 +2,7 @@
 """Unit regressions for native MCP transport configuration."""
 
 import asyncio
+from contextlib import AsyncExitStack
 from threading import Event
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,7 +17,6 @@ from nexent.core.concurrency import RunCancellationScope
 
 def test_session_worker_does_not_replace_recorded_connection_error_with_cleanup_error():
     owner = JiuwenMCPCollection(
-        authorized_tools=[],
         observe=lambda *_: None,
         manager=MagicMock(),
         server_parameters=[],
@@ -61,7 +61,6 @@ async def test_connection_diagnostic_survives_task_bound_cleanup(monkeypatch, cl
     client = MagicMock(connect=AsyncMock(side_effect=original), disconnect=AsyncMock(side_effect=cleanup_error))
     monkeypatch.setattr("nexent.core.agents.cores.jiuwen.mcp._ConfiguredNativeClient", lambda *_: client)
     owner = JiuwenMCPCollection(
-        authorized_tools=[],
         observe=lambda *_: None,
         manager=MagicMock(),
         server_parameters=[{"url": "http://fixture/mcp", "transport": "streamable-http"}],
@@ -69,8 +68,19 @@ async def test_connection_diagnostic_survives_task_bound_cleanup(monkeypatch, cl
         tool_timeout_seconds=3,
         close_timeout_seconds=1,
     )
+    raised = None
+    # Lazy connect runs inside the owner stack and registers the disconnect
+    # callback itself; a failing disconnect during stack cleanup must not
+    # erase the recorded connection diagnostic.
     with pytest.raises(type(cleanup_error)):
-        await owner._run_async_session()
+        async with AsyncExitStack() as stack:
+            owner._stack = stack
+            try:
+                await owner._connect_server({"url": "http://fixture/mcp", "transport": "streamable-http"})
+            except Exception as exc:
+                raised = exc
+                raise
+    assert isinstance(raised, MCPConnectionFailure)
     assert owner._startup_error is not None
     assert classify_mcp_failure(owner._startup_error)[0] == "auth_failed"
 
@@ -126,14 +136,15 @@ async def test_native_transport_preserves_headers_factory_and_session(monkeypatc
 async def test_false_connect_result_records_timeout_and_disconnects_owner(monkeypatch):
     client = MagicMock(connect=AsyncMock(return_value=False), disconnect=AsyncMock())
     monkeypatch.setattr("nexent.core.agents.cores.jiuwen.mcp._ConfiguredNativeClient", lambda *_: client)
-    owner = JiuwenMCPCollection(
-        authorized_tools=[], observe=lambda *_: None, manager=MagicMock(),
+    owner = JiuwenMCPCollection(observe=lambda *_: None, manager=MagicMock(),
         server_parameters=[{"url": "http://fixture/mcp", "transport": "streamable-http"}],
         cancellation_scope=RunCancellationScope(), tool_timeout_seconds=3,
         connect_timeout_seconds=2, close_timeout_seconds=1,
     )
     with pytest.raises(MCPConnectionFailure) as found:
-        await owner._run_async_session()
+        async with AsyncExitStack() as stack:
+            owner._stack = stack
+            await owner._connect_server({"url": "http://fixture/mcp", "transport": "streamable-http"})
     assert owner._startup_error is found.value
     assert isinstance(found.value.__cause__, MCPConnectionTimeoutError)
     assert classify_mcp_failure(found.value)[0] == "timeout"

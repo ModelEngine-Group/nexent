@@ -551,9 +551,9 @@ def test_agent_run_thread_mcp_flow(
         "", ProcessType.AGENT_NEW_RUN, "<MCP_START>"
     )
 
-    expected_client_list = [
-        {"url": "http://mcp.server/mcp", "transport": "streamable-http"}
-    ]
+    # The runner passes the raw mcp_host through; transport detection and
+    # normalization happen inside ManagedMCPToolCollection.
+    expected_client_list = ["http://mcp.server/mcp"]
     assert (
         managed_mcp_factory.call_args.kwargs["server_parameters"]
         == expected_client_list
@@ -656,10 +656,15 @@ def test_agent_run_thread_mcp_flow_mixed_formats(
     # Execute
     run_agent.agent_run_thread(basic_agent_run_info)
 
+    # Raw passthrough; normalization into dicts with transports happens in
+    # ManagedMCPToolCollection (covered by _normalize_mcp_config tests).
     expected_client_list = [
-        {"url": "http://mcp1.server/mcp", "transport": "streamable-http"},
-        {"url": "http://mcp2.server/sse", "transport": "sse"},
-        {"url": "http://mcp3.server/mcp", "transport": "streamable-http"},
+        "http://mcp1.server/mcp",  # Auto-detect: streamable-http
+        "http://mcp2.server/sse",  # Auto-detect: sse
+        {
+            "url": "http://mcp3.server/mcp",
+            "transport": "streamable-http",
+        },  # Explicit: streamable-http
     ]
     assert (
         managed_mcp_factory.call_args.kwargs["server_parameters"]

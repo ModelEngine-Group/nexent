@@ -1,0 +1,62 @@
+schema_version: '1.0'
+change:
+  change_id: MCP-LAZY-CONNECT-20261119
+  change_type: refactor
+  title: Connect MCP servers lazily on first tool call instead of run start
+  description: >-
+    ManagedMCPToolCollection no longer connects to every server in mcp_host when a run starts.
+    Entering the collection only starts the dedicated session loop; each server connects on the
+    first tool call routed to it (bounded by the same connect deadline), the session is reused for
+    the rest of the run, and all opened sessions close together at run end. Prompt-facing MCP tool
+    schemas now come from the DB cache (ag_tool_info_t inputs/description/origin_name), so agent
+    construction never blocks on MCP availability. An unreachable server no longer fails the run
+    at startup; its failure surfaces at the first tool call with the existing MCP error taxonomy.
+  affected_features:
+    existing: [TFP-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-SDK-AUTO-E6DDFB4661E0D8B4, TFP-D1-006]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Entering the collection and building MCP tools perform no network I/O; the first tool call
+      connects to the tool's server once and later calls reuse that session within the run.
+    - Lazy connection timeout is bounded by the connect deadline on first use and reported as
+      MCPConnectionTimeoutError/MCPConnectionFailure attributed to url and transport; a Python 3.11
+      FutureTimeoutError alias no longer misreports connection failures as tool deadlines.
+    - A configured tool absent from the live tool list fails at call time with MCPToolNotFoundError.
+    - Tool objects are built from the DB-cached schema with dual-encoding parsing (JSON and legacy
+      Python repr); an unreadable cache fails agent construction with a refresh hint.
+    - Close/cancellation contracts cover pending lazy connects and all opened sessions.
+    reason: >-
+      Rewrite the eager-connect lifecycle tests for lazy semantics and add component regressions for
+      first-use connect, session reuse, missing-tool attribution and cached-schema parsing. Existing
+      run-flow tests keep their MCP wiring assertions with raw passthrough of mcp_host.
+    test_selectors:
+    - test/sdk/core/agents/test_managed_mcp.py
+    - test/sdk/core/agents/test_tool_schemas.py
+    - test/sdk/core/agents/test_jiuwen_mcp_names.py
+    - test/sdk/core/agents/test_jiuwen_mcp_transport.py
+    - test/sdk/core/agents/test_jiuwen_resources.py
+    - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_run_agent.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_create_agent_info_workbench_coverage.py
+  notes: >-
+    Baseline b7cbdc4c0; rebased onto origin/develop 2a7adc9fb (jiuwen interface fixes #4357 ported
+    into the lazy jiuwen collection: connection failure attribution and disconnect hardening).
+    Backend mcp_host entries gain a server "name" key and ToolConfig gains "origin_name"; discovery
+    writes inputs as standard JSON while the SDK parser still accepts legacy repr rows.
+    TFP-D1-006 patch targets were stale before this change (entry.ManagedMCPToolCollection /
+    entry.NexentAgent no longer exist); the MCP collection patch now points at the runner import
+    site and the Case runs again, but its fastpath sandbox assertions still fail against the current
+    runner assembly — an unresolved pre-existing maintenance debt unrelated to MCP, recorded here as
+    a known issue rather than a pass. test_jiuwen_mcp_transport and the D5 factory reliability test
+    were ported to lazy semantics; the D5 model-call counting failures in
+    test_agent_core_factory_reliability reproduce on baseline b7cbdc4c0 and are environment-level.
