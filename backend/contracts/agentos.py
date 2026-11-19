@@ -578,12 +578,20 @@ class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
 
 
+class PreparedHistoryExecutionRecord(RunSpecModel):
+    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact"]
+    content: str | None
+    tool_call_id: str | None = None
+    invocation_id: str | None = None
+
+
 class PreparedHistoryTurn(RunSpecModel):
     user_message: str
     assistant_final_answer: str
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    execution_records: list[PreparedHistoryExecutionRecord] = Field(default_factory=list)
 
 
 class PreparedConversationHistory(RunSpecModel):
