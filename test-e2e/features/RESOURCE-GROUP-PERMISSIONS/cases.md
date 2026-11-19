@@ -1,0 +1,5 @@
+# RESOURCE-GROUP-PERMISSIONS 关联用例
+
+此页由结构化用例生成，不手工编辑。
+
+- D2 [AUTH-RESOURCE-GROUP-PERMISSIONS-D2-001](../../cases/AUTH-RESOURCE-GROUP-PERMISSIONS-D2-001/case.yaml) · active

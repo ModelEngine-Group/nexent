@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-STAGED-ACTIONS-20261110
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-STAGED-ACTIONS-20261110
+  title: Roll out Casdoor authority over additional operation actions
+  description: Allow a deployment to select additional wired actions without migrating its entire permission catalog at once. Start with native knowledge-base mutations.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR-POLICY-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_casdoor_feature_policy.py
+    behaviors:
+    - Rollout selection restricts authority to wired keys. A missing or stale grant denies a selected action.
+    - Native knowledge-base metadata mutations return forbidden before performing writes when an enabled action is absent.
+    reason: Existing tests cover typed policy scoping but do not exercise staged native knowledge-base operations.
+  notes: Reuse the existing AUTH-IDENTITY D2 fixture and its disposable PostgreSQL and controlled provider transport.

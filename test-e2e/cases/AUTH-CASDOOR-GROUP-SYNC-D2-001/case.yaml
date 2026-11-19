@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-GROUP-SYNC-D2-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-GROUP-SYNC]
+  title: Casdoor 群组和直接成员双向同步
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify group creation, parent changes and direct member changes through Nexent HTTP and a controlled Casdoor directory.
+  preconditions:
+  - NEXENT_AUTH_TEST_DSN permits creating a disposable PostgreSQL database.
+  test_data:
+    profile: isolated tenant, bound member, unrelated account and controlled Casdoor directory
+  steps:
+  - order: 1
+    action: Create a Nexent group and child, edit the child, and add a verified tenant member.
+    expected: The controlled directory receives the child parent and metadata and the user receives its direct membership.
+  - order: 2
+    action: Create and edit groups in the controlled directory and change the verified member's direct group list, then reconcile.
+    expected: Nexent lists the imported hierarchy and direct member changes and keeps stable local group IDs.
+  - order: 3
+    action: Attempt a cyclic parent, a cross-tenant write and an unbound member addition.
+    expected: Requests fail without modifying the provider directory.
+  expected_results:
+  - Group records, parents and verified direct memberships converge in both directions.
+  - Invalid or out-of-scope writes leave the controlled directory intact.
+  forbidden_side_effects:
+  - No external provider calls, live account changes or leftover owned resources.
+  acceptance:
+  - id: AC-01
+    description: Authorized Nexent group and member writes update the Casdoor records.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Casdoor updates are reflected in Nexent group and member APIs.
+    steps: [2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Tenant, identity and hierarchy checks prevent unintended changes.
+    steps: [3]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: Nexent HTTP, PostgreSQL, controlled Casdoor API responses
+    request_expectations: [The client uses an authenticated Nexent tenant session and existing group routes.]
+    response_expectations: [Group lists include the parent ID, and member lists reflect confirmed direct membership.]

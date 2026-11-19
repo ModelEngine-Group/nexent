@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: 身份认证与账号
+feature:
+  feature_id: RESOURCE-GROUP-PERMISSIONS
+  name: 资源多组授权
+  status: active
+  description: 知识库和智能体可分别配置只读组和可编辑组。
+  business_rules:
+  - rule_id: RESOURCE-GROUP-ASSIGNMENT
+    description: 同一资源的不同组可以获得不同权限，重叠成员采用较高权限，清空规则关闭组共享。
+  - rule_id: RESOURCE-GROUP-SCOPE
+    description: 共享配置由资源创建者或具备管理权限的用户维护，仅允许引用当前租户的组。
+  required_test_stages: [D2]
+  source:
+    requirement_ids: [RESOURCE-GROUP-PERMISSIONS-20261111]
+    spec_path: ../nexent-doc/docs/Developing/auth-casdoor-login/proposal.md

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-LINKED-POLICY-20261116
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-LINKED-POLICY-20261116
+  title: Apply Casdoor feature policies to previously linked Nexent accounts
+  description: Apply verified Casdoor model decisions to linked business accounts without switching their tenant role or login policy.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR-POLICY-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_casdoor_feature_policy.py
+    behaviors:
+    - A linked local account needs a current snapshot for its verified subject.
+    - A different subject invalidates previous feature grants and unlinking returns a local account to local policy.
+    reason: The previous eligibility check required registration provenance and did not bind snapshots to the OAuth subject.
+  notes: Reuse the existing isolated D2 fixture and verify same-session refresh separately in the frontend authorization component test.

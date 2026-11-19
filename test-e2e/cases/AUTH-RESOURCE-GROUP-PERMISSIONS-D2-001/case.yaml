@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-RESOURCE-GROUP-PERMISSIONS-D2-001
+  feature_id: RESOURCE-GROUP-PERMISSIONS
+  business_rule_ids: [RESOURCE-GROUP-ASSIGNMENT, RESOURCE-GROUP-SCOPE]
+  title: 资源只读组和可编辑组独立生效
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify stored rules, role resolution and tenant restrictions for both resource types.
+  preconditions:
+  - NEXENT_AUTH_TEST_DSN permits creating a disposable database.
+  test_data:
+    profile: two tenant groups, a foreign group, one owner and read-only and edit members
+  steps:
+  - order: 1
+    action: Save distinct read-only and edit group permissions and reload the resource.
+    expected: Both group assignments survive the round trip and grant their corresponding access.
+  - order: 2
+    action: Submit an out-of-tenant group and then clear group sharing as the owner.
+    expected: The foreign group is rejected and clearing removes group-derived access.
+  expected_results:
+  - Mixed group permissions are persisted and checked for knowledge bases and agents.
+  - Cross-tenant assignments cannot grant access.
+  forbidden_side_effects:
+  - No live group, user or resource changes and no leftover disposable database.
+  acceptance:
+  - id: AC-01
+    description: Both resources use the persisted per-group read-only and edit grants.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Tenant validation and clearing rules protect the resource.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: Nexent authenticated HTTP backed by PostgreSQL
+    request_expectations: [Each rule identifies one tenant group and one access level.]
+    response_expectations: [The API preserves assignments and rejects unauthorized updates.]

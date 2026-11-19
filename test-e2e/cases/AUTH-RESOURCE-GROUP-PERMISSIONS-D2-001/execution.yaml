@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AUTH-RESOURCE-GROUP-PERMISSIONS-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-RESOURCE-GROUP-PERMISSIONS-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_resource_sharing_round_trip]
+  AC-02: [test_resource_sharing_round_trip]
+notes: Owns and cleans a disposable PostgreSQL database and in-process Nexent HTTP fixture.

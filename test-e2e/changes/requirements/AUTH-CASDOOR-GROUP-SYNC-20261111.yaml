@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-GROUP-SYNC-20261111
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-GROUP-SYNC-20261111
+  title: Synchronize Nexent and Casdoor groups
+  description: Share group metadata, parents and verified direct memberships between a configured Nexent tenant and Casdoor organization.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AUTH-CASDOOR-GROUP-SYNC-D2-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/services/test_casdoor_group_sync.py
+    behaviors:
+    - Reject invalid directory responses and cyclic or foreign parents.
+    - Resolve direct members by immutable subject and preserve unrelated Casdoor groups on membership writes.
+    reason: Existing group tests cover local storage and the role sync tests do not cover directory projection.
+  notes: System owns the existing AUTH-CASDOOR feature. The D2 fixture owns a disposable database, app and controlled provider transport.

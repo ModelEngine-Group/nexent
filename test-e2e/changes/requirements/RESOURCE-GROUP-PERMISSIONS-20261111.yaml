@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-GROUP-PERMISSIONS-20261111
+  change_type: requirement
+  requirement_id: RESOURCE-GROUP-PERMISSIONS-20261111
+  title: Assign independent sharing permissions to resource groups
+  description: Configure multiple read-only and editable groups for a knowledge base or agent while preserving tenant and owner boundaries.
+  affected_features:
+    existing: []
+    added: [RESOURCE-GROUP-PERMISSIONS]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AUTH-RESOURCE-GROUP-PERMISSIONS-D2-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/permissions/test_group_sharing.py
+    behaviors:
+    - Read and edit decisions depend on matching per-group rules and preserve legacy behavior.
+    - Duplicate groups and groups outside the resource tenant are rejected.
+    reason: Existing single-permission tests cannot distinguish read-only and edit groups on one resource.
+  notes: D2 owns a temporary PostgreSQL database and authenticated API fixture.
