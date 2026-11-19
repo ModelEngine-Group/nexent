@@ -6436,7 +6436,51 @@
       "credential_kinds": [
         "session"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/agents/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-agent-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
     }
   ],
-  "revision": "2026-11-19.ops-model-monitoring"
+  "revision": "2026-11-19.ops-agent-monitoring"
 }

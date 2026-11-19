@@ -42,7 +42,7 @@ def read_agent_tokens(service, *, tenant, start, end, groups, agent_id, identiti
     states = [state for state in states if state["tenant_id"] in tenants]
     published = [state for state in published if state["tenant_id"] in tenants]
     starts = service.store.coverage_starts(tenants, "model") if published else {}
-    failures = {scope: service.store.has_failed_batches(scope, "model", start, end) for scope in tenants}
+    failures = service.store.failed_batch_tenants(tenants, "model", start, end)
     by_agent = defaultdict(list)
     by_day = defaultdict(list)
     for row in rows:
@@ -55,7 +55,7 @@ def read_agent_tokens(service, *, tenant, start, end, groups, agent_id, identiti
         return _publication_status(
             service, kind="model", start=first, end=last, tenants=scopes, states=selected,
             published=[state for state in selected if state["publish_id"]],
-            write_failed=any(failures[scope] for scope in scopes), coverage_starts=starts,
+            write_failed=bool(scopes & failures), coverage_starts=starts,
         )
 
     status = publication(tenants, start, end)

@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.dialects import postgresql
 
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from ops.api import monitoring
 from ops.monitoring.agent_tokens import AgentTokenUsage
 from ops.monitoring import query

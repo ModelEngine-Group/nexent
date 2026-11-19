@@ -16,7 +16,7 @@ import httpx
 import pytest
 from elasticsearch import Elasticsearch
 from fastapi import FastAPI
-from sqlalchemy import insert, text
+from sqlalchemy import event, insert, text
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema
 
@@ -38,6 +38,64 @@ from ops.monitoring.store import BATCH, DAY
 pytestmark = [pytest.mark.case_id("OPS-AGENT-FACTS-D3-001"), pytest.mark.stage("D3")]
 
 
+def test_bulk_model_batch_failures_preserve_scoped_status(isolated_monitoring, record_property):
+    """Compare bulk reads to the retained predicate through the actual PostgreSQL driver."""
+    service, tenant = isolated_monitoring
+    store = service.store
+    peer = tenant + "-other"
+    first, last = date(2026, 11, 18), date(2026, 11, 19)
+    before, after = first - timedelta(days=1), last + timedelta(days=1)
+    scenarios = [
+        ("queued", "write_failed", "model", [first], "N", True),
+        ("pending", "write_failed", "model", [last], "N", True),
+        ("queued", "write_failed", "model", [], "N", True),
+        ("confirmed", "write_failed", "model", [first], "N", False),
+        ("pending", None, "model", [first], "N", False),
+        ("pending", "write_failed", "agent", [first], "N", False),
+        ("pending", "write_failed", "model", [before], "N", False),
+        ("pending", "write_failed", "model", [after], "N", False),
+        ("pending", "write_failed", "model", [first], "Y", False),
+        ("pending", "write_failed", "model", [before, last, after], "N", True),
+    ]
+    for state, error, kind, dates, deleted, failed in scenarios:
+        with store.engine.begin() as conn:
+            conn.execute(text(f"DELETE FROM {BATCH} WHERE tenant_id=ANY(:tenants)"),
+                         {"tenants": [tenant, peer]})
+            conn.execute(text(f"""
+                INSERT INTO {BATCH}
+                    (batch_id, tenant_id, fact_kind, batch_state, affected_dates, last_error_code, delete_flag)
+                VALUES (:id, :tenant, :kind, :state, CAST(:dates AS date[]), :error, :deleted)
+            """), [
+                {"id": uuid4(), "tenant": tenant, "kind": kind, "state": state, "dates": dates,
+                 "error": error, "deleted": deleted},
+                {"id": uuid4(), "tenant": peer, "kind": "model", "state": "pending", "dates": [first],
+                 "error": "write_failed", "deleted": "N"},
+            ])
+        expected = {scope for scope in (tenant, peer) if store.has_failed_batches(scope, "model", first, last)}
+        assert expected == ({tenant, peer} if failed else {peer})
+        statements = []
+
+        def observe(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(store.engine, "before_cursor_execute", observe)
+        try:
+            assert store.failed_batch_tenants({tenant, peer}, "model", first, last) == expected
+            assert len(statements) == 1 and BATCH in statements[0]
+            statements.clear()
+            assert store.failed_batch_tenants(set(), "model", first, last) == set()
+            assert statements == []
+            assert store.failed_batch_tenants({tenant}, "model", first, last) == ({tenant} if failed else set())
+            assert len(statements) == 1
+        finally:
+            event.remove(store.engine, "before_cursor_execute", observe)
+        with store.engine.connect() as conn:
+            assert conn.execute(text(f"SELECT count(*) FROM {BATCH} WHERE tenant_id=ANY(:tenants)"),
+                                {"tenants": [tenant, peer]}).scalar_one() == 2
+    record_property("failure_predicate_scenarios", len(scenarios))
+    record_property("bulk_failure_sql_count", 1)
+
+
 @pytest.fixture
 def isolated_monitoring(monkeypatch):
     pg_host = os.environ.get("OPS_MONITORING_TEST_POSTGRES_HOST")
@@ -49,26 +107,29 @@ def isolated_monitoring(monkeypatch):
     for key, value in {
         "OPS_MONITORING_ENABLED": True,
         "OPS_MONITORING_TIMEZONE": "UTC",
-        "OPS_POSTGRES_HOST": pg_host,
-        "OPS_POSTGRES_PORT": int(os.environ.get("OPS_MONITORING_TEST_POSTGRES_PORT", "5432")),
+        "POSTGRES_HOST": pg_host,
+        "POSTGRES_PORT": int(os.environ.get("OPS_MONITORING_TEST_POSTGRES_PORT", "5432")),
+        "POSTGRES_DB": "nexent",
         "OPS_POSTGRES_DB": pg_db,
-        "OPS_POSTGRES_USER": os.environ.get("OPS_MONITORING_TEST_POSTGRES_USER", "postgres"),
-        "OPS_POSTGRES_PASSWORD": os.environ.get("OPS_MONITORING_TEST_POSTGRES_PASSWORD"),
+        "POSTGRES_USER": os.environ.get("OPS_MONITORING_TEST_POSTGRES_USER", "postgres"),
+        "NEXENT_POSTGRES_PASSWORD": os.environ.get("OPS_MONITORING_TEST_POSTGRES_PASSWORD"),
     }.items():
         monkeypatch.setattr(runtime, key, value)
 
     tenant = f"agent-sample-{uuid4().hex}"
     store = runtime.control_store()
-    catalog_created = False
+    catalog_tables = []
     from management.db.agent.models import AgentInfo
+    from management.db.model.models import ModelRecord
     from ops.monitoring import query
 
     try:
         store.verify_schema()
         with store.engine.begin() as connection:
             connection.execute(CreateSchema(AgentInfo.__table__.schema, if_not_exists=True))
-            AgentInfo.__table__.create(connection)
-        catalog_created = True
+            for model in (AgentInfo, ModelRecord):
+                model.__table__.create(connection)
+                catalog_tables.append(model.__table__)
         monkeypatch.setattr(query, "get_db_session", lambda: Session(store.engine))
         with Elasticsearch(es_host, request_timeout=10) as es:
             assert not es.indices.get(index="monitoring-*", allow_no_indices=True)
@@ -86,8 +147,8 @@ def isolated_monitoring(monkeypatch):
     finally:
         try:
             with store.engine.begin() as connection:
-                if catalog_created:
-                    AgentInfo.__table__.drop(connection)
+                for table in reversed(catalog_tables):
+                    table.drop(connection)
                 for table in (BATCH, DAY):
                     connection.execute(text(f"DELETE FROM {table} WHERE tenant_id IN (:tenant, :other)"),
                                        {"tenant": tenant, "other": f"{tenant}-other"})
@@ -291,7 +352,7 @@ def _resume_app(info, tenant, channel, threads, monkeypatch):
 
 
 async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
-    from gateway.authentication import auth
+    from management.services.permission.identity import session as auth
     from contracts.constants import environment
 
     monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
@@ -448,7 +509,7 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
 async def test_real_root_agent_capture_survives_sse_reconnect(
     isolated_monitoring, model_peer, monkeypatch, record_property,
 ):
-    from infrastructure.streaming.channels import StreamingChannel, runtime_state_service
+    from management.services.agent.channels import StreamingChannel, runtime_state_service
 
     service, tenant = isolated_monitoring
     base, requests, release = model_peer
@@ -606,7 +667,7 @@ def _mixed_result_events(tenant):
 @pytest.mark.asyncio
 async def test_mixed_agent_results_merge_across_days_and_replay(isolated_monitoring, monkeypatch, record_property):
     from contracts.constants import environment
-    from gateway.authentication import auth
+    from management.services.permission.identity import session as auth
     from management.db.agent.models import AgentInfo
     from permissions import rbac
 
@@ -710,7 +771,7 @@ async def test_real_parent_and_child_facts_publish_and_replay(
     isolated_monitoring, model_peer, monkeypatch, record_property, request,
 ):
     from contracts.constants import environment
-    from gateway.authentication import auth
+    from management.services.permission.identity import session as auth
     from management.db.agent.models import AgentInfo
     from permissions import rbac
 
@@ -913,6 +974,16 @@ async def _verify_real_agent_tokens(client, service, tenant, day, agent_ends, mo
     child_usage = (await read(agent_id=22))["tokens"]["total_tokens"]
     assert parent_usage == {"value": "35", "known_count": 2, "eligible_count": 2, "coverage_rate": 1.0}
     assert child_usage == {"value": "100", "known_count": 1, "eligible_count": 2, "coverage_rate": 0.5}
+    model_response = await client.get("/ops/v1/monitoring/models/summary", params=params)
+    assert model_response.status_code == 200
+    model_summary = model_response.json()
+    assert model_summary["data"]["request_count"] == 4
+    assert {field: model_summary["data"][field] for field in ("input_tokens", "output_tokens", "total_tokens")} == (
+        published["tokens"]
+    )
+    assert {key: model_summary[key] for key in ("data_as_of", "coverage_state", "is_stale")} == published["token_status"]
+    assert (await client.get("/ops/v1/monitoring/models/summary",
+                             params=dict(params, tenant_id=tenant + "-other"))).status_code == 403
     with service.publication_snapshot(tenant, "model", day, day) as (states, point):
         state, = states
         daily = list(point.documents(filters(tenant_id=tenant, fact_kind="model", publish_id=str(state["publish_id"]))))
@@ -924,6 +995,7 @@ async def _verify_real_agent_tokens(client, service, tenant, day, agent_ends, mo
     await _wait_for_model_batch(service, tenant)
     service.publish(tenant, "model")
     assert await read() == published
+    assert (await client.get("/ops/v1/monitoring/models/summary", params=params)).json() == model_summary
     replay = service.es.search(index=f"{FACTS}-*", size=100, query=filters(tenant_id=tenant, fact_kind="model"))
     assert {hit["_source"]["fact_id"]: hit["_source"] for hit in replay["hits"]["hits"]} == sources
     previous = day - timedelta(days=1)

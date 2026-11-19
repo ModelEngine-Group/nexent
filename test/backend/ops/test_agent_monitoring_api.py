@@ -11,7 +11,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from ops.api import monitoring
 from ops.monitoring.query import read_agents, read_models
 from permissions import rbac

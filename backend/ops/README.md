@@ -206,6 +206,9 @@ Use `GET /ops/v1/monitoring/agents/summary` directly on Ops or
 bearer token with `ops.dashboard:read`. Ops operators are scoped to their own
 tenant. Super Admin can select a tenant or omit `tenant_id` for all tenants.
 
+The Gateway registry exposes Agent list, summary, trends and rankings as
+session-only routes to Ops, using the same signed identity boundary as models.
+
 `start_date` and `end_date` are inclusive dates in the Ops monitoring timezone.
 The range can cover up to 366 days. Repeat `group_ids` to match any of those
 initiating groups. A record matching multiple groups contributes once.
@@ -297,6 +300,9 @@ with no published usage returns null Token fields.
 coverage remains in each Token field. Pending model revisions and failed model
 batches mark Token data stale independently of Agent publication. Failed batches
 in the requested date range conservatively mark that range's day views stale.
+All selected tenants' model batch failures are read in one scoped SQL query.
+An empty tenant selection skips that query. Legacy batches without affected
+dates retain their existing failure indication.
 The normal publication tick clears pending revisions once published. Clicking
 refresh reads these latest published results. Counts and duration keep their
 Agent execution start-day semantics, so their daily window can differ from

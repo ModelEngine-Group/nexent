@@ -14,7 +14,7 @@ case:
   objective: Prove sample revisions, real main Agent capture, daily publication and the authorized Ops summary.
   integration_boundary: [Real Agent worker and model HTTP transport, SSE recovery, Public SDK emit_fact, Shared producer and writer, Ops PostgreSQL, Elasticsearch, Ops HTTP and tenant authorization]
   observations: [Confirmed batches, Elasticsearch document identity and source fields]
-  cleanup: [Stop the model fixture and managed worker, Close producer and clients, Remove sample tenant rows and test-owned Elasticsearch indices and templates]
+  cleanup: [Stop the model fixture and managed worker, Close producer and clients, Remove sample tenant rows and test-owned Agent and model catalog tables and Elasticsearch indices and templates]
   preconditions: [A disposable migrated Ops database and a clean isolated Elasticsearch instance]
   test_data: {workload: Main Agent execution crossing a UTC month boundary with a 350 ms duration}
   steps:
@@ -75,6 +75,9 @@ case:
   - order: 19
     action: Replay model terminal facts, add cross-day attributed requests and orphan requests, and compare Agent summaries, directory and trends before and after publication.
     expected: Replay leaves usage and eligibility unchanged. Filters use request start dates and groups. Orphans are excluded and Token publication time, coverage and lag remain independent of Agent metrics.
+  - order: 20
+    action: Seed failed and excluded ingest batches in two owned tenants and compare one scoped bulk read with the existing per-tenant predicate, including empty scopes and inclusive date boundaries.
+    expected: The returned tenant set is equivalent with one SQL statement for any nonempty scope and none for an empty scope. Other kinds, confirmed or deleted batches and dates outside the range are excluded; legacy empty dates remain included.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -89,6 +92,7 @@ case:
   - Actual child invocations preserve their independent identity and timing through source facts, daily publication and queries with trajectory disabled.
   - Ended-result success metrics follow the confirmed outcome contract across dates and remain idempotent through all existing query surfaces.
   - Agent Token views match attributed published model usage and provider coverage independently of parent execution and publication timing.
+  - One scoped PostgreSQL read returns exactly the failed model batch tenants selected by the existing per-tenant predicate, including inclusive dates and legacy batches.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -98,6 +102,7 @@ case:
   - An extra child execution or duration sample from terminal replay, or child attribution to its parent's execution ID.
   - A success denominator containing cancelled, ongoing or unknown executions, a guessed timeout, or a mean of daily success rates.
   - Double-counting child usage under the parent, including unassociated model requests, replacing missing usage with zero, or inheriting Agent publication status for Tokens.
+  - Per-tenant SQL growth, failures from an unselected tenant or changes to existing Token lag semantics.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -139,3 +144,8 @@ case:
     steps: [18, 19]
     expected_results: [13]
     forbidden_side_effects: [8]
+  - id: AC-09
+    description: Batched failure-state reads preserve the existing scoped and dated model failure contract through real PostgreSQL.
+    steps: [20]
+    expected_results: [14]
+    forbidden_side_effects: [9]

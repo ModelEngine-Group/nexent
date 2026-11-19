@@ -8,7 +8,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from ops.api import monitoring
 from ops.monitoring.agent_tokens import AgentTokenUsage
 from permissions import rbac
