@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-ARCHIVE-UT-20261119
+  change_type: test-fix
+  title: Backfill trajectory archive unit coverage
+  description: >-
+    Cover archive HTTP dispatch, authentication before upload, multipart limits and
+    cleanup, export consistency, ZIP budgets and metadata, and saved import errors.
+    No product code or coverage configuration changes.
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Existing archive and saved-import D2/D3 Cases already own the real API and
+    persistence paths. This backfill isolates handler delegation, local validation,
+    cancellation, and error translation; adding a formal Case would duplicate proof.
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Archive request binding, authentication order, disconnect cancellation, and private responses.
+    - Multipart byte limits and temporary file release on success, rejection, timeout, and cancellation.
+    - Export snapshot invalidation, archive budgets and capture-state handling, and saved import failures.
+    reason: Existing service tests did not exercise the archive handlers or the streaming upload parser.
+    test_selectors:
+    - test/backend/ops/test_trajectory_archive_api.py
+    - test/backend/ops/test_trajectory_upload.py
+    - test/backend/services/trajectory/test_exchange.py
+    - test/backend/services/trajectory/test_saved_imports.py
+  notes: >-
+    Verified the working tree based on a21878806 against develop 2a7adc9fb.
+    The targeted Gateway, Ops, and exchange/retention selection passed 165 UTs
+    with pytest-cov branch tracking. Intersecting the Python coverage report
+    with the PR diff and treating partial lines as misses gives 515 of 540 lines
+    fully covered (95.37%). The remote Codecov result requires a fresh CI run.

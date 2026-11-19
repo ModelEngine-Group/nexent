@@ -213,3 +213,38 @@ export interface ConversationPage {
   availability: string;
   active_execution_count: number;
 }
+
+export interface ImportedTrajectory {
+  row: TrajectoryRecord;
+  coverage: Coverage;
+  pages: {
+    run: TrajectoryExecution;
+    snapshot: SnapshotPage | null;
+    directory?: never;
+  }[];
+}
+
+export interface SavedTrajectoryRecord {
+  import_id: string;
+  filename: string;
+  imported_at: string;
+  size_bytes: number;
+  row: TrajectoryRecord;
+}
+
+export interface SavedTrajectory {
+  item: SavedTrajectoryRecord;
+  trajectory: ImportedTrajectory;
+}
+
+export interface SavedTrajectoriesPage {
+  items: SavedTrajectoryRecord[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SavedImportsSort {
+  sort_by: "filename" | "imported_at";
+  sort_order: "asc" | "desc";
+}

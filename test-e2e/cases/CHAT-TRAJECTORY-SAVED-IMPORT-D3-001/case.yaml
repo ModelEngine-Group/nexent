@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-SAVED-IMPORT-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  business_rule_ids:
+  - TRJ-RULE-012
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-saved-imports/proposal.md
+    acceptance_criteria:
+    - AC-SI-001
+    - AC-SI-004
+    - AC-SI-005
+    - AC-SI-006
+  title: 原生导出保存后跨服务实例重新打开完整轨迹
+  objective: 原生导出保存后跨服务实例重新打开完整轨迹
+  preconditions:
+  - 独占临时存储根、受控管理员身份和可执行产品；runtime责任域，不依赖生产源会话或模型服务。
+  - 资源由Case持有，测试结束关闭ThreadManager、文件及浏览器，删除独占测试文件。
+  test_data:
+    profile: mock
+    corpus:
+    - 原生多轮Unicode ZIP
+    - 相同ZIP重复上传、两名同租户用户及跨租户SU
+    - 非法包与受控存储故障
+  steps:
+  - order: 1
+    action: 原生writer写入并导出ZIP，保存到独占导入根。
+    expected: 真实路由、受管线程和文件协作完成，保存原ZIP字节和全文。
+  - order: 2
+    action: 关闭并重建HTTP应用、存储对象，禁用采集读取后列表和查看。
+    expected: 无需来源目录或PG实体，完整Unicode、轮次、版本及原hash保持，原清理不影响导入。
+  - order: 3
+    action: 删除记录并关闭服务，检查独占目录和线程。
+    expected: 仅保留稳定锁，源文件无变化，文件及线程资源释放。
+  expected_results:
+  - 真实路由、受管线程和文件协作完成，保存原ZIP字节和全文。
+  - 无需来源目录或PG实体，完整Unicode、轮次、版本及原hash保持，原清理不影响导入。
+  - 仅保留稳定锁，源文件无变化，文件及线程资源释放。
+  forbidden_side_effects:
+  - 不得访问其他用户导入记录、修改原采集数据、数据库业务记录或调用模型工具。
+  - 不得将包内路径用于持久文件定位；无效ZIP不得执行代码、请求来源资源或触发模型工具。
+  integration_boundary:
+  - 真实原生writer与Ops导出→持久导入→关闭并重建HTTP应用后读取；保留原ZIP和原格式解析。
+  - 身份和源PG边界受控，实际文件、ThreadManager、HTTP协议及原解析器保持真实；不宣称生产数据库集成。
+  observations:
+  - 文件/原文hash、节点及引用映射、HTTP调用和存储写入计数、解析请求释放及冷挂载状态。
+  cleanup:
+  - 删除本Case自有来源夹具/身份及后端导出暂存，关闭独占浏览器与服务，核对解析请求/URL及连接释放。
+  acceptance:
+  - id: AC-01
+    description: 真实路由、受管线程和文件协作完成，保存原ZIP字节和全文。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 无需来源目录或PG实体，完整Unicode、轮次、版本及原hash保持，原清理不影响导入。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 仅保留稳定锁，源文件无变化，文件及线程资源释放。
+    steps:
+    - 3
+    expected_results:
+    - 3

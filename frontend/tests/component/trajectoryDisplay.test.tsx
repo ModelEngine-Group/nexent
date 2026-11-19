@@ -454,7 +454,7 @@ describe("trajectory page refresh", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "common.refresh" })
+        screen.getByRole("button", { name: "trajectory.refreshData" })
       ).not.toBeDisabled()
     );
     await userEvent.click(
@@ -471,7 +471,7 @@ describe("trajectory page refresh", () => {
     next.summary.conversation_count = 31;
     api.records.mockResolvedValueOnce(next);
     await userEvent.click(
-      screen.getByRole("button", { name: "common.refresh" })
+      screen.getByRole("button", { name: "trajectory.refreshData" })
     );
     expect(
       await screen.findByRole("button", { name: "Refreshed Agent" })
@@ -514,7 +514,13 @@ describe("trajectory page refresh", () => {
           fail = reject;
         })
     );
-    const refresh = screen.getByRole("button", { name: "common.refresh" });
+    const toolbar = screen.getByRole("toolbar", {
+      name: "trajectory.recordList",
+    });
+    const refresh = within(toolbar).getByRole("button", {
+      name: "trajectory.refreshData",
+    });
+    expect(refresh).toHaveTextContent("trajectory.refreshData");
     await userEvent.click(refresh);
     await waitFor(() => expect(api.records).toHaveBeenCalledTimes(2));
     expect(refresh).toBeDisabled();
