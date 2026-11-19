@@ -36,6 +36,8 @@ change:
     - test/sdk/core/models/test_implicit_output_cap.py
     - test/sdk/core/agents/test_history_context_runtime.py
     - test/backend/utils/test_config_utils.py
+    - test/backend/management/test_gateway_app_boundary.py
+    - test/backend/app/test_ops_entrypoint.py
     - test/backend/agents/test_context_budget_v2_pipeline.py
     - test/backend/agents/test_create_agent_info.py
     - test/backend/agents/test_agent_outlet_run_snapshot.py
@@ -43,4 +45,5 @@ change:
     reason: Existing capacity, context manager/runtime and adapter UT need new policy assertions; D3 adds the real transport/usage boundary without duplicating UT as D1.
   notes: |
     SPEC: model-access-native-agent/followups/20261112-remove-output-budget in the document repository; user authorized PR1 implementation on 2026-11-12.
+    Final container startup also exposed develop factory/entrypoint wiring prerequisites; narrow regressions preserve internal JWT and public Gateway enforcement.
     Ownership is F-171/runtime and F-036/model. No API or browser contract change in PR1, so no new D2/D4. Risk assertions live in UT and D3; final container and real-model/Phoenix remain independent required acceptance. No D1 quota.
