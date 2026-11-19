@@ -376,3 +376,5 @@ Model.get 与 Model.invoke 的执行配置读取现使用 Runtime 专用只读 S
 SQL 时间字符串转换为原 get 使用的 ISO T 形式；revision 比较同时接受 catalog 已有的空格时间形式，普通版本 tag 保持。原 embedding 空 chunk 参数默认值保留在 Runtime，维度仍只取已配置 max_tokens，不探测或替换模型。此项没有迁移全部模型写入/健康检查或 Memory 配置读取，也不代表完整 data-process 流水线已验收。
 
 公开 documents 与旧配额管理复用纯配额判断、source 去重和对象路径解析。为保持原计量规则，可解析对象引用即使尚无账本行，也保留原零值键投影，不增加本次 pending bytes。此批不修正该历史行为，不新增预留、并发计量保证或重试。配额管理其他入口继续按退役 SPEC 迁移，不能据此认定全部存储访问已切至 SI。
+
+公开 POST /indices/check_exist 由 Management 通过只读 knowledge_catalog RecordStore 检查当前租户的精确名称，不创建 VDB 客户端或调用 Runtime。PRIVATE、DataMate、重复目录及尚无物理集合的目录保持占名，其他租户和已删目录不占名；接口返回原 available/exists_in_tenant 状态。此提示不替代创建事务的名称锁。阻塞读取使用 ThreadManager control-io，十秒父预算覆盖排队与读取，超时返回504，失败不会降级为available。旧 check_knowledge_base_exist_impl 和无调用方的排除索引分支已移除，列表与物理统计仍按退役 SPEC 迁移。

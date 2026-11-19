@@ -478,7 +478,7 @@ for module_name, functions in {
 with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     from management.services.knowledge_base.management import KnowledgeBaseManagementService
-    from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
+    from management.services.knowledge_base.service import ElasticSearchService, KnowledgeBaseNeedsModelConfigError
 
 
 def _accurate_search_impl(request, vdb_core):
@@ -2862,48 +2862,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         mock_get_record.assert_called_once_with({'index_name': 'test_index'})
 
-    @patch('management.services.knowledge_base.common.get_knowledge_record')
-    def test_check_kb_exist_available(self, mock_get_knowledge):
-        """Test knowledge base name availability when not found in tenant."""
-        # Setup: knowledge_name not found in tenant
-        mock_get_knowledge.return_value = None
 
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            knowledge_name="test_kb",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert
-        mock_get_knowledge.assert_called_once_with({
-            "knowledge_name": "test_kb",
-            "tenant_id": "tenant1"
-        })
-        self.assertEqual(result["status"], "available")
-
-    @patch('management.services.knowledge_base.common.get_knowledge_record')
-    def test_check_kb_exist_exists_in_tenant(self, mock_get_knowledge):
-        """Test detection when knowledge base exists within the same tenant."""
-        # Setup: knowledge_name exists in tenant
-        mock_get_knowledge.return_value = {
-            "knowledge_name": "test_kb", "tenant_id": "tenant1"}
-
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            knowledge_name="test_kb",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert
-        mock_get_knowledge.assert_called_once_with({
-            "knowledge_name": "test_kb",
-            "tenant_id": "tenant1"
-        })
-        self.assertEqual(result["status"], "exists_in_tenant")
 
     def test_get_vdb_core(self):
         """
@@ -3053,54 +3012,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("error_code", str(exc.exception))
 
-    @patch('management.services.knowledge_base.common.get_knowledge_record')
-    def test_check_kb_exist_exclude_index_name_matches(self, mock_get_knowledge):
-        """Test that KB is available when exclude_index_name matches the found record's index_name."""
-        # Setup: knowledge_name exists in tenant, but exclude_index_name matches
-        mock_get_knowledge.return_value = {
-            "knowledge_name": "test_kb",
-            "index_name": "test-index-123",
-            "tenant_id": "tenant1"
-        }
 
-        # Execute with exclude_index_name matching the found record
-        result = check_knowledge_base_exist_impl(
-            knowledge_name="test_kb",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1",
-            exclude_index_name="test-index-123"
-        )
-
-        # Assert
-        mock_get_knowledge.assert_called_once_with({
-            "knowledge_name": "test_kb",
-            "tenant_id": "tenant1"
-        })
-        # Should return available because we're excluding this specific index
-        self.assertEqual(result["status"], "available")
-
-    @patch('management.services.knowledge_base.common.get_knowledge_record')
-    def test_check_kb_exist_exclude_index_name_does_not_match(self, mock_get_knowledge):
-        """Test that KB is exists_in_tenant when exclude_index_name does not match."""
-        # Setup: knowledge_name exists in tenant with different index_name
-        mock_get_knowledge.return_value = {
-            "knowledge_name": "test_kb",
-            "index_name": "existing-index",
-            "tenant_id": "tenant1"
-        }
-
-        # Execute with exclude_index_name that doesn't match
-        result = check_knowledge_base_exist_impl(
-            knowledge_name="test_kb",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1",
-            exclude_index_name="different-index"
-        )
-
-        # Assert
-        self.assertEqual(result["status"], "exists_in_tenant")
 
     def test_rethrow_or_plain_non_json_string(self):
         """_rethrow_or_plain should re-raise plain string message when not valid JSON."""

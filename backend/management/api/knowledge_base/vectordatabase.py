@@ -46,7 +46,6 @@ from management.services.file.service import check_file_access
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
-    check_knowledge_base_exist_impl,
     get_vector_db_core,
 )
 from management.services.knowledge_base.deletion_public import with_cleanup_summary
@@ -68,6 +67,7 @@ from nexent.storage.errors import InvalidInput
 from nexent.storage.models import OperationContext
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from management.services.knowledge_base.documents import index_documents
+from management.services.knowledge_base.names import check_knowledge_name
 from management.services.knowledge_base.document_admission import prepare_document_admission
 from management.services.knowledge_base.summary_settings import configure_summary_schedule
 from nexent.vector_database.base import VectorDatabaseCore
@@ -96,7 +96,6 @@ async def get_summary_frequency_options():
 @router.post("/check_exist")
 async def check_knowledge_base_exist(
     request: Dict[str, str] = Body(..., description="Request body containing knowledge base name"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Check if a knowledge base name exists in the current tenant."""
@@ -106,9 +105,10 @@ async def check_knowledge_base_exist(
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Knowledge base name is required")
 
         user_id, tenant_id = get_current_user_id(authorization)
-        return check_knowledge_base_exist_impl(
-            knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id
-        )
+        return await check_knowledge_name(knowledge_name, ServicePrincipal(user_id, tenant_id))
+    except (TimeoutError, DeadlineExceeded):
+        return JSONResponse(status_code=HTTPStatus.GATEWAY_TIMEOUT,
+                            content={"message": "Knowledge base existence check timed out"})
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))

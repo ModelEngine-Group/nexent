@@ -187,39 +187,3 @@ def _rethrow_or_plain(exc: Exception) -> None:
         raise Exception(json.dumps(parsed, ensure_ascii=False))
 
     raise Exception(msg)
-
-
-def check_knowledge_base_exist_impl(
-    knowledge_name: str,
-    vdb_core: VectorDatabaseCore,
-    user_id: str,
-    tenant_id: str,
-    exclude_index_name: Optional[str] = None,
-) -> dict:
-    """
-    Check knowledge base existence and handle orphan cases
-
-    Args:
-        knowledge_name: Name of the knowledge base to check
-        vdb_core: Elasticsearch core instance
-        user_id: Current user ID
-        tenant_id: Current tenant ID
-        exclude_index_name: Optional index name to exclude from the check (used when updating an existing knowledge base)
-
-    Returns:
-        dict: Status information about the knowledge base
-    """
-    # 1. Check if knowledge_name exists in PG for the current tenant
-    pg_record = get_knowledge_record(
-        {"knowledge_name": knowledge_name, "tenant_id": tenant_id}
-    )
-
-    # Case A: Knowledge base name already exists in the same tenant
-    if pg_record:
-        # If we're excluding a specific index and this is the one we found, consider it available
-        if exclude_index_name and pg_record.get("index_name") == exclude_index_name:
-            return {"status": "available"}
-        return {"status": "exists_in_tenant"}
-
-    # Case B: Name is available in this tenant
-    return {"status": "available"}

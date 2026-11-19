@@ -1629,7 +1629,7 @@ async def test_check_knowledge_base_exist_success(vdb_core_mock, auth_data):
     """
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.check_knowledge_base_exist_impl") as mock_impl:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_name") as mock_impl:
 
         expected_response = {"status": "exists_in_tenant"}
         mock_impl.return_value = expected_response
@@ -1651,7 +1651,7 @@ async def test_check_knowledge_base_exist_error(vdb_core_mock, auth_data):
     """
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.check_knowledge_base_exist_impl") as mock_impl:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_name") as mock_impl:
 
         mock_impl.side_effect = Exception("Test error")
 

@@ -21,7 +21,6 @@ from management.services.knowledge_base.common import (
     ALLOWED_CHUNK_FIELDS,
     KnowledgeBaseNeedsModelConfigError,
     _rethrow_or_plain,
-    check_knowledge_base_exist_impl,
     get_embedding_model_by_index_name,
     get_vector_db_core,
     logger,
@@ -37,7 +36,6 @@ __all__ = (
     "get_embedding_model_by_index_name",
     "get_vector_db_core",
     "_rethrow_or_plain",
-    "check_knowledge_base_exist_impl",
     "logger",
 )
 
