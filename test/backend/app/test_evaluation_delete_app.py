@@ -30,7 +30,7 @@ _STUB_SYMBOLS = {
         "create_agent_evaluation_run_impl", "delete_agent_evaluation_run_impl",
         "generate_analysis_report_impl", "get_agent_evaluation_run_impl",
         "get_evaluation_stats_impl", "list_agent_evaluation_cases_impl",
-        "list_agent_evaluations_by_agent_impl", "trial_run_evaluator_impl",
+        "list_agent_evaluations_by_agent_impl", "run_evaluation_trial_in_worker",
     ),
     "management.services.evaluation.reporting.report": ("generate_agent_evaluation_report_impl",),
     "management.services.evaluation.sets": (

@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -755,20 +755,44 @@ async def test_confirm_proposal_rejects_and_marks_expired_proposal(monkeypatch):
     assert statuses == [AutomationProposalStatus.EXPIRED.value]
 
 
-def test_cancel_run_marks_running_run_canceled(monkeypatch):
+@pytest.mark.parametrize("prepared", [False, True])
+@pytest.mark.asyncio
+async def test_cancel_run_marks_running_run_canceled(monkeypatch, prepared):
+    operations = []
+    run = {
+        "run_id": 7, "tenant_id": "tenant", "user_id": "user", "task_id": 88,
+        "conversation_id": 99, "runtime_run_id": "a" * 32, "status": AutomationRunStatus.RUNNING.value,
+        "projection_message_index": 3 if prepared else None,
+    }
+
+    async def fake_stop(runtime_run_id, conversation_id, user_id, tenant_id):
+        assert (runtime_run_id, conversation_id, user_id, tenant_id) == ("a" * 32, 99, "user", "tenant")
+        operations.append("stop")
+
+    def cancel(run_id, tenant_id, user_id, reason):
+        assert (run_id, tenant_id, user_id) == (7, "tenant", "user")
+        operations.append("cancel")
+        return {**run, "status": AutomationRunStatus.CANCELED.value, "error_message": reason}
+
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *_: run)
+    monkeypatch.setattr(facade_module.agent_automation_db, "cancel_run", cancel)
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_task", lambda *_: operations.append("update"))
+    monkeypatch.setattr("management.services.automation.runner.agent_automation_runner.cancel_runtime_run", fake_stop)
+
     from management.services.automation import runner
-    from unittest.mock import Mock
-    active = dict(run_id=7, task_id=88, conversation_id=99, status="RUNNING")
-    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *a: active)
-    finalizer = Mock(return_value=({**active, "status": "CANCELED"}, True))
-    monkeypatch.setattr(runner.agent_automation_runner, "cancel_run_by_user", finalizer)
-    service = AgentAutomationFacade()
-    monkeypatch.setattr(service, "get_task", lambda *a: {"task_id": 88})
-    stop = Mock()
-    monkeypatch.setattr(service, "_request_conversation_stop", stop)
-    assert service.cancel_run(7, "tenant", "user")["status"] == "CANCELED"
-    finalizer.assert_called_once_with(active, {"task_id": 88})
-    stop.assert_called_once_with(99, "user", 7)
+    facade = AgentAutomationFacade()
+    monkeypatch.setattr(facade, "get_task", lambda *args: {"task_id": 88})
+
+    def transactional_cancel(active, task):
+        result = cancel(7, "tenant", "user", "Automation run was canceled by user.")
+        operations.append("update")
+        return result, True
+
+    monkeypatch.setattr(runner.agent_automation_runner, "cancel_run_by_user", transactional_cancel)
+    canceled = await facade.cancel_run(7, "tenant", "user")
+
+    assert canceled["status"] == AutomationRunStatus.CANCELED.value
+    assert operations == (["cancel", "stop"] if prepared else ["cancel", "update", "stop"])
 
 
 def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):
@@ -930,14 +954,15 @@ async def test_create_task_requires_and_reuses_bound_conversation(
     }
 
 
-def test_conversation_deleted_soft_deletes_task_and_cancels_runs(monkeypatch):
+@pytest.mark.asyncio
+async def test_conversation_deleted_soft_deletes_task_and_cancels_runs(monkeypatch):
     events = []
 
     service = AgentAutomationFacade()
     monkeypatch.setattr(
         service,
         "_cancel_active_runs_for_conversation",
-        lambda conversation_id, user_id, reason: events.append((conversation_id, user_id, reason)),
+        AsyncMock(side_effect=lambda conversation_id, user_id, tenant_id, reason: events.append((conversation_id, user_id, reason))),
     )
     monkeypatch.setattr(
         facade_module.agent_automation_db,
@@ -945,7 +970,7 @@ def test_conversation_deleted_soft_deletes_task_and_cancels_runs(monkeypatch):
         lambda conversation_id, user_id: 1,
     )
 
-    deleted_count = service.on_conversation_deleted(77, "user")
+    deleted_count = await service.on_conversation_deleted(77, "user", "tenant")
 
     assert deleted_count == 1
     assert events == [(77, "user", "Conversation was deleted.")]
@@ -1391,7 +1416,7 @@ async def test_task_management_methods_cover_successful_lifecycle(monkeypatch, a
     monkeypatch.setattr(
         service,
         "_cancel_active_runs_for_conversation",
-        lambda conversation_id, user_id, reason: canceled.append((conversation_id, reason)),
+        AsyncMock(side_effect=lambda conversation_id, user_id, tenant_id, reason: canceled.append((conversation_id, reason))),
     )
     monkeypatch.setattr(facade_module.agent_automation_db, "soft_delete_task", lambda *args: True)
     monkeypatch.setattr(
@@ -1429,7 +1454,7 @@ async def test_task_management_methods_cover_successful_lifecycle(monkeypatch, a
         "page_size": 3,
     }
     assert (await service.run_task_now(1, "tenant", "user"))["trigger_type"] == "MANUAL"
-    assert service.delete_task(1, "tenant", "user") is True
+    assert await service.delete_task(1, "tenant", "user") is True
     assert canceled == [(9, "Automation task was deleted.")]
     assert any(update.get("next_fire_at") for update in updates)
 
@@ -1524,7 +1549,8 @@ async def test_create_task_rejects_invalid_context_capabilities_and_binding(monk
         await service.create_task(request, "tenant", "user")
 
 
-def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch, automation_runner):
+@pytest.mark.asyncio
+async def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch, automation_runner):
     service = AgentAutomationFacade()
     assert facade_module._enrich_tasks_with_agent_names([], "tenant", "user") == []
     monkeypatch.setattr(
@@ -1547,17 +1573,18 @@ def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch, aut
 
     monkeypatch.setattr(
         "management.services.automation.runner.agent_automation_runner.cancel_for_conversation",
-        lambda *args: (_ for _ in ()).throw(RuntimeError("runner unavailable")),
+        AsyncMock(side_effect=RuntimeError("runner unavailable")),
     )
     monkeypatch.setattr(
         facade_module.agent_automation_db,
         "cancel_runs_by_conversation",
         lambda *args: 0,
     )
-    service._cancel_active_runs_for_conversation(9, "user", "cleanup")
+    await service._cancel_active_runs_for_conversation(9, "user", "tenant", "cleanup")
 
 
-def test_facade_helpers_and_run_deletion_errors_cover_boundary_paths(monkeypatch):
+@pytest.mark.asyncio
+async def test_facade_helpers_and_run_deletion_errors_cover_boundary_paths(monkeypatch):
     service = AgentAutomationFacade()
     assert facade_module._as_utc("2030-01-01T00:00:00Z") == datetime(
         2030,
@@ -1577,7 +1604,7 @@ def test_facade_helpers_and_run_deletion_errors_cover_boundary_paths(monkeypatch
 
     monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *args: None)
     with pytest.raises(AutomationNotFoundError):
-        service.cancel_run(1, "tenant", "user")
+        await service.cancel_run(1, "tenant", "user")
     with pytest.raises(AutomationNotFoundError):
         service.delete_run(1, "tenant", "user")
 
@@ -1588,16 +1615,16 @@ def test_facade_helpers_and_run_deletion_errors_cover_boundary_paths(monkeypatch
         "status": AutomationRunStatus.SUCCEEDED.value,
     }
     monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *args: terminal_run)
-    assert service.cancel_run(1, "tenant", "user") == terminal_run
+    assert await service.cancel_run(1, "tenant", "user") == terminal_run
     monkeypatch.setattr(facade_module.agent_automation_db, "soft_delete_run", lambda *args: None)
     with pytest.raises(AutomationNotFoundError, match="no longer deletable"):
         service.delete_run(1, "tenant", "user")
 
     monkeypatch.setattr(service, "get_task", lambda *args: {"task_id": 2, "conversation_id": 9})
-    monkeypatch.setattr(service, "_cancel_active_runs_for_conversation", lambda *args: None)
+    monkeypatch.setattr(service, "_cancel_active_runs_for_conversation", AsyncMock())
     monkeypatch.setattr(facade_module.agent_automation_db, "soft_delete_task", lambda *args: False)
     with pytest.raises(AutomationNotFoundError):
-        service.delete_task(2, "tenant", "user")
+        await service.delete_task(2, "tenant", "user")
 
 
 @pytest.mark.asyncio

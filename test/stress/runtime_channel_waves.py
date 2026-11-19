@@ -12,8 +12,8 @@ import sys
 
 sys.path.insert(0, "/opt/backend")
 
-from management.services.agent.channels import StreamingChannel  # noqa: E402
-import management.services.agent.channels as streaming_module  # noqa: E402
+from infrastructure.agent_stream_channels import StreamingChannel  # noqa: E402
+import infrastructure.agent_stream_channels as streaming_module  # noqa: E402
 
 
 def rss_bytes() -> int:

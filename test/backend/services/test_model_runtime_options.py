@@ -99,7 +99,7 @@ def test_record_factory_and_request_overlay_preserve_trusted_outlet(saved, monke
     from management.services.model.runtime_options import compile_bound_model_profile
 
     canonical_record = saved
-    base = create_model_config_from_record(canonical_record, "tenant")
+    base = create_model_config_from_record(canonical_record)
     original = base.resolved_profile.model_dump()
     models = [base]
     config = AgentConfig(name="root", description="Root", model_name=base.cite_name, tools=[])

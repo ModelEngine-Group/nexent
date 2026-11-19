@@ -2255,7 +2255,8 @@ async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock
 
 
 @pytest.mark.asyncio
-async def test_get_document_error_info_returns_lifecycle_error(auth_data):
+@pytest.mark.parametrize("use_query", [False, True])
+async def test_get_document_error_info_returns_lifecycle_error(auth_data, use_query):
     """Durable lifecycle errors take precedence over Redis task metadata."""
     lifecycle_record = {
         "file_id": "fid-failed",
@@ -2267,11 +2268,14 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as mock_get_record, \
             patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new_callable=AsyncMock) as mock_legacy:
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-failed"},
-            headers=auth_data["auth_header"],
-        )
+        path = f"/indices/{auth_data['index_name']}/documents"
+        params = {"file_id": "fid-failed"}
+        if use_query:
+            path += "/error-info"
+            params["path_or_url"] = "https://example.test/folder/a.txt?download=1"
+        else:
+            path += "/knowledge_base/a.txt/error-info"
+        response = client.get(path, params=params, headers=auth_data["auth_header"])
 
         assert response.status_code == 200
         assert response.json() == {
@@ -2292,8 +2296,10 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
 
 
 @pytest.mark.asyncio
-async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data):
+@pytest.mark.parametrize("use_query", [False, True])
+async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data, use_query):
     """A lifecycle row without error metadata must not hide legacy Redis errors."""
+    document = "https://example.test/folder/a%20b.txt?download=1#part" if use_query else "knowledge_base/a.txt"
     lifecycle_record = {
         "file_id": "fid-processing",
         "tenant_id": auth_data["tenant_id"],
@@ -2307,17 +2313,16 @@ async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(au
     redis_service = MagicMock()
     redis_service.get_error_info.return_value = '{"error_code":"LEGACY_PARSE_FAILED"}'
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as lookup, \
             patch(
                 "management.api.knowledge_base.vectordatabase.get_all_files_status",
-                new=AsyncMock(return_value={"knowledge_base/a.txt": {"latest_task_id": "task-legacy"}}),
+                new=AsyncMock(return_value={document: {"latest_task_id": "task-legacy"}}),
             ), \
             patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service):
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-processing"},
-            headers=auth_data["auth_header"],
-        )
+        path = f"/indices/{auth_data['index_name']}/documents"
+        params = {"path_or_url": document} if use_query else {"file_id": "fid-processing"}
+        path += "/error-info" if use_query else f"/{document}/error-info"
+        response = client.get(path, params=params, headers=auth_data["auth_header"])
 
     assert response.status_code == 200
     assert response.json() == {
@@ -2327,6 +2332,7 @@ async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(au
         "error_stage": None,
         "failed_at": None,
     }
+    assert lookup.call_args.kwargs["object_name"] == (document if use_query else None)
     redis_service.get_error_info.assert_called_once_with("task-legacy")
 
 

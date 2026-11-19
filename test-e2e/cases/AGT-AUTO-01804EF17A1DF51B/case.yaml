@@ -23,7 +23,7 @@ case:
       - ${NEXENT_TEST_HOME}/config/secrets.env'
   steps:
   - order: 1
-    action: 在本地工作区构造最小有效 NL2AgentRunRequest（含 query、agent_id、history），调用 backend/services/nl2agent_service.py 的 build_nl2agent_run_info，使用返回非空
+    action: 在本地工作区构造最小有效 NL2AgentRunRequest（含 query、agent_id、history），构造签名 AgentOS 模式的运行快照并调用 Runtime 装配器，使用非空
       context_budget_snapshot 的模型 A。
     expected: snapshot 非空时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens 与 context_budget_snapshot
       对应字段一致，token_threshold == compaction_trigger_threshold_tokens。
@@ -32,16 +32,15 @@ case:
     expected: snapshot 为 None 时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
       == 0，token_threshold == input_budget（回退阈值）。
   - order: 3
-    action: 对照 nl2agent_service.py:1357-1368 的分支语义，断言 snapshot 非空时 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+    action: 对照 Runtime 的预算装配分支，断言 snapshot 非空时 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
       分别等于 context_budget_snapshot 对应字段，且 token_threshold == compaction_trigger_threshold_tokens。
     expected: ContextManagerConfig 的五个字段全部完成赋值，不因快照缺失出现半写入、空字段或未处理异常；不再使用 _resolve_safe_input_budget 旧路径。
   - order: 4
-    action: 改用返回 None（无预算快照）的模型 B 再次调用 build_nl2agent_run_info，断言 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+    action: 改用返回 None（无预算快照）的模型 B 再次调用 Runtime 装配器，断言 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
       均为 0，且 token_threshold 回退为 _resolve_input_budget 返回的 input_budget。
     expected: 关键状态在返回的 run_info.agent_config 与 agent_run 调用间保持一致，无重复副作用或跨租户泄露。
   - order: 5
-    action: 断言 agent_config.capacity_snapshot 与 agent_config.context_budget_snapshot 按 nl2agent_service.py:1383-1384 正确写入，且流式执行路径
-      agent_run 传入 runtime_thread_manager（nl2agent_service.py:1440）。
+    action: 断言 agent_config.capacity_snapshot 与 agent_config.context_budget_snapshot 写入 Runtime 的 AgentConfig。
     expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   - order: 6
     action: 确认日志/Trace 不输出 API Key、Token、用户密码或模型密钥。

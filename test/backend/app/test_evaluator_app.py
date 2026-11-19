@@ -17,7 +17,7 @@ import json
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import UploadFile
@@ -124,6 +124,7 @@ def bundle():
             sys.path.insert(0, extra)
 
     impls = {n: MagicMock(name=n) for n in _IMPL_NAMES}
+    impls["generate_evaluator_by_llm_impl"] = AsyncMock(name="generate_evaluator_by_llm_impl")
     auth = MagicMock(name="get_current_user_id")
     auth.return_value = ("u1", "t1")
 
@@ -527,7 +528,7 @@ class TestGenerate:
         assert resp.status_code == 200
         assert _resp_json(resp)["data"] == {"evaluator_id": 5}
         bundle.impls["generate_evaluator_by_llm_impl"].assert_called_once_with(
-            description="d", tenant_id="t1", model_id=3, agent_id=9, language="zh"
+            description="d", user_id="u1", tenant_id="t1", model_id=3, agent_id=9, language="zh"
         )
 
     async def test_internal_error(self, bundle):

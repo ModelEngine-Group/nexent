@@ -8,15 +8,15 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from management.services.agent.creation import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from contracts.agent import AgentImportRequest, AgentInfoRequest, ExportAndImportAgentInfo
 from infrastructure.rdb.orm import as_dict, filter_property
 from management.db.agent.models import AgentInfo
 from contracts.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
 from management.services.repository.agent.listing import _extract_root_agent_from_snapshot
 from nexent.core.utils.observer import MessageObserver
-from services import nl2agent_service as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent as service
+from management.services.agent import nl2agent_tools as tools
 
 
 def test_request_and_tool_accept_only_canonical_prompt():
@@ -89,7 +89,7 @@ async def test_partial_prompt_save_retains_unrequested_fields_and_uses_canonical
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
         "Authorization": "Bearer test", tools.NL2AGENT_AGENT_ID_HEADER: "170",
     }))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("owner", "tenant"))
+    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="owner", tenant_id="tenant"))
     mocker.patch.object(service, "require_agent_draft_edit", return_value=dict(draft))
     update = mocker.patch.object(service, "update_agent_draft_fields", return_value=1)
     mocker.patch.object(service, "validate_agent_generation_complete_impl", return_value=None)

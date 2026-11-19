@@ -65,7 +65,8 @@ def test_k8s_password_rotation_uses_shared_postgres_checksum():
     def function(text, name):
         return re.search(r"^" + name + r"\(\) \{.*?^\}", text, re.M | re.S).group()
     script = "\n".join([function(source, "env_or_default"), function(source, "yaml_quote"),
-                          function(common, "deployment_sha256_string"), function(source, "render_runtime_secret_values")])
+                          function(common, "deployment_sha256_string"), function(source, "effective_northbound_api_server"),
+                          function(source, "render_runtime_secret_values")])
     script += """
 k8s_env_file_data() { printf '      {}'; }
 deployment_monitoring_env_file() { printf '/nonexistent-gateway-fixture'; }
@@ -76,9 +77,10 @@ k8s_write_private_values() { cat; }
 render_runtime_secret_values
 """
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
-    def render(password):
+    def render(password, northbound_url=""):
         env = {**os.environ, "NEXENT_POSTGRES_PASSWORD": password, "JWT_SECRET": "fixture-jwt",
-               "ROOT_ENV_FILE": "fixture", "GENERATED_SECRETS_VALUES": "fixture"}
+               "ROOT_ENV_FILE": "fixture", "GENERATED_SECRETS_VALUES": "fixture",
+               "NORTHBOUND_API_SERVER": northbound_url}
         result = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True, timeout=15)
         assert result.returncode == 0, result.stderr
         return yaml.safe_load(result.stdout)
@@ -86,6 +88,10 @@ render_runtime_secret_values
     assert first["global"]["rolloutChecksums"]["postgresSecret"] == hashlib.sha256(b"existing-secret").hexdigest()
     assert first["global"]["rolloutChecksums"]["postgresSecret"] != rotated["global"]["rolloutChecksums"]["postgresSecret"]
     assert first["nexent-common"]["secrets"]["postgresPassword"] == "existing-secret"
+    legacy = render("existing-secret", "http://nexent-northbound:5013/api")
+    custom = render("existing-secret", "https://gateway.example.test/api")
+    assert first["global"]["rolloutChecksums"]["env"] == legacy["global"]["rolloutChecksums"]["env"]
+    assert first["global"]["rolloutChecksums"]["env"] != custom["global"]["rolloutChecksums"]["env"]
 
 
 
@@ -93,7 +99,7 @@ def test_k8s_runtime_renderer_passes_existing_postgres_values(tmp_path):
     source = (ROOT / "deploy/k8s/deploy.sh").read_text(encoding="utf-8")
     def function(name):
         return re.search(r"^" + name + r"\(\) \{.*?^\}", source, re.M | re.S).group()
-    script = "\n".join(function(name) for name in ("yaml_quote", "env_or_default", "render_k8s_runtime_config_values"))
+    script = "\n".join(function(name) for name in ("yaml_quote", "env_or_default", "effective_northbound_api_server", "render_k8s_runtime_config_values"))
     script += '\nrender_k8s_runtime_config_values "$FIXTURE_OUTPUT"'
     (tmp_path / "sql/migrations").mkdir(parents=True)
     init_file = tmp_path / "sql/init.sql"

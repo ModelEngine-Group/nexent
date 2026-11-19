@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from management.utils.exception_handlers import register_exception_handlers
+from backend.http.server.exception_handlers import register_exception_handlers
 from backend.http.server.health import install_health_contract
 
 try:
@@ -32,7 +32,6 @@ def create_app(
     enable_monitoring: bool = True,
     lifespan=None,
     gateway_identity_audience=None,
-    internal_runtime_request=None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -46,7 +45,6 @@ def create_app(
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
         lifespan: Optional FastAPI lifespan context manager
-        internal_runtime_request: Predicate for routes that require scoped Runtime service credentials
 
     Returns:
         Configured FastAPI application
@@ -70,8 +68,7 @@ def create_app(
     if gateway_identity_audience:
         from gateway.downstream.middleware import GatewayIdentityMiddleware
 
-        app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience,
-                           internal_runtime_request=internal_runtime_request)
+        app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
 
     # Register exception handlers
     register_exception_handlers(app)

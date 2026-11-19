@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: Authentication
+feature:
+  feature_id: AOS-TRANSPORT
+  name: AgentOS signed service transport
+  status: active
+  description: Versioned Management to Runtime capability transport.
+  business_rules:
+  - rule_id: AOS-TRANSPORT-RULE-01
+    description: Accept a service principal only with the matching audience, operation,
+      and exact signed request body; retain streaming compatibility.
+  required_test_stages:
+  - D3
+  source:
+    requirement_ids:
+    - AOS-REQ-001
+    - AOS-REQ-002
+    spec_path: nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/spec.md

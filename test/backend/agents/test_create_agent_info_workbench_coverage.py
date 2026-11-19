@@ -1,130 +1,117 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from types import SimpleNamespace
 import sys
 import types
 
 import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+from contracts.agent import AgentRequest
+from contracts.agentos import AgentResource, EvaluationSkillTool
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure import skill_execution
+from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
+from runtime.agentos import prepared_skills
 
 from test.backend.agents import test_create_agent_info as legacy
-from runtime.adapters.nexent import factory as runtime_factory
 
 
 WorkbenchError = legacy.WorkbenchError
 
 
 import management.services.agent.preparation.compiler as preparation_compiler
-import management.services.agent.preparation.inputs as input_preparation
 import management.services.agent.resource_resolver as resource_resolver
 import management.services.agent.preparation.run as run_preparation
 import management.services.agent.preparation.tools as tool_preparation
 
-def test_materialize_runtime_skill_snapshot_writes_frozen_files(tmp_path):
-    result = input_preparation._materialize_runtime_skill_snapshot(
-        [
-            {
-                "name": "demo",
-                "files": [
-                    ("SKILL.md", b"# Demo"),
-                    ("scripts/main.py", b"print('ok')"),
-                ],
-            }
-        ],
-        str(tmp_path),
-        "tenant-a",
+@pytest.fixture
+def skill_bundle(monkeypatch, tmp_path):
+    root = tmp_path / "catalog"
+    source = root / "tenant-a" / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_bytes(b"# Demo")
+    (source / "scripts").mkdir()
+    (source / "scripts" / "main.py").write_bytes(b"print('ok')")
+    monkeypatch.setattr(skill_execution.environment, "CONTAINER_SKILLS_PATH", str(root))
+    monkeypatch.setattr(skill_execution.environment, "JWT_SECRET", "fixture-skill-revision-key")
+    row = {"instance_id": 53, "name": "demo", "description": "Demo", "config": {}, "tool_ids": []}
+    monkeypatch.setattr(prepared_skills, "read_bound_skills", lambda *_: [row])
+    revision = skill_execution_revision("tenant-a", 7, 3, row, capture_skill_files("tenant-a", "demo"))
+    resource = AgentResource.model_validate({
+        "agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {},
+        "skill_refs": [{"instance_id": 53, "revision": revision}],
+        "tools": [{"tool_id": tool.value, "version": "1"} for tool in EvaluationSkillTool],
+    })
+    workspace = tmp_path / "runs" / "user-a" / "fixture"
+    stage = tmp_path / "stage" / "fixture"
+    monkeypatch.setattr(prepared_skills, "skill_stage_path", lambda *_args, **_kwargs: stage)
+    return resource, row, source, workspace
+
+
+def test_materialize_runtime_skill_snapshot_writes_verified_files(skill_bundle):
+    resource, _row, _source, workspace = skill_bundle
+    tools, verified = prepared_skills.materialize_skill_tools(
+        resource, ServicePrincipal("user-a", "tenant-a"), str(workspace),
     )
 
-    skill = result[0]
-    snapshot_root = tmp_path / ".skill_snapshot"
-    assert (snapshot_root / "tenant-a" / "demo" / "SKILL.md").read_bytes() == b"# Demo"
-    assert (snapshot_root / "tenant-a" / "demo" / "scripts" / "main.py").is_file()
-    assert skill["_snapshot_root"] == str(snapshot_root.resolve())
-    assert "files" not in skill
+    assert verified == []
+    stage_root = Path(tools["read_skill_md"].params["local_skills_dir"])
+    assert (stage_root / "tenant-a" / "demo" / "SKILL.md").read_bytes() == b"# Demo"
+    assert (stage_root / "tenant-a" / "demo" / "scripts" / "main.py").read_bytes() == b"print('ok')"
+    assert not workspace.exists()
+    assert tools["read_skill_md"].params["authorized_skill_names"] == ["demo"]
 
 
-@pytest.mark.parametrize(
-    ("tenant_id", "snapshot"),
-    [
-        ("../outside", [{"name": "demo", "files": []}]),
-        ("tenant-a", [{"name": "../demo", "files": []}]),
-        ("tenant-a", [{"name": "demo", "files": [("../escape", b"x")]}]),
-        ("tenant-a", [{"name": "demo", "files": [("notes.txt", b"x")]}]),
-    ],
-)
-def test_materialize_runtime_skill_snapshot_rejects_unsafe_or_incomplete_input(
-    tmp_path, tenant_id, snapshot
-):
-    with pytest.raises(WorkbenchError, match="RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE"):
-        input_preparation._materialize_runtime_skill_snapshot(
-            snapshot, str(tmp_path), tenant_id
-        )
+@pytest.mark.parametrize("invalid", ["tenant", "name", "missing-guide", "changed-file"])
+def test_materialize_runtime_skill_snapshot_rejects_invalid_or_changed_source(skill_bundle, invalid):
+    resource, row, source, workspace = skill_bundle
+    tenant = "tenant-a"
+    if invalid == "tenant":
+        tenant = "tenant-b"
+    elif invalid == "name":
+        row["name"] = ""
+    elif invalid == "missing-guide":
+        (source / "SKILL.md").unlink()
+    else:
+        (source / "scripts" / "main.py").write_bytes(b"changed")
+
+    with pytest.raises(HTTPException) as failure:
+        prepared_skills.materialize_skill_tools(resource, ServicePrincipal("user-a", tenant), str(workspace))
+
+    assert failure.value.status_code == 409
+    assert failure.value.detail == {"code": "AGENTOS_SKILL_REVISION_MISMATCH"}
+    assert not workspace.exists()
 
 
 @pytest.mark.asyncio
 async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(monkeypatch):
-    import sys
+    from management.services.agent.preparation import evaluation_snapshot
+    from management.services.model import run_controls
 
-    frozen_snapshot = [{"name": "demo", "_snapshot_root": "/snapshot"}]
-    materialize = MagicMock(return_value=frozen_snapshot)
-    agent_config = MagicMock(model_name="model")
-    monkeypatch.setattr(run_preparation, "get_model_by_model_id", lambda *a, **k: {"model_type": "llm", "connect_status": "available"})
-    agent_config.sandbox_policy = None
+    frozen_snapshot = [{"name": "demo", "files": [("SKILL.md", b"Demo")]}]
+    agent_config = MagicMock(model_name="model", agent_core="smolagents", worker_agents=[])
     create_config = AsyncMock(return_value=agent_config)
-    monkeypatch.setattr(run_preparation, "_materialize_runtime_skill_snapshot", materialize)
-    monkeypatch.setattr(run_preparation, "_validate_run_minio_files", MagicMock())
-    monkeypatch.setattr(
-        run_preparation,
-        "join_minio_file_description_to_query",
-        AsyncMock(return_value="processed"),
-    )
-    monkeypatch.setattr(
-        run_preparation, "create_model_config_list", AsyncMock(return_value=[])
-    )
+    export = MagicMock()
+    monkeypatch.setattr(evaluation_snapshot, "compile_snapshot", export)
+    monkeypatch.setattr(run_controls, "validate_selected_record", MagicMock())
+    monkeypatch.setattr(run_preparation, "get_model_by_model_id", MagicMock())
+    monkeypatch.setattr(run_preparation, "create_model_config_list", AsyncMock(return_value=[]))
     monkeypatch.setattr(run_preparation, "create_agent_config", create_config)
     monkeypatch.setattr(run_preparation, "query_current_version_no", lambda **_kwargs: 3)
     monkeypatch.setattr(run_preparation, "_ensure_agent_reasoning_snapshot", MagicMock())
-    monkeypatch.setattr(
-        run_preparation,
-        "search_agent_info_by_agent_id",
-        MagicMock(return_value={}),
-    )
-    monkeypatch.setattr(
-        run_preparation, "get_remote_mcp_server_list", AsyncMock(return_value=[])
-    )
-    monkeypatch.setattr(run_preparation, "filter_mcp_servers_and_tools", MagicMock(return_value=[]))
-    monkeypatch.setattr(run_preparation, "resolve_tool_user_context", MagicMock(return_value=None))
-    monkeypatch.setattr(run_preparation, "urljoin", MagicMock(return_value="http://mcp"))
-    monkeypatch.setattr(runtime_factory.threading, "Event", MagicMock(return_value="stop"))
-    agent_service = sys.modules["management.services.agent.service"]
-    monkeypatch.setattr(agent_service, "build_sandbox_policy", MagicMock(return_value=None))
-    monkeypatch.setattr(agent_service, "get_sandbox_minio_client", MagicMock(return_value=None))
-    monkeypatch.setattr(
-        run_preparation,
-        "get_config_snapshot",
-        MagicMock(return_value={
-            "MCP_REQUEST_TIMEOUT_SECONDS": 10,
-            "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS": 60,
-        }),
+    monkeypatch.setattr(run_preparation, "search_agent_info_by_agent_id", MagicMock(return_value={}))
+
+    result = await run_preparation.create_agent_run_info(
+        agent_id=7, minio_files=[], query="hello", history=[], tenant_id="tenant-a", user_id="user-a",
+        override_model_id=9, requested_output_tokens=2048, context_policy={"mode": "strict"},
+        runtime_knowledge_context={"policy": "knowledge"}, runtime_skill_snapshot=frozen_snapshot,
+        runtime_knowledge_tools=[{"name": "search"}], runtime_sub_agent_mounts=[{"agent_id": 8, "version_no": 2}],
     )
 
-    await run_preparation.create_agent_run_info(
-        agent_id=7,
-        minio_files=[],
-        query="hello",
-        history=[],
-        tenant_id="tenant-a",
-        user_id="user-a",
-        override_model_id=9,
-        requested_output_tokens=2048,
-        context_policy={"mode": "strict"},
-        runtime_knowledge_context={"policy": "knowledge"},
-        runtime_skill_snapshot=[{"name": "demo", "files": []}],
-        runtime_knowledge_tools=[{"name": "search"}],
-        runtime_sub_agent_mounts=[{"agent_id": 8, "version_no": 2}],
-    )
-
-    materialize.assert_called_once()
+    assert result is export.return_value
     kwargs = create_config.await_args.kwargs
     assert kwargs["runtime_knowledge_context"] == {"policy": "knowledge"}
     assert kwargs["runtime_skill_snapshot"] is frozen_snapshot
@@ -133,6 +120,8 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
     assert kwargs["request_context_policy"] == {"mode": "strict"}
     assert kwargs["runtime_knowledge_tools"] == [{"name": "search"}]
     assert kwargs["runtime_sub_agent_mounts"] == [{"agent_id": 8, "version_no": 2}]
+    assert kwargs["portable_evaluation"] is True
+    assert export.call_args.kwargs["run_input"].query == "hello"
 
 
 def test_get_skills_for_template_uses_runtime_snapshot_without_repository_lookup():
@@ -172,8 +161,9 @@ def test_skill_script_tools_remove_mutating_tool_for_runtime_snapshot(monkeypatc
     assert len(tools) == 5
 
 
-def test_su_ac_07_no_parallel_generation_overlay_remains():
-    assert not hasattr(run_preparation, "apply_root_generation_overlay")
+def test_public_workbench_request_rejects_legacy_generation_overlay():
+    with pytest.raises(ValidationError, match="model_parameter_preferences"):
+        AgentRequest(query="hello", generation_config={"temperature": 0.4}, is_debug=True)
 
 
 @pytest.mark.asyncio

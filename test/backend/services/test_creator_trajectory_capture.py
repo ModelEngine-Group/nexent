@@ -236,6 +236,7 @@ async def test_invalid_saved_message_id_cannot_claim_completeness(creator, inval
 async def test_managed_worker_receives_creation_context_for_file_capture(creator, tmp_path):
     import json
 
+    pytest.importorskip("fcntl")
     from infrastructure.trace.trajectory_processor import (
         LocalTrajectoryProcessor,
     )
