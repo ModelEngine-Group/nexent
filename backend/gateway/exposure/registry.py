@@ -102,6 +102,7 @@ def default_registry():
     document = json.loads(Path(__file__).with_name("registry.json").read_text(encoding="utf-8"))
     excluded = _excluded_capabilities()
     if excluded:
+        known_before = {r.get("capability_id") or r["path"] for r in document["routes"]}
         kept, removed = [], []
         for row in document["routes"]:
             # match by capability_id, or raw path for non-gate rows
@@ -118,11 +119,13 @@ def default_registry():
                 len(removed),
                 ", ".join(sorted(set(removed))),
             )
-        # warn on ids that matched nothing
+        # warn on ids that matched nothing; build the known set from the full
+        # document (pre-removal) so an id that just excluded its own row is
+        # not falsely reported as unknown
         import difflib
         import logging
 
-        known = {r.get("capability_id") or r["path"] for r in document["routes"]}
+        known = known_before
         for unknown in set(excluded) - known:
             suggestions = difflib.get_close_matches(unknown, known, n=2)
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
