@@ -4,7 +4,7 @@
 import pytest
 
 from contracts.agent import AgentRequest
-from management.services.agent import prepared_turn, raw_execution, runtime_client
+from management.services.agent import prepared_turn, runtime_client
 from .test_prepared_public_turn import ACTOR, PAYLOAD, REFERENCE, flow
 
 
@@ -38,36 +38,29 @@ async def test_omitted_user_cannot_be_requested_for_an_existing_conversation(flo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("supported", [True, False])
-async def test_raw_new_dispatch_uses_claimed_agentos_turn_or_one_original_fallback(mocker, supported):
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
+async def test_new_dispatch_uses_claimed_agentos_turn_or_rejects_unprepared_resources(mocker, supported):
     from starlette.responses import StreamingResponse
     from contracts.agentos import CompatibilityConversationRun
-    from infrastructure.agentos_identity import ServicePrincipal
+    from contracts.errors.exceptions import ValidationError
     from management.services.agent import conversation_submission
 
-    payload = CompatibilityConversationRun(request={"query": "hello", "agent_id": 7}, invocation="northbound")
+    payload = CompatibilityConversationRun(request={"query": "hello", "agent_id": 7})
     response = StreamingResponse(iter([]))
     start = mocker.patch.object(prepared_turn, "start_turn", return_value=response if supported else None)
-    reject = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
-    debug = mocker.patch.object(raw_execution, "prepare_raw_debug", return_value=None)
-    client = SimpleNamespace(run_conversation=AsyncMock(return_value=response))
-    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
 
     async def claim(candidate, user, tenant, dispatch, **options):
         assert candidate.idempotency_key and options == {"include_claim_headers": False}
         return await dispatch(candidate.model_copy(update={"claimed_run_id": REFERENCE.run_id}), user, tenant)
 
     mocker.patch.object(conversation_submission, "submit_conversation", side_effect=claim)
-    result = await raw_execution.forward_raw_run(payload, ServicePrincipal(*ACTOR))
-    assert result is response
-    assert start.await_args.kwargs == {"include_journal_controls": False, "omitted_user": True}
-    assert start.await_args.args[0].claimed_run_id == REFERENCE.run_id
-    debug.assert_not_awaited()
     if supported:
-        client.run_conversation.assert_not_awaited()
-        reject.assert_not_awaited()
-        assert result.headers["Connection"] == "keep-alive"
+        assert await runtime_client.forward_conversation_run(payload, *ACTOR, northbound=True) is response
     else:
-        reject.assert_awaited_once()
-        client.run_conversation.assert_awaited_once_with(payload.model_copy(update={"preparation": "legacy"}), *ACTOR)
+        with pytest.raises(ValidationError, match="could not be prepared"):
+            await runtime_client.forward_conversation_run(payload, *ACTOR, northbound=True)
+    start.assert_awaited_once()
+    assert start.await_args.kwargs == {"include_journal_controls": False, "metadata_from_northbound": False}
+    assert start.await_args.args[0].claimed_run_id == REFERENCE.run_id
+    assert start.await_args.args[-1] is client
+    assert client.mock_calls == []

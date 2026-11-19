@@ -89,6 +89,8 @@ async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: 
     from management.services.agent.preparation.evaluation_snapshot import prepare_a2a_snapshot
 
     snapshot = await prepare_a2a_snapshot(agent_request, user_id, tenant_id)
+    if snapshot is None:
+        raise ValidationError("Agent resources could not be prepared for AgentOS")
     response = await _agentos_client().run_ephemeral(snapshot, user_id, tenant_id)
     return present_ephemeral_stream(response, user_id, snapshot.run_id)
 
