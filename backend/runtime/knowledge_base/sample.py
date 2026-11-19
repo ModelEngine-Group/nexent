@@ -18,11 +18,12 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchAuthorization,
     ModelVersion,
 )
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_chunk_projection import public_chunk_value
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
-from runtime.knowledge_base.chunk_view import ChunkReadView
+from runtime.knowledge_base.chunk_view import ChunkReadView, validate_read_ports
 from runtime.knowledge_base.publication import published_files, published_job
 
 from infrastructure.agent_model_config import normalize_model_revision
@@ -114,7 +115,8 @@ class PublishedKnowledgeReader:
     async def _grant(self, request, actor):
         grant = await self.client.authorize_knowledge_search(
             KnowledgeSearchAuthorization(knowledge_ids=[request.knowledge_id]), actor.user_id, actor.tenant_id)
-        if len(grant.knowledge_bases) != 1 or grant.knowledge_bases[0].knowledge_id != request.knowledge_id:
+        if (len(grant.knowledge_bases) != 1 or grant.knowledge_bases[0].knowledge_id != request.knowledge_id
+            or grant.knowledge_bases[0].resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}):
             raise ScopeDenied()
         if grant.knowledge_bases[0].revision != request.expected_revision:
             raise Conflict()
@@ -146,6 +148,8 @@ class KnowledgeSampleService(PublishedKnowledgeReader):
                 model = ModelVersion(model_id=metadata.model_id, revision=metadata.revision)
                 dimensions = await self.models.embedding_dimensions(model, actor)
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
+                    validate_read_ports(records, vectors, grant, actor)
+                    records = records[request.knowledge_id]
                     revision = await self._blocking(_snapshot, records, request.knowledge_id, context=context)
                     documents = await self._blocking(_sample_documents, records, vectors[resource.collection], resource,
                                                     model, request.document_limit, context=context)

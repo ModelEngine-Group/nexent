@@ -212,6 +212,7 @@ class KnowledgeSearchAuthorization(Contract):
 class KnowledgeBaseGrant(Contract):
     knowledge_id: int = Field(gt=0)
     collection: str = Field(min_length=1, max_length=100)
+    resource_tenant_id: str = Field(min_length=1, max_length=100)
     embedding_model_id: int = Field(gt=0)
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
 

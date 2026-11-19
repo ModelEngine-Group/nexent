@@ -4,6 +4,7 @@
 from dataclasses import dataclass
 
 from contracts.agentos_knowledge import KnowledgeChunk, ModelVersion
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_chunk_mutation import CHANGES
 from contracts.knowledge_chunk_projection import public_chunk_value
 from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
@@ -11,6 +12,22 @@ from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from runtime.knowledge_base.chunk_journal import ChunkMutationJournal
 
 from infrastructure.agent_model_config import normalize_model_revision
+
+
+def validate_read_ports(records, vectors, grant, actor):
+    if (set(records) != {r.knowledge_id for r in grant.knowledge_bases}
+        or set(vectors) != {r.collection for r in grant.knowledge_bases}):
+        raise ScopeDenied()
+    for resource in grant.knowledge_bases:
+        if resource.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
+            raise ScopeDenied()
+        for port in (records[resource.knowledge_id], vectors[resource.collection]):
+            scope = port.scope
+            if (scope.system or scope.resource_prefix or scope.service_role != "runtime"
+                or scope.actor_id != actor.user_id or scope.tenant_id != resource.resource_tenant_id):
+                raise ScopeDenied()
+        if vectors[resource.collection].scope.namespaces != {resource.collection}:
+            raise ScopeDenied()
 
 
 @dataclass

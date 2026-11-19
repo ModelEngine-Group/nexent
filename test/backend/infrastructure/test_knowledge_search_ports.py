@@ -2,10 +2,10 @@
 """Search receives no file catalog grant and closes all readonly vector handles."""
 
 from time import monotonic
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from contracts.agentos_knowledge import KnowledgeBaseGrant, KnowledgeSearchGrant
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import (
     OperationContext,
@@ -45,7 +45,7 @@ def test_partial_vector_assembly_closes_first_readonly_handle_and_records(mocker
     mocker.patch.object(knowledge_runtime, "record_engine", return_value=engine)
     bind_records = mocker.patch.object(knowledge_runtime, "bind_knowledge_lifecycle", return_value=record)
     bind = mocker.patch.object(knowledge_runtime, "bind_knowledge_vectors", side_effect=[vector, ValueError("controlled")])
-    grant = SimpleNamespace(knowledge_bases=[SimpleNamespace(collection="one", knowledge_id=1), SimpleNamespace(collection="two", knowledge_id=2)])
+    grant = KnowledgeSearchGrant(knowledge_bases=[KnowledgeBaseGrant(collection=name, knowledge_id=i, resource_tenant_id="tenant", embedding_model_id=2, revision="a"*64) for i,name in [(1,"one"),(2,"two")]])
     with pytest.raises(ValueError), knowledge_runtime.knowledge_search_ports(ServicePrincipal("user", "tenant"), grant, 2, context=context()):
         raise AssertionError("Incomplete port assembly must not yield")
     assert all(c.kwargs["writable"] is False for c in bind.call_args_list)

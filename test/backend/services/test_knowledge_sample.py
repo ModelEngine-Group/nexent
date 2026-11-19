@@ -33,7 +33,7 @@ async def sample(setup):
     s.models.invoke.reset_mock()
     s.models.get.reset_mock()
     grant = KnowledgeSearchGrant(knowledge_bases=[{
-        'knowledge_id': 1, 'collection': 'kb', 'embedding_model_id': 2, 'revision': 'a' * 64,
+        'knowledge_id': 1, 'collection': 'kb', 'resource_tenant_id': s.actor.tenant_id, 'embedding_model_id': 2, 'revision': 'a' * 64,
     }])
     s.client.authorize_knowledge_search = AsyncMock(return_value=grant)
     s.models.get.return_value = type('Metadata', (), {'model_id': 2, 'model_type': 'embedding', 'revision': 'v1'})()
@@ -49,7 +49,7 @@ async def sample(setup):
     @contextmanager
     def ports(*args, **kwargs):
         try:
-            yield s.records, {'kb': s.vectors}
+            yield {1: s.records}, {'kb': s.vectors}
         finally:
             s.closed.append(True)
 

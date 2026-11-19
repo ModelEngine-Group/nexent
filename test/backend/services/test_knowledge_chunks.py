@@ -51,7 +51,7 @@ def browse(sample):
     @contextmanager
     def ports(actor, resource, *, context):
         with samples.ports(actor, resource, context=context) as (records, vectors):
-            yield records, vectors['kb']
+            yield records[resource.knowledge_id], vectors['kb']
     return s,request,grant,record,KnowledgeChunksService(s.client,ports=ports)
 
 

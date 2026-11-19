@@ -15,6 +15,7 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchHit,
     KnowledgeSearchResult,
 )
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_chunk_projection import public_chunk_value
 from nexent.core.concurrency import run_blocking
 from nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
@@ -26,7 +27,7 @@ from nexent.storage.errors import (
     ScopeDenied,
 )
 from nexent.storage.models import Comparison, Junction, OperationContext, SearchQuery
-from runtime.knowledge_base.chunk_view import ChunkReadView
+from runtime.knowledge_base.chunk_view import ChunkReadView, validate_read_ports
 from runtime.knowledge_base.ingestion import embedding_vectors
 from runtime.knowledge_base.jobs import KnowledgeJobs
 
@@ -99,7 +100,8 @@ class KnowledgeSearchService:
         grant = await self.client.authorize_knowledge_search(
             KnowledgeSearchAuthorization(knowledge_ids=request.knowledge_ids), actor.user_id, actor.tenant_id)
         if ([g.knowledge_id for g in grant.knowledge_bases] != request.knowledge_ids
-                or len({g.collection for g in grant.knowledge_bases}) != len(grant.knowledge_bases)):
+                or len({g.collection for g in grant.knowledge_bases}) != len(grant.knowledge_bases)
+                or any(g.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID} for g in grant.knowledge_bases)):
             raise ScopeDenied()
         if any(g.embedding_model_id != request.embedding_model.model_id for g in grant.knowledge_bases):
             raise Conflict()
@@ -131,13 +133,13 @@ class KnowledgeSearchService:
 
     def _visible(self, records, grant, request, hits, views, require_embedding, *, context):
         self._stable_views(views, context=context)
-        policy = KnowledgeJobs(records, authorize=lambda *a, **kw: None)
         allowed = {g.collection: g.knowledge_id for g in grant.knowledge_bases}
         result = []
         for hit in hits:
             reference = self._dto(hit)
             if allowed.get(hit.key.collection) != reference.knowledge_id:
                 raise ScopeDenied()
+            policy = KnowledgeJobs(records[reference.knowledge_id], authorize=lambda *a, **kw: None)
             if request.file_ids and reference.file_id not in request.file_ids:
                 raise ScopeDenied()
             if request.file_versions and request.file_versions[reference.file_id] != reference.file_version:
@@ -158,7 +160,7 @@ class KnowledgeSearchService:
 
     @staticmethod
     def _views(records, grant, *, context):
-        return {resource.knowledge_id: ChunkReadView(records, resource.knowledge_id, context=context)
+        return {resource.knowledge_id: ChunkReadView(records[resource.knowledge_id], resource.knowledge_id, context=context)
                 for resource in grant.knowledge_bases}
 
     @staticmethod
@@ -222,6 +224,7 @@ class KnowledgeSearchService:
                     query_vector = embedding_vectors(output, 1, dimensions)[0]
                 limit = request.top_k * (RERANK_OVERSEARCH_MULTIPLIER if request.rerank_model else 1)
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
+                    validate_read_ports(records, vectors, grant, actor)
                     views = await self._blocking(self._views, records, grant, context=context)
                     lexical, semantic = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
                     lexical = await self._blocking(self._visible, records, grant, request, lexical, views, False, context=context)

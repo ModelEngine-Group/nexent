@@ -6,10 +6,10 @@ import logging
 
 from contracts.agentos import KNOWLEDGE_TOOL_BINDING_PREFIX, KnowledgeSearchBinding
 from contracts.agentos_knowledge import (
-    KnowledgeBaseGrant,
     KnowledgeSearchAuthorization,
     ModelVersion,
 )
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeUpstreamError
 from fastapi import HTTPException
 from nexent.core.agents.agent_model import ToolConfig
@@ -58,7 +58,7 @@ def _current_grant(binding, actor, client):
         actor.user_id, actor.tenant_id))
 
 
-def _authorize_indexes(binding, actor, client):
+def _authorize_binding(binding, actor, client):
     names = [reference.index_name for reference in binding.allowed]
     if (len(set(names)) != len(names) or not set(names) <= set(binding.index_names)
             or not set(binding.display_name_to_index.values()) <= set(binding.index_names)):
@@ -69,7 +69,7 @@ def _authorize_indexes(binding, actor, client):
     if not names:
         if binding.embedding_models or binding.reranker or binding.default_reranker:
             raise ValueError("An empty knowledge scope cannot bind models")
-        return []
+        return None
     if set(binding.embedding_models) != set(names) or ((binding.reranker or binding.default_reranker)
                                                      and not (binding.rerank and binding.rerank_model_name)):
         raise ValueError("Knowledge search model bindings do not match the tool settings")
@@ -80,14 +80,15 @@ def _authorize_indexes(binding, actor, client):
             raise HTTPException(status_code=error.status_code, detail={"code": (
                 "AGENTOS_KNOWLEDGE_FORBIDDEN" if error.status_code == 403 else "AGENTOS_KNOWLEDGE_NOT_FOUND")}) from error
         raise
-    if [(g.knowledge_id, g.collection) for g in grant.knowledge_bases] != [
+    if (any(g.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID} for g in grant.knowledge_bases)
+        or [(g.knowledge_id, g.collection) for g in grant.knowledge_bases] != [
         (ref.knowledge_id, ref.index_name) for ref in binding.allowed
-    ]:
+    ]):
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_KNOWLEDGE_NOT_FOUND"})
     if any(g.revision != ref.revision or g.embedding_model_id != binding.embedding_models[ref.index_name].model_id
            for ref, g in zip(binding.allowed, grant.knowledge_bases, strict=True)):
         raise HTTPException(status_code=409, detail={"code": "AGENTOS_KNOWLEDGE_REVISION_MISMATCH"})
-    return names
+    return grant
 
 
 def materialize_knowledge_search(bindings, actor):
@@ -114,15 +115,15 @@ def materialize_knowledge_search(bindings, actor):
 
 def _materialize_knowledge_search_tool(binding, actor, catalog_name):
     service = default_service()
-    allowed = _authorize_indexes(binding, actor, service.client)
+    grant = _authorize_binding(binding, actor, service.client)
+    allowed = [resource.collection for resource in grant.knowledge_bases] if grant is not None else []
     for ref in binding.embedding_models.values():
         _load_model(ref, actor.tenant_id, {"embedding", "multi_embedding"})
     reranker = binding.reranker or binding.default_reranker
     if reranker is not None:
         _load_model(reranker, actor.tenant_id, {"rerank"})
-    resources = [(KnowledgeBaseGrant(knowledge_id=ref.knowledge_id, collection=ref.index_name, revision=ref.revision,
-                                    embedding_model_id=binding.embedding_models[ref.index_name].model_id),
-                  ModelVersion(**binding.embedding_models[ref.index_name].model_dump())) for ref in binding.allowed]
+    resources = [(resource, ModelVersion(**binding.embedding_models[resource.collection].model_dump()))
+                 for resource in grant.knowledge_bases] if grant is not None else []
     backend = KnowledgeToolSearch(KnowledgeSearchService(service.client, service.models), actor, resources,
                                   file_refs=binding.file_refs)
     return ToolConfig(

@@ -35,6 +35,45 @@ class KnowledgeFileReader:
     def __init__(self, *, ports=knowledge_file_read_ports):
         self.ports = ports
 
+    @staticmethod
+    def _authorized_rows(rows, identity, actor, *, context, edit):
+        selected = []
+        for value in rows:
+            row = dict(value)
+            tenant = row.pop("resource_tenant_id")
+            if tenant not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
+                raise ScopeDenied()
+            row["tenant_id"] = tenant
+            selected.append(row)
+        member, groups = KnowledgeFileAuthorization(identity, user_id=actor.user_id).identity(context=context)
+        permissions = resolve_knowledge_permissions(selected, actor.user_id, actor.tenant_id,
+            member, groups, speed_mode=False)
+        if any(permissions[row["index_name"]] is None or edit and permissions[row["index_name"]] not in {"EDIT", "CREATOR"}
+               for row in selected):
+            raise ScopeDenied()
+        return selected
+
+    def knowledges(self, knowledge_ids, actor, *, context, edit=False):
+        if (not isinstance(knowledge_ids, (list, tuple)) or not 0 < len(knowledge_ids) <= 100
+            or any(type(value) is not int or value <= 0 for value in knowledge_ids)
+            or len(set(knowledge_ids)) != len(knowledge_ids)):
+            raise InvalidInput()
+        context.remaining()
+        with self.ports(actor, context=context) as (knowledge, identity, _):
+            if any(port.scope.service_role != "management" or port.scope.system or port.scope.resource_prefix
+                or port.scope.actor_id != actor.user_id or port.scope.tenant_id != actor.tenant_id
+                for port in (knowledge, identity)):
+                raise ScopeDenied()
+            page = knowledge.query(KNOWLEDGE, RecordQuery(where=Comparison("knowledge_id", "in", list(knowledge_ids))),
+                PageRequest(limit=len(knowledge_ids)), context=context)
+            if (page.next_cursor or len(page.items) != len(knowledge_ids)
+                or {row["knowledge_id"] for row in page.items} != set(knowledge_ids)
+                or len({row["index_name"] for row in page.items}) != len(page.items)):
+                raise ScopeDenied()
+            rows = {row["knowledge_id"]: row for row in self._authorized_rows(
+                page.items, identity, actor, context=context, edit=edit)}
+            return [rows[key] for key in knowledge_ids]
+
     @contextmanager
     def _records(self, index_name, actor, *, context, knowledge_id=None, edit=False):
         context.remaining()
@@ -58,24 +97,8 @@ class KnowledgeFileReader:
                 raise ValueError(f"Knowledge base '{index_name}' not found")
             if len(page.items) != 1 or page.next_cursor:
                 raise ScopeDenied()
-            row = dict(page.items[0])
-            resource_tenant = row.pop("resource_tenant_id")
-            if resource_tenant not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
-                raise ScopeDenied()
-            row["tenant_id"] = resource_tenant
-            membership, groups = KnowledgeFileAuthorization(
-                identity, user_id=actor.user_id
-            ).identity(context=context)
-            permission = resolve_knowledge_permissions(
-                [row],
-                actor.user_id,
-                actor.tenant_id,
-                membership,
-                groups,
-                speed_mode=False,
-            )[row['index_name']]
-            if permission is None or edit and permission not in {'EDIT', 'CREATOR'}:
-                raise ScopeDenied()
+            row = self._authorized_rows(page.items, identity, actor, context=context, edit=edit)[0]
+            resource_tenant = row["tenant_id"]
             records = scoped_files(resource_tenant)
             if (
                 records.scope.tenant_id != resource_tenant

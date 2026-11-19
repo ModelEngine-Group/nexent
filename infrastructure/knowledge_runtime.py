@@ -3,7 +3,7 @@
 
 from contextlib import contextmanager
 
-from contracts.agentos_knowledge import KnowledgeChunksGrant
+from contracts.agentos_knowledge import KnowledgeChunksGrant, KnowledgeSearchGrant
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
@@ -84,17 +84,27 @@ def knowledge_deletion_ports(actor, grant, *, context):
 
 @contextmanager
 def knowledge_search_ports(actor, grant, dimensions, *, context):
-    vectors = {}
-    engine, records = record_engine(context), None
+    if (not isinstance(grant, KnowledgeSearchGrant)
+        or any(r.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID} for r in grant.knowledge_bases)
+        or len({r.knowledge_id for r in grant.knowledge_bases}) != len(grant.knowledge_bases)
+        or len({r.collection for r in grant.knowledge_bases}) != len(grant.knowledge_bases)):
+        raise ScopeDenied()
+    vectors, records, tenants = {}, {}, {}
+    for resource in grant.knowledge_bases:
+        tenants.setdefault(resource.resource_tenant_id, []).append(resource.knowledge_id)
+    engine, owned = record_engine(context), []
     try:
-        scope = StorageScope("runtime", actor.tenant_id, actor.user_id, {FILES, JOBS})
-        records = bind_knowledge_lifecycle(scope, engine, mode="read",
-            knowledge_ids=tuple(resource.knowledge_id for resource in grant.knowledge_bases))
+        for tenant, knowledge_ids in tenants.items():
+            scope = StorageScope("runtime", tenant, actor.user_id, {FILES, JOBS})
+            port = bind_knowledge_lifecycle(scope, engine, mode="read", knowledge_ids=tuple(knowledge_ids))
+            owned.append(port)
+            records.update({knowledge_id: port for knowledge_id in knowledge_ids})
         for resource in grant.knowledge_bases:
-            vectors[resource.collection] = bind_knowledge_vectors(actor, resource.collection, dimensions, writable=False)
+            vectors[resource.collection] = bind_knowledge_vectors(actor, resource.collection, dimensions, writable=False,
+                resource_tenant_id=resource.resource_tenant_id)
         yield records, vectors
     finally:
-        close_owned(context, [port.close for port in vectors.values()] + ([records.close] if records else []) + [engine.dispose])
+        close_owned(context, [port.close for port in vectors.values()] + [port.close for port in reversed(owned)] + [engine.dispose])
 
 
 @contextmanager

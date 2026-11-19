@@ -43,7 +43,7 @@ async def search(setup):
     s.models.invoke.reset_mock()
     s.models.embedding_dimensions.reset_mock()
     request = KnowledgeSearch(knowledge_ids=[1], query="worker", embedding_model={"model_id": 2, "revision": "v1"})
-    grant = KnowledgeSearchGrant(knowledge_bases=[{"knowledge_id": 1, "collection": "kb", "embedding_model_id": 2, "revision": "a" * 64}])
+    grant = KnowledgeSearchGrant(knowledge_bases=[{"knowledge_id": 1, "collection": "kb", "resource_tenant_id": s.actor.tenant_id, "embedding_model_id": 2, "revision": "a" * 64}])
     s.client.authorize_knowledge_search = AsyncMock(return_value=grant)
     hit = SearchHit(VectorKey("kb", "one"), 0.8, "elasticsearch.cosine", {
         "knowledge_id": 1, "file_id": s.request.file_id, "file_version": 0, "content": "worker content",
@@ -64,7 +64,7 @@ async def search(setup):
     @contextmanager
     def ports(*args, **kwargs):
         try:
-            yield s.records, {"kb": s.vectors}
+            yield {1: s.records}, {"kb": s.vectors}
         finally:
             s.closed.append(True)
 

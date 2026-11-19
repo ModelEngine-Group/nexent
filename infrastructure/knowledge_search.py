@@ -8,7 +8,8 @@ import json
 def knowledge_search_revision(record: dict) -> str:
     fields = ("knowledge_id", "index_name", "knowledge_name", "tenant_id", "embedding_model_id",
               "created_by", "group_ids", "ingroup_permission", "knowledge_sources")
-    encoded = json.dumps([record.get(field) for field in fields], ensure_ascii=False, separators=(",", ":"))
+    encoded = json.dumps([None if field == "knowledge_name" else record.get(field) for field in fields],
+                         ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 

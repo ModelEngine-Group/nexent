@@ -69,6 +69,37 @@ def knowledge_tool(mocker):
     )
 
 
+@pytest.mark.parametrize("shared", [False, True])
+def test_materialized_tool_keeps_live_resource_namespace(mocker, shared):
+    from types import SimpleNamespace
+
+    from contracts.agentos import KnowledgeSearchBinding
+    from contracts.agentos_knowledge import KnowledgeBaseGrant, KnowledgeSearchGrant
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from runtime.agentos import prepared_knowledge
+
+    actor = ServicePrincipal("user-a", "tenant-a")
+    resource = KnowledgeBaseGrant(
+        knowledge_id=7, collection="kb-authorized", embedding_model_id=12,
+        resource_tenant_id=ASSET_OWNER_TENANT_ID if shared else actor.tenant_id,
+        revision="a" * 64,
+    )
+    binding = KnowledgeSearchBinding(
+        description={}, index_names=[resource.collection],
+        allowed=[{"knowledge_id": 7, "index_name": resource.collection, "revision": resource.revision}],
+        display_name_to_index={}, embedding_models={resource.collection: {"model_id": 12, "revision": "r1"}},
+    )
+    mocker.patch.object(prepared_knowledge, "default_service", return_value=SimpleNamespace(client=object(), models=object()))
+    mocker.patch.object(prepared_knowledge, "_current_grant", return_value=KnowledgeSearchGrant(knowledge_bases=[resource]))
+    load = mocker.patch.object(prepared_knowledge, "_load_model")
+    tool = prepared_knowledge._materialize_knowledge_search_tool(binding, actor, "knowledge_base_search")
+    search = tool.metadata["knowledge_searcher"].search
+    actual, model = search.bindings[resource.collection]
+    assert actual == resource and actual is not resource
+    assert search.actor == actor and model.model_id == 12
+    load.assert_called_once_with(binding.embedding_models[resource.collection], actor.tenant_id, {"embedding", "multi_embedding"})
+
+
 @pytest.mark.parametrize(("change", "status"), [
     ("none", None), ("deny_all", None), ("revoked", 403), ("stale", 409), ("stale_model", 409), ("foreign", 404),
 ])
@@ -127,7 +158,7 @@ async def test_prepared_knowledge_search_preserves_scope_and_model_revision(mock
             raise RuntimeUpstreamError(status_code=403 if change == "revoked" else 404,
                                        content=b'{"code":"DENIED"}', headers={})
         return KnowledgeSearchGrant(knowledge_bases=[KnowledgeBaseGrant(
-            knowledge_id=row["knowledge_id"], collection=row["index_name"], embedding_model_id=row["embedding_model_id"],
+            resource_tenant_id=row["tenant_id"], knowledge_id=row["knowledge_id"], collection=row["index_name"], embedding_model_id=row["embedding_model_id"],
             revision=knowledge_search_revision(row)) for row in runtime_records])
     mocker.patch.object(prepared_knowledge, "_current_grant", side_effect=current_grant)
     if change == "revoked":
@@ -208,7 +239,7 @@ async def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mock
 
     from infrastructure.knowledge_search import knowledge_search_revision
     mocker.patch.object(prepared_knowledge, "_current_grant", return_value=KnowledgeSearchGrant(knowledge_bases=[
-        KnowledgeBaseGrant(knowledge_id=7, collection="kb-authorized", embedding_model_id=12,
+        KnowledgeBaseGrant(knowledge_id=7, collection="kb-authorized", resource_tenant_id=index["tenant_id"], embedding_model_id=12,
                            revision=knowledge_search_revision(index))]))
     lookup = mocker.patch.object(prepared_knowledge, "get_model_by_model_id",
                                 side_effect=lambda model_id, tenant: records[model_id])

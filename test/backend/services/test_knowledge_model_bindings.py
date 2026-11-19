@@ -71,7 +71,7 @@ async def test_snapshot_exports_every_model_and_runtime_never_builds_an_es_clien
 
     from infrastructure.knowledge_search import knowledge_search_revision
     mocker.patch.object(prepared_knowledge, "_current_grant", return_value=KnowledgeSearchGrant(knowledge_bases=[
-        KnowledgeBaseGrant(knowledge_id=row["knowledge_id"], collection=row["index_name"], embedding_model_id=row["embedding_model_id"],
+        KnowledgeBaseGrant(resource_tenant_id=row["tenant_id"], knowledge_id=row["knowledge_id"], collection=row["index_name"], embedding_model_id=row["embedding_model_id"],
                            revision=knowledge_search_revision(row)) for row in rows]))
     mocker.patch.object(prepared_knowledge, "get_model_by_model_id", side_effect=lambda i, tenant: models[i])
     client = mocker.patch("infrastructure.vdb.client.create_elasticsearch_core")

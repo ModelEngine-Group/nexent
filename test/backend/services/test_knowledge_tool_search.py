@@ -19,7 +19,7 @@ from runtime.knowledge_base.tool_search import KnowledgeToolSearch
 
 
 def binding(knowledge_id=1, model_id=2):
-    return (KnowledgeBaseGrant(knowledge_id=knowledge_id, collection=f"kb-{knowledge_id}",
+    return (KnowledgeBaseGrant(knowledge_id=knowledge_id, collection=f"kb-{knowledge_id}", resource_tenant_id="tenant",
                               embedding_model_id=model_id, revision="a" * 64),
             ModelVersion(model_id=model_id, revision="v1"))
 
