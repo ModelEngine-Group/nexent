@@ -7,19 +7,27 @@ Tests the full request/response cycle using FastAPI TestClient
 with mocked authentication and database dependencies.
 """
 
-import pytest
 from contextlib import ExitStack
-from unittest.mock import patch, MagicMock
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
+from unittest.mock import MagicMock, patch
 
-from fastapi import HTTPException
-from management.api.knowledge_base import quota as quota_app
-from backend.http.server.app_factory import create_app
-from management.api.file.file_management import upload_files
-from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, QuotaExceededError
+import pytest
 from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import (
+    AppException,
+    PlatformQuotaConflictError,
+    QuotaExceededError,
+)
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from management.api.file.file_management import upload_files
+from management.api.knowledge_base import quota as quota_app
+from management.api.knowledge_base.quota import (
+    personal_quota_router,
+    platform_quota_router,
+    tenant_quota_router,
+)
+
+from backend.http.server.app_factory import create_app
 
 GB = 1024 * 1024 * 1024
 
@@ -35,6 +43,14 @@ def _make_test_app() -> FastAPI:
     app.include_router(platform_quota_router)
     app.include_router(personal_quota_router)
     return app
+
+
+@pytest.fixture(autouse=True)
+def quota_managed_boundary(mocker):
+    async def blocking(name, action, *args, **kwargs):
+        kwargs.pop('lane'); kwargs.pop('owner')
+        return action(*args, **kwargs)
+    return mocker.patch.object(quota_app, 'run_blocking', side_effect=blocking)
 
 
 @pytest.fixture
@@ -611,31 +627,18 @@ class TestQuotaRoleHelpers:
                 quota_app._require_platform_quota_manager("token")
             assert raised.value.status_code == 403
 
-    def test_manageable_indices_only_include_edit_permissions(self):
-        with patch(
-            "management.services.knowledge_base.service.get_vector_db_core"
-        ), patch(
-            "management.services.knowledge_base.service.ElasticSearchService.list_indices",
-            return_value={
-                "index_permissions": {
-                    "editable": "EDIT",
-                    "created": "CREATOR",
-                    "readonly": "READ_ONLY",
-                }
-            },
-        ):
-            assert quota_app._get_manageable_index_names("tenant", "user") == {
-                "editable",
-                "created",
-            }
+    @pytest.mark.asyncio
+    async def test_manageable_indices_only_include_edit_permissions(self):
+        from time import monotonic
 
-        with patch(
-            "management.services.knowledge_base.service.get_vector_db_core"
-        ), patch(
-            "management.services.knowledge_base.service.ElasticSearchService.list_indices",
-            return_value=[],
-        ):
-            assert quota_app._get_manageable_index_names("tenant", "user") == set()
+        from nexent.storage.models import OperationContext
+        with patch('management.api.knowledge_base.quota.list_knowledge_indices', return_value={'index_permissions': {
+            'editable':'EDIT','created':'CREATOR','readonly':'READ_ONLY'}}) as query:
+            result = await quota_app._get_manageable_index_names('tenant','user','actual-tenant',
+                context=OperationContext('quota-list',monotonic()+10))
+            assert result == {'editable','created'}
+            assert query.await_args.args[0].tenant_id == 'actual-tenant'
+            assert query.await_args.args[1] == 'tenant'
 
 
 class TestQuotaEndpointErrors:

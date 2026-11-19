@@ -2,12 +2,12 @@
 
 """Knowledge-base list result normalization and composition."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from contracts.constants.constants import PERMISSION_READ
 
 
-def apply_read_only_to_asset_indices_info(result: Dict[str, Any]) -> Dict[str, Any]:
+def apply_read_only_to_asset_indices_info(result: dict[str, Any]) -> dict[str, Any]:
     """Copy asset-owned rows and expose them as read-only."""
     indices_info = result.get("indices_info")
     if not indices_info:
@@ -19,7 +19,7 @@ def apply_read_only_to_asset_indices_info(result: Dict[str, Any]) -> Dict[str, A
     return normalized
 
 
-def _sort_key(item: Dict[str, Any]) -> tuple[str, str, str]:
+def _sort_key(item: dict[str, Any]) -> tuple[str, str, str]:
     return (
         str(item.get("update_time") or ""),
         str(item.get("knowledge_id") or "").zfill(20),
@@ -28,8 +28,8 @@ def _sort_key(item: Dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _merge_ordered_info(
-    primary_info: List[Dict[str, Any]], asset_info: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    primary_info: list[dict[str, Any]], asset_info: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     merged = []
     primary_index = asset_index = 0
     while primary_index < len(primary_info) and asset_index < len(asset_info):
@@ -45,12 +45,12 @@ def _merge_ordered_info(
 
 
 def merge_indices_results(
-    primary: Dict[str, Any],
-    asset_owner: Dict[str, Any],
+    primary: dict[str, Any],
+    asset_owner: dict[str, Any],
     *,
     offset: Optional[int] = None,
     limit: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Merge tenant and asset-owner results, optionally returning a global page."""
     asset_owner = apply_read_only_to_asset_indices_info(asset_owner)
     combined_indices = primary.get("indices", []) + asset_owner.get("indices", [])
@@ -96,15 +96,77 @@ def merge_indices_results(
 
 
 def merge_list_indices_results(
-    primary: Dict[str, Any], asset_owner: Dict[str, Any]
-) -> Dict[str, Any]:
+    primary: dict[str, Any], asset_owner: dict[str, Any]
+) -> dict[str, Any]:
     return merge_indices_results(primary, asset_owner)
 
 
 def merge_paginated_list_indices_results(
-    primary: Dict[str, Any],
-    asset_owner: Dict[str, Any],
+    primary: dict[str, Any],
+    asset_owner: dict[str, Any],
     offset: int,
     limit: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return merge_indices_results(primary, asset_owner, offset=offset, limit=limit)
+
+
+def prepare_indices_page(
+    visible_knowledgebases: list[dict[str, Any]],
+    pagination_enabled: bool,
+    offset: int,
+    limit: int | None,
+    keyword: str | None,
+    sources: list[str] | None,
+    models: list[str] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Apply list filters and optional pagination to ordered visible records."""
+    facets = {
+        "sources": sorted(
+            {
+                str(record.get("knowledge_sources"))
+                for record in visible_knowledgebases
+                if record.get("knowledge_sources")
+            }
+        ),
+        "models": sorted(
+            {
+                str(record.get("embedding_model_name"))
+                for record in visible_knowledgebases
+                if record.get("embedding_model_name")
+            }
+        ),
+    }
+    normalized_keyword = (keyword or "").strip().lower()
+    selected_sources = {source for source in (sources or []) if source}
+    selected_models = {model for model in (models or []) if model}
+    filtered = [
+        record
+        for record in visible_knowledgebases
+        if (
+            not normalized_keyword
+            or normalized_keyword in str(record.get("knowledge_name") or "").lower()
+            or normalized_keyword in str(record.get("description") or "").lower()
+            or normalized_keyword in str(record.get("nickname") or "").lower()
+        )
+        and (
+            not selected_sources
+            or record.get("knowledge_sources") in selected_sources
+        )
+        and (
+            not selected_models
+            or record.get("embedding_model_name") in selected_models
+        )
+    ]
+    if not pagination_enabled:
+        return filtered, {}
+    if limit is None:
+        raise ValueError("limit is required when pagination is enabled")
+
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
+    next_offset = offset + len(page)
+    return page, {
+        "total": total,
+        "next_offset": next_offset if next_offset < total else None,
+        "facets": facets,
+    }

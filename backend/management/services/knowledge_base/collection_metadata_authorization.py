@@ -31,26 +31,43 @@ def _scope(port, actor):
         raise ScopeDenied()
 
 
+def metadata_identity(identity, permissions, actor, view, *, context):
+    _scope(identity, actor); _scope(permissions, actor)
+    member, groups = KnowledgeFileAuthorization(identity, user_id=actor.user_id).identity(context=context)
+    if member.get('tenant_id') != actor.tenant_id:
+        raise ScopeDenied()
+    try:
+        roles = roles_from_record(member)
+    except ValueError as error:
+        raise ScopeDenied() from error
+    inventory = view == 'inventory'
+    if inventory and (has_any_role(roles, {'ADMIN', 'SU'}) or not permissions.count(PERMISSIONS, RecordQuery(where=Junction('and', (
+            Comparison('user_role', 'in', list(roles)), Comparison('permission_category', 'eq', 'RESOURCE'),
+            Comparison('permission_type', 'eq', 'resource.inventory'), Comparison('permission_subtype', 'eq', 'read'),
+        ))), context=context)):
+        raise ScopeDenied()
+    return member, roles, groups
+
+
+def metadata_permission(row, actor, roles, groups, view):
+    if view == 'inventory':
+        return 'READ_ONLY' if row['tenant_id'] == actor.tenant_id else None
+    access = ResourceAccessControl.check(Resource(resource_type='knowledge_base', resource_id=row['index_name'],
+        tenant_id=row['tenant_id'], created_by=row['created_by'], group_ids=row['group_ids'],
+        ingroup_permission=row['ingroup_permission'], knowledge_sources=row['knowledge_sources']),
+        user_id=actor.user_id, role=roles, user_groups=groups,
+        user_tenant_id=row['tenant_id'] if has_any_role(roles, {'SU'}) else actor.tenant_id,
+        asset_owner_tenant_id=ASSET_OWNER_TENANT_ID)
+    return access.permission_label
+
+
 def authorize_collection_metadata(request, actor, *, context, ports=collection_metadata_ports):
     if type(request) is not KnowledgeCollectionsAuthorization:
         raise ScopeDenied()
     request = KnowledgeCollectionsAuthorization.model_validate(request.model_dump())
     context.remaining()
     with ports(actor, context=context) as (identity, permissions, resources):
-        _scope(identity, actor); _scope(permissions, actor)
-        member, groups = KnowledgeFileAuthorization(identity, user_id=actor.user_id).identity(context=context)
-        if member.get('tenant_id') != actor.tenant_id:
-            raise ScopeDenied()
-        try:
-            roles = roles_from_record(member)
-        except ValueError as error:
-            raise ScopeDenied() from error
-        inventory = request.view == 'inventory'
-        if inventory and (has_any_role(roles, {'ADMIN', 'SU'}) or not permissions.count(PERMISSIONS, RecordQuery(where=Junction('and', (
-                Comparison('user_role', 'in', list(roles)), Comparison('permission_category', 'eq', 'RESOURCE'),
-                Comparison('permission_type', 'eq', 'resource.inventory'), Comparison('permission_subtype', 'eq', 'read'),
-            ))), context=context)):
-            raise ScopeDenied()
+        _, roles, groups = metadata_identity(identity, permissions, actor, request.view, context=context)
         records = resources(cross_tenant=has_any_role(roles, {'SU'}))
         _scope(records, actor)
         page = records.query(METADATA, RecordQuery(where=Comparison('knowledge_id', 'in', request.knowledge_ids)),
@@ -63,18 +80,8 @@ def authorize_collection_metadata(request, actor, *, context, ports=collection_m
             row = {**rows[key], 'tenant_id': rows[key]['resource_tenant_id']}
             if row['knowledge_sources'] != 'elasticsearch':
                 raise ScopeDenied()
-            if inventory:
-                if row['tenant_id'] != actor.tenant_id:
-                    raise ScopeDenied()
-            else:
-                access = ResourceAccessControl.check(Resource(resource_type='knowledge_base', resource_id=row['index_name'],
-                    tenant_id=row['tenant_id'], created_by=row['created_by'], group_ids=row['group_ids'],
-                    ingroup_permission=row['ingroup_permission'], knowledge_sources=row['knowledge_sources']),
-                    user_id=actor.user_id, role=roles, user_groups=groups,
-                    user_tenant_id=row['tenant_id'] if has_any_role(roles, {'SU'}) else actor.tenant_id,
-                    asset_owner_tenant_id=ASSET_OWNER_TENANT_ID)
-                if not access.can_read:
-                    raise ScopeDenied()
+            if metadata_permission(row, actor, roles, groups, request.view) is None:
+                raise ScopeDenied()
             grants.append(KnowledgeCollectionGrant(knowledge_id=key, collection=row['index_name'],
                 resource_tenant_id=row['tenant_id'], revision=knowledge_search_revision(row),
                 embedding_model_id=row['embedding_model_id'] if type(row['embedding_model_id']) is int

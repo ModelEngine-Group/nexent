@@ -127,44 +127,21 @@ def test_merge_selection_keeps_settings_and_serializes_aidp_strings():
     assert len(config) == 1
 
 
-def test_local_catalog_reads_only_authorized_indices_and_stored_summary(mocker):
-    core = mocker.patch(
-        "management.services.knowledge_base.common.get_vector_db_core",
-        return_value=object(),
-    ).return_value
-    query = mocker.patch(
-        "management.services.knowledge_base.service.ElasticSearchService.list_indices",
-        return_value={"indices": ["allowed"]},
-    )
-    metadata = mocker.patch(
-        "management.db.knowledge_base.repository.get_knowledge_metadata_by_index_names",
-        return_value=[
-            {
-                "knowledge_id": 1,
-                "index_name": "allowed",
-                "knowledge_name": "Company records",
-                "knowledge_describe": "Expense policy",
-                "embedding_model_id": 9,
-            },
-            {"knowledge_id": 2, "index_name": "forbidden", "knowledge_name": "Private"},
-        ],
-    )
-    result = load_visible_knowledge("knowledge_base_search", user_id="u", tenant_id="t")
-    query.assert_any_call(
-        user_id="u", target_tenant_id="t", include_stats=False, vdb_core=core
-    )
-    assert all(call.kwargs["user_id"] == "u" for call in query.call_args_list)
-    metadata.assert_called_once_with(["allowed"])
-    assert [item["binding_value"] for item in result] == ["allowed"]
-    assert (
-        rank_knowledge(
-            result, ["Expense policy"], [], tool_name="knowledge_base_search"
-        )[0]["id"]
-        == "1"
-    )
+@pytest.mark.asyncio
+async def test_local_catalog_reads_only_authorized_indices_and_stored_summary(mocker):
+    query = mocker.patch('management.services.knowledge_base.recommendation.visible_knowledge_records',
+        return_value=[{'knowledge_id':1,'index_name':'allowed','knowledge_name':'Company records',
+            'knowledge_describe':'Expense policy'}])
+    result = await load_visible_knowledge('knowledge_base_search', user_id='u', tenant_id='t')
+    assert query.await_count == 1
+    assert (query.await_args.args[0].user_id,query.await_args.args[0].tenant_id)==('u','t')
+    assert [item['binding_value'] for item in result]==['allowed']
+    assert rank_knowledge(result,['Expense policy'],[],tool_name='knowledge_base_search')[0]['id']=='1'
 
 
-def test_aidp_catalog_preserves_authorized_string_ids_and_filters_inactive(mocker):
+
+@pytest.mark.asyncio
+async def test_aidp_catalog_preserves_authorized_string_ids_and_filters_inactive(mocker):
     mocker.patch(
         "management.services.knowledge_base.scope._resolve_aidp_access_snapshot",
         return_value=SimpleNamespace(
@@ -182,7 +159,11 @@ def test_aidp_catalog_preserves_authorized_string_ids_and_filters_inactive(mocke
             ]
         ),
     )
-    result = load_visible_knowledge("aidp_search", user_id="u", tenant_id="t")
+    async def blocking(name, action, *args, **kwargs):
+        kwargs.pop('lane'); kwargs.pop('owner')
+        return action(*args, **kwargs)
+    mocker.patch('management.services.knowledge_base.recommendation.run_blocking', side_effect=blocking)
+    result = await load_visible_knowledge("aidp_search", user_id="u", tenant_id="t")
     assert len(result) == 1
     assert result[0]["binding_value"] == "0001"
 
@@ -225,7 +206,7 @@ async def test_recommendation_enriches_real_card_and_preserves_current_binding(
         ],
     )
     loader = mocker.patch.object(
-        service, "run_blocking", AsyncMock(return_value=[kb("bound"), kb("001")])
+        service, "load_visible_knowledge", AsyncMock(return_value=[kb("bound"), kb("001")])
     )
     supplied = ResourceCandidate(
         candidate_ref="tool:7",
@@ -278,7 +259,7 @@ async def test_no_match_keeps_generic_and_provider_error_is_retryable(mocker):
     )
     mocker.patch.object(service, "query_all_enabled_tool_instances", return_value=[])
     loader = mocker.patch.object(
-        service, "run_blocking", AsyncMock(return_value=[kb("weather", "Weather data")])
+        service, "load_visible_knowledge", AsyncMock(return_value=[kb("weather", "Weather data")])
     )
     supplied = ResourceCandidate(
         candidate_ref="tool:7",
@@ -350,7 +331,7 @@ async def test_installed_search_carries_matched_intent_to_concrete_recommendatio
         service, "_load_installed_resource_catalog", AsyncMock(return_value=[actual])
     )
     mocker.patch.object(service, "query_all_enabled_tool_instances", return_value=[])
-    mocker.patch.object(service, "run_blocking", AsyncMock(return_value=[kb("001")]))
+    mocker.patch.object(service, "load_visible_knowledge", AsyncMock(return_value=[kb("001")]))
     fallback = mocker.patch.object(
         service,
         "require_agent_draft_edit",

@@ -9,9 +9,6 @@ import logging
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
-from fastapi.responses import JSONResponse
-
 from contracts.constants.constants import (
     ASSET_OWNER_TENANT_ID,
     PERSONAL_KB_CAPACITY_MANAGE_PERMISSION,
@@ -25,16 +22,26 @@ from contracts.errors.exceptions import (
     TokenExpiredError,
 )
 from contracts.roles import has_any_role, roles_from_record
-from management.services.permission.identity.session import authenticate, get_current_user_id
-from management.services.knowledge_base.quota_formatting import bytes_to_readable
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
+from fastapi.responses import JSONResponse
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.services.permission.identity.session import authenticate, get_current_user_id
+from management.services.knowledge_base.inventory import (
+    knowledge_listing_operation,
+    list_knowledge_indices,
+)
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.quota_formatting import bytes_to_readable
+from management.services.permission.identity.session import (
+    authenticate,
+    get_current_user_id,
+)
+from nexent.core.concurrency import run_blocking
+from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from permissions.depends import require
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
-from management.services.knowledge_base.quota import QuotaService
-from management.services.knowledge_base.quota_formatting import bytes_to_readable
-from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
+
+from infrastructure.agentos_identity import ServicePrincipal
 
 logger = logging.getLogger(__name__)
 
@@ -93,20 +100,9 @@ def _require_platform_quota_manager(authorization: Optional[str]) -> str:
     return role
 
 
-def _get_manageable_index_names(tenant_id: str, user_id: str) -> set[str]:
-    """Return KB index names the current user can manage."""
-
-    result = ElasticSearchService.list_indices(
-        pattern="*",
-        include_stats=False,
-        target_tenant_id=tenant_id,
-        user_id=user_id,
-        vdb_core=get_vector_db_core(),
-    )
-    if not isinstance(result, dict):
-        return set()
-    permissions = result.get("index_permissions", {})
-    return {index_name for index_name, permission in permissions.items() if permission in ("EDIT", "CREATOR")}
+async def _get_manageable_index_names(tenant_id, user_id, actor_tenant_id, *, context):
+    result = await list_knowledge_indices(ServicePrincipal(user_id, actor_tenant_id), tenant_id, context=context)
+    return {name for name, permission in result.get('index_permissions', {}).items() if permission in ('EDIT', 'CREATOR')}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -295,8 +291,24 @@ def delete_tenant_quota(
         )
 
 
+def _read_quota_usage(tenant_id, authorization, force_refresh, detail, *, context):
+    context.remaining()
+    user_id, auth_tenant_id = get_current_user_id(authorization)
+    role = _get_user_role(authorization)
+    if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Cannot access usage data for another tenant",
+        )
+
+    service = QuotaService(tenant_id, user_id)
+    usage = service.get_usage(force_refresh=force_refresh, detail=detail)
+    context.remaining()
+    return user_id, auth_tenant_id, role, usage
+
+
 @tenant_quota_router.get("/{tenant_id}/quota/usage")
-def get_tenant_quota_usage(
+async def get_tenant_quota_usage(
     tenant_id: str = Path(..., description="Tenant ID"),
     force_refresh: bool = Query(False, description="Bypass cache and recompute usage"),
     detail: bool = Query(False, description="Include per-KB breakdown"),
@@ -307,23 +319,17 @@ def get_tenant_quota_usage(
     Accessible to any authenticated tenant user.
     """
     try:
-        user_id, auth_tenant_id = get_current_user_id(authorization)
-        role = _get_user_role(authorization)
-        if not has_any_role(role, {'SU','ASSET_OWNER'}) and tenant_id != auth_tenant_id:
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN,
-                detail="Cannot access usage data for another tenant",
-            )
-
-        service = QuotaService(tenant_id, user_id)
-        usage = service.get_usage(force_refresh=force_refresh, detail=detail)
-        if detail and has_any_role(role, {'USER','DEV'}):
-            manageable_index_names = _get_manageable_index_names(tenant_id, user_id)
-            usage["breakdown"] = [
-                item for item in usage.get("breakdown", []) if item.get("index_name") in manageable_index_names
-            ]
-
-        return JSONResponse(status_code=HTTPStatus.OK, content=usage)
+        async with knowledge_listing_operation() as context:
+            user_id, auth_tenant_id, role, usage = await run_blocking('knowledge-quota-usage', _read_quota_usage,
+                tenant_id, authorization, force_refresh, detail, context=context, lane='control-io', owner='management.knowledge_base')
+            if detail and has_any_role(role, {'USER','DEV'}):
+                manageable_index_names = await _get_manageable_index_names(tenant_id, user_id, auth_tenant_id, context=context)
+                usage['breakdown'] = [item for item in usage.get('breakdown', []) if item.get('index_name') in manageable_index_names]
+            return JSONResponse(status_code=HTTPStatus.OK, content=usage)
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=403, detail="No permission to list knowledge bases") from exc
+    except (TimeoutError, DeadlineExceeded):
+        return JSONResponse(status_code=504, content={"message": "Knowledge base list timed out"})
     except HTTPException:
         raise
     except TokenExpiredError as exc:

@@ -10,37 +10,45 @@ import unicodedata
 from typing import Any
 from urllib.parse import quote
 
-from rapidfuzz import fuzz
-
 from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE
 from contracts.errors.exceptions import AgentDraftEditError
 from contracts.tool import ToolSourceEnum
-from management.db.agent.repository import query_all_agent_info_by_tenant_id, update_agent_draft_fields
-from management.db.skill.repository import query_enabled_skill_instances
-from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
-from management.services.agent.authorization import require_agent_draft_edit
-from management.services.knowledge_base.recommendation import (
-    MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
+from management.db.agent.repository import (
+    query_all_agent_info_by_tenant_id,
+    update_agent_draft_fields,
 )
-from nexent.core.agent_names import validate_agent_name
-from nexent.core.agents.context import ContextItemInput, ContextItemType
-from nexent.core.concurrency import run_blocking
+from management.db.skill.repository import query_enabled_skill_instances
+from management.db.tool.repository import (
+    query_all_enabled_tool_instances,
+    query_all_tools,
+)
+from management.services.agent.authorization import require_agent_draft_edit
 from management.services.agent.nl2agent_tools import (
-    AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
-    InstalledMcpToolRecommendation,
-    KnowledgeBaseRecommendation,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
-    RecommendResourcesOutput,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
+    UNINSTALLED_RESOURCE_SOURCES,
+    AgentDraftFields,
+    InstalledMcpToolRecommendation,
+    KnowledgeBaseRecommendation,
     RecommendedResource,
+    RecommendResourcesOutput,
     ResourceCandidate,
     ResourceInstallationOption,
     ResourceRequirement,
     ResourceSearchOutput,
-    SEARCH_UNINSTALLED_RESOURCES_NAME,
-    UNINSTALLED_RESOURCE_SOURCES,
 )
+from management.services.knowledge_base.recommendation import (
+    MANAGED_KNOWLEDGE_NAMES,
+    load_visible_knowledge,
+    merge_selection,
+    rank_knowledge,
+    selection_values,
+)
+from nexent.core.agent_names import validate_agent_name
+from nexent.core.agents.context import ContextItemInput, ContextItemType
+from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
@@ -742,10 +750,10 @@ async def _load_internal_uninstalled_resource_catalog(
     user_id: str,
 ) -> list[dict[str, Any]]:
     from management.services.repository.mcp.service import list_community_mcp_services
+    from management.services.skill.transfer import get_official_skills_with_status
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
-    from management.services.skill.transfer import get_official_skills_with_status
 
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):
@@ -1070,14 +1078,8 @@ async def recommend_installed_resources_impl(
         if actual["resource_type"] == "tool" and tool_name:
             try:
                 if tool_name not in knowledge_catalogs:
-                    knowledge_catalogs[tool_name] = await run_blocking(
-                        "nl2agent-visible-knowledge",
-                        load_visible_knowledge,
-                        tool_name,
-                        user_id=user_id,
-                        tenant_id=tenant_id,
-                        lane="control-io",
-                        owner="management",
+                    knowledge_catalogs[tool_name] = await load_visible_knowledge(
+                        tool_name, user_id=user_id, tenant_id=tenant_id,
                     )
                 range_name = "kds_list" if tool_name == "aidp_search" else "index_names"
                 current_params = {}

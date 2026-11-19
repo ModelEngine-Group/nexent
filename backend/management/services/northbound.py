@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.authentication import NorthboundContext
 import asyncio
 import hashlib
 import json
@@ -8,46 +7,73 @@ import time
 from os.path import basename
 from typing import Any, Dict, List, Literal, Optional
 
+from contracts.agent import AgentRequest
+from contracts.authentication import NorthboundContext
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.constants.environment import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
+    NORTHBOUND_RATE_LIMIT_ENABLED,
+    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+)
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.errors.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    LimitExceededError,
+    RuntimeMetadataValidationError,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    UnauthorizedError,
+)
+from contracts.runtime_metadata import (
+    runtime_metadata_hash,
+    validate_runtime_metadata,
+)
+from contracts.tool import ToolParamsRequest
 from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
-from nexent.core.concurrency import ManagedTaskSpec
-
-
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
-from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
-from contracts.agent import AgentRequest
-from contracts.tool import ToolParamsRequest
+from management.db.conversation.repository import (
+    get_conversation_list,
+    get_conversation_messages,
+)
+from management.db.file.attachment import get_file_size_from_minio, get_file_url
+from management.db.identity.token import log_token_usage
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
-from management.db.conversation.repository import get_conversation_list, get_conversation_messages
-from management.db.identity.token import get_latest_usage_metadata, log_token_usage
 from management.services.agent.management import get_agent_by_name_impl
-from management.services.agent.runtime_client import forward_agent_stop, forward_northbound_run
-from management.thread_management import config_thread_manager
-from infrastructure.redis.run_state import runtime_state_service
+from management.services.agent.runtime_client import (
+    forward_agent_stop,
+    forward_northbound_run,
+)
 from management.services.agent.versions import list_published_agents_impl
+from management.services.conversation.service import (
+    create_new_conversation,
+    generate_conversation_title_service,
+    get_conversation_service,
+)
+from management.services.conversation.service import (
+    update_conversation_title as update_conversation_title_service,
+)
+from management.services.file.service import (
+    resolve_minio_upload_folder,
+    upload_to_minio,
+    validate_urls_access,
+)
 from management.services.knowledge_base.scope import (
     AIDP_TOOL_CLASS,
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
 from management.services.knowledge_base.service import ElasticSearchService
-from management.services.model.resolver import get_model_descriptor
-from management.services.conversation.service import (
-    create_new_conversation,
-    generate_conversation_title_service,
-    get_conversation_service,
-    update_conversation_title as update_conversation_title_service,
-)
 from management.services.model.management import list_models_for_tenant
-from contracts.runtime_metadata import (
-    runtime_metadata_hash,
-    validate_runtime_metadata,
-)
-from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
-from management.db.file.attachment import get_file_url, get_file_size_from_minio
+from management.services.model.resolver import get_model_descriptor
+from management.thread_management import config_thread_manager
+from nexent.core.concurrency import ManagedTaskSpec
 from nexent.multi_modal.utils import parse_s3_url
+
+from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("northbound_service")
 
@@ -76,6 +102,16 @@ async def create_knowledge_base_for_northbound(*, ctx, knowledge_name, embedding
         group_ids=group_ids, preserve_source_file=preserve_source_file)
 
 
+async def list_knowledge_indices_for_northbound(*, ctx, pattern='*'):
+    """Preserve the public northbound list while using the authorized catalog."""
+    from management.services.knowledge_base.inventory import list_knowledge_indices
+
+    from infrastructure.agentos_identity import ServicePrincipal
+
+    return await list_knowledge_indices(ServicePrincipal(ctx.user_id, ctx.tenant_id), ctx.tenant_id,
+                                        pattern=pattern, include_stats=True)
+
+
 async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
     """Keep the northbound file contract while supplying the current actor."""
     return await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core,
@@ -85,6 +121,7 @@ async def list_knowledge_files_for_northbound(*, ctx, index_name, vdb_core):
 async def list_knowledge_chunks_for_northbound(*, ctx, index_name, page=None, page_size=None, path_or_url=None):
     """Keep Northbound chunk responses while signing AgentOS calls as the actual user."""
     from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
+
     from infrastructure.agentos_identity import ServicePrincipal
 
     return await KnowledgeChunkBrowser().browse(index_name, ServicePrincipal(ctx.user_id, ctx.tenant_id),

@@ -53,6 +53,7 @@ northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
 northbound_service_module.list_knowledge_chunks_for_northbound = AsyncMock(return_value={"chunks": [{"id": "c1", "content": "hello"}], "total": 1})
 northbound_service_module.list_knowledge_files_for_northbound = AsyncMock(return_value={"files": []})
+northbound_service_module.list_knowledge_indices_for_northbound = AsyncMock(return_value={"indices": ["kb1"]})
 northbound_service_module.process_uploaded_knowledge_for_northbound = AsyncMock()
 northbound_service_module.delete_knowledge_document_for_northbound = AsyncMock()
 northbound_service_module.delete_knowledge_base_for_northbound = AsyncMock()
@@ -274,7 +275,7 @@ class TestGetListIndices:
     def test_rate_limit_returns_429(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.list_indices",
+            "management.api.northbound.list_knowledge_indices_for_northbound",
             side_effect=LimitExceededError("too many"),
         ):
             response = client.get("/nb/v1/knowledge/indices")
@@ -283,7 +284,7 @@ class TestGetListIndices:
     def test_generic_error_returns_500(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.get_vector_db_core",
+            "management.api.northbound.list_knowledge_indices_for_northbound",
             side_effect=RuntimeError("db down"),
         ):
             response = client.get("/nb/v1/knowledge/indices")

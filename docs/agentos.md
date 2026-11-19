@@ -379,7 +379,7 @@ SQL 时间字符串转换为原 get 使用的 ISO T 形式；revision 比较同�
 
 公开 POST /indices/check_exist 由 Management 通过只读 knowledge_catalog RecordStore 检查当前租户的精确名称，不创建 VDB 客户端或调用 Runtime。PRIVATE、DataMate、重复目录及尚无物理集合的目录保持占名，其他租户和已删目录不占名；接口返回原 available/exists_in_tenant 状态。此提示不替代创建事务的名称锁。阻塞读取使用 ThreadManager control-io，十秒父预算覆盖排队与读取，超时返回504，失败不会降级为available。旧 check_knowledge_base_exist_impl 和无调用方的排除索引分支已移除，列表与物理统计仍按退役 SPEC 迁移。
 
-SI VectorStore.statistics 已提供中立的物理集合指标与有限标量字段摘要。Infrastructure 实现 ES stats/settings 和 source-backed 聚合，只有可信独占集合绑定声明该能力；字段聚合仍固定租户与集合，普通维护端口权限不扩大。部分分片或超时响应显式失败，不重试。此能力尚待接入 AgentOS 的只读描述及公开列表，现有 ensure/inspect 接口语义保持，不能据此认定列表/统计已迁移或 data-process 已退役。
+SI VectorStore.statistics 已提供中立的物理集合指标与有限标量字段摘要。Infrastructure 实现 ES stats/settings 和 source-backed 聚合，只有可信独占集合绑定声明该能力；字段聚合仍固定租户与集合，普通维护端口权限不扩大。部分分片或超时响应显式失败，不重试。此能力已接入 AgentOS 批量只读描述及 Management 公开列表，现有 ensure/inspect 接口语义保持。历史集合迁移与 data-process 其他退役工作仍待完成。
 
 
 ### KnowledgeBase 批量集合描述
@@ -404,9 +404,18 @@ result = await client.describe_knowledge_collections(request, user_id, tenant_id
 
 resources使用当前账号、成员及群组DAC。SU按原列表规则读取明确资源租户的普通可读元数据，实际actor身份不变，他人PRIVATE仍拒绝。inventory只用于既有运营清单视图，要求SI实时resource.inventory:read权限、资源属于当前租户且角色不含ADMIN/SU；它不授予正文或写权限。授权、存在性、维度读取或作用域失败会拒绝整批，读取后撤权也不返回部分成功。可选统计的已知读取失败写入该项statistics_error，statistics为None，其余获准项继续读取；不使用零统计代替错误。默认30秒统一预算覆盖HTTP回调和受管I/O，超时返回504并停止后续读取，无重试。
 
-此接口已可用于当前SI canonical集合。公开列表的目录/标签/模型名称装配与历史索引迁移仍按退役SPEC推进，现有ensure/inspect语义保持，不能据此认定公开列表或data-process退役已完成。
+此接口用于当前 SI canonical 集合，已接通普通和 Northbound 列表、配额用量的资源筛选与 NL2Agent 推荐。历史索引迁移和 data-process 其余退役工作继续按 SPEC 推进，现有 ensure/inspect 语义保持。
 
 
 集合描述在include_statistics=true且present=true时还返回model_display，只有display_name与is_multimodal。Runtime按已授权KB的model ID与资源租户读取有限SI投影，保留实际调用者身份；这支持共享资源和SU查看其他租户的显示信息。Model.get继续限定调用者租户，不扩大模型配置或推理权限。没有模型、模型已删或缺失时保留原空显示；显示读取的既有best-effort告警继续保留，作用域损坏、取消和总超时仍中止请求。不构造适配器，也不读取或返回模型凭据。
 
 statistics_error只包含unavailable、conflict、not_found、unsupported或invalid_input，并与statistics互斥。它保留旧列表逐索引stats.error的语义，后续公开适配负责投影；不含provider地址或异常原文。统计单项失败时仍读取获准的模型显示并执行最终授权复查。跨HTTP总截止和取消不会转换成单项统计错误，也不增加重试。
+
+
+### Management 列表装配
+
+`management.services.knowledge_base.inventory.list_knowledge_indices` 使用当前实际调用者和资源租户，通过 SI 读取目录与 DAC、默认群组和标签，再分批调用 `describe_knowledge_collections`。每批最多100个资源。存在性确认后执行原分页与筛选，只给当前页请求统计；保留总数、facets、共享只读项及原显示字段。模型名称缺失时仅对获准目录进行版本条件写入。默认根预算180秒覆盖SI及跨HTTP调用，子操作复用父截止和取消信号，根拥有者只记录一次超时告警。
+
+Northbound 在 `management/services/northbound.py` 适配，公开路径与响应保持。配额接口使用相同列表筛选可管理资源，其余旧配额读写仍待迁移；推荐只读取已授权目录与已有摘要。旧 `ElasticSearchService.list_indices` 已删除。物理统计单项失败投影为原 `stats.error`，整体授权失败返回403，总超时返回504，失败不合成为空列表或零统计。
+
+公开 documents 的 `X-Task-Id` 仅作追踪，处理进度统一使用新文件任务，不新增旧任务 ID 查询兼容层。

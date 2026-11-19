@@ -89,6 +89,7 @@ from management.services.northbound import (
     list_knowledge_chunks_for_northbound,
     delete_knowledge_base_for_northbound,
     list_knowledge_files_for_northbound,
+    list_knowledge_indices_for_northbound,
     delete_knowledge_document_for_northbound,
     generate_conversation_title,
     get_agent_info_by_name_for_northbound,
@@ -754,8 +755,7 @@ async def get_list_indices(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
-        return ElasticSearchService.list_indices(pattern, True, ctx.tenant_id, ctx.user_id, vdb_core)
+        return await list_knowledge_indices_for_northbound(ctx=ctx, pattern=pattern)
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while listing knowledge bases")
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=RATE_LIMIT_EXCEEDED_DETAIL)

@@ -4,21 +4,22 @@ Unit tests for the Elasticsearch application endpoints.
 These tests verify the behavior of the Elasticsearch API without actual database connections.
 All external services and dependencies are mocked to isolate the tests.
 """
-from test.common.contract_stubs import install_business_contract_stubs
+import importlib.machinery
+import logging
 import os
 import sys
-import logging
-from nexent.storage.errors import DeadlineExceeded, InvalidInput, NotFound, ScopeDenied
-import pytest
 import types
-import importlib.machinery
-from unittest.mock import patch, MagicMock, ANY, AsyncMock, call
-from fastapi.testclient import TestClient
+from typing import Any, Dict, List, Optional
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-
-from typing import List, Optional, Any, Dict
+from fastapi.testclient import TestClient
+from nexent.storage.errors import DeadlineExceeded, InvalidInput, NotFound, ScopeDenied
 from pydantic import BaseModel, Field
+
+from test.common.contract_stubs import install_business_contract_stubs
 
 # Dynamically determine the backend path and add it to sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -112,10 +113,10 @@ ElasticSearchService = MagicMock()
 RedisService = MagicMock()
 
 # Import routes and services
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, DuplicateError
 from management.api.knowledge_base.vectordatabase import create_new_index, router
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
-from contracts.errors.exceptions import AppException, DuplicateError
-from contracts.errors.codes import ErrorCode
 
 # Create test client
 app = FastAPI()
@@ -613,318 +614,22 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
         )
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_success(vdb_core_mock, auth_data):
-    """
-    Test listing indices successfully.
-    Verifies that the endpoint returns the expected list of indices.
-    """
-    # Setup mocks - get_current_user_id is now required
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ASSET_OWNER_TENANT_ID", auth_data["tenant_id"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices") as mock_list:
-
-        expected_response = {"indices": ["index1", "index2"]}
-        mock_list.return_value = expected_response
-
-        # Execute request
-        response = client.get(
-            "/indices", params={"pattern": "*", "include_stats": False}, headers=auth_data["auth_header"])
-
-        # Verify
-        assert response.status_code == 200
-        assert response.json() == expected_response
-        mock_list.assert_called_once()
-
-        # Verify that list_indices was called with correct parameters including user_id
-        call_args = mock_list.call_args
-        assert call_args[0][0] == "*"  # pattern
-        assert call_args[0][1] is False  # include_stats
-        assert call_args[0][2] == auth_data["tenant_id"]  # tenant_id
-        assert call_args[0][3] == auth_data["user_id"]  # user_id
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_error(vdb_core_mock, auth_data):
-    """
-    Test listing indices with error.
-    Verifies that the endpoint returns an appropriate error response when listing fails.
-    """
-    # Setup mocks - get_current_user_id is now required
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices") as mock_list:
-
-        mock_list.side_effect = Exception("Test error")
-
-        # Execute request
-        response = client.get("/indices", headers=auth_data["auth_header"])
-
-        # Verify
-        assert response.status_code == 500
-        assert response.json() == {"detail": "Error get index: Test error"}
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_with_tenant_id_filter(vdb_core_mock, auth_data):
-    """
-    Test listing indices with tenant_id query parameter for filtering.
-    Verifies that the endpoint passes tenant_id to the service for filtering.
-    """
-    # Setup mocks
-    target_tenant_id = "target_tenant_123"
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices") as mock_list:
-
-        expected_response = {
-            "indices": ["kb1", "kb2"],
-            "count": 2,
-            "indices_info": [
-                {
-                    "name": "kb1",
-                    "display_name": "Knowledge Base 1",
-                    "permission": "EDIT",
-                    "group_ids": [],
-                    "knowledge_sources": "elasticsearch",
-                    "ingroup_permission": "EDIT",
-                    "tenant_id": target_tenant_id,
-                    "stats": {}
-                },
-                {
-                    "name": "kb2",
-                    "display_name": "Knowledge Base 2",
-                    "permission": "READ_ONLY",
-                    "group_ids": [],
-                    "knowledge_sources": "elasticsearch",
-                    "ingroup_permission": "READ_ONLY",
-                    "tenant_id": target_tenant_id,
-                    "stats": {}
-                }
-            ]
-        }
-        mock_list.return_value = expected_response
-
-        # Execute request with tenant_id query parameter
-        response = client.get(
-            "/indices",
-            params={"pattern": "*", "include_stats": True,
-                    "tenant_id": target_tenant_id},
-            headers=auth_data["auth_header"]
-        )
-
-        # Verify
-        assert response.status_code == 200
-        response_data = response.json()
-        assert response_data == expected_response
-
-        # Verify that list_indices was called with the target tenant_id
-        mock_list.assert_called_once()
-        call_args = mock_list.call_args
-        assert call_args[0][0] == "*"  # pattern
-        assert call_args[0][1] is True  # include_stats
-        # effective_tenant_id from query param
-        assert call_args[0][2] == target_tenant_id
-        assert call_args[0][3] == auth_data["user_id"]  # user_id from auth
-
-        # Verify indices_info contains tenant_id
-        assert len(response_data["indices_info"]) == 2
-        assert response_data["indices_info"][0]["tenant_id"] == target_tenant_id
-        assert response_data["indices_info"][1]["tenant_id"] == target_tenant_id
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_passes_pagination_and_filters(vdb_core_mock, auth_data):
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices") as mock_list:
-        mock_list.return_value = {
-            "indices": [], "count": 0, "total": 0,
-            "next_offset": None, "facets": {"sources": [], "models": []},
-            "estimated_row_height": 112, "estimated_item_heights": None,
-        }
-
-        response = client.get(
-            "/indices",
-            params=[
-                ("tenant_id", auth_data["tenant_id"]), ("offset", "10"), ("limit", "10"),
-                ("keyword", "medical"), ("sources", "elasticsearch"), ("models", "model-a"),
-            ],
-            headers=auth_data["auth_header"],
-        )
-
-        assert response.status_code == 200
-        assert mock_list.call_args.kwargs == {
-            "pagination_enabled": True,
-            "offset": 10,
-            "limit": 10,
-            "keyword": "medical",
-            "sources": ["elasticsearch"],
-            "models": ["model-a"],
-        }
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_merges_tenant_and_asset_pages(vdb_core_mock, auth_data):
-    primary = {"indices": ["tenant-kb"], "count": 1, "total": 1}
-    asset = {"indices": ["asset-kb"], "count": 1, "total": 1}
-    merged = {
-        "indices": ["tenant-kb", "asset-kb"],
-        "count": 2,
-        "total": 2,
-        "next_offset": None,
-    }
-
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ASSET_OWNER_TENANT_ID", "asset-tenant"), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices", side_effect=[primary, asset]) as mock_list, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.merge_paginated_list_indices_results", return_value=merged) as mock_merge:
-        response = client.get(
-            "/indices",
-            params={"offset": 3, "limit": 10, "keyword": "medical"},
-            headers=auth_data["auth_header"],
-        )
-
-    assert response.status_code == 200
-    assert response.json() == merged
-    assert mock_list.call_args_list == [
-        call(
-            "*", False, auth_data["tenant_id"], auth_data["user_id"], ANY,
-            pagination_enabled=True, offset=0, limit=13,
-            keyword="medical", sources=None, models=None,
-        ),
-        call(
-            "*", False, "asset-tenant", auth_data["user_id"], ANY,
-            pagination_enabled=True, offset=0, limit=13,
-            keyword="medical", sources=None, models=None,
-        ),
-    ]
-    mock_merge.assert_called_once_with(primary, asset, 3, 10)
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_merges_tenant_and_asset_without_pagination(vdb_core_mock, auth_data):
-    primary = {"indices": ["tenant-kb"], "count": 1}
-    asset = {"indices": ["asset-kb"], "count": 1}
-    merged = {"indices": ["tenant-kb", "asset-kb"], "count": 2}
-
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ASSET_OWNER_TENANT_ID", "asset-tenant"), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices", side_effect=[primary, asset]) as mock_list, \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.merge_list_indices_results", return_value=merged) as mock_merge:
-        response = client.get("/indices", headers=auth_data["auth_header"])
-
-    assert response.status_code == 200
-    assert response.json() == merged
-    assert mock_list.call_args_list == [
-        call("*", False, auth_data["tenant_id"], auth_data["user_id"], ANY),
-        call("*", False, "asset-tenant", auth_data["user_id"], ANY),
-    ]
-    mock_merge.assert_called_once_with(primary, asset)
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_uses_auth_tenant_id_when_no_query_param(vdb_core_mock, auth_data):
-    """
-    Test listing indices uses auth tenant_id when tenant_id query parameter is not provided.
-    """
-    # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ASSET_OWNER_TENANT_ID", auth_data["tenant_id"]), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices") as mock_list:
-
-        expected_response = {"indices": ["index1"], "count": 1}
-        mock_list.return_value = expected_response
-
-        # Execute request without tenant_id query parameter
-        response = client.get(
-            "/indices",
-            params={"pattern": "*"},
-            headers=auth_data["auth_header"]
-        )
-
-        # Verify
-        assert response.status_code == 200
-
-        # Verify that list_indices was called with auth tenant_id (no asset-owner merge)
-        mock_list.assert_called_once()
-        call_args = mock_list.call_args
-        assert call_args[0][2] == auth_data["tenant_id"]
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_with_stats_includes_tenant_id(vdb_core_mock, auth_data):
-    """
-    Test that list_indices with stats includes tenant_id in the response.
-    """
-    # Setup mocks
-    target_tenant_id = "stats_tenant_456"
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.list_indices") as mock_list:
-
-        expected_response = {
-            "indices": ["kb1"],
-            "count": 1,
-            "indices_info": [{
-                "name": "kb1",
-                "display_name": "Test KB",
-                "permission": "EDIT",
-                "group_ids": [1, 2],
-                "knowledge_sources": "elasticsearch",
-                "ingroup_permission": "EDIT",
-                "tenant_id": target_tenant_id,
-                "stats": {
-                    "base_info": {
-                        "doc_count": 100,
-                        "embedding_model": "test-model",
-                        "store_size": "1GB"
-                    }
-                }
-            }]
-        }
-        mock_list.return_value = expected_response
-
-        # Execute request
-        response = client.get(
-            "/indices",
-            params={"include_stats": True, "tenant_id": target_tenant_id},
-            headers=auth_data["auth_header"]
-        )
-
-        # Verify
-        assert response.status_code == 200
-        response_data = response.json()
-
-        assert "indices_info" in response_data
-        assert len(response_data["indices_info"]) == 1
-        assert response_data["indices_info"][0]["tenant_id"] == target_tenant_id
-        assert response_data["indices_info"][0]["group_ids"] == [1, 2]
 
 
-@pytest.mark.asyncio
-async def test_get_list_indices_auth_exception(vdb_core_mock):
-    """
-    Test listing indices with authentication exception.
-    Verifies that the endpoint returns 500 when auth fails.
-    """
-    # Setup mocks - get_current_user_id raises exception
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.get_current_user_id") as mock_get_user:
-
-        mock_get_user.side_effect = Exception("Invalid authorization token")
-
-        # Execute request
-        response = client.get("/indices")
-
-        # Verify
-        assert response.status_code == 500
-        assert "Error get index" in response.json()["detail"]
-        mock_get_user.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -3140,8 +2845,9 @@ TOKEN_EXPIRED_ENDPOINTS = [
 )
 def test_vdb_endpoints_return_401_on_token_expired(method, url, kwargs, auth_fn):
     """Expired token maps to 401 on every authenticated VDB endpoint."""
-    from contracts.errors.exceptions import TokenExpiredError
     from http import HTTPStatus
+
+    from contracts.errors.exceptions import TokenExpiredError
 
     with patch(
         f"management.api.knowledge_base.vectordatabase.{auth_fn}",

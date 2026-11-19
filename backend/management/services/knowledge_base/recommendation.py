@@ -8,6 +8,9 @@ import unicodedata
 from typing import Any
 
 from rapidfuzz import fuzz
+from nexent.core.concurrency import run_blocking
+from infrastructure.agentos_identity import ServicePrincipal
+from management.services.knowledge_base.inventory import visible_knowledge_records
 
 MANAGED_KNOWLEDGE_NAMES = {"knowledge_base_search", "aidp_search"}
 _GENERIC_TERMS = {
@@ -47,61 +50,41 @@ def selection_values(value: Any) -> list[str]:
     )
 
 
-def load_visible_knowledge(
-    tool_name: str, *, user_id: str, tenant_id: str
-) -> list[dict[str, Any]]:
-    """Reuse permission-scoped provider catalogs; return inert metadata only."""
-    if tool_name == "aidp_search":
-        from management.services.knowledge_base.scope import (
-            _resolve_aidp_access_snapshot,
-        )
+def _aidp_catalog(user_id, tenant_id):
+    from management.services.knowledge_base.scope import (
+        _resolve_aidp_access_snapshot,
+    )
 
-        snapshot = _resolve_aidp_access_snapshot(user_id, tenant_id)
-        return [
-            {
-                "id": str(row["kb_id"]),
-                "binding_value": str(row["kb_id"]),
-                "name": row.get("kds_name")
-                or row.get("name")
-                or row.get("kb_name")
-                or str(row["kb_id"]),
-                "description": row.get("description") or "",
-                "summary": row.get("summary") or "",
-            }
-            for row in snapshot.accessible_rows
-            if row.get("kb_id")
-            and str(row.get("resource_status") or "ACTIVE").upper() == "ACTIVE"
-        ]
-
-    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-    from management.db.knowledge_base.repository import get_knowledge_metadata_by_index_names
-    from management.services.knowledge_base.common import get_vector_db_core
-    from management.services.knowledge_base.service import ElasticSearchService
-
-    core = get_vector_db_core()
-    indices = set()
-    for scope_tenant in dict.fromkeys([tenant_id, ASSET_OWNER_TENANT_ID]):
-        visible = ElasticSearchService.list_indices(
-            user_id=user_id,
-            target_tenant_id=scope_tenant,
-            include_stats=False,
-            vdb_core=core,
-        )
-        indices.update(visible.get("indices") or [])
-    records = get_knowledge_metadata_by_index_names(list(indices)) if indices else []
+    snapshot = _resolve_aidp_access_snapshot(user_id, tenant_id)
     return [
         {
-            "id": str(row["knowledge_id"]),
-            "binding_value": row["index_name"],
-            "name": row.get("knowledge_name") or row["index_name"],
+            "id": str(row["kb_id"]),
+            "binding_value": str(row["kb_id"]),
+            "name": row.get("kds_name")
+            or row.get("name")
+            or row.get("kb_name")
+            or str(row["kb_id"]),
             "description": row.get("description") or "",
-            "summary": row.get("knowledge_describe") or row.get("summary") or "",
-            "embedding_model_id": row.get("embedding_model_id"),
-            "is_multimodal": row.get("is_multimodal"),
+            "summary": row.get("summary") or "",
         }
-        for row in records
-        if row.get("index_name") in indices and row.get("knowledge_id") is not None
+        for row in snapshot.accessible_rows
+        if row.get("kb_id")
+        and str(row.get("resource_status") or "ACTIVE").upper() == "ACTIVE"
     ]
+
+
+
+async def load_visible_knowledge(tool_name: str, *, user_id: str, tenant_id: str) -> list[dict[str, Any]]:
+    """Read only the authorized catalog, including its stored summary."""
+    if tool_name == 'aidp_search':
+        return await run_blocking('recommendation-aidp-catalog', _aidp_catalog, user_id, tenant_id,
+                                  lane='control-io', owner='management.knowledge_base')
+    rows = await visible_knowledge_records(ServicePrincipal(user_id, tenant_id))
+    return [{'id': str(row['knowledge_id']), 'binding_value': row['index_name'],
+             'name': row.get('knowledge_name') or row['index_name'],
+             'description': row.get('knowledge_describe') or '', 'summary': row.get('knowledge_describe') or ''}
+            for row in rows if row.get('knowledge_id') is not None]
+
 
 
 def _normalize(text: Any) -> str:

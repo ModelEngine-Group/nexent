@@ -2,12 +2,32 @@
 
 import asyncio
 import logging
+from http import HTTPStatus
 from threading import Event
 from time import monotonic
-from uuid import uuid4
-from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
+from uuid import uuid4
 
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    INTERNAL_INDEX_NAME_DESC,
+    SUMMARY_FREQUENCY_OPTIONS_FOR_API,
+    VALID_SUMMARY_FREQUENCIES,
+)
+from contracts.errors.exceptions import (
+    AppException,
+    DuplicateError,
+    RuntimeServiceTimeoutError,
+    TokenExpiredError,
+)
+from contracts.knowledge import (
+    ChunkCreateRequest,
+    ChunkUpdateRequest,
+    HybridSearchRequest,
+    IndexingResponse,
+    VectorDatabaseType,
+)
+from contracts.roles import has_any_role
 from fastapi import (
     APIRouter,
     Body,
@@ -19,58 +39,57 @@ from fastapi import (
     Request,
 )
 from fastapi.responses import JSONResponse
-
-from contracts.constants.constants import (
-    ASSET_OWNER_TENANT_ID,
-    INTERNAL_INDEX_NAME_DESC,
-    SUMMARY_FREQUENCY_OPTIONS_FOR_API,
-    VALID_SUMMARY_FREQUENCIES,
-)
-from contracts.errors.exceptions import AppException, DuplicateError, TokenExpiredError
-from contracts.knowledge import (
-    ChunkCreateRequest,
-    ChunkUpdateRequest,
-    HybridSearchRequest,
-    IndexingResponse,
-    VectorDatabaseType,
-)
-from contracts.roles import has_any_role
-from permissions.resource_access import resource_read_tenant
-from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 from management.db.knowledge_base.repository import (
     get_index_name_by_knowledge_name,
     get_knowledge_record,
 )
 from management.db.model.repository import get_model_by_model_id
 from management.services.file.service import check_file_access
+from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
+from management.services.knowledge_base.chunk_creation import create_manual_chunk
+from management.services.knowledge_base.chunk_deletion import delete_manual_chunk
+from management.services.knowledge_base.chunk_update import update_manual_chunk
+from management.services.knowledge_base.creation import create_knowledge_base
+from management.services.knowledge_base.deletion_public import with_cleanup_summary
+from management.services.knowledge_base.document_admission import (
+    prepare_document_admission,
+)
+from management.services.knowledge_base.documents import index_documents
+from management.services.knowledge_base.file_reader import read_document_error
+from management.services.knowledge_base.inventory import (
+    knowledge_listing_operation,
+    list_knowledge_indices,
+    resolve_listing_view,
+)
+from management.services.knowledge_base.listing import (
+    merge_list_indices_results,
+    merge_paginated_list_indices_results,
+)
+from management.services.knowledge_base.names import check_knowledge_name
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
     get_vector_db_core,
 )
-from management.services.knowledge_base.deletion_public import with_cleanup_summary
-from management.services.knowledge_base.creation import create_knowledge_base
-from management.services.knowledge_base.file_reader import read_document_error
-from management.services.knowledge_base.chunk_browser import KnowledgeChunkBrowser
-from management.services.knowledge_base.chunk_deletion import delete_manual_chunk
-from management.services.knowledge_base.chunk_creation import create_manual_chunk
-from management.services.knowledge_base.chunk_update import update_manual_chunk
-from infrastructure.agentos_identity import ServicePrincipal
-from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
+from management.services.knowledge_base.summary_settings import (
+    configure_summary_schedule,
+)
 from management.services.monitor.audit import record_security_event
-from management.services.file.service import check_file_access
-from management.services.permission.identity.session import get_current_user_context, get_current_user_id
+from management.services.permission.identity.session import (
+    get_current_user_context,
+    get_current_user_id,
+)
 from management.services.tag.projection import project_authorized_document_tags
-from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
+from management.utils.knowledge_permission import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
+)
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import InvalidInput
+from nexent.storage.errors import DeadlineExceeded, InvalidInput, NotFound, ScopeDenied
 from nexent.storage.models import OperationContext
-from contracts.errors.exceptions import RuntimeServiceTimeoutError
-from management.services.knowledge_base.documents import index_documents
-from management.services.knowledge_base.names import check_knowledge_name
-from management.services.knowledge_base.document_admission import prepare_document_admission
-from management.services.knowledge_base.summary_settings import configure_summary_schedule
 from nexent.vector_database.base import VectorDatabaseCore
+
+from infrastructure.agentos_identity import ServicePrincipal
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -486,7 +505,7 @@ def update_embedding_model(
 
 
 @router.get("")
-def get_list_indices(
+async def get_list_indices(
     pattern: str = Query("*", description="Pattern to match index names"),
     include_stats: bool = Query(False, description="Whether to include index stats"),
     tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
@@ -495,71 +514,70 @@ def get_list_indices(
     keyword: Optional[str] = Query(None, description="Search knowledge base name and description"),
     sources: Optional[List[str]] = Query(None, description="Knowledge base sources to include"),
     models: Optional[List[str]] = Query(None, description="Embedding model names to include"),
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
     request: Request = None,
 ):
     """List all user indices with optional stats"""
     try:
-        user_id, auth_tenant_id = get_current_user_id(authorization)
-        pagination_enabled = limit is not None
-        pagination_args = {}
-        if limit is not None or keyword or sources or models:
-            pagination_args = {
-                "pagination_enabled": pagination_enabled,
-                "offset": offset,
-                "limit": limit,
-                "keyword": keyword,
-                "sources": sources,
-                "models": models,
-            }
-        if authorized_tenant := resource_read_tenant(request, shared=True):
-            return ElasticSearchService.list_indices(
-                pattern, include_stats, authorized_tenant, user_id, vdb_core,
-                inventory_read=True, **pagination_args,
+        async with knowledge_listing_operation() as context:
+            user_id, auth_tenant_id = get_current_user_id(authorization)
+            pagination_enabled = limit is not None
+            pagination_args = {}
+            if limit is not None or keyword or sources or models:
+                pagination_args = {
+                    "pagination_enabled": pagination_enabled,
+                    "offset": offset,
+                    "limit": limit,
+                    "keyword": keyword,
+                    "sources": sources,
+                    "models": models,
+                }
+            actor = ServicePrincipal(user_id, auth_tenant_id)
+            view = await resolve_listing_view(actor, request, context=context)
+            if view == 'inventory':
+                authorized_tenant = auth_tenant_id
+                return await list_knowledge_indices(
+                    actor, authorized_tenant, pattern=pattern, include_stats=include_stats, context=context,
+                    inventory_read=True, **pagination_args,
+                )
+            if tenant_id is None:
+                if limit is not None and auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                    prefix_limit = offset + limit
+                    result = await list_knowledge_indices(
+                        actor, auth_tenant_id, pattern=pattern, include_stats=include_stats, context=context,
+                        pagination_enabled=True,
+                        offset=0,
+                        limit=prefix_limit,
+                        keyword=keyword,
+                        sources=sources,
+                        models=models,
+                    )
+                    asset_result = await list_knowledge_indices(
+                        actor, ASSET_OWNER_TENANT_ID, pattern=pattern, include_stats=include_stats, context=context,
+                        pagination_enabled=True,
+                        offset=0,
+                        limit=prefix_limit,
+                        keyword=keyword,
+                        sources=sources,
+                        models=models,
+                    )
+                    return merge_paginated_list_indices_results(result, asset_result, offset, limit)
+                result = await list_knowledge_indices(
+                    actor, auth_tenant_id, pattern=pattern, include_stats=include_stats, context=context, **pagination_args
+                )
+                if auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                    asset_result = await list_knowledge_indices(
+                        actor, ASSET_OWNER_TENANT_ID, pattern=pattern, include_stats=include_stats, context=context, **pagination_args
+                    )
+                    return merge_list_indices_results(result, asset_result)
+                return result
+            return await list_knowledge_indices(
+                actor, tenant_id, pattern=pattern, include_stats=include_stats, context=context, **pagination_args
             )
-        if tenant_id is None:
-            if limit is not None and auth_tenant_id != ASSET_OWNER_TENANT_ID:
-                prefix_limit = offset + limit
-                result = ElasticSearchService.list_indices(
-                    pattern,
-                    include_stats,
-                    auth_tenant_id,
-                    user_id,
-                    vdb_core,
-                    pagination_enabled=True,
-                    offset=0,
-                    limit=prefix_limit,
-                    keyword=keyword,
-                    sources=sources,
-                    models=models,
-                )
-                asset_result = ElasticSearchService.list_indices(
-                    pattern,
-                    include_stats,
-                    ASSET_OWNER_TENANT_ID,
-                    user_id,
-                    vdb_core,
-                    pagination_enabled=True,
-                    offset=0,
-                    limit=prefix_limit,
-                    keyword=keyword,
-                    sources=sources,
-                    models=models,
-                )
-                return ElasticSearchService.merge_paginated_list_indices_results(result, asset_result, offset, limit)
-            result = ElasticSearchService.list_indices(
-                pattern, include_stats, auth_tenant_id, user_id, vdb_core, **pagination_args
-            )
-            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
-                asset_result = ElasticSearchService.list_indices(
-                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core, **pagination_args
-                )
-                return ElasticSearchService.merge_list_indices_results(result, asset_result)
-            return result
-        return ElasticSearchService.list_indices(
-            pattern, include_stats, tenant_id, user_id, vdb_core, **pagination_args
-        )
+    except ScopeDenied as e:
+        raise HTTPException(status_code=403, detail="No permission to list knowledge bases") from e
+    except (TimeoutError, DeadlineExceeded, RuntimeServiceTimeoutError):
+        return JSONResponse(status_code=504, content={"message": "Knowledge base list timed out"})
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
