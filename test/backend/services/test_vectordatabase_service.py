@@ -4,7 +4,6 @@ from test.common.contract_stubs import install_shared_contract_stub
 from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import asyncio
 import importlib
-import io
 import sys
 import os
 import time
@@ -15,6 +14,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
+from infrastructure.agentos_identity import ServicePrincipal
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -2067,7 +2067,8 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 data=test_data,
                 vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model
+                embedding_model=mock_embedding_model,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
 
             # Assert
@@ -2098,7 +2099,8 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 data=[{"path_or_url": "p1", "content": "c1", "metadata": {}}],
                 vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model
+                embedding_model=mock_embedding_model,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
 
             self.assertTrue(result["success"])
@@ -2115,12 +2117,12 @@ class TestElasticSearchService(unittest.TestCase):
 
         with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
                 patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
-                patch('management.services.knowledge_base.management.get_file_stream') as mock_get_stream, \
+                patch('management.services.knowledge_base.management.read_document_image') as mock_get_stream, \
                 patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_get_record.return_value = {
                 "tenant_id": identity_constants.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
-            mock_get_stream.return_value = io.BytesIO(b"img-bytes")
+            mock_get_stream.return_value = b"img-bytes"
 
             data = [
                 {
@@ -2137,14 +2139,16 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 data=data,
                 vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model
+                embedding_model=mock_embedding_model,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
 
             self.assertTrue(result["success"])
             _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
             documents = kwargs.get("documents")
             self.assertEqual(documents[0]["image_bytes"], b"img-bytes")
-            mock_get_stream.assert_called_once_with(object_name="s3://bucket/img.png")
+            mock_get_stream.assert_called_once()
+            self.assertEqual(mock_get_stream.call_args.args, ("s3://bucket/img.png", ServicePrincipal("test-user", "tenant-1")))
 
     def test_vectorize_documents_empty_data(self):
         """
@@ -2165,7 +2169,8 @@ class TestElasticSearchService(unittest.TestCase):
             index_name="test_index",
             data=test_data,
             vdb_core=self.mock_vdb_core,
-            embedding_model=mock_embedding_model
+            embedding_model=mock_embedding_model,
+            actor=ServicePrincipal("test-user", "tenant-1"),
         )
 
         # Assert
@@ -2210,7 +2215,8 @@ class TestElasticSearchService(unittest.TestCase):
                 index_name="test_index",
                 data=test_data,
                 vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model
+                embedding_model=mock_embedding_model,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
 
         # Assert
@@ -2256,7 +2262,8 @@ class TestElasticSearchService(unittest.TestCase):
                     index_name="test_index",
                     data=test_data,
                     vdb_core=self.mock_vdb_core,
-                    embedding_model=mock_embedding_model
+                    embedding_model=mock_embedding_model,
+                    actor=ServicePrincipal("test-user", "tenant-1"),
                 )
 
         self.assertIn("Indexing error", str(context.exception))
@@ -2555,6 +2562,7 @@ class TestElasticSearchService(unittest.TestCase):
                     data=data,
                     vdb_core=self.mock_vdb_core,
                     task_id="task-123",
+                    actor=ServicePrincipal("test-user", "tenant-1"),
                 )
 
                 self.assertTrue(result["success"])
@@ -3659,7 +3667,8 @@ class TestElasticSearchService(unittest.TestCase):
             index_name="test_index",
             data=test_data,
             vdb_core=self.mock_vdb_core,
-            embedding_model=mock_embedding_model
+            embedding_model=mock_embedding_model,
+            actor=ServicePrincipal("test-user", "tenant-1"),
         )
 
         # Assert
@@ -4071,6 +4080,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             index_name="idx",
             data=data,
             vdb_core=self.mock_vdb_core,
+            actor=ServicePrincipal("test-user", "tenant-1"),
         )
 
         self.assertTrue(result["success"])
@@ -4102,6 +4112,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             data=data,
             vdb_core=self.mock_vdb_core,
             task_id="task-xyz",
+            actor=ServicePrincipal("test-user", "tenant-1"),
         )
 
         self.assertTrue(result["success"])
@@ -4136,6 +4147,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             data=data,
             vdb_core=self.mock_vdb_core,
             task_id="task-err",
+            actor=ServicePrincipal("test-user", "tenant-1"),
         )
 
         self.assertTrue(result["success"])
@@ -5260,6 +5272,7 @@ class TestCoverageImprovement(unittest.TestCase):
             data=[{"content": "test"}],
             vdb_core=self.mock_vdb_core,
             task_id="task-123",
+            actor=ServicePrincipal("test-user", "tenant-1"),
         )
 
         # Should complete successfully despite progress save failure
@@ -5551,6 +5564,7 @@ class TestCoverageImprovement(unittest.TestCase):
                 index_name="",  # Empty index name
                 data=[{"content": "test"}],
                 vdb_core=self.mock_vdb_core,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
         self.assertIn("Index name is required", str(ctx.exception))
 
@@ -5569,6 +5583,7 @@ class TestCoverageImprovement(unittest.TestCase):
                 index_name="new-index",
                 data=[{"content": "test"}],
                 vdb_core=self.mock_vdb_core,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
         self.assertIn("Failed to create index", str(ctx.exception))
 
@@ -6007,6 +6022,7 @@ class TestCoverageImprovement(unittest.TestCase):
                     None,  # Should be skipped
                 ],
                 vdb_core=self.mock_vdb_core,
+                actor=ServicePrincipal("test-user", "tenant-1"),
             )
 
         self.assertTrue(result["success"])
@@ -6016,7 +6032,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(len(documents_passed), 1)
 
     # Tests for index_documents - image bytes fetch exception and raise (lines 1206-1214)
-    @patch('management.services.knowledge_base.management.get_file_stream')
+    @patch('management.services.knowledge_base.management.read_document_image')
     def test_index_documents_image_fetch_exception_and_raise(self, mock_get_file):
         """Test index_documents logs and re-raises exception when fetching image bytes fails (lines 1206-1214)."""
         mock_embedding = MagicMock()
@@ -6042,6 +6058,7 @@ class TestCoverageImprovement(unittest.TestCase):
                         "metadata": {"image_url": "s3://bucket/image.png"}
                     }],
                     vdb_core=self.mock_vdb_core,
+                    actor=ServicePrincipal("test-user", "tenant-1"),
                 )
             self.assertIn("MinIO unavailable", str(ctx.exception))
             # Error should be logged before re-raising

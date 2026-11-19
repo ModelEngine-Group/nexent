@@ -323,6 +323,8 @@ KnowledgeBase.search 的结果必须携带 data_revisions，覆盖每个实际�
 
 分块创建的内部数据可显式设置 require_embedding=true，要求模型推理成功。官方文本种子使用此策略，模型、修订、维度或向量错误会终止写入，不使用提供的替代向量，也不改存纯正文。原手工创建保留现有默认策略。embedding_input_type=image 要求严格策略、显式模型和内联 base64 图片，Runtime 校验多模态模型后调用 Model.invoke，存储正文仍来自 content。此能力不授权读取任意对象或 URL，也不会为旧 image_url 自动生成可信图片引用。
 
+旧公开 documents 的图片准备已改用 Management 的授权读取和单键只读 StorageInterface，显式接收实际用户、租户及共享截止时间，保留原始字节。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。该入口的向量化和进度投影仍待迁移，当前读取证明不能代替完整图片写入验收。
+
 ### KnowledgeBase 已登记文件清单
 
 `KnowledgeBase.inspect` 的内部路径为 `/internal/agentos/v1/knowledge/bases/state`，客户端方法为 `inspect_knowledge_base`。请求 `KnowledgeBaseInspect` 固定 `knowledge_id` 和当前授权的 `expected_revision`，`page_size` 范围为1至1000，后续页原样传回 `cursor`。它与已有 `File.inspect`、删除协调状态查询分别服务不同场景。

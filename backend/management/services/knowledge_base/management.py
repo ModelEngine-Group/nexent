@@ -14,7 +14,9 @@ Main features include:
 
 import os
 import time
+from time import monotonic
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from fastapi import Body, Depends, Path, Query
 
@@ -22,7 +24,6 @@ from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIV
 from contracts.errors.exceptions import AppException, DuplicateError
 from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
-from management.db.file.attachment import get_file_stream
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.knowledge_base.repository import (
@@ -47,6 +48,7 @@ from management.services.knowledge_base.common import (
 from management.services.knowledge_base.files import (
     KnowledgeBaseFileService,
 )
+from management.services.knowledge_base.document_images import read_document_image
 from management.services.knowledge_base.listing import (
     apply_read_only_to_asset_indices_info,
     merge_list_indices_results,
@@ -76,6 +78,9 @@ from management.utils.serialization import (
 )
 from nexent.core.gateway.modality import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
+from nexent.storage.errors import InvalidInput
+from nexent.storage.models import OperationContext
+from infrastructure.agentos_identity import ServicePrincipal
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
 
@@ -764,6 +769,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             None, description="ID of the embedding model to use"
         ),
         large_mode: bool = False,
+        *,
+        actor: ServicePrincipal,
     ):
         """
         Index documents and create vector embeddings, create index if it doesn't exist
@@ -779,6 +786,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         Returns:
             IndexingResponse object containing indexing result information
         """
+        if not isinstance(actor, ServicePrincipal):
+            raise InvalidInput()
         try:
             if not index_name:
                 raise Exception("Index name is required")
@@ -797,6 +806,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
 
             # Transform indexing request results to documents
             documents = []
+            image_context = OperationContext("document-images-" + uuid4().hex, monotonic() + 180)
 
             for idx, item in enumerate(data):
                 # All items should be dictionaries
@@ -856,12 +866,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                 if len(image_url) > 0:
                     # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)
                     try:
-                        file_stream = get_file_stream(object_name=image_url)
-                        if file_stream is None:
-                            raise FileNotFoundError(
-                                f"Unable to fetch file from URL: {image_url}"
-                            )
-                        document["image_bytes"] = file_stream.read()
+                        document["image_bytes"] = read_document_image(image_url, actor, context=image_context)
                     except Exception as e:
                         logger.error(f"Failed to fetch file from {image_url}: {e}")
                         raise

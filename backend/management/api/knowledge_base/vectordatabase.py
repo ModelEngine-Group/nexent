@@ -643,6 +643,7 @@ def create_index_documents(
             task_id=task_id,
             large_mode=large_mode,
             model_id=saved_embedding_model_id,
+            actor=ServicePrincipal(user_id, tenant_id),
         )
     except AppException:
         raise

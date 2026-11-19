@@ -955,6 +955,10 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
     assert response.status_code == 200
     assert response.json() == expected_response.dict()
     mock_index.assert_called_once()
+    actor = mock_index.call_args.kwargs["actor"]
+    assert actor.user_id == auth_data["user_id"]
+    assert actor.tenant_id == auth_data["tenant_id"]
+
 
 
 @pytest.mark.asyncio
