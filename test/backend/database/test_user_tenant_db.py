@@ -13,6 +13,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from management.db.identity import user_tenant
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(user_tenant, "get_config_snapshot", lambda: system_config_snapshot())
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -44,7 +52,7 @@ utils_mock.str_utils.convert_list_to_string = MagicMock(
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -62,17 +70,17 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
 
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -477,8 +485,12 @@ def test_soft_delete_user_tenant_by_user_id_no_rows(monkeypatch, mock_session):
     monkeypatch.setattr(
         "management.db.identity.user_tenant.get_db_session", lambda: mock_ctx)
 
+    lookup = MagicMock(return_value=None)
+    monkeypatch.setattr("management.db.identity.user_tenant.get_user_tenant_by_user_id", lookup)
     ok = soft_delete_user_tenant_by_user_id("none", "test_user")
     assert ok is False
+    lookup.assert_called_once_with("none")
+    mock_ctx.__enter__.assert_not_called()
 
 
 def test_get_users_by_tenant_id_success_with_pagination(monkeypatch, mock_session):
@@ -901,7 +913,9 @@ def test_user_limit_rejects_new_user(monkeypatch):
     session = MagicMock()
     session.query.return_value = query
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, "_USER_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(MAX_USERS_PER_TENANT=1))
 
     with pytest.raises(ResourceLimitError, match="user limit"):
         module._validate_user_tenant_limit(session, "tenant-1", "USER")
@@ -915,8 +929,13 @@ def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
         pass
 
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, "_ADMIN_LIMIT", 1)
-    monkeypatch.setattr(module, "_SUPER_ADMIN_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(
+        module,
+        "get_config_snapshot",
+        lambda: system_config_snapshot(MAX_ADMINS_PER_TENANT=1, MAX_SUPER_ADMIN_COUNT=1),
+    )
 
     admin_session = MagicMock()
     admin_user_count = MagicMock()
@@ -938,8 +957,8 @@ def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
 
 
 @pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
-@pytest.mark.parametrize("role, limit_name", [("USER", "_USER_LIMIT"), ("ADMIN", "_ADMIN_LIMIT"), ("SU", "_SUPER_ADMIN_LIMIT")])
-def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, role, limit_name):
+@pytest.mark.parametrize("role, config_key", [("USER", "MAX_USERS_PER_TENANT"), ("ADMIN", "MAX_ADMINS_PER_TENANT"), ("SU", "MAX_SUPER_ADMIN_COUNT")])
+def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, role, config_key):
     """All user-role limits allow below cap and reject at or above cap."""
     from management.db.identity import user_tenant as module
 
@@ -951,7 +970,9 @@ def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, r
     query.filter.return_value.count.return_value = current_count
     session.query.return_value = query
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, limit_name, 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(**{config_key: 1}))
 
     if should_reject:
         with pytest.raises(ResourceLimitError):

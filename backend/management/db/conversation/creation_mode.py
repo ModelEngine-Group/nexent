@@ -9,7 +9,7 @@ from sqlalchemy import desc, select
 from contracts.clarification import ClarificationResponse
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord
 from management.db.conversation.repository import create_conversation_message
 

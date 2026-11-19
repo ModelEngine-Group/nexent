@@ -4,11 +4,14 @@
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryConflict,
     TrajectoryCorrupt,
@@ -16,6 +19,17 @@ from infrastructure.observability.trajectory_store import (
 )
 
 NOW = datetime(2026, 11, 9, tzinfo=UTC)
+
+
+def test_importing_trajectory_storage_does_not_require_fcntl():
+    repository = Path(__file__).resolve().parents[3]
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.modules['fcntl'] = None; "
+         "from infrastructure.trace.trajectory_store import TrajectoryFileStore"],
+        cwd=repository, capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture

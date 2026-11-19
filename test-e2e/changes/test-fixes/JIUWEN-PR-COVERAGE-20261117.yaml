@@ -1,0 +1,65 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-PR-COVERAGE-20261117
+  change_type: test-fix
+  title: Complete Jiuwen failure diagnostic unit coverage for PR 4357
+  description: >-
+    Add isolated regression assertions for resource provenance, diagnostic precedence,
+    exception graphs, invalid result carriers, startup failure and transport cleanup.
+    Preserve product behavior and the existing Codecov threshold.
+  affected_features:
+    existing: [JIUWEN-OUTPUT, JIUWEN-RESOURCES]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-OUTPUT-D3-001, JIUWEN-RESOURCES-D3-002]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: >-
+    Remaining gaps are isolated branches covered by traditional UT. Existing D3
+    Cases retain runtime, persistence and mixed-Core proof; no formal contracts,
+    bindings or preparation responsibilities change and no duplicate D1 is needed.
+  traditional_ut:
+    decision: strengthen
+    reason: >-
+      Codecov reports 202 hits of 227 changed executable lines (88.98%) at
+      f9f365c795fea046872054e8dc11e7bd06df1367. Missing error branches need
+      observable assertions, without changing product or coverage configuration.
+    behaviors:
+    - Preserve resource origin and specific diagnostics through wrappers and cancellation.
+    - Decode only valid MCP transport carriers and preserve exact successful output.
+    - Handle grouped or cyclic exception graphs and localize unknown protocol errors safely.
+    - Preserve startup timeout identity and release all native transport session references.
+    - Preserve original lifecycle failures when an optional reporting hook is not callable.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_errors.py
+    - test/sdk/core/agents/test_jiuwen_mcp_transport.py
+    - test/sdk/core/agents/test_adapter_failure_lifecycle.py
+  notes: |
+    Proof-gap assessment before test implementation:
+    | Behavior | Existing proof | Remaining gap and action |
+    | Resource diagnostics | test_resource_exception_is_specific_but_does_not_poison_recovery, test_nested_code_error_preserves_the_actual_resource_origin | Add A2A/child provenance, immutable exceptions, cancellation suppression and specific protocol precedence. |
+    | MCP results | test_mcp_result_carrier_keeps_exact_payload_and_failure_identity | Add plain text and structured business carriers without false failure attribution. |
+    | Exception classification | test_model_failure_keeps_normalized_identity_inside_wrapper, test_wait_for_timeout_cancellation_cause_is_a_deadline_not_user_cancellation | Add grouped/cyclic graphs, unknown protocol localization and schema validation errors. |
+    | Startup and cleanup | test_connection_diagnostic_survives_task_bound_cleanup, test_native_disconnect_preserves_transport_exception_and_clears_session | Add false connect result and successful disconnect with exact cleanup assertions. |
+    | Lifecycle | test_reporting_hook_cannot_mask_the_original_failure | Add absent/noncallable optional reporting hooks and direct MCP startup attribution. |
+    Verification on product baseline f9f365c795fea046872054e8dc11e7bd06df1367
+    with this test-only change, Python 3.11.14:
+    - python -m pytest test/sdk/core/agents/test_jiuwen_errors.py test/sdk/core/agents/test_jiuwen_mcp_transport.py test/sdk/core/agents/test_adapter_failure_lifecycle.py test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py test/sdk/core/agents/test_jiuwen_output.py test/sdk/core/agents/test_root_clarification.py -q --disable-warnings --cov=sdk/nexent --cov=backend --cov-branch --cov-report= --cov-report=json:test-results/pr4357-coverage.json
+      PASS: 115 tests. The three changed suites contain 23 additional parametrized test instances.
+    - NEXENT_PYTEST_TARGETS selects the three traditional_ut test_selectors above;
+      NEXENT_PYTEST_WORKERS=3 python test/run_all_test.py: PASS, 72 tests, zero skips.
+    - Comparing local branch coverage with the unchanged Codecov PR baseline confirms
+      24 previously missing/partial changed lines are now fully covered. Retaining
+      baseline hits projects at least 226/227 (99.56%) patch coverage; the final
+      Codecov result requires CI upload. Targeted whole-repository coverage is not
+      a full-suite coverage claim and is not combined with frontend coverage.
+    - Selected Change schema, Feature/Case references and UT paths validate; copyright
+      and git diff --check pass. Full implementation validation reports seven existing
+      issues in NB-CHAT-FINAL-ANSWER-001, NB-OTEL-001, local UT-BE-AIDP-ASYNC-001 and
+      UT-BE-AIDP-COOLDOWN-001, plus a missing NB-OTEL-20261111 UT reference. These
+      unrelated assets remain unchanged; local details are in test-results/pr4357-assets-validation.txt.
+    Formal runtime Cases remain unchanged; these UT results do not certify D3 acceptance.

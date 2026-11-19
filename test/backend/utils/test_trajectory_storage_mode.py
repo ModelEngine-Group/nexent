@@ -6,9 +6,9 @@ import runpy
 from types import SimpleNamespace
 
 import pytest
-from infrastructure.observability.trajectory_io import TrajectoryConflict
-from infrastructure.observability.trajectory_runtime import create_local_processor
-from infrastructure.observability.trajectory_store import TrajectoryFileStore
+from infrastructure.trace.trajectory_io import TrajectoryConflict
+from infrastructure.trace.trajectory_runtime import create_local_processor
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
 
 
 @pytest.mark.parametrize("mode", ["single_node", "shared_directory"])

@@ -12,6 +12,20 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'agent/a2a/http_client.py',
+    'agent/a2a/nacos.py',
+    'agent/channels.py',
+    'agent/replay.py',
+    'agent/runtime_config.py',
+    'conversation/nexent_output.py',
+    'conversation/runtime_output.py',
+    'knowledge_base/quota_formatting.py',
+    'northbound.py',
+    'permission/identity/credentials.py',
+    'permission/identity/gateway_lookup.py',
+    'permission/identity/northbound.py',
+    'permission/identity/session.py',
+    'permission/identity/signatures.py',
     "agent/core_policy.py",
     "model/runtime_options.py",
     "model/legacy_snapshot.py",
@@ -56,7 +70,6 @@ MIGRATED_MODULES = {
     'agent/read.py',
     'agent/reasoning.py',
     'agent/run.py',
-    'agent/run_state.py',
     'agent/runtime_client.py',
     'agent/service.py',
     'agent/stream.py',
@@ -86,8 +99,12 @@ MIGRATED_MODULES = {
     'conversation/agent_history.py',
     'conversation/creation_history.py',
     'conversation/creation_mode.py',
+    'conversation/creator_checkpoints.py',
+    'conversation/creator_events.py',
     'conversation/creator_execution.py',
     'conversation/creator_histories.py',
+    'conversation/creator_replay.py',
+    'conversation/creator_runtime.py',
     'conversation/creator_targets.py',
     'conversation/pins.py',
     'conversation/service.py',
@@ -374,7 +391,6 @@ def test_agent_services_do_not_restore_test_only_entry_points():
 def test_agent_shared_types_and_utilities_have_canonical_locations():
     shared_types = {
         "AgentModelProjection", "AgentRunContext", "SystemAgentRef", "WorkbenchReleaseManifest",
-        "OptimizeRequest", "OptimizeResult",
     }
     contract = ast.parse((BACKEND_ROOT / "contracts/agent.py").read_text(encoding="utf-8"))
     # The business file also owns the API request models after their migration.

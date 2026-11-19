@@ -2,9 +2,9 @@
 """Own projection, statistics and maintenance independently of Agent capture."""
 
 from contracts.constants import environment as config
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_runtime import conversation_deleted
-from infrastructure.observability.trajectory_store import TrajectoryFileStore
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_runtime import conversation_deleted
+from infrastructure.trace.trajectory_store import TrajectoryFileStore
 from management.db.trajectory.repository import ExecutionRepository
 from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
 from ops.services.trajectory.cleanup_schedule import read_policies

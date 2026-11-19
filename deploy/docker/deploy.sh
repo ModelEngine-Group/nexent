@@ -1130,6 +1130,19 @@ prepare_directory_and_data() {
   echo ""
 }
 
+retire_legacy_northbound_container() {
+  # Remove only this project's old service; preserve images and volumes.
+  local legacy_identity
+  legacy_identity="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}/{{ index .Config.Labels "com.docker.compose.service" }}' nexent-northbound 2>/dev/null)" || return 0
+  if [ "$legacy_identity" != "nexent/nexent-northbound" ]; then
+    echo "ERROR: nexent-northbound is not the expected legacy Compose service; inspect it before upgrading."
+    return 1
+  fi
+  docker update --restart=no nexent-northbound >/dev/null || return 1
+  docker stop --time 30 nexent-northbound >/dev/null || return 1
+  docker rm nexent-northbound >/dev/null || return 1
+}
+
 prepare_core_service_deployment() {
   local service image
   local prepared_images=" "
@@ -1140,6 +1153,7 @@ prepare_core_service_deployment() {
 
   for service in "$@"; do
     case "$service" in
+      nexent-gateway) image="${NEXENT_GATEWAY_IMAGE:-}" ;;
       nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
       nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
       *) image="${NEXENT_IMAGE:-}" ;;
@@ -1249,7 +1263,7 @@ deploy_core_services() {
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process|nexent-ops)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-gateway|nexent-web|nexent-data-process|nexent-ops)
         core_services+=("$service")
         ;;
     esac
@@ -1267,6 +1281,14 @@ deploy_core_services() {
   publish_shared_workbench || return 1
 
   echo "👀 Starting core services: ${core_services[*]}"
+  if [[ " ${core_services[*]} " == *" nexent-gateway "* ]]; then
+    # Validate required secrets and the full composition before retiring a live entry.
+    if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+      echo "ERROR: Invalid Gateway deployment configuration; the legacy container was left unchanged."
+      return 1
+    fi
+    retire_legacy_northbound_container || return 1
+  fi
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
@@ -1624,7 +1646,7 @@ select_terminal_tool() {
 }
 
 check_super_admin_user_exists() {
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker exec nexent-config python /opt/backend/account_admin.py bootstrap-su --check >/dev/null
+  docker exec nexent-config python -m management.cli.account bootstrap-su --check >/dev/null
 }
 
 prompt_super_admin_password() {

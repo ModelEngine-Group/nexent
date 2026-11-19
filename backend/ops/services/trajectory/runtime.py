@@ -18,12 +18,12 @@ def get_service():
     global _service, _cache_client
     with _lock:
         if _service is None:
-            from infrastructure.observability.trajectory_io import (
+            from infrastructure.trace.trajectory_io import (
                 TrajectoryConflict,
                 TrajectoryCorrupt,
             )
-            from infrastructure.observability.trajectory_runtime import capture_sources
-            from infrastructure.observability.trajectory_store import (
+            from infrastructure.trace.trajectory_runtime import capture_sources
+            from infrastructure.trace.trajectory_store import (
                 TrajectoryFileStore,
             )
             from management.db.trajectory.repository import ExecutionRepository

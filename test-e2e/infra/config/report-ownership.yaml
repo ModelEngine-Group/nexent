@@ -74,6 +74,8 @@ domains:
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
   NEXENT-SERVICE-REPLICAS: deployment
+  SI-STORAGE: system
+  GW-AUTH: system
   AGENT-CORE-CONFIG: agent_config
   JIUWEN-CONTEXT: context
   JIUWEN-MODEL-BRIDGE: runtime
@@ -109,6 +111,7 @@ feature_overrides:
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: system
+  SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
   RUNTIME-REPLICAS: runtime

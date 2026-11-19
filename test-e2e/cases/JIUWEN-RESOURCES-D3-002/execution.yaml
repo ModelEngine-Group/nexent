@@ -6,6 +6,8 @@ implementations:
   selector: test_
 timeout_seconds: 180
 acceptance_bindings:
+  AC-03:
+  - test_only_root_clarifies_after_child_returns_missing_information
   AC-02:
   - test_configured_deadlines_allow_delayed_a2a_completion
   AC-01:

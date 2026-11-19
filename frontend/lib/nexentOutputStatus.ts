@@ -7,7 +7,7 @@ export function outputStatus(
   error?: string
 ): NexentOutputStatus | undefined {
   if (!status) return undefined;
-  if (status === "running" || status === "streaming")
+  if (status === "pending" || status === "running" || status === "streaming")
     return { type: "running" };
   if (status === "completed") return { type: "complete", reason: "stop" };
   return {

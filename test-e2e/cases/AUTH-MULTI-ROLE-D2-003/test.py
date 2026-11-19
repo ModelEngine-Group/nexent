@@ -9,7 +9,7 @@ pytestmark = [pytest.mark.case_id("AUTH-MULTI-ROLE-D2-003"), pytest.mark.stage("
 
 def test_fixed_invitation_grants_survive_issuer_revocation(role_runtime):
     from sqlalchemy import select
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
 
     r = role_runtime
     created = r.invite(["ADMIN", "OPS"], "admin2")

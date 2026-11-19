@@ -7,9 +7,9 @@ instead of `--generate`; it never rewrites repository assets or silently shrinks
 ## Decisions
 
 - Unknown findings, malformed shared contracts/configuration, duplicate IDs and unsafe
-  script paths stop the batch. Unsafe recovery journals, active owners/locks and
-  pending D5 fault recovery also stop before synchronization. An ordinary failed
-  deployment can use the validated Daily redeployment path described below.
+  script paths stop the batch. Active locks, dirty source or a non-fast-forward update
+  stop synchronization. Deployment-mode recovery journal and owner checks run in
+  the synchronized worker before recovery or execution, as described below.
 - Explicit `CASE_EXECUTION_MISSING`, `CASE_SCRIPT_MISSING`,
   `CASE_SELECTOR_MISSING`, `CASE_PREPARATION_MISSING` and `CASE_EXECUTION_INVALID` findings with a known owner retain that Case in the plan
   and produce a BLOCKED receipt without starting its worker.
@@ -49,6 +49,14 @@ and affected Cases receive BLOCKED receipts with the actual prerequisite reason.
 Opaque custom scripts and Python imports report dependency errors in their own
 workers. No dependency failure is counted as PASS.
 
+Daily provisions every usable catalog fixture and records unavailable inputs without
+overwriting user-owned files. Missing, conflicting or unreadable ordinary fixtures
+block only Cases that declare or directly reference them, using the same selection
+rules as targeted runs. D0 still saves the full inventory; blocked Case receipts
+name the unavailable fixture. Strict operator `static_assets.py apply` still rejects
+unready inputs. Malformed catalogs, unsafe paths/symlinks, damaged shared provision
+state and failed integrity checks remain batch errors, not Case skips.
+
 The parent validates the full registry; each worker inspects only its requested Case.
 Source/configuration fingerprints remain checked before every Case and finalization.
 Dependency/cache directories are pruned before walking the tree, not filtered after
@@ -58,19 +66,32 @@ change detection. Clean-source and environment-recovery checks remain required.
 ## Retrying a failed deployment
 
 The scheduled `daily-launch.py` holds the test-home Daily lock and checkout
-deployment lock before touching configuration or synchronizing develop. A pending
-ordinary mode-switch journal does not by itself prevent fetching a repair. The
-launcher validates the complete backup index and checksums, exact owned paths,
-Local baseline, previous owner exit and absence of unrelated configuration edits.
-Legacy journals require a terminal prior-batch receipt. It saves the old journal
-and current configuration privately under `runtime/daily-recovery/`, then restores
-only the four owned configuration files. Prior reports, original backups and
+deployment lock, then excludes active fault-operation children while synchronizing
+develop. It does not restore configuration or validate recovery backups before
+fetching a repair. Dirty/divergent source and active locks still prevent updates.
+
+The freshly synchronized worker verifies its inherited locks and revision before
+checking owner exit, complete backup index/checksums, exact
+owned paths, Local baseline and absence of unrelated configuration edits. A failed
+check prevents recovery, deployment and Case execution; it does not undo the code
+update or delete any marker. Legacy journals require a terminal prior-batch receipt.
+The worker saves the old journal and current configuration privately under
+`runtime/daily-recovery/`, then restores only the four owned configuration files.
+It can also revalidate a before-image already prepared by an older supervisor
+without creating another backup. Prior reports, original backups and
 business data/volumes remain intact. Historical business-result files are not
 deployment-recovery authority and may be missing or damaged without blocking a
-validated redeploy. Their original evidence remains untouched. Actual fault journals,
-active locks, validated configuration backups and the prior owner's terminal status
+validated redeploy. Their original evidence remains untouched. Active locks,
+validated configuration backups and the prior owner's terminal status
 remain mandatory. The legacy `recovery_cases` catalog field is optional and no longer
 participates in scheduling or Case-reference validation.
+
+After upgrading from an older launcher, verify the execution checkout was actually
+updated. Older versions may reject historical D5 TIMEOUT/CLEANUP_FAILED results
+before reaching Git synchronization, so merging a repair into develop alone will
+not update that machine. In an idle maintenance window, preserve configuration and
+recovery evidence, check the real fault state, and synchronize the clean checkout
+before starting a fresh launcher. Do not delete recovery markers to force an upgrade.
 
 The old journal remains pending through synchronization, asset validation and
 doctor. A new deployment campaign then adopts responsibility with its own backup
@@ -79,11 +100,15 @@ preflight and runtime-mode verification before starting ordinary Cases. Final Lo
 restoration, service readiness and deployment-mode checks must pass before clearing
 that campaign's unchanged journal. Business Cases are never recovery gates: they run
 once in their normal group, and FAIL/TIMEOUT/CLEANUP_FAILED remains a failed result
-without suppressing independent Cases. Only an unresolved environment fault marker
-blocks further execution; a D5 outcome alone is not evidence of such a fault. Any failure retains
-recoverable evidence; a later Daily can try again after its owner exits.
+without suppressing independent Cases. A fault-injection pending journal is retained
+as evidence, not used as an admission or continuation gate by the launcher, Case
+coordinator or deployment campaign. It does not block build, redeploy, later groups
+or completion of Local configuration restoration. Existing service/mode preflight
+still checks actual deployment readiness; individual Cases retain their own dependency
+and fault-operation checks. The journal is never deleted merely to make a new batch
+pass, and original FAIL/TIMEOUT/CLEANUP_FAILED outcomes remain unchanged.
 
-Targeted runs and resume do not gain this permission. A D5 fault journal or active
+Targeted runs and resume do not gain deployment-mode recovery permission. An active
 fault-operation lock, an active deployment owner, damaged/missing backups, path
 redirection, changed unrelated configuration, dirty/divergent source or missing
 explicit deployment hooks still stop execution. No marker is deleted merely to

@@ -19,10 +19,10 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability import trajectory_store
-from infrastructure.observability.trajectory_otlp import span_request
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace import trajectory_store
+from infrastructure.trace.trajectory_otlp import span_request
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryConflict,
     TrajectoryCorrupt,

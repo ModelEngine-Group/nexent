@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: SI-FOUNDATION-20261112
+  change_type: requirement
+  requirement_id: SI-REQ-001
+  title: Start StorageInterface contracts and the scoped Redis KV adapter
+  description: >-
+    Implement the first dependency-ordered slice of SI-P0 and SI-P1. Keep vendor
+    clients private, require explicit scope, and use the service-owned thread
+    manager for async access. Record/Object/Vector adapters, event/queue semantics
+    and application migrations remain pending in the owning SPEC.
+  affected_features:
+    existing: [F-167]
+    added: [SI-STORAGE]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    Current isolated contract gaps are covered by traditional UT. Existing MinIO
+    regressions remain active. No duplicate formal D1 or unimplemented application
+    Case is introduced. Synthetic Redis protocol checks are separate local evidence.
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Import contracts without vendor drivers or environment discovery.
+    - Reject missing scope, unsupported capabilities and unsafe query fields.
+    - Keep tenant and active-record predicates mandatory and ordering deterministic.
+    - Apply KV revision and TTL updates once and retain uncertain outcomes.
+    - Use managed workers for async access and propagate cancellation and deadlines.
+    reason: Existing storage tests exercise legacy clients and cannot prove the new port boundaries.
+    test_selectors:
+    - test/sdk/storage/test_interface_contract.py
+    - test/backend/infrastructure/test_storage_catalog.py
+    - test/backend/infrastructure/test_redis_key_value.py
+    - test/backend/infrastructure/test_storage_async_access.py
+    - test/sdk/storage/test_storage_client_factory.py
+    - test/sdk/storage/test_minio.py
+    - test/sdk/storage/test_minio_config.py

@@ -87,16 +87,18 @@ database_oauth_mock.get_oauth_account_by_provider = MagicMock(return_value=None)
 database_oauth_mock.get_soft_deleted_oauth_account = MagicMock(return_value=None)
 sys.modules["management.db.identity.oauth_account"] = database_oauth_mock
 sys.modules["management.db.identity.user_tenant"] = MagicMock()
-sys.modules["management.db.client"] = MagicMock()
+sys.modules["infrastructure.rdb.client"] = MagicMock()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules["management.db.models"] = MagicMock()
 sys.modules["backend.database"] = MagicMock()
-sys.modules["management.db.client"] = MagicMock()
+sys.modules["infrastructure.rdb.client"] = MagicMock()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules["management.db.models"] = MagicMock()
 sys.modules["utils"] = MagicMock()
 sys.modules["utils.token_encryption"] = MagicMock()
@@ -108,7 +110,7 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["gateway.authentication.auth"] = auth_utils_mock
+sys.modules["management.services.permission.identity.session"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
@@ -156,9 +158,9 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("management.db.client.MinioClient", return_value=minio_mock).start()
-patch("management.db.client.MinioClient", return_value=minio_mock).start()
-patch("management.db.client.minio_client", minio_mock).start()
+patch("infrastructure.object_storage.client.MinioClient", return_value=minio_mock).start()
+patch("infrastructure.object_storage.client.MinioClient", return_value=minio_mock).start()
+patch("infrastructure.object_storage.client.minio_client", minio_mock).start()
 
 from fastapi.testclient import TestClient
 from fastapi import FastAPI

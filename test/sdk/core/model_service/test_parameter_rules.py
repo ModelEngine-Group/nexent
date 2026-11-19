@@ -12,7 +12,7 @@ from nexent.core.model_service.profiles.parameter_rules import (
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 
 
-def rule(key="temperature", **overrides):
+def rule(key="custom_parameter", **overrides):
     result = {
         "key": key,
         "schema": {},
@@ -39,30 +39,30 @@ def apply(rules, submitted=None, saved=None, scope="outlet"):
 
 @pytest.mark.parametrize("value", [None, False, 0, "", [], {}])
 def test_explicit_values_and_defaults_preserve_presence(value):
-    assert apply([rule(default_value="default")], {"temperature": value}) == {
-        "temperature": value
+    assert apply([rule(default_value="default")], {"custom_parameter": value}) == {
+        "custom_parameter": value
     }
-    assert apply([rule(default_value=value)]) == {"temperature": value}
-    assert apply([rule()], saved={"temperature": value}) == {"temperature": value}
+    assert apply([rule(default_value=value)]) == {"custom_parameter": value}
+    assert apply([rule()], saved={"custom_parameter": value}) == {"custom_parameter": value}
     assert apply([rule()]) == {}
 
 
 @pytest.mark.parametrize("value", [None, False, 0, "", {"private": "fixed-secret"}])
 def test_fixed_value_is_written_and_equal_submission_is_allowed(value):
     fixed = rule(fixed_value=value, visible=False, editable=False, allowed_scopes=[])
-    assert apply([fixed]) == {"temperature": value}
-    assert apply([fixed], {"temperature": value}, scope="conversation") == {
-        "temperature": value
+    assert apply([fixed]) == {"custom_parameter": value}
+    assert apply([fixed], {"custom_parameter": value}, scope="conversation") == {
+        "custom_parameter": value
     }
     with pytest.raises(ParameterValidationError) as captured:
-        apply([fixed], {"temperature": "different-secret"})
+        apply([fixed], {"custom_parameter": "different-secret"})
     assert captured.value.category == "FIXED_PARAMETER"
     assert "secret" not in str(captured.value)
 
 
 def test_fixed_saved_conflict_is_not_silently_overwritten():
     with pytest.raises(ParameterValidationError, match="FIXED_PARAMETER"):
-        apply([rule(fixed_value=False)], saved={"temperature": 0})
+        apply([rule(fixed_value=False)], saved={"custom_parameter": 0})
 
 
 @pytest.mark.parametrize(
@@ -76,12 +76,12 @@ def test_fixed_saved_conflict_is_not_silently_overwritten():
 def test_conversation_override_requires_explicit_edit_permission(overrides):
     declaration = rule(default_value=0, **overrides)
     with pytest.raises(ParameterValidationError, match="PARAMETER_NOT_EDITABLE"):
-        apply([declaration], {"temperature": 1}, scope="conversation")
-    assert apply([declaration], scope="conversation") == {"temperature": 0}
+        apply([declaration], {"custom_parameter": 1}, scope="conversation")
+    assert apply([declaration], scope="conversation") == {"custom_parameter": 0}
 
 
 def test_visibility_and_required_flags_are_independent():
-    assert apply([rule(visible=False)], {"temperature": 1}) == {"temperature": 1}
+    assert apply([rule(visible=False)], {"custom_parameter": 1}) == {"custom_parameter": 1}
     with pytest.raises(ParameterValidationError, match="PARAMETER_VALUE_REQUIRED"):
         apply([rule(required=True)])
 
@@ -163,9 +163,9 @@ def test_dependency_order_does_not_depend_on_declaration_order():
         {"any": []},
         {"all": [{}], "any": [{}]},
         {"key": "unknown", "op": "eq", "value": 1},
-        {"key": "temperature", "op": "eval", "value": "secret"},
-        {"key": "temperature", "op": "exists", "value": 1},
-        {"key": "temperature", "op": "in", "value": []},
+        {"key": "custom_parameter", "op": "eval", "value": "secret"},
+        {"key": "custom_parameter", "op": "exists", "value": 1},
+        {"key": "custom_parameter", "op": "in", "value": []},
         {"key": [], "op": "eq", "value": 1},
     ],
 )
@@ -177,7 +177,7 @@ def test_invalid_conditions_fail_before_use(condition):
 def test_cycles_and_duplicate_keys_are_rejected():
     with pytest.raises(ParameterValidationError, match="PARAMETER_CONDITION_CYCLE"):
         compile_parameter_rules(
-            [rule(condition={"key": "temperature", "op": "exists", "value": True})]
+            [rule(condition={"key": "custom_parameter", "op": "exists", "value": True})]
         )
     with pytest.raises(ParameterValidationError, match="PARAMETER_RULE_INVALID"):
         compile_parameter_rules([rule(), rule()])
@@ -191,7 +191,7 @@ def test_nested_condition_must_be_an_object():
 def test_empty_rule_set_is_valid_and_still_rejects_unknown_parameters():
     assert apply([]) == {}
     with pytest.raises(ParameterValidationError, match="PARAMETER_UNKNOWN"):
-        apply([], {"temperature": 1})
+        apply([], {"custom_parameter": 1})
 
 
 @pytest.mark.parametrize(
@@ -217,10 +217,10 @@ def test_snapshots_and_inputs_are_independent():
     declarations[0]["default_value"]["nested"].append(2)
     view = compiled.declarations
     view[0]["default_value"]["nested"].append(3)
-    saved = {"temperature": {"nested": [4]}}
+    saved = {"custom_parameter": {"nested": [4]}}
     result = apply_parameter_values(compiled, {}, saved_values=saved, scope="outlet")
-    result["temperature"]["nested"].append(5)
-    assert saved == {"temperature": {"nested": [4]}}
+    result["custom_parameter"]["nested"].append(5)
+    assert saved == {"custom_parameter": {"nested": [4]}}
     assert compiled.declarations == original
 
 
@@ -234,7 +234,7 @@ def test_unknown_values_fail_explicitly(submitted, saved):
 
 def test_values_are_checked_including_saved_values_and_null():
     declarations = [rule(schema={"type": "number", "minimum": 0})]
-    for submitted, saved in [({"temperature": None}, {}), ({}, {"temperature": -1})]:
+    for submitted, saved in [({"custom_parameter": None}, {}), ({}, {"custom_parameter": -1})]:
         with pytest.raises(ParameterValidationError, match="PARAMETER_VALUE_INVALID"):
             apply(declarations, submitted, saved)
     with pytest.raises(ParameterValidationError, match="PARAMETER_SCOPE_INVALID"):

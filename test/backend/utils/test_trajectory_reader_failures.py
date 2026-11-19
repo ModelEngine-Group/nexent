@@ -5,8 +5,8 @@ import json
 from io import BytesIO
 
 import pytest
-from infrastructure.observability.trajectory_io import TrajectoryCorrupt
-from infrastructure.observability.trajectory_reader import JSONReader, read_text
+from infrastructure.trace.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_reader import JSONReader, read_text
 from ops.services.trajectory.quantiles import DiskQuantiles
 
 

@@ -8,6 +8,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from contracts.errors.exceptions import ModelOutletValidationError
+
 from test.backend.services.test_model_management_service import import_svc
 
 
@@ -54,4 +56,18 @@ def test_missing_record_does_not_write(writers):
     with pytest.raises(LookupError, match="MODEL_OUTLET_NOT_FOUND"):
         service._update_model_configuration(None, {}, "user", "tenant")
     service.update_model_record.assert_not_called()
+    legacy.update_legacy_llm_outlet.assert_not_called()
+
+
+
+@pytest.mark.parametrize("invalid", [{"top_p": 0}, {"extra_params": {"__custom__": {"top_p": 0}}}])
+def test_legacy_model_writers_reject_zero_top_p_before_persistence(writers, invalid):
+    service, legacy = writers
+    row = {"model_id": 42, "model_type": "llm"}
+    with pytest.raises(ModelOutletValidationError) as create_error:
+        service._create_model_configuration({**row, **invalid}, "user", "tenant")
+    with pytest.raises(ModelOutletValidationError) as update_error:
+        service._update_model_configuration(row, invalid, "user", "tenant")
+    assert create_error.value.path == update_error.value.path == "/top_p"
+    legacy.create_legacy_llm_outlet.assert_not_called()
     legacy.update_legacy_llm_outlet.assert_not_called()

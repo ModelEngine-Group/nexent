@@ -9,20 +9,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_web_dispatches_trajectory_queries_to_ops_only():
-    source = (ROOT / "frontend/server.js").read_text()
+def test_web_dispatches_trajectory_queries_through_gateway():
+    source = (ROOT / "frontend/server.js").read_text(encoding="utf-8")
     start = source.index("function handleAllApiProxy(")
     end = source.index("function sendJsonResponse(", start)
-    helper = source[source.index("function isTrajectoryOpsRequest(") :]
     requests = [
-        ("/api/trajectory/records", "GET", "ops"),
-        ("/api/trajectory/cleanup", "POST", "ops"),
-        ("/api/trajectory/cleanup/schedule", "PUT", "ops"),
-        ("/api/conversation/agent_groups?view=trajectory", "GET", "ops"),
+        ("/api/trajectory/records", "GET", "config"),
+        ("/api/trajectory/cleanup", "POST", "config"),
+        ("/api/trajectory/cleanup/schedule", "PUT", "config"),
+        ("/api/conversation/agent_groups?view=trajectory", "GET", "runtime"),
         (
             "/api/conversation/agent_groups/agent:42/conversations?view=trajectory",
             "GET",
-            "ops",
+            "runtime",
         ),
         ("/api/conversation/agent_groups?view=chat", "GET", "runtime"),
         ("/api/conversation/agent_groups?search=trajectory", "GET", "runtime"),
@@ -34,14 +33,13 @@ def test_web_dispatches_trajectory_queries_to_ops_only():
         """
 const assert = require('assert').strict;
 const AUTH_INTERCEPT_ENDPOINTS = new Set();
-const OPS_HTTP_BACKEND = 'ops', HTTP_BACKEND = 'config';
+const HTTP_BACKEND = 'config';
 const PROXY_TIMEOUT_MS = 1234, SSE_PROXY_TIMEOUT_MS = 9876;
 let actual;
 const proxy = {web(req, res, config) { actual = config; }};
 function getRuntimeProxyConfig(timeout) { return { target: 'runtime', timeout }; }
 """
         + source[start:end]
-        + helper
         + """
 for (const [url, method, target] of """
         + json.dumps(requests)
