@@ -6,11 +6,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from contracts.agent import WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, BackgroundRun
-from contracts.errors.exceptions import AgentBackgroundError
+from contracts.errors.exceptions import AgentBackgroundError, RuntimeServiceUnavailableError
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_admission import AdmissionClaim
-from management.services.agent import background_compatibility as service
+from management.services.agent import background_compatibility as service, prepared_turn
 
 ACTOR = ServicePrincipal("actor", "tenant")
 REFERENCE = AgentRunReference(conversation_id=42, run_id="a" * 32)
@@ -178,3 +179,73 @@ async def test_confirmation_conflict_stops_only_the_unbound_run(flow, mocker):
     flow.client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), "actor", "tenant")
     flow.close.assert_called_once_with(flow.staged)
     flow.project.assert_not_awaited()
+
+
+@pytest.mark.parametrize("outcome", ["rejected", "missing", "foreign", "stale-receipt", "failed-receipt"])
+async def test_background_retry_requires_matching_retained_records(flow, outcome):
+    flow.claim.return_value = AdmissionClaim(REFERENCE.run_id, "admitted", 42, True, False)
+    if outcome == "rejected":
+        flow.claim.return_value = AdmissionClaim(REFERENCE.run_id, "rejected", None, False, False)
+    elif outcome == "missing":
+        flow.read.return_value = None
+    elif outcome == "foreign":
+        flow.client.inspect_run.return_value.conversation_id = 43
+    else:
+        flow.read.return_value = flow.confirmed
+        flow.receipt.return_value = (62, "completed") if outcome == "stale-receipt" else (61, "failed")
+
+    if outcome == "rejected":
+        assert await service.run_background(flow.client, PAYLOAD, ACTOR) is None
+        flow.read.assert_not_called()
+    else:
+        error = RuntimeServiceUnavailableError if outcome in {"foreign", "stale-receipt"} else AgentBackgroundError
+        with pytest.raises(error):
+            await service.run_background(flow.client, PAYLOAD, ACTOR)
+    if outcome == "failed-receipt":
+        flow.close.assert_called_once_with(flow.confirmed)
+    else:
+        flow.close.assert_not_called()
+    flow.client.start_prepared_run.assert_not_awaited()
+    flow.project.assert_not_awaited()
+
+
+@pytest.mark.parametrize("outcome", ["wrong-entry", "no-plan", "workbench", "knowledge"])
+async def test_background_preparation_uses_only_the_compatible_scope(mocker, outcome):
+    async def inline(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch.object(service, "_io", side_effect=inline)
+    config = WorkbenchSessionConfig(mode="generic_chat")
+    conversation = {"workbench_config": config.model_dump()} if outcome != "knowledge" else {}
+    mocker.patch.object(service, "get_conversation", return_value=conversation)
+    mocker.patch.object(service, "get_current_run_user_message_id", return_value=23)
+    snapshot = SimpleNamespace(
+        memory_enabled=False, runtime_metadata_version=2,
+        resource=SimpleNamespace(agent_id=7, version_no=4, workbench_skill_refs=[{"skill_id": 45}]),
+    )
+    compile_run = mocker.patch.object(service, "prepare_conversation_snapshot", return_value=snapshot)
+    plan = mocker.patch.object(prepared_turn, "_prepare_workbench", return_value=(
+        None if outcome == "no-plan" else SimpleNamespace(config=config, previous_version=2, version=3)
+    ))
+    scope = {"local": {"mode": "disabled"}}
+    owned = SimpleNamespace(resolution=SimpleNamespace(desired_scope=scope))
+    resolve = mocker.patch.object(service, "prepare_native_knowledge", return_value=owned)
+    request = service.AgentRequest.model_validate({
+        **PAYLOAD.request, "entrypoint": "workbench" if outcome in {"workbench", "no-plan"} else None,
+        "knowledge_scope": scope if outcome == "knowledge" else None, "metadata": {"purpose": "test"},
+    })
+    prepared = await service._prepare(request, REFERENCE, ACTOR)
+    if outcome in {"wrong-entry", "no-plan"}:
+        assert prepared is None
+        compile_run.assert_not_awaited()
+        assert plan.await_count == (outcome == "no-plan")
+        return
+    result, turn = prepared
+    assert result is snapshot and turn["metadata_update"] == {"expected_version": 1, "value": {"purpose": "test"}}
+    if outcome == "workbench":
+        plan.assert_awaited_once_with(request, 42, ACTOR.user_id, ACTOR.tenant_id)
+        assert turn["workbench_skill_root"] == {"agent_id": 7, "version_no": 4}
+        assert turn["workbench_update"] == {"config": config.model_dump(mode="json"), "expected_version": 2, "version": 3}
+    else:
+        resolve.assert_called_once_with(request, conversation, ACTOR.user_id, ACTOR.tenant_id)
+        assert turn["knowledge_update"] == {"expected": None, "value": scope}

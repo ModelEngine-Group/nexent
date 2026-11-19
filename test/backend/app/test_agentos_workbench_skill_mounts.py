@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from contracts.agentos import ManagementOperation, WorkbenchDebugSkillLookup, WorkbenchSkillLookup, WorkbenchSkillMounts
 from infrastructure.agentos_identity import ServicePrincipal, sign_call, verify_call
@@ -153,3 +154,37 @@ async def test_debug_mount_callback_requires_signed_lookup(mocker):
         "agentos-workbench-debug-mounts", workbench_debug_grant.read_workbench_debug_grant,
         scope, _ACTOR, lane="control-io", owner="management",
     )
+
+
+@pytest.mark.parametrize("debug,error,expected,code", [
+    (False, None, 200, None),
+    (False, ValueError, 409, "AGENTOS_SKILL_REVISION_MISMATCH"),
+    (False, SQLAlchemyError, 503, "AGENTOS_WORKBENCH_SCOPE_UNAVAILABLE"),
+    (False, LookupError, 404, "AGENTOS_SKILL_NOT_FOUND"),
+    (True, ValueError, 503, "AGENTOS_WORKBENCH_SCOPE_UNAVAILABLE"),
+    (True, LookupError, 404, "AGENTOS_SKILL_NOT_FOUND"),
+])
+async def test_mount_callback_maps_scope_and_storage_results(mocker, debug, error, expected, code):
+    mocker.patch.object(prepared_workbench.environment, "JWT_SECRET", "temporary-workbench-test-secret")
+    operation = ManagementOperation.WORKBENCH_DEBUG_SKILL_MOUNTS if debug else ManagementOperation.WORKBENCH_SKILL_MOUNTS
+    scope = WorkbenchDebugSkillLookup(run_id=_LOOKUP["run_id"], agent_id=7, agent_version=2) if debug else WorkbenchSkillLookup(**_LOOKUP)
+    mounts = WorkbenchSkillMounts(mounts=_CONFIG["skill_mounts"])
+    read = mocker.patch.object(workbench_callback, "run_blocking", return_value=None if error is LookupError else mounts)
+    if error is not LookupError:
+        read.side_effect = error
+    app = FastAPI()
+    app.include_router(workbench_callback.router)
+    body = scope.model_dump_json().encode()
+    token = sign_call(operation, body, _ACTOR)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
+        response = await client.post(operation.value, content=body, headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == expected
+    if expected == 200:
+        assert response.json() == mounts.model_dump()
+        assert response.headers["Cache-Control"] == "no-store"
+    else:
+        assert response.json()["detail"] == {"code": code}
+    expected_scope = (_ACTOR,) if debug else (_ACTOR.user_id, _ACTOR.tenant_id)
+    assert read.await_args.args[2:] == (scope, *expected_scope)

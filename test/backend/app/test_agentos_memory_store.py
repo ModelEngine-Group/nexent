@@ -96,6 +96,51 @@ async def test_embedding_and_index_errors_preserve_database_receipt(store):
     assert store.mirror.call_args.args[-1].keywords["embedding"] is None
 
 
+@pytest.mark.parametrize("record", [
+    None,
+    {"model_type": "llm", "model_name": "wrong-kind", "max_tokens": 2},
+    {"model_type": "embedding", "model_name": "", "max_tokens": 2},
+    {"model_type": "embedding", "model_name": "embed"},
+    {"model_type": "embedding", "model_name": "embed", "max_tokens": "unknown"},
+    {"model_type": "embedding", "model_name": "embed", "max_tokens": 0},
+])
+def test_embedding_binding_rejects_unusable_tenant_model(mocker, record):
+    mocker.patch.object(memory, "read_memory_embedding_model_id", return_value=11)
+    read = mocker.patch.object(memory, "get_model_by_model_id", return_value=record)
+    assert memory._load_embedding("tenant-a") is None
+    read.assert_called_once_with(11, "tenant-a")
+
+
+def test_embedding_binding_uses_current_model_revision_and_dimension(mocker):
+    definition = {"model_type": "multi_embedding", "model_name": "embed", "max_tokens": "768",
+                  "model_repo": "provider"}
+    mocker.patch.object(memory, "read_memory_embedding_model_id", return_value=11)
+    mocker.patch.object(memory, "get_model_by_model_id", return_value=definition)
+    revision = mocker.patch.object(memory, "model_record_revision", return_value="frozen-revision")
+    binding = memory._load_embedding("tenant-a")
+    assert (binding.model_id, binding.revision, binding.dimension, binding.model_name) == (
+        11, "frozen-revision", 768, "embed",
+    )
+    revision.assert_called_once_with(definition)
+
+
+async def test_missing_model_fails_before_writing_memory(store, mocker):
+    mocker.patch.object(memory, "_load_embedding", return_value=None)
+    with pytest.raises(memory.MemoryStoreModelError, match="MEMORY_EMBEDDING_NOT_CONFIGURED"):
+        await store.service.store(store.request, store.actor)
+    store.model.invoke.assert_not_awaited()
+    store.write.assert_not_called()
+    store.mirror.assert_not_called()
+
+
+@pytest.mark.parametrize("output", [[], [[0.1]], [[True, 0.2]], [[float("inf"), 0.2]]])
+async def test_invalid_provider_vector_does_not_mark_memory_indexed(store, output):
+    store.model.invoke.return_value = SimpleNamespace(output=output)
+    receipt = await store.service.store(store.request, store.actor)
+    assert (receipt.memory_id, receipt.event, receipt.indexed) == (17, "ADD", False)
+    assert store.index.index_record.call_args.kwargs["embedding"] is None
+
+
 @pytest.mark.parametrize("extra", [{"tenant_id": "tenant-b"}, {"user_id": "user-b"}, {"embedding": [float("inf")]}])
 def test_request_rejects_unsigned_scope_and_nonfinite_vectors(extra):
     with pytest.raises(ValidationError):

@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 from redis.exceptions import ConnectionError
+from sqlalchemy.exc import SQLAlchemyError
 
-from contracts.agentos import AgentResume, AgentRunReference
+from contracts.agentos import AgentResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityStop
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.redis.agent_events import RunJournal
 from runtime.agentos import resume
@@ -149,6 +150,103 @@ def journal(mocker):
     mocker.patch.object(resume, "read_execution", return_value=None)
     mocker.patch.object(resume, "runtime_state_service", MagicMock(enabled=True))
     return mocker.patch.object(resume, "RunJournal").return_value
+
+
+@pytest.mark.parametrize("error,status,code", [
+    (PermissionError, 404, "AGENTOS_RUN_NOT_FOUND"),
+    (SQLAlchemyError, 503, "AGENTOS_EXECUTION_STORE_UNAVAILABLE"),
+])
+async def test_execution_store_failures_do_not_fall_back_to_journal(journal, mocker, error, status, code):
+    active = mocker.patch.object(resume, "active_execution", side_effect=error)
+    resume.read_execution.side_effect = error
+    for operation, payload in (
+        (resume.find_active, CompatibilityStop(conversation_id=42)),
+        (resume.inspect_run, AgentRunLookup(run_id=RUN_ID, conversation_id=42)),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await operation(payload, ACTOR)
+        assert exc.value.status_code == status
+        assert exc.value.detail == {"code": code}
+    active.assert_called_once_with(42, ACTOR.user_id, ACTOR.tenant_id)
+    resume.conversation_belongs_to.assert_not_called()
+    journal.run_state.assert_not_called()
+
+
+async def test_stop_requires_conversation_for_prevent_start(journal):
+    with pytest.raises(HTTPException) as exc:
+        await resume.stop_run(AgentStop(run_id=RUN_ID, prevent_start=True), ACTOR)
+    assert exc.value.status_code == 422
+    assert exc.value.detail == {"code": "AGENTOS_INVALID_REQUEST"}
+    resume.read_execution.assert_not_called()
+    journal.run_state.assert_not_called()
+
+
+@pytest.mark.parametrize("tail,cursor", [("0-1", None), ("17-0", f"{RUN_ID}:17"), (None, None)])
+async def test_durable_receipt_remains_authoritative_if_journal_is_unavailable(journal, tail, cursor):
+    resume.read_execution.return_value = {
+        "conversation_id": 42, "status": "completed", "assistant_message_id": 61,
+        "cancellation_requested": False,
+    }
+    if tail is None:
+        journal.run_state.side_effect = ConnectionError("unavailable")
+    else:
+        journal.run_state.return_value = (tail, "running", True)
+
+    result = await resume.inspect_run(AgentRunLookup(run_id=RUN_ID), ACTOR)
+
+    assert result.status == "completed"
+    assert result.assistant_message_id == 61
+    assert result.latest_event_id == cursor
+    assert result.cancellation_requested is False
+
+
+@pytest.mark.parametrize("events,tail,status", [
+    ([], [], 404),
+    ([("3-0", {"kind": "chunk", "data": "data: skipped\n\n"})], [("3-0", {"kind": "chunk"})], 410),
+])
+async def test_replay_rejects_missing_or_discontinuous_snapshot_before_streaming(journal, events, tail, status):
+    journal.replay.return_value = ([("1-0", {"kind": "chunk"})], events, tail)
+    with pytest.raises(HTTPException) as exc:
+        await resume.resume_run(
+            AgentResume(conversation_id=42, run_id=RUN_ID, after_event_id=f"{RUN_ID}:1"), ACTOR,
+        )
+    assert exc.value.status_code == status
+    assert exc.value.detail["code"] == (
+        "AGENTOS_RUN_NOT_FOUND" if status == 404 else "AGENTOS_CURSOR_UNAVAILABLE"
+    )
+    journal.wait.assert_not_called()
+
+
+@pytest.mark.parametrize("follow,code", [
+    (None, "AGENTOS_CURSOR_UNAVAILABLE"),
+    ([("2-0", {"kind": "chunk", "data": "data: skipped\n\n"})], "AGENTOS_CURSOR_UNAVAILABLE"),
+    (ConnectionError("unavailable"), "AGENTOS_EVENT_STORE_UNAVAILABLE"),
+])
+async def test_resume_reports_errors_after_keepalive_as_sse(journal, follow, code):
+    start = ("0-1", {"kind": "start"})
+    journal.replay.return_value = ([start], [], [start])
+    journal.wait.side_effect = [[], follow]
+
+    response = await resume.resume_run(AgentResume(conversation_id=42, run_id=RUN_ID), ACTOR)
+
+    assert [chunk async for chunk in response.body_iterator] == [
+        ": keep-alive\n\n",
+        f'event: agentos_error\ndata: {{"code": "{code}"}}\n\n',
+    ]
+    assert [call.args for call in journal.wait.call_args_list] == [("0-1",), ("0-1",)]
+
+
+async def test_resume_at_terminal_cursor_does_not_keep_following(journal):
+    terminal = ("5-0", {"kind": "terminal", "status": "completed"})
+    journal.replay.return_value = ([terminal], [], [terminal])
+
+    response = await resume.resume_run(
+        AgentResume(conversation_id=42, run_id=RUN_ID, after_event_id=f"{RUN_ID}:5"), ACTOR,
+    )
+
+    assert response.headers["X-AgentOS-Replay-Count"] == "0"
+    assert [chunk async for chunk in response.body_iterator] == []
+    journal.wait.assert_not_called()
 
 
 @pytest.mark.asyncio
