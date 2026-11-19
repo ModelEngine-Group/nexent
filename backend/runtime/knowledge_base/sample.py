@@ -18,6 +18,7 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchAuthorization,
     ModelVersion,
 )
+from contracts.knowledge_chunk_projection import public_chunk_value
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
@@ -94,7 +95,8 @@ def _sample_documents(records, vectors, resource, model, limit, *, context):
                                                 file_version=manifest['visible_version'])
         documents.append(KnowledgeSampleDocument(file_ref=reference,
             standalone_key=independent[0] if independent else None, path_or_url=independent[1] if independent else None,
-            filename=rows[0].payload.get('filename', ''), chunks=[_sample_chunk(row, model) for row in rows]))
+            filename=public_chunk_value(rows[0].payload.get('location', {}), 'filename', rows[0].payload.get('filename', '')),
+            chunks=[_sample_chunk(row, model) for row in rows]))
     view.stable(context=context)
     return documents
 

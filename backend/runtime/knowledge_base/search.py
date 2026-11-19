@@ -15,6 +15,7 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchHit,
     KnowledgeSearchResult,
 )
+from contracts.knowledge_chunk_projection import public_chunk_value
 from nexent.core.concurrency import run_blocking
 from nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from nexent.storage.errors import (
@@ -121,7 +122,7 @@ class KnowledgeSearchService:
             details["retrieval_highlight_terms"] = list(hit.highlights)
         return KnowledgeSearchHit(
             **{name: hit.payload[name] for name in ("knowledge_id", "file_id", "file_version", "content")},
-            filename=hit.payload.get("filename", ""), location=hit.payload.get("location", {}),
+            filename=public_chunk_value(hit.payload.get("location", {}), "filename", hit.payload.get("filename", "")), location=hit.payload.get("location", {}),
             chunk_id=hit.key.key, score=hit.score, score_kind=hit.score_kind,
             score_details=details,
             image_ref=hit.payload.get("location", {}).get("image_ref")

@@ -261,8 +261,8 @@ class KnowledgeSearchHit(Contract):
     file_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     file_version: int | None = Field(default=None, ge=0)
     chunk_id: str = Field(min_length=1, max_length=1024)
-    content: str
-    filename: str | None = ""
+    content: JsonValue
+    filename: JsonValue = ""
     score: float
     score_kind: str = Field(min_length=1, max_length=64)
     location: dict[str, JsonValue] = Field(default_factory=dict)
@@ -325,7 +325,7 @@ class KnowledgeBaseState(Contract):
 class KnowledgeSampleChunk(Contract):
     chunk_id: str = Field(min_length=1, max_length=1024)
     chunk_index: int | None = Field(default=None, ge=0)
-    content: str
+    content: JsonValue
     embedding: list[float] | None = Field(default=None, min_length=1)
     location: dict[str, JsonValue] = Field(default_factory=dict)
 
@@ -343,7 +343,7 @@ class KnowledgeSampleDocument(Contract):
     file_ref: KnowledgeFileReference | None = None
     standalone_key: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     path_or_url: str | None = None
-    filename: str | None
+    filename: JsonValue
     chunks: list[KnowledgeSampleChunk]
 
     @model_validator(mode="after")
@@ -396,8 +396,8 @@ class KnowledgeChunk(Contract):
     file_version: int | None = Field(default=None, ge=0)
     chunk_id: str = Field(min_length=1, max_length=1024)
     chunk_index: int | None = Field(default=None, ge=0)
-    filename: str | None = None
-    content: str
+    filename: JsonValue = None
+    content: JsonValue
     location: dict[str, JsonValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")

@@ -11,6 +11,7 @@ from contracts.agentos_knowledge import (
     KnowledgeFileReference,
     ModelVersion,
 )
+from contracts.knowledge_chunk_projection import public_id_matches
 from pydantic import Field, JsonValue, model_validator
 
 CHANGES = "runtime_knowledge_chunk_changes"
@@ -19,11 +20,17 @@ ACTIVE_STATUSES = ("reserved", "writing", "unknown")
 
 
 class ChunkCreateData(Contract):
-    content: str
+    content: JsonValue
     filename: str | None = None
     location: dict[str, JsonValue] = Field(default_factory=dict)
     embedding_model: ModelVersion | None = None
     embedding_input: str | None = None
+
+    @model_validator(mode="after")
+    def explicit_model_text(self):
+        if self.embedding_model is not None and self.embedding_input is None and not isinstance(self.content, str):
+            raise ValueError("A nontext stored body requires explicit embedding_input")
+        return self
 
 
 class ChunkMutationAuthorization(Contract):
@@ -41,6 +48,7 @@ class ChunkMutationGrant(ChunkMutationAuthorization):
 
 class ChunkMutationLookup(ChunkMutationAuthorization):
     resource_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    resolve_public_id: bool = False
 
 
 class ChunkMutationTarget(ChunkMutationLookup):
@@ -52,7 +60,9 @@ class ChunkMutationTarget(ChunkMutationLookup):
     def exact_target(self):
         if (self.chunk is None) != (self.generation is None):
             raise ValueError("A stored chunk and its generation must be present together")
-        if self.chunk is not None and (self.chunk.knowledge_id != self.knowledge_id or self.chunk.chunk_id != self.chunk_id):
+        if self.chunk is not None and (self.chunk.knowledge_id != self.knowledge_id
+            or self.chunk.chunk_id != self.chunk_id and not (
+                self.resolve_public_id and public_id_matches(self.chunk.location, self.chunk_id))):
             raise ValueError("Target must belong to the requested knowledge base and key")
         return self
 

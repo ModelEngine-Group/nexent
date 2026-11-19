@@ -200,3 +200,115 @@ def test_absent_epoch_preserves_existing_intent_digest(target):
         ).encode()
     ).hexdigest()
     assert target.s.value.fingerprint() == expected
+
+
+@pytest.mark.parametrize("alias", ["public", "123", "false"])
+async def test_public_alias_returns_real_key_only_when_explicitly_requested(
+    target, alias
+):
+    from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+    from nexent.storage.models import Page
+
+    s = target
+    value = s.s.value.model_copy(
+        update={
+            "changes": {
+                **s.s.value.changes,
+                "location": {PUBLIC_CHUNK_SOURCE_KEY: {"id": ["public", 123, False]}},
+            }
+        }
+    )
+    receipt = await s.service.mutate(value, s.s.s.actor)
+    s.s.vectors.get.side_effect = lambda key, **kwargs: (
+        s.s.stored[0] if key == s.s.stored[0].key else None
+    )
+    s.s.vectors.scan.return_value = Page((s.s.stored[0],))
+    lookup = s.lookup.model_copy(update={"chunk_id": alias, "resolve_public_id": True})
+    s.client.authorize_knowledge_chunk_mutation.return_value = s.grant.model_copy(
+        update={"chunk_id": alias}
+    )
+    result = await s.service.lookup(lookup, s.s.s.actor)
+    assert result.chunk_id == alias and result.chunk.chunk_id == "manual"
+    assert result.generation == receipt.mutation_id
+    assert s.s.vectors.get.call_args.args[0].key == alias
+
+
+async def test_default_lookup_does_not_resolve_public_id_and_real_key_has_priority(
+    target,
+):
+    from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+
+    s = target
+    value = s.s.value.model_copy(
+        update={
+            "changes": {
+                **s.s.value.changes,
+                "location": {PUBLIC_CHUNK_SOURCE_KEY: {"id": "public"}},
+            }
+        }
+    )
+    await s.service.mutate(value, s.s.s.actor)
+    s.s.vectors.get.side_effect = lambda key, **kwargs: (
+        s.s.stored[0] if key == s.s.stored[0].key else None
+    )
+    assert (await s.service.lookup(s.lookup, s.s.s.actor)).chunk.chunk_id == "manual"
+    s.client.authorize_knowledge_chunk_mutation.return_value = s.grant.model_copy(
+        update={"chunk_id": "public"}
+    )
+    assert (
+        await s.service.lookup(
+            s.lookup.model_copy(update={"chunk_id": "public"}), s.s.s.actor
+        )
+    ).chunk is None
+    s.s.vectors.scan.assert_not_called()
+
+
+async def test_provider_read_failure_never_starts_alias_scan(target):
+    from nexent.storage.errors import Unavailable
+
+    s = target
+    s.s.vectors.get.side_effect = Unavailable()
+    with pytest.raises(Unavailable):
+        await s.service.lookup(
+            s.lookup.model_copy(update={"resolve_public_id": True}), s.s.s.actor
+        )
+    s.s.vectors.scan.assert_not_called()
+
+
+@pytest.mark.parametrize("fault", ["foreign", "generation"])
+async def test_alias_scan_never_returns_foreign_or_unconfirmed_content(target, fault):
+    from dataclasses import replace
+
+    from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+    from nexent.storage.models import Page
+
+    s = target
+    value = s.s.value.model_copy(
+        update={
+            "changes": {
+                **s.s.value.changes,
+                "location": {PUBLIC_CHUNK_SOURCE_KEY: {"id": "public"}},
+            }
+        }
+    )
+    await s.service.mutate(value, s.s.s.actor)
+    original = s.s.stored[0]
+    row = (
+        replace(original, payload={**original.payload, "knowledge_id": 2})
+        if fault == "foreign"
+        else replace(original, generation=Revision("unconfirmed"))
+    )
+    s.s.vectors.get.return_value = None
+    s.s.vectors.get.side_effect = None
+    s.s.vectors.scan.return_value = Page((row,))
+    s.client.authorize_knowledge_chunk_mutation.return_value = s.grant.model_copy(
+        update={"chunk_id": "public"}
+    )
+    lookup = s.lookup.model_copy(
+        update={"chunk_id": "public", "resolve_public_id": True}
+    )
+    if fault == "foreign":
+        with pytest.raises(ScopeDenied):
+            await s.service.lookup(lookup, s.s.s.actor)
+    else:
+        assert (await s.service.lookup(lookup, s.s.s.actor)).chunk is None

@@ -10,6 +10,11 @@ from uuid import uuid4
 from contracts.agentos_knowledge import KnowledgeChunks, KnowledgeChunksResult
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
+from contracts.knowledge_chunk_projection import (
+    PUBLIC_CHUNK_FIELDS,
+    public_chunk_source,
+    public_path_matches,
+)
 from management.services.knowledge_base.chunks_authorization import (
     chunks_resource_grant,
 )
@@ -49,6 +54,10 @@ class KnowledgeChunkBrowser:
         file = files.get(chunk.file_id)
         if chunk.file_id is not None and (file is None or file['knowledge_id'] != chunk.knowledge_id):
             raise ScopeDenied()
+        source = public_chunk_source(chunk.content, chunk.location)
+        if source is not None:
+            source.setdefault('id', chunk.chunk_id)
+            return {key: value for key, value in source.items() if key in PUBLIC_CHUNK_FIELDS}
         result = {key: chunk.location[key] for key in ('title', 'language', 'author', 'date', 'create_time') if key in chunk.location}
         result.update(id=chunk.chunk_id, content=chunk.content, filename=chunk.filename,
                       path_or_url=(file['object_name'] or file['local_source_path'] or '') if file is not None else chunk.location.get('path_or_url',''))
@@ -89,7 +98,7 @@ class KnowledgeChunkBrowser:
                             raise ScopeDenied()
                         if (chunk.chunk_id in seen
                             or selected is not None and chunk.file_id is not None and chunk.file_id not in selected
-                            or path_or_url and chunk.file_id is None and chunk.location.get('path_or_url', '') != path_or_url):
+                            or path_or_url and chunk.file_id is None and not public_path_matches(chunk.location, path_or_url)):
                             raise Conflict()
                         seen.add(chunk.chunk_id)
                         chunks.append(self._chunk(chunk, mapping))

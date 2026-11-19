@@ -133,14 +133,16 @@ async def test_no_model_creates_plaintext_without_fake_file_or_vector(creation):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('stored', ['body', ['after', 'merge'], 123])
 async def test_create_invokes_standard_model_with_actual_actor_and_original_embedding_input(
-    creation,
+    creation, stored,
 ):
     s = creation
     value = s.value.model_copy(
         update={
             "changes": {
                 **s.value.changes,
+                "content": stored,
                 "embedding_input": "before metadata merge",
                 "embedding_model": {"model_id": 2, "revision": "r1"},
             }
@@ -156,6 +158,7 @@ async def test_create_invokes_standard_model_with_actual_actor_and_original_embe
         s.stored[0].vector == (1.0, 0.0, 0.0)
         and s.stored[0].payload["embedding_model_id"] == 2
     )
+    assert s.stored[0].payload['content'] == stored
     assert s.dimensions == [None, 3] and row["status"] == "completed"
 
 

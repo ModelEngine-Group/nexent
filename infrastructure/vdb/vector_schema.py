@@ -151,15 +151,27 @@ def validate_value(field, value):
 def payload(binding, values, *, partial=False):
     if not isinstance(values, dict) or not set(values) <= set(binding.schema):
         raise InvalidInput()
+    try:
+        values = json.loads(json.dumps(values, allow_nan=False))
+    except (TypeError, ValueError, RecursionError):
+        raise InvalidInput() from None
     for field in binding.fields:
         if field.name in values:
-            validate_value(field, values[field.name])
+            if field.name in (binding.text_field, *binding.additional_text_fields):
+                if values[field.name] is None and not field.nullable:
+                    raise InvalidInput()
+                pending = [values[field.name]]
+                while pending:
+                    value = pending.pop()
+                    if isinstance(value, list):
+                        pending.extend(value)
+                    elif value is not None and type(value) not in {str, bool, int, float}:
+                        raise InvalidInput()
+            else:
+                validate_value(field, values[field.name])
         elif not partial and not field.nullable:
             raise InvalidInput()
-    try:
-        return json.loads(json.dumps(values, allow_nan=False))
-    except (TypeError, ValueError):
-        raise InvalidInput() from None
+    return values
 
 
 def vector(binding, values):

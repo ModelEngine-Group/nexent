@@ -17,9 +17,10 @@ from contracts.knowledge_chunk_mutation import (
     ChunkMutationState,
     ChunkMutationTarget,
 )
+from contracts.knowledge_chunk_projection import public_id_matches
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
-from nexent.storage.models import OperationContext, VectorKey
+from nexent.storage.models import Comparison, OperationContext, VectorKey
 from pydantic import ValidationError
 from runtime.knowledge_base.chunk_admission import ChunkMutationAdmission
 from runtime.knowledge_base.chunk_creation import ChunkCreationExecutor
@@ -111,9 +112,33 @@ class ChunkMutationService:
             include_vector=False,
             context=context,
         )
+        if row is None and payload.resolve_public_id:
+            policy = KnowledgeJobs(records, authorize=lambda *args, **kwargs: None)
+            for candidate in view._scan(
+                vectors,
+                grant,
+                Comparison("knowledge_id", "eq", payload.knowledge_id),
+                context=context,
+            ):
+                if not public_id_matches(
+                    candidate.payload.get("location", {}), payload.chunk_id
+                ):
+                    continue
+                chunk = view._dto(candidate, grant)
+                if not view.allows_candidate(candidate, context=context):
+                    continue
+                if chunk.file_id is not None and not policy.is_visible(
+                    chunk, candidate.generation.value, context=context
+                ):
+                    continue
+                row = candidate
+                break
         chunk, generation = None, None
         if row is not None:
-            if row.key != VectorKey(grant.collection, payload.chunk_id):
+            if row.key != VectorKey(grant.collection, payload.chunk_id) and not (
+                payload.resolve_public_id
+                and public_id_matches(row.payload.get("location", {}), payload.chunk_id)
+            ):
                 raise ScopeDenied()
             try:
                 chunk = view._dto(row, grant)

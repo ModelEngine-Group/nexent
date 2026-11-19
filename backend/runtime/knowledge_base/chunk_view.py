@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from contracts.agentos_knowledge import KnowledgeChunk, ModelVersion
 from contracts.knowledge_chunk_mutation import CHANGES
+from contracts.knowledge_chunk_projection import public_chunk_value
 from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery, Sort
 from runtime.knowledge_base.chunk_journal import ChunkMutationJournal
@@ -239,7 +240,7 @@ class ChunkReadView:
             file_version=data.get("file_version"),
             chunk_index=data.get("chunk_index"),
             content=data["content"],
-            filename=data.get("filename", ""),
+            filename=public_chunk_value(data.get("location", {}), "filename", data.get("filename", "")),
             location=data.get("location", {}),
         )
 

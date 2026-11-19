@@ -193,6 +193,20 @@ async def test_typed_transport_roundtrips_both_directions(api):
     )
 
 
+async def test_alias_target_transport_keeps_original_json_values(api):
+    from contracts.agentos_knowledge import KnowledgeChunk
+    from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+
+    s = api
+    lookup = s.lookup.model_copy(update={'chunk_id':'display','resolve_public_id':True})
+    target = ChunkMutationTarget(**lookup.model_dump(),change_epoch=1,generation='b'*64,
+        chunk=KnowledgeChunk(knowledge_id=1,chunk_id='physical',content=['raw',False],filename=['file.txt'],
+            location={PUBLIC_CHUNK_SOURCE_KEY:{'id':'display','filename':['file.txt']}}))
+    s.service.inspect_chunk.return_value = target
+    client = AgentOSClient('http://runtime',lambda **kwargs:httpx.AsyncClient(transport=httpx.ASGITransport(app=s.runtime),**kwargs))
+    assert await client.inspect_knowledge_chunk(lookup,s.actor.user_id,s.actor.tenant_id) == target
+
+
 @pytest.mark.parametrize(
     "error,status,code",
     [

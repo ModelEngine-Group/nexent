@@ -13,6 +13,7 @@ from contracts.agentos_knowledge import (
 )
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
+from contracts.knowledge_chunk_projection import public_path_matches
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
 from runtime.knowledge_base.chunk_view import ChunkReadView
@@ -49,7 +50,7 @@ def _window(records, vectors, request, resource, *, context):
         filtered = None
         if request.standalone_path is not None:
             rows = view.standalone_window(vectors, resource, 0, count, context=context) if count else []
-            filtered = [row for row in rows if row.location.get('path_or_url', '') == request.standalone_path]
+            filtered = [row for row in rows if public_path_matches(row.location, request.standalone_path)]
             count = len(filtered)
         start, end = max(0, request.offset-total), min(count, request.offset+request.limit-total)
         total += count

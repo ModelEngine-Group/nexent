@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from contracts.constants.environment import ES_API_KEY, ES_HOST
 from contracts.knowledge import VectorDatabaseType
+from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_FIELDS
 from infrastructure.vdb.client import create_datamate_core, create_elasticsearch_core
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.model.resolver import (
@@ -164,17 +165,7 @@ def get_embedding_model_by_index_name(
         return None, None, {"status": "error", "needs_update": False, "message": str(e)}
 
 
-ALLOWED_CHUNK_FIELDS = {
-    "id",
-    "title",
-    "filename",
-    "path_or_url",
-    "content",
-    "create_time",
-    "language",
-    "author",
-    "date",
-}
+ALLOWED_CHUNK_FIELDS = PUBLIC_CHUNK_FIELDS
 
 # Configure logging
 logger = logging.getLogger("vectordatabase_service")
