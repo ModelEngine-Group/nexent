@@ -115,7 +115,7 @@ export default function ResourceCard({
         measuredAgent &&
           "rounded-xl border-[rgba(201,201,201,0.4)] px-[24px] py-[16px]",
         measuredMcp &&
-          "min-h-[140px] rounded-xl border-0 px-6 py-4 outline outline-1 -outline-offset-1 outline-[#C9C9C9]/40 hover:outline-blue-300",
+          "min-h-[140px] rounded-xl border-[rgba(201,201,201,0.4)] px-6 py-4",
         measuredMineMcp &&
           "min-h-[142px] rounded-xl border-[rgba(201,201,201,0.4)] bg-white px-6 py-4",
         measuredSkill &&
@@ -151,9 +151,10 @@ export default function ResourceCard({
               className={cn(
                 "flex shrink-0 gap-3",
                 fixedHeaderLayout ? "min-h-[60px] items-center" : "items-start",
-                (measuredMcp || measuredMineMcp) && "min-h-12 items-center",
+                measuredMineMcp && "min-h-12 items-center",
                 measuredAgent && "min-h-14",
-                measuredSkill && "min-h-12 items-center"
+                measuredMcp && "min-h-14 items-center",
+                measuredSkill && "min-h-14 items-center"
               )}
             >
               {icon ? <span className="shrink-0">{icon}</span> : null}
@@ -215,12 +216,7 @@ export default function ResourceCard({
                 </div>
               ) : null}
             </div>
-            <div
-              className={cn(
-                "flex flex-1 flex-col",
-                measuredAgent && "gap-2 pt-2"
-              )}
-            >
+            <div className="flex flex-1 flex-col">
               {statusRow ? (
                 <div className={cn("min-w-0", !measuredAgent && "mt-1")}>
                   {statusRow}
@@ -240,16 +236,15 @@ export default function ResourceCard({
                   <div
                     className={cn(
                       "min-h-0 overflow-hidden [overflow-wrap:anywhere] text-sm leading-6 text-slate-600 dark:text-slate-300",
-                      !measuredAgent &&
-                        (compact
-                          ? "mt-2.5 leading-5"
-                          : statusRow
-                            ? "mt-3"
-                            : "mt-4"),
+                      compact
+                        ? "mt-2.5 leading-5"
+                        : statusRow
+                          ? "mt-3"
+                          : "mt-4",
                       (measuredAgent || measuredMcp || measuredMineMcp) &&
                         "min-h-10 font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]",
                       measuredSkill &&
-                        "min-h-9 font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-[18px] tracking-normal text-[#777777]"
+                        "min-h-10 font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-[18px] tracking-normal text-[#777777]"
                     )}
                     style={{
                       display: "-webkit-box",
@@ -267,9 +262,8 @@ export default function ResourceCard({
                 <div
                   className={cn(
                     "flex flex-wrap gap-2 text-xs [&>*]:max-w-full [&>*]:[overflow-wrap:anywhere]",
-                    !measuredAgent && "pb-2",
-                    !measuredAgent &&
-                      (compact ? "mt-2.5" : description ? "mt-3" : "mt-4")
+                    "pb-2",
+                    compact ? "mt-2.5" : description ? "mt-3" : "mt-4"
                   )}
                 >
                   {tags}
@@ -304,10 +298,9 @@ export default function ResourceCard({
                       "flex min-h-7 items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400",
                       compact && "min-h-0 border-0 pt-2.5",
                       measuredSkill &&
-                        "justify-start gap-4 [&>div]:justify-start [&>div]:gap-4",
+                        "justify-start gap-4 leading-5 [&>div]:justify-start [&>div]:gap-4",
                       (measuredMcp || measuredMineMcp) &&
-                        "leading-5 text-[#777777]",
-                      measuredAgent && "pt-0"
+                        "leading-5 text-[#777777]"
                     )}
                   >
                     <div
