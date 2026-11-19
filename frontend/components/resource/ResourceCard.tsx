@@ -88,12 +88,26 @@ export default function ResourceCard({
   const actionsInFooter =
     measuredSkill && repositoryView && footerLayout === "inline";
   const titleId = `resource-card-title-${useId()}`;
-  // Full-width opening brackets (【（《 etc.) carry a built-in left side
-  // bearing, so their ink starts right of the text box origin and the
-  // title looks indented against the subtitle line. Pull the ink back
-  // to keep the visible left edge identical across leading characters.
-  const titleStartsWithFullWidthBracket =
-    typeof title === "string" && /^[【（《「『〔［｛]/.test(title);
+  // HarmonyOS Sans SC full-width opening brackets reserve blank space on
+  // the left of their glyph cell (left side bearing measured from the
+  // font, in em units), so the title ink starts right of the text box
+  // origin and looks indented against the subtitle line. Pull the ink
+  // back per leading character so the visible left edge matches
+  // letter-leading titles.
+  const fullWidthBracketIndent: Record<string, string> = {
+    "【": "-ml-[0.66em]",
+    "（": "-ml-[0.66em]",
+    "《": "-ml-[0.49em]",
+    "「": "-ml-[0.66em]",
+    "『": "-ml-[0.62em]",
+    "〔": "-ml-[0.66em]",
+    "［": "-ml-[0.66em]",
+    "｛": "-ml-[0.57em]",
+  };
+  const bracketIndentClass =
+    typeof title === "string"
+      ? fullWidthBracketIndent[title.trim().charAt(0)]
+      : undefined;
   const isInteractive = onClick !== undefined;
   const actionClassName = isInteractive
     ? "pointer-events-auto relative z-10"
@@ -185,7 +199,11 @@ export default function ResourceCard({
                       measuredMineMcp ||
                       measuredSkill) &&
                       "font-['HarmonyOS_Sans_SC',sans-serif] font-medium leading-6 tracking-normal text-[#191919]",
-                    titleStartsWithFullWidthBracket && "-ml-[0.2em]"
+                    (measuredAgent ||
+                      measuredMcp ||
+                      measuredMineMcp ||
+                      measuredSkill) &&
+                      bracketIndentClass
                   )}
                 >
                   {title}
