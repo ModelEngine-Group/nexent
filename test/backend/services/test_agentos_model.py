@@ -58,7 +58,17 @@ async def test_metadata_omits_credentials():
         "revision": "2026-11-09",
         "profile_version": "p1",
         "embedding_dimensions": None,
+        "qualified_name": None,
     }
+
+
+async def test_metadata_projects_old_source_model_name_without_constructing_an_adapter():
+    build = Mock()
+    record = _record(model_type="embedding", model_name="embed", model_repo="repo", api_key="secret")
+    model = await ModelService(Mock(return_value=record), build).get(1, _ACTOR)
+    assert model.qualified_name == "repo/embed"
+    assert "secret" not in model.model_dump_json()
+    build.assert_not_called()
 
 
 @pytest.mark.parametrize('model_type,dimensions,expected', [

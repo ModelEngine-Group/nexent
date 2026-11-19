@@ -7,6 +7,7 @@ from threading import Event
 from time import monotonic
 from uuid import uuid4
 
+from contracts.agentos_knowledge import ModelVersion
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from contracts.knowledge_documents import (
@@ -44,7 +45,7 @@ def _touch_activity(index_name, grant, actor, reader, *, context):
 
 
 async def append_documents(index_name, documents, actor, *, reader=None, client=None, operation_seconds=180,
-                           context=None, embedding_batch_size=None):
+                           context=None, embedding_batch_size=None, model_binding=None):
     if not isinstance(documents, (list, tuple)):
         raise InvalidInput()
     if not documents:
@@ -53,6 +54,10 @@ async def append_documents(index_name, documents, actor, *, reader=None, client=
         raise InvalidInput()
     if embedding_batch_size is not None and (type(embedding_batch_size) is not int or embedding_batch_size <= 0):
         raise InvalidInput()
+    if model_binding is not None:
+        if not isinstance(model_binding, ModelVersion):
+            raise InvalidInput()
+        model_binding = ModelVersion.model_validate(model_binding.model_dump())
     cancelled = Event() if context is None else None
     context = context or OperationContext("knowledge-document-append-" + uuid4().hex,
                                          monotonic() + operation_seconds, cancelled=cancelled)
@@ -67,11 +72,13 @@ async def append_documents(index_name, documents, actor, *, reader=None, client=
             model_id = row["embedding_model_id"]
             if row["index_name"] != index_name or type(model_id) is not int or model_id <= 0:
                 raise InvalidInput()
+            if model_binding is not None and model_binding.model_id != model_id:
+                raise Conflict()
             indexed = 0
             for offset in range(0, len(documents), 64):
                 selected = list(documents[offset:offset + 64])
                 request = KnowledgeDocumentsAppend(knowledge_id=grant.knowledge_id, resource_revision=grant.revision,
-                    embedding_model={"model_id": model_id}, documents=selected,
+                    embedding_model=model_binding or {"model_id": model_id}, documents=selected,
                     embedding_batch_size=min(embedding_batch_size, 64) if embedding_batch_size is not None else None)
                 result = await client.append_knowledge_documents(request, actor.user_id, actor.tenant_id)
                 context.remaining()

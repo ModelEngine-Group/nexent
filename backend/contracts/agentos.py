@@ -902,6 +902,7 @@ class ModelMetadata(ModelReference):
     revision: str
     profile_version: str | None = None
     embedding_dimensions: int | None = Field(default=None, gt=0, strict=True)
+    qualified_name: str | None = None
 
 
 class ModelListQuery(RunSpecModel):
@@ -911,7 +912,7 @@ class ModelListQuery(RunSpecModel):
 
 
 class ModelCatalogEntry(ModelMetadata):
-    qualified_name: str | None = None
+    pass
 
 
 class ModelCatalogPage(RunSpecModel):

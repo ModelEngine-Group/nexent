@@ -58,6 +58,24 @@ async def test_embedding_batch_setting_is_preserved_within_physical_batch_limit(
     assert s.client.append_knowledge_documents.await_args.args[0].embedding_batch_size == expected
 
 
+@pytest.mark.parametrize("model_id", [2, 3])
+async def test_pinned_model_version_must_match_current_kb_before_rpc(writer, model_id):
+    from contracts.agentos_knowledge import ModelVersion
+
+    s = writer
+    binding = ModelVersion(model_id=model_id, revision="fixed-r1")
+    action = document_append.append_documents("kb", [KnowledgeDocument(content="text")], s.actor,
+        reader=s.reader, client=s.client, model_binding=binding)
+    if model_id == 2:
+        await action
+        assert s.client.append_knowledge_documents.await_args.args[0].embedding_model == binding
+    else:
+        with pytest.raises(Conflict):
+            await action
+        s.client.append_knowledge_documents.assert_not_called()
+        s.touch.assert_not_called()
+
+
 async def test_empty_request_has_no_resource_http_or_activity_side_effects(writer):
     s = writer
     assert await document_append.append_documents("kb", [], s.actor, reader=s.reader, client=s.client) == 0

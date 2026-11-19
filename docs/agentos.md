@@ -333,7 +333,11 @@ process_source=UniversalImageExtractor 的记录按原规则处理。普通 embe
 
 成功回执 `KnowledgeDocumentsAppended` 包含 knowledge_id、total_submitted、total_indexed、total_skipped 和独立 chunk_ids。indexed+skipped 必须等于 submitted，物理键数必须等于 indexed，全部跳过时返回空键列表；Management 仅允许图片提取项被跳过。Runtime 复用已有 cancellable_context，在退出时设置本次取消标记，并保留父上下文的截止与取消信号，防止后台读取继续处理后续分块。此同步追加操作保留重发追加语义，File.upload 的文件幂等协议单独保持。
 
-Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 documents 的完整数据准备、原模型名称投影和 X-Task-Id 进度适配尚未切换，不能据此认定该公开入口或 data-process 已退役。
+Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 documents 的路由、X-Task-Id 进度及空集合创建语义尚未切换，不能据此认定该公开入口或 data-process 已退役。
+
+Management 的 `knowledge_base.documents.index_documents` 提供标准准备编排。它先使用当前实际用户取得 KB edit 授权，通过 Model.get 取得模型版本与 qualified_name，按原字段和默认值准备 source，固定所有 metadata.image_url，再调用 append_documents。它保留原响应字典、空正文、文档顺序、缺省与显式 null；图片原字节不作为传输参数。该服务不创建 SDK 适配器，不进行模型推理。公开路由接线还需处理上述进度及集合创建分支。
+
+Model.get 的 qualified_name 使用现有模型名称函数从 Runtime 私有 SI 记录投影仓库限定名称，缺名称时为 null，与执行 profile 的实际 request model ID 分别使用。它保留旧 source.embedding_model_name 的拼接规则，不用 display_name 替代，不返回凭据或构造 SDK。Management 标准准备要求有效名称并把该版本作为 ModelVersion 传给追加接口；KB 绑定 ID 变化在 Management 的 RPC 前拒绝，同模型版本变化由 Runtime 在推理前拒绝。原调用方可省略 model_binding，继续使用 ModelReference。
 
 旧公开 documents 的图片准备已改用 Management 的授权读取和单键只读 StorageInterface，显式接收实际用户、租户及共享截止时间，保留原始字节。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。该入口的向量化和进度投影仍待迁移，当前读取证明不能代替完整图片写入验收。
 

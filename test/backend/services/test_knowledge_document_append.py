@@ -85,6 +85,18 @@ async def test_explicit_batch_never_reads_tenant_setting(append):
     assert a.events == ["model", "put", "put"]
 
 
+async def test_pinned_model_changed_after_management_preparation_never_starts_inference(append):
+    from contracts.agentos_knowledge import ModelVersion
+
+    a = append
+    request = a.request.model_copy(update={"embedding_model": ModelVersion(model_id=2, revision="prepared-older")})
+    with pytest.raises(Conflict):
+        await a.service.append(request, a.s.s.actor, context=context())
+    assert a.s.models.get.await_count == 1 and not a.events and not a.opened
+    a.s.models.embedding_dimensions.assert_not_called()
+    a.batch_setting.assert_not_called()
+
+
 async def test_configuration_failure_prevents_model_and_write_without_replay(append):
     a = append
     a.batch_setting.side_effect = Conflict()

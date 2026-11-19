@@ -20,6 +20,7 @@ from contracts.constants.constants import (
     DEFAULT_EXPECTED_CHUNK_SIZE,
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
+from contracts.model_names import get_model_name_from_config
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from nexent.core.gateway.modality.embedding.embedding_adapter import EmbeddingRequest
@@ -87,6 +88,7 @@ class ModelService:
             revision=revision or "legacy",
             profile_version=record.get("capability_profile_version"),
             embedding_dimensions=_configured_embedding_dimensions(record),
+            qualified_name=get_model_name_from_config(record) or None,
         )
 
     async def get(self, model_id: int, actor: ServicePrincipal) -> ModelMetadata:

@@ -228,7 +228,7 @@ async def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mock
                              display_name=record["display_name"], revision="revision-1")
     metadata_client.get_model.side_effect = lambda model_id, user, tenant: metadata(records[model_id])
     metadata_client.list_models.return_value = ModelCatalogPage(models=[ModelCatalogEntry(
-        **metadata(named).model_dump(), qualified_name="repo/named")] if named_available else [])
+        **metadata(named).model_dump(exclude={"qualified_name"}), qualified_name="repo/named")] if named_available else [])
     mocker.patch.object(knowledge_search.tenant_config_manager, "get_app_config", return_value="14")
     assert await knowledge_search.prepare_knowledge_search(knowledge_tool, "user-a", "tenant-a", None)
     binding = ToolBinding(tool_id=knowledge_tool.name, version="2", parameters=knowledge_tool.metadata["prepared_knowledge_search"])
