@@ -39,6 +39,7 @@ class ContextManager:
 
     def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None):
         self.config = config or ContextManagerConfig()
+        self.use_result_observations = False
         if max_steps is not None:
             self.config.keep_recent_steps = min(self.config.keep_recent_steps, max_steps)
         if self.config.max_summary_input_tokens <= 0:

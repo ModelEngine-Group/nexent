@@ -19,6 +19,7 @@ from openjiuwen.core.foundation.llm.schema.tool_call import ToolCall as NativeTo
 from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
 from nexent.core.agents.cores.jiuwen.messages import resource_view
 from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, JiuwenProtocolError, parse_execution_blocks
+from nexent.core.agents.output.answer import AnswerBoundaryError, normalize_public_answer
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.model_service.contracts import ModelError
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
@@ -155,6 +156,11 @@ class JiuwenServiceModel(Model):
                                             arguments=json.dumps({"code": block.code}), index=0))
         if not calls and not content.strip():
             self._fail(request, "MODEL_EMPTY_RESPONSE")
+        if not calls and not self.artifact_output:
+            try:
+                normalize_public_answer(content)
+            except AnswerBoundaryError as error:
+                self._fail(request, str(error))
         if self.clarification is not None:
             try:
                 self._clarification_form = self.clarification.form_for(calls, text_protocol=self.text_protocol)
@@ -258,7 +264,13 @@ class JiuwenServiceModel(Model):
                 return None
             self.argument_corrections += 1
             kind = "arguments"
-        elif category in {"MODEL_EMPTY_RESPONSE", "MODEL_RESPONSE_INCOMPLETE"}:
+        elif category in {
+            "MODEL_EMPTY_RESPONSE", "MODEL_RESPONSE_INCOMPLETE", "MODEL_STREAM_INCOMPLETE",
+            "JIUWEN_INCOMPLETE_EXECUTION_BLOCK", "JIUWEN_TOOL_FINISH_MISMATCH", "JIUWEN_FINAL_OUTPUT_INVALID",
+        } or (
+            category == "MODEL_PROTOCOL_ERROR"
+            and error.diagnostic_code in {"MODEL_TOOL_CALL_INVALID", "MODEL_RESPONSE_INCOMPLETE"}
+        ):
             if self.response_corrections >= 1:
                 return None
             self.response_corrections += 1

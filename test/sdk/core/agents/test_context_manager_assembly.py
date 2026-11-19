@@ -11,6 +11,7 @@ from nexent.core.agents.context import (
     ContextManagerConfig,
 )
 from smolagents.memory import ActionStep, TaskStep, ToolCall
+from smolagents.models import get_clean_message_list, tool_role_conversions
 from smolagents.monitoring import Timing
 
 
@@ -383,3 +384,25 @@ def test_current_run_preserves_action_clarification_and_guidance_order(purpose):
         if len(expected) == 6:
             memory.steps.append(TaskStep(task="Guidance: include the date"))
             expected.append("Guidance: include the date")
+
+
+
+def test_strict_codeagent_observations_follow_smolagents_message_roles():
+    manager = ContextManager()
+    manager.use_result_observations = True
+    memory = _Memory()
+    action = ToolCall(name="python_interpreter", arguments="print('actual')", id="call_1")
+    step = ActionStep(
+        step_number=1, timing=Timing(start_time=0), tool_calls=[action],
+        model_output="MODEL_NARRATION_SHOULD_NOT_BE_REPLAYED",
+        observations="actual", action_output="actual",
+    )
+    memory.steps = [TaskStep(task="Use a tool"), step]
+
+    context = manager.assemble_final_context(model=None, memory=memory, current_run_start_idx=0)
+    wire = get_clean_message_list(context.messages, role_conversions=tool_role_conversions)
+    native = get_clean_message_list(step.to_messages(summary_mode=True), role_conversions=tool_role_conversions)
+
+    assert [message["role"] for message in wire[-2:]] == ["assistant", "user"]
+    assert _message_text(wire[-2]) == _message_text(native[0]).replace("Calling tools:", "Executed action:", 1)
+    assert _message_text(wire[-1]) == "<RESULT>\n<OUTPUT>actual</OUTPUT>\n</RESULT>"

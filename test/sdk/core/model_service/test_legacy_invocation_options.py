@@ -7,6 +7,7 @@ from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
 from nexent.core.model_service.compatibility.invocation_options import (
     LegacyInvocationOptions,
 )
+from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
 from nexent.core.model_service.contracts import ModelMessage, ModelRequest
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
@@ -70,6 +71,15 @@ def test_identical_duplicate_alias_is_allowed_but_conflict_rejected(declared_pro
 def test_invalid_or_undeclared_options_are_rejected(declared_profile, options):
     with pytest.raises(ParameterValidationError):
         options.resolve(declared_profile)
+
+
+def test_strict_agent_stop_support_follows_outlet_wire_binding(openai_profile):
+    assert LegacyChatModel(openai_profile, service=None).supports_stop_parameter is True
+
+    data = openai_profile.model_dump()
+    data["parameter_rules"] = [rule for rule in data["parameter_rules"] if rule["key"] != "stop"]
+    profile_without_stop = ResolvedModelProfile.model_validate(data)
+    assert LegacyChatModel(profile_without_stop, service=None).supports_stop_parameter is False
 
 
 def test_protocol_capability_does_not_invent_stop_or_format_rules(openai_profile):

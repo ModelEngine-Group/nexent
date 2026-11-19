@@ -304,6 +304,7 @@ class SmolagentsMemoryAdapter:
     """Project native memory while retaining the CM-owned representation cache."""
 
     def __init__(self, manager):
+        self._manager = manager
         self._current_item_cache = manager._current_item_cache
         self._to_json_value = manager._to_json_value
         self.build_context_messages = manager.build_context_messages
@@ -356,20 +357,16 @@ class SmolagentsMemoryAdapter:
                 projected.append(item)
             elif isinstance(step, ActionStep):
                 content = self._neutral_action_content(step, action_index)
-                # Render completed actions from structured fields instead of
-                # smolagents ActionStep.to_messages(). The upstream rendering
-                # injects protocol labels such as "Calling tools:" and
-                # "Observation:" into the next model request, which can prime
-                # reasoning models to emit a configured stop sequence. The
-                # neutral representation preserves the executable action,
-                # outcome, error, result, and ordering without changing how
-                # the live ReAct step is parsed or executed.
                 item = ContextItem.from_input(
                     ContextItemInput(
                         id=f"current_action:{action_index}",
                         type=ContextItemType.CURRENT_ACTION,
                         content=content,
-                        metadata={"layout_order": action_index, "run_order": index},
+                        metadata={
+                            "layout_order": action_index,
+                            "run_order": index,
+                            "use_result_observations": self._manager.use_result_observations,
+                        },
                     )
                 )
                 projected.append(item)

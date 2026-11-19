@@ -269,14 +269,22 @@ class OpenAIChatAdapter:
             parts = _content_parts(message.get("content"))
             if message.get("audio") is not None:
                 parts.append({"type": "audio", "audio": message["audio"]})
+            usage_diagnostic = {}
+            semantics_id = profile.capabilities.usage.semantics_id
+            try:
+                usage = _usage(body.get("usage"), semantics_id)
+            except ModelAdapterError as error:
+                usage = TokenUsage(semantics_id=semantics_id)
+                usage_diagnostic["usage_diagnostic"] = error.category
             return AssistantMessage(
                 content_parts=parts,
                 reasoning_parts=_content_parts(message.get("reasoning_content")),
                 refusal=message.get("refusal"),
                 tool_calls=[_tool_call(call, index) for index, call in enumerate(calls)],
                 finish_reason=finish,
-                usage=_usage(body.get("usage"), profile.capabilities.usage.semantics_id),
+                usage=usage,
                 provider_metadata={
+                    **usage_diagnostic,
                     "response_id": body.get("id"),
                     "model": body.get("model"),
                     "request_id": request.request_id,
