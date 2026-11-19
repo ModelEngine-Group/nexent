@@ -46,6 +46,78 @@ const project = (messages: unknown[], isRunning = false) =>
     phase: "idle",
   });
 
+const generationTool = (overrides: Record<string, unknown> = {}) => ({
+  ...message(),
+  content: [
+    {
+      type: "tool-call",
+      toolName: "nl2a_read_generation_context",
+      args: { agent_id: 42, goal: "complete" },
+      ...overrides,
+    },
+  ],
+});
+
+it.each([undefined, { status: "success" }])(
+  "shows generation while reading context and composing the prompt (result: %j)",
+  (result) => {
+    const messages = [
+      message([], { subtype: "installed_resource_binding" }),
+      generationTool({ result }),
+    ];
+    const view = project(messages, true);
+    expect(view).toMatchObject({
+      current: 3,
+      status: "running",
+      detail: "generating",
+      skipped: [],
+    });
+    render(<Nl2AgentWorkflowProgress value={view} />);
+    expect(screen.getByTestId("nl2agent-workflow-progress")).toHaveAttribute(
+      "data-step",
+      "generation"
+    );
+  }
+);
+
+it("recognizes prompt saving before the first saved-field receipt", () => {
+  expect(
+    project(
+      [
+        message([], { subtype: "installed_resource_binding" }),
+        generationTool({
+          toolName: "nl2a_save_agent_draft_fields",
+          argsText: JSON.stringify({
+            agent_id: 42,
+            fields: { prompt: "Draft" },
+          }),
+        }),
+      ],
+      true
+    )
+  ).toMatchObject({ current: 3, status: "running", detail: "generating" });
+});
+
+it("does not advance binding from unrelated, invalid, failed or inactive tools", () => {
+  const binding = message([], { subtype: "installed_resource_binding" });
+  for (const overrides of [
+    { args: { agent_id: 99, goal: "complete" } },
+    { argsText: '{"goal":' },
+    {
+      toolName: "nl2a_save_agent_draft_fields",
+      args: { fields: { name: "Name" } },
+    },
+    { isError: true },
+  ]) {
+    expect(project([binding, generationTool(overrides)], true).current).toBe(2);
+  }
+  expect(
+    project([binding, generationTool({ isError: true })], true).status
+  ).toBe("error");
+  expect(project([binding, generationTool()]).current).toBe(2);
+  expect(project([generationTool(), binding], true).current).toBe(2);
+});
+
 it.each([
   [message([state("preparing_embeddings")]), "coverage", "paused"],
   [

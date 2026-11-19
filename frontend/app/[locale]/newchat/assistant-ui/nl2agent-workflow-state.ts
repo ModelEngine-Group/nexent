@@ -283,15 +283,34 @@ export function projectNl2AgentWorkflow({
         isRunning &&
         index === messages.length - 1 &&
         part.type === "tool-call" &&
-        !part.result &&
+        part.isError !== true &&
+        view.status !== "error" &&
         typeof part.toolName === "string"
       ) {
+        let args = record(part.args);
+        if (typeof part.argsText === "string" && part.argsText.trim()) {
+          try {
+            args = record(JSON.parse(part.argsText));
+          } catch {
+            continue;
+          }
+        }
+        if (args.agent_id !== undefined && args.agent_id !== agentId) continue;
+        // Context reading starts prompt composition; its result can arrive long
+        // before the first prompt save. This indicates activity, not completion.
+        const startsGeneration =
+          view.current < 3 &&
+          (part.toolName === "nl2a_read_generation_context" ||
+            (part.toolName === "nl2a_save_agent_draft_fields" &&
+              typeof record(args.fields).prompt === "string"));
         if (
-          [
-            "nl2a_save_agent_draft_fields",
-            "nl2a_validate_agent_generation_complete",
-          ].includes(part.toolName) &&
-          (view.current === 3 || part.toolName.includes("validate"))
+          startsGeneration ||
+          (!part.result &&
+            [
+              "nl2a_save_agent_draft_fields",
+              "nl2a_validate_agent_generation_complete",
+            ].includes(part.toolName) &&
+            (view.current === 3 || part.toolName.includes("validate")))
         ) {
           view.current = 3;
           view.status = "running";
