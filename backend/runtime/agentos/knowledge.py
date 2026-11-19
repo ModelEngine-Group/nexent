@@ -17,6 +17,7 @@ from contracts.knowledge_base_deletion import (
     KnowledgeBaseDeleteLookup,
 )
 from contracts.knowledge_chunk_mutation import ChunkMutationIntent, ChunkMutationLookup
+from contracts.knowledge_documents import KnowledgeDocumentsAppend
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
@@ -51,6 +52,10 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.UPLOAD.value, include_in_schema=False)
     async def upload(request: Request):
         return await dispatch(request, KnowledgeFileUpload, service.upload, 202)
+
+    @router.post(KnowledgeOperation.APPEND_DOCUMENTS.value, include_in_schema=False)
+    async def append_documents(request: Request):
+        return await dispatch(request, KnowledgeDocumentsAppend, service.append_documents, 200)
 
     @router.post(KnowledgeOperation.INSPECT.value, include_in_schema=False)
     async def inspect(request: Request):

@@ -319,9 +319,15 @@ KnowledgeBase.search 的内部请求可传 weight_accurate，范围为 0 到 1�
 
 KnowledgeBase.search 的结果必须携带 data_revisions，覆盖每个实际查询的 KB，空结果也保留修订。修订由确认修改 epoch 和当前发布 manifest 共同计算，JSON 对象键按规范十进制 KB ID 解码。Runtime 工具在跨模型合并、外层 rerank 和整体授权检查后，通过只读 StorageInterface 再核对这些修订。期间发生确认更新、删除或活动写入会拒绝整次旧结果，不重做推理和检索。采样、分块浏览与搜索共用 Runtime 的 data_revision 模块。
 
-官方 Agent 的文本种子复用分块创建入口。Management 准备原正文、文件名、展示字段和旧分块 ID，以实际安装用户调用 AgentOS，等待每次 Runtime 写入完成后继续安装。模型调用和向量写入都在 Runtime；同秒同正文保留旧 ID 覆盖语义。二进制种子继续使用上传、清洗及 File.upload 链路。旧公开 documents 写入入口中的图片处理、KB 集合创建及其他存储旁路仍待迁移。
+官方 Agent 的文本种子使用标准文档追加入口。Management 准备正文、文件名和展示字段，以实际安装用户调用 AgentOS，等待全部确认后继续安装。Runtime 按原规则补齐展示 source.id，并为每条文档生成独立物理键。同秒同正文可有相同展示 ID，仍追加为两条物理记录。此前按展示 ID 推断旧 bulk 会覆盖的说明有误，旧 SDK 的 index 动作没有设置 _id。二进制种子继续使用上传、清洗及 File.upload 链路。旧公开 documents 写入入口中的图片处理、KB 集合创建及其他存储旁路仍待迁移。
 
-分块创建的内部数据可显式设置 require_embedding=true，要求模型推理成功。官方文本种子使用此策略，模型、修订、维度或向量错误会终止写入，不使用提供的替代向量，也不改存纯正文。原手工创建保留现有默认策略。embedding_input_type=image 要求严格策略、显式模型和内联 base64 图片，Runtime 校验多模态模型后调用 Model.invoke，存储正文仍来自 content。此能力不授权读取任意对象或 URL，也不会为旧 image_url 自动生成可信图片引用。
+分块创建的内部数据可显式设置 require_embedding=true，要求模型推理成功。模型、修订、维度或向量错误会终止写入，不使用提供的替代向量，也不改存纯正文。原手工创建保留现有默认策略。embedding_input_type=image 要求严格策略、显式模型和内联 base64 图片，Runtime 校验多模态模型后调用 Model.invoke，存储正文仍来自 content。此能力不授权读取任意对象或 URL，也不会为旧 image_url 自动生成可信图片引用。
+
+`KnowledgeBase.append_documents` 的内部路径为 `/internal/agentos/v1/knowledge/documents/append`，客户端方法为 `append_knowledge_documents`。`KnowledgeDocumentsAppend` 固定 knowledge_id、当前 resource_revision、embedding_model ID 或版本，接收 1 至 64 条 `KnowledgeDocument`。每条含 content 和 metadata，空文本保留，图片提取记录目前明确拒绝。embedding_batch_size 默认为 10，范围为 1 至 64。Management 的 append_documents 适配按 64 条拆分，显式子批量配置超过 64 时按物理批量上限执行，不改变本次请求的文档顺序。
+
+Runtime 先通过 Model.invoke 完成当前批次全部推理，核对版本和向量，再重新授权并通过 StorageInterface 逐条追加。后续推理子批次失败时，本批不打开写入接纳，不保存前缀正文。写入阶段仍可能部分确认，异常不会被改报成功或自动重放。成功回执 `KnowledgeDocumentsAppended` 包含 knowledge_id、total_submitted、total_indexed 和独立 chunk_ids，计数必须完整相等。此同步追加操作保留重发追加语义，File.upload 的文件幂等协议单独保持。
+
+Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入；公开 documents 的图片资源、原租户子批量配置读取及 X-Task-Id 进度适配尚未切换，不能据此认定该公开入口或 data-process 已退役。
 
 旧公开 documents 的图片准备已改用 Management 的授权读取和单键只读 StorageInterface，显式接收实际用户、租户及共享截止时间，保留原始字节。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。该入口的向量化和进度投影仍待迁移，当前读取证明不能代替完整图片写入验收。
 

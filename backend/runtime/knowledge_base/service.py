@@ -68,6 +68,12 @@ class KnowledgeService:
 
         return await ChunkMutationService(self.client, self.models).mutate(payload, actor, context=context)
 
+    async def append_documents(self, payload, actor, *, context=None):
+        from runtime.knowledge_base.chunk_write import ChunkMutationService
+        from runtime.knowledge_base.document_append import KnowledgeDocumentAppender
+
+        return await KnowledgeDocumentAppender(ChunkMutationService(self.client, self.models)).append(payload, actor, context=context)
+
     async def inspect_chunk(self, payload, actor, *, context=None):
         from runtime.knowledge_base.chunk_write import ChunkMutationService
 

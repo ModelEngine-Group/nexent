@@ -92,6 +92,12 @@ class SummaryScheduleJournal:
                                        attempt=old.attempt if old else None)
             return self._patch(tx, row, {'summary_frequency': frequency, 'summary_schedule': schedule.model_dump(mode='json')}, context)
 
+    def touch_documents(self, knowledge_id, *, context):
+        with self.records.transaction(context=context) as tx:
+            row = self._lock(tx, knowledge_id, context)
+            self._grant(row, context)
+            return self._patch(tx, row, {"last_doc_update_time": self.clock().isoformat()}, context)
+
     def _schedule(self, row):
         if row['summary_frequency'] is None or row['summary_frequency'] not in VALID_SUMMARY_FREQUENCIES or row['summary_schedule'] is None:
             raise Conflict()

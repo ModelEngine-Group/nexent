@@ -494,6 +494,7 @@ class FileCleanseReleased(FileCleanseLookup):
 
 
 class KnowledgeOperation(str, Enum):
+    APPEND_DOCUMENTS = '/internal/agentos/v1/knowledge/documents/append'
     INSPECT_CHUNK = '/internal/agentos/v1/knowledge/chunks/inspect'
     MUTATE_CHUNK = '/internal/agentos/v1/knowledge/chunks/mutate'
     INSPECT_BASE = '/internal/agentos/v1/knowledge/bases/state'

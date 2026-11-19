@@ -65,6 +65,7 @@ from contracts.knowledge_chunk_mutation import (
     ChunkMutationState,
     ChunkMutationTarget,
 )
+from contracts.knowledge_documents import KnowledgeDocumentsAppended
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -138,6 +139,9 @@ class AgentOSClient:
 
     async def mutate_knowledge_chunk(self, payload, user_id, tenant_id):
         return await self._knowledge_request(KnowledgeOperation.MUTATE_CHUNK, payload, user_id, tenant_id, ChunkMutationState)
+
+    async def append_knowledge_documents(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.APPEND_DOCUMENTS, payload, user_id, tenant_id, KnowledgeDocumentsAppended)
 
     async def inspect_knowledge_chunk(self, payload, user_id, tenant_id):
         return await self._record_json(KnowledgeOperation.INSPECT_CHUNK, payload, user_id, tenant_id, ChunkMutationTarget)
