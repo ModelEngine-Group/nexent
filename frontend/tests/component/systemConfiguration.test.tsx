@@ -348,3 +348,24 @@ test("shows a retryable query error without demo content", async () => {
   expect(screen.queryByText("systemConfig.demoBadge")).not.toBeInTheDocument();
   expect(screen.queryByTestId("config-summary")).not.toBeInTheDocument();
 });
+
+test("confirms before history navigation with unsaved changes", async () => {
+  const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
+  renderPage();
+
+  const input = await screen.findByLabelText(
+    "systemConfig.param.MAX_TENANT_COUNT.label"
+  );
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  expect(confirmation).not.toHaveBeenCalled();
+
+  fireEvent.change(input, { target: { value: "5" } });
+  window.dispatchEvent(new PopStateEvent("popstate"));
+
+  await waitFor(() =>
+    expect(confirmation).toHaveBeenCalledWith("systemConfig.leaveWarning")
+  );
+  confirmation.mockRestore();
+});
+
+

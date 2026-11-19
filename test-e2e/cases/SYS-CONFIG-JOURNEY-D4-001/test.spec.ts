@@ -396,6 +396,21 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
         ),
       )
       .toBe(1);
+    await expect(page).toHaveURL(/\/zh\/ops\/configuration$/);
+    await expect(input).toHaveValue("10");
+    await page.goBack();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __systemConfigLeaveWarnings?: string[];
+              }
+            ).__systemConfigLeaveWarnings?.length,
+        ),
+      )
+      .toBe(2);
     leaveWarnings.push(
       ...(await page.evaluate(
         () =>
@@ -432,7 +447,10 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByRole("spinbutton", { name: "租户数量上限", exact: true }),
     ).toHaveValue("10");
-    expect(leaveWarnings).toEqual(["存在未保存的修改，确定离开当前页面吗？"]);
+    expect(leaveWarnings).toEqual([
+      "存在未保存的修改，确定离开当前页面吗？",
+      "存在未保存的修改，确定离开当前页面吗？",
+    ]);
     await expect(page.getByText("全部已生效", { exact: true })).toHaveCount(0);
   });
 });
