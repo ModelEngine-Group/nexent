@@ -41,10 +41,10 @@ def _identity(hit):
     return hit.key.collection, hit.key.key, hit.generation.value if hit.generation else ""
 
 
-def rank_candidates(lexical, semantic, mode, query):
+def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None):
     if mode != "hybrid":
         return sorted(lexical if mode == "accurate" else semantic, key=lambda h: (-h.score, _identity(h)))
-    weight = 0.7 if any(char.isdigit() for char in query) else 0.3
+    weight = weight_accurate if weight_accurate is not None else (0.7 if any(char.isdigit() for char in query) else 0.3)
     maxima = [max((hit.score for hit in branch), default=1) for branch in (lexical, semantic)]
     merged = {}
     for branch, maximum, factor, name in zip((lexical, semantic), maxima, (weight, 1 - weight), ("accurate", "semantic"), strict=True):
@@ -229,7 +229,8 @@ class KnowledgeSearchService:
                     lexical, semantic = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
                     lexical = await self._blocking(self._visible, records, grant, request, lexical, views, False, context=context)
                     semantic = await self._blocking(self._visible, records, grant, request, semantic, views, True, context=context)
-                    candidates = rank_candidates(lexical, semantic, request.search_mode, request.query)[:limit]
+                    candidates = rank_candidates(lexical, semantic, request.search_mode, request.query,
+                                                 weight_accurate=request.weight_accurate)[:limit]
                     if request.rerank_model and candidates:
                         output = await self._invoke(RerankInvocation(
                             model_id=request.rerank_model.model_id, expected_revision=request.rerank_model.revision,

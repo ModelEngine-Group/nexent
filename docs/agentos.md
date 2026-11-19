@@ -315,6 +315,8 @@ KnowledgeSearchGrant 中每个 KB 必须返回 resource_tenant_id。Management �
 
 资源修订不包含展示名称，模型绑定、租户和权限等原修订字段保持。历史旧索引、旧 documents/search_hybrid 及其他存储旁路仍需按退役 SPEC 迁移，最终镜像和完整部署验收继续待完成。
 
+KnowledgeBase.search 的内部请求可传 weight_accurate，范围为 0 到 1，0 与 1 均有效。hybrid 使用此值融合归一化分数；未传时仍按原工具规则，普通查询为 0.3，含数字查询为 0.7。accurate 和 semantic 保持各自原始分数。旧公开 REST 搜索仍待迁移，迁移时应显式传入其既有默认值，普通查询为 0.5，含数字查询为 0.7。
+
 ### KnowledgeBase 已登记文件清单
 
 `KnowledgeBase.inspect` 的内部路径为 `/internal/agentos/v1/knowledge/bases/state`，客户端方法为 `inspect_knowledge_base`。请求 `KnowledgeBaseInspect` 固定 `knowledge_id` 和当前授权的 `expected_revision`，`page_size` 范围为1至1000，后续页原样传回 `cursor`。它与已有 `File.inspect`、删除协调状态查询分别服务不同场景。

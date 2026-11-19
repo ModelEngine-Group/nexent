@@ -224,6 +224,7 @@ class KnowledgeSearchGrant(Contract):
 class KnowledgeSearch(KnowledgeSearchAuthorization):
     query: str = Field(min_length=1)
     search_mode: Literal["accurate", "semantic", "hybrid"] = "semantic"
+    weight_accurate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
