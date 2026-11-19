@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Describe authorized physical collections without model, write or body access."""
+"""Describe authorized physical collections without inference, writes or body access."""
 
 import asyncio
 import logging
@@ -14,12 +14,15 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionsDescribe,
     KnowledgeCollectionsDescribed,
     KnowledgeCollectionsGrant,
+    KnowledgeModelDisplay,
 )
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
+    CapabilityUnsupported,
     Conflict,
     DeadlineExceeded,
     InvalidInput,
+    NotFound,
     ScopeDenied,
     Unavailable,
 )
@@ -31,6 +34,7 @@ from nexent.storage.models import (
 )
 from pydantic import ValidationError
 from runtime.knowledge_base.worker import cancellable_context
+from runtime.model.display import knowledge_model_display
 
 from infrastructure.knowledge_collection_metadata import (
     collection_metadata_vector_ports,
@@ -39,6 +43,8 @@ from infrastructure.knowledge_collection_metadata import (
 logger = logging.getLogger(__name__)
 SUMMARY_FIELDS = tuple(VectorSummaryField(name, (('location', 'nexent_public_chunk_v1', field), ('location', field)))
     for name, field in (('source', 'path_or_url'), ('processor', 'process_source'), ('model', 'embedding_model_name')))
+STATISTICS_ERRORS = {Unavailable: 'unavailable', Conflict: 'conflict', NotFound: 'not_found',
+                     CapabilityUnsupported: 'unsupported', InvalidInput: 'invalid_input'}
 
 
 def _metrics(result, collection, context):
@@ -58,10 +64,11 @@ def _metrics(result, collection, context):
 
 
 class KnowledgeCollectionMetadataService:
-    def __init__(self, client, *, ports=collection_metadata_vector_ports, operation_seconds=30):
+    def __init__(self, client, *, ports=collection_metadata_vector_ports, display=knowledge_model_display, operation_seconds=30):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
             raise InvalidInput()
         self.client, self.ports, self.seconds = client, ports, operation_seconds
+        self.display = display
 
     async def _grant(self, request, actor):
         grant = await self.client.authorize_collection_metadata(KnowledgeCollectionsAuthorization(
@@ -96,8 +103,16 @@ class KnowledgeCollectionMetadataService:
                         raise Unavailable(operation_id=context.operation_id)
                     values.update(dimensions=info.dimensions, metric=info.metric)
                     if request.include_statistics:
-                        values['statistics'] = _metrics(vectors.statistics(resource.collection, SUMMARY_FIELDS,
-                                                                          context=context), resource.collection, context)
+                        try:
+                            values['statistics'] = _metrics(vectors.statistics(resource.collection, SUMMARY_FIELDS,
+                                                                              context=context), resource.collection, context)
+                        except tuple(STATISTICS_ERRORS) as error:
+                            values['statistics_error'] = next(code for kind, code in STATISTICS_ERRORS.items()
+                                                             if isinstance(error, kind))
+                        display = self.display(actor, resource, context=context)
+                        if not isinstance(display, KnowledgeModelDisplay):
+                            raise Unavailable(operation_id=context.operation_id)
+                        values['model_display'] = display
                 try:
                     result.append(KnowledgeCollectionDescription(knowledge_id=key, expected_revision=resource.revision,
                                                                 present=present, **values))

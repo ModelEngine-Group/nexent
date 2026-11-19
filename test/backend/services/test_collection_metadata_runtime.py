@@ -12,8 +12,17 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionGrant,
     KnowledgeCollectionsDescribe,
     KnowledgeCollectionsGrant,
+    KnowledgeModelDisplay,
 )
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied, Unavailable
+from nexent.storage.errors import (
+    CapabilityUnsupported,
+    Conflict,
+    DeadlineExceeded,
+    InvalidInput,
+    NotFound,
+    ScopeDenied,
+    Unavailable,
+)
 from nexent.storage.models import (
     OperationContext,
     VectorCollectionInfo,
@@ -59,7 +68,8 @@ def boundary(mocker):
         return action(*args, **kwargs)
 
     worker = mocker.patch.object(module, 'run_blocking', side_effect=blocking)
-    service = module.KnowledgeCollectionMetadataService(client, ports=ports)
+    display = Mock(return_value=KnowledgeModelDisplay(display_name='Authorized', is_multimodal=True))
+    service = module.KnowledgeCollectionMetadataService(client, ports=ports, display=display)
     request = KnowledgeCollectionsDescribe(knowledge_ids=[2, 1], expected_revisions={1: 'a' * 64, 2: 'b' * 64})
     return SimpleNamespace(**locals())
 
@@ -81,6 +91,7 @@ async def test_batch_preserves_order_empty_model_and_only_two_authorization_roun
     assert s.worker.await_count == 1
     for port in s.vectors.values():
         port.statistics.assert_not_called()
+    s.display.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -94,6 +105,10 @@ async def test_statistics_uses_finite_neutral_summaries(boundary):
     fields = s.vectors[2].statistics.call_args.args[1]
     assert [field.name for field in fields] == ['source', 'processor', 'model']
     assert fields[0].paths == (('location', 'nexent_public_chunk_v1', 'path_or_url'), ('location', 'path_or_url'))
+    assert result.items[0].model_display.display_name == 'Authorized'
+    assert s.display.call_count == 2
+    assert s.display.call_args_list[0].args == (s.actor, s.grants.knowledge_bases[1])
+    assert s.display.call_args_list[0].kwargs['context'] is s.contexts[0]
 
 
 @pytest.mark.asyncio
@@ -126,7 +141,7 @@ async def test_reauthorization_failure_never_returns_partial_results(boundary):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('phase', ['exists', 'scope', 'describe', 'stats'])
+@pytest.mark.parametrize('phase', ['exists', 'scope', 'describe'])
 async def test_invalid_or_unavailable_provider_response_stops_the_batch(boundary, phase):
     s = boundary
     if phase == 'exists':
@@ -135,12 +150,57 @@ async def test_invalid_or_unavailable_provider_response_stops_the_batch(boundary
         s.vectors[2].scope.actor_id = 'other'
     elif phase == 'describe':
         s.vectors[2].describe_collection.return_value = VectorCollectionInfo('wrong', 3, 'cosine')
-    else:
-        s.request.include_statistics = True
-        s.vectors[2].statistics.return_value = VectorCollectionStatistics('two', -1, 0, 0, 0, 0, ())
     with pytest.raises(ScopeDenied if phase == 'scope' else Unavailable):
         await invoke(s)
     assert s.opened == s.closed == [2] and s.client.authorize_collection_metadata.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('error,code', [(Unavailable(), 'unavailable'), (Conflict(), 'conflict'),
+    (NotFound(), 'not_found'), (CapabilityUnsupported(), 'unsupported'), (InvalidInput(), 'invalid_input')])
+async def test_optional_statistics_failure_preserves_each_item_and_model_display(boundary, error, code):
+    s = boundary
+    s.request.include_statistics = True
+    s.vectors[2].statistics.side_effect = error
+    result = await invoke(s)
+    failed, healthy = result.items
+    assert failed.present and failed.statistics is None and failed.statistics_error == code
+    assert failed.model_display.display_name == 'Authorized'
+    assert healthy.statistics.record_count == 4 and healthy.statistics_error is None
+    assert s.opened == s.closed == [2, 1] and s.client.authorize_collection_metadata.await_count == 2
+    assert s.vectors[2].statistics.call_count == 1 and s.display.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_statistics_is_reported_without_zero_values(boundary):
+    s = boundary
+    s.request.include_statistics = True
+    s.vectors[2].statistics.return_value = VectorCollectionStatistics('two', -1, 0, 0, 0, 0, ())
+    result = await invoke(s)
+    assert result.items[0].statistics is None and result.items[0].statistics_error == 'unavailable'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('error', [DeadlineExceeded(), ScopeDenied(), asyncio.CancelledError()])
+async def test_optional_statistics_never_hides_deadline_scope_or_cancellation(boundary, error):
+    s = boundary
+    s.request.include_statistics = True
+    s.vectors[2].statistics.side_effect = error
+    with pytest.raises(type(error)):
+        await invoke(s)
+    assert s.opened == s.closed == [2]
+    s.display.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_revocation_after_optional_statistics_error_still_rejects_everything(boundary):
+    s = boundary
+    s.request.include_statistics = True
+    s.vectors[2].statistics.side_effect = Unavailable()
+    s.client.authorize_collection_metadata.side_effect = [s.grants, ScopeDenied()]
+    with pytest.raises(ScopeDenied):
+        await invoke(s)
+    assert s.opened == s.closed == [2, 1]
 
 
 @pytest.mark.asyncio

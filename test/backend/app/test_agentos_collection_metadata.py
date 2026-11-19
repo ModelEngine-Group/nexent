@@ -14,10 +14,12 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionDescription,
     KnowledgeCollectionEnsure,
     KnowledgeCollectionGrant,
+    KnowledgeCollectionMetrics,
     KnowledgeCollectionsAuthorization,
     KnowledgeCollectionsDescribe,
     KnowledgeCollectionsDescribed,
     KnowledgeCollectionsGrant,
+    KnowledgeModelDisplay,
 )
 from fastapi import FastAPI
 from management.api.knowledge_base.agentos_authorization import (
@@ -78,6 +80,22 @@ def test_batch_contract_rejects_incomplete_or_provider_specific_inputs(change):
 def test_absence_cannot_carry_statistics_or_dimensions():
     with pytest.raises(ValidationError):
         KnowledgeCollectionDescription(knowledge_id=1, expected_revision='a' * 64, present=False, dimensions=3)
+
+
+def test_statistics_error_and_display_contracts_never_carry_provider_details():
+    metrics = KnowledgeCollectionMetrics(record_count=1, size_bytes=10, created_at_ms=100, query_count=0,
+        cache_hit_count=0, source_count=1, process_source='Clean', embedding_model_name='repo/embed')
+    with pytest.raises(ValidationError, match='mutually exclusive'):
+        KnowledgeCollectionDescription(knowledge_id=1, expected_revision='a' * 64, present=True,
+            metric='cosine', statistics=metrics, statistics_error='unavailable')
+    with pytest.raises(ValidationError):
+        KnowledgeModelDisplay(display_name='Visible', api_key='secret')
+    with pytest.raises(ValidationError):
+        KnowledgeCollectionDescription(knowledge_id=1, expected_revision='a' * 64, present=True,
+            metric='cosine', statistics_error='provider url or exception text')
+    with pytest.raises(ValidationError):
+        KnowledgeCollectionDescription(knowledge_id=1, expected_revision='a' * 64, present=False,
+            model_display=KnowledgeModelDisplay())
 
 
 @pytest.mark.asyncio

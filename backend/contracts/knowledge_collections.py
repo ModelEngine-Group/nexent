@@ -91,18 +91,27 @@ class KnowledgeCollectionMetrics(Contract):
     embedding_model_name: str = Field(max_length=32766)
 
 
+class KnowledgeModelDisplay(Contract):
+    display_name: str | None = ''
+    is_multimodal: bool = False
+
+
 class KnowledgeCollectionDescription(KnowledgeCollectionLookup):
     present: bool
     dimensions: int | None = Field(default=None, gt=0, le=2**31 - 1)
     metric: Literal['cosine'] | None = None
     statistics: KnowledgeCollectionMetrics | None = None
+    statistics_error: Literal['unavailable', 'conflict', 'not_found', 'unsupported', 'invalid_input'] | None = None
+    model_display: KnowledgeModelDisplay | None = None
 
     @model_validator(mode='after')
     def confirmed_presence(self):
         if self.present and self.metric != 'cosine' or not self.present and any(
-            value is not None for value in (self.dimensions, self.metric, self.statistics)
+            value is not None for value in (self.dimensions, self.metric, self.statistics, self.statistics_error, self.model_display)
         ):
             raise ValueError('Collection metadata must match confirmed presence')
+        if self.statistics is not None and self.statistics_error is not None:
+            raise ValueError('Statistics and their failure are mutually exclusive')
         return self
 
 
