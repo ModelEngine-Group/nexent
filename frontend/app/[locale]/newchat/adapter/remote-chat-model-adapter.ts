@@ -23,6 +23,7 @@ import type {
 } from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
+import { clearCachedAssignmentsByResource } from "@/services/tagAssignmentCache";
 import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDraft";
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
@@ -2421,6 +2422,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       if (event.agent_id !== Number(nl2AgentId)) return;
+      if (
+        event.event === "agent_draft_fields_saved" &&
+        event.updated_fields.includes("tags")
+      ) {
+        clearCachedAssignmentsByResource("agent", String(event.agent_id));
+      }
       workflowStates = recordNl2AgentState(workflowStates, event);
       const eventKey = JSON.stringify(event);
       if (event.event !== "agent_draft_fields_saved") {
