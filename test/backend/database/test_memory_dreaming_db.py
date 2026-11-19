@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from management.db.memory import dreaming as memory_dreaming_db
-from management.db.models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryDreamingSchedule, MemoryLongTermVersion
+from management.db.models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryDreamingSchedule, MemoryLongTermVersion, MemoryUserConfig
 
 
 def _mock_session(monkeypatch):
@@ -129,6 +129,8 @@ def test_ac037_upsert_schedule_replaces_soft_deleted_row(monkeypatch):
     ) = old_row
 
     def capture_add(row):
+        if not isinstance(row, MemoryDreamingSchedule):
+            return
         row.schedule_id = 3
         row.fire_count = 0
         row.last_fire_at = None
@@ -155,7 +157,7 @@ def test_ac037_upsert_schedule_replaces_soft_deleted_row(monkeypatch):
     assert result["fire_count"] == 0
     assert result["last_fire_at"] is None
     session.delete.assert_called_once_with(old_row)
-    session.add.assert_called_once()
+    assert sum(isinstance(call.args[0], MemoryDreamingSchedule) for call in session.add.call_args_list) == 1
     assert session.flush.call_count == 2
 
 
@@ -183,7 +185,10 @@ def test_ac078_schedule_reads_thresholds_and_next_fire(monkeypatch):
     )
     query = MagicMock()
     query.filter.return_value = query
-    query.first.side_effect = [row, row, None]
+    query.first.return_value = row
+    values = {key: getattr(row, key) for key in memory_dreaming_db._DREAMING_PARAMETER_TYPES}
+    query.all.return_value = [MemoryUserConfig(config_key="DREAMING_" + key.upper(), config_value=str(value))
+                              for key, value in values.items()]
     session.query.return_value = query
 
     assert memory_dreaming_db.get_schedule("t", "u", "__user__")["min_score"] == 0.8
@@ -193,6 +198,7 @@ def test_ac078_schedule_reads_thresholds_and_next_fire(monkeypatch):
         "long_term_length_tolerance_percent": 0,
         "summarization_max_attempts": 2,
     }
+    query.all.return_value = []
     assert memory_dreaming_db.get_thresholds("t", "u", "__user__") is None
 
     future = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -209,7 +215,7 @@ def test_ac078_all_unset_thresholds_return_none(monkeypatch):
         source_limit=None, long_term_max_chars=None, long_term_length_tolerance_percent=None,
         summarization_max_attempts=None,
     )
-    session.query.return_value.filter.return_value.first.return_value = row
+    session.query.return_value.filter.return_value.all.return_value = []
     assert memory_dreaming_db.get_thresholds("t", "u", "__user__") is None
 
 
@@ -491,13 +497,30 @@ def test_list_audits_none_datetime_fields(monkeypatch):
 def test_ac007_upsert_preserves_omitted_tolerance_and_honors_zero_and_reset(monkeypatch):
     session = _mock_session(monkeypatch)
     row = MemoryDreamingSchedule(
-        tenant_id="t", user_id="u", agent_id="__user__", long_term_length_tolerance_percent=7,
+        tenant_id="t", user_id="u", agent_id="__user__", long_term_length_tolerance_percent=9,
     )
-    session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
+    rows = {"DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT": MemoryUserConfig(
+        user_id="u", value_type="single", config_key="DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT",
+        config_value="7",
+    )}
+    schedule_query = MagicMock()
+    schedule_query.filter.return_value.with_for_update.return_value.first.return_value = row
+
+    def config_query(*filters):
+        key = next((item.right.value for item in filters if str(item.left).endswith("config_key")), None)
+        query = MagicMock()
+        query.first.return_value = rows.get(key) if isinstance(key, str) else None
+        query.all.return_value = list(rows.values())
+        return query
+
+    configs = MagicMock()
+    configs.filter.side_effect = config_query
+    session.query.side_effect = lambda model: schedule_query if model is MemoryDreamingSchedule else configs
+    session.add.side_effect = lambda item: rows.update({item.config_key: item})
     settings = dict(
         enabled=False, rule_type="CRON", timezone_name="Asia/Shanghai",
         start_at=datetime(2026, 1, 1), cron_expr="0 3 * * *",
-        interval_seconds=None, next_fire_at=None, actor_user_id="u",
+        interval_seconds=None, next_fire_at=None, actor_user_id="admin",
     )
 
     for update, expected in (
@@ -507,4 +530,11 @@ def test_ac007_upsert_preserves_omitted_tolerance_and_honors_zero_and_reset(monk
     ):
         schedule = memory_dreaming_db.upsert_schedule("t", "u", "__user__", **settings, **update)
         assert schedule["long_term_length_tolerance_percent"] == expected
-        assert row.long_term_length_tolerance_percent == expected
+        assert row.long_term_length_tolerance_percent == 9
+        config = rows["DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT"]
+        assert config.config_value == (str(expected) if expected is not None else None)
+        assert memory_dreaming_db.get_thresholds("t", "u", "__user__") == (
+            dict.fromkeys(memory_dreaming_db._DREAMING_PARAMETER_TYPES) |
+            {"long_term_length_tolerance_percent": expected} if expected is not None else None
+        )
+    assert config.updated_by == "admin"

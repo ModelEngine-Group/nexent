@@ -183,9 +183,14 @@ def test_ac033_schedule_defaults_disabled(monkeypatch):
         memory_dreaming_app.memory_dreaming_db, "get_schedule", lambda *_args: None
     )
 
+    monkeypatch.setattr(
+        memory_dreaming_app.memory_dreaming_db, "get_thresholds",
+        lambda *_args: {"long_term_length_tolerance_percent": 0},
+    )
     result = memory_dreaming_app.get_dreaming_schedule(
         agent_id="agent-1", authorization="Bearer token"
     )
+    assert result["long_term_length_tolerance_percent"] == 0
 
     assert result["enabled"] is False
     assert result["cron_expr"] == "0 3 * * *"

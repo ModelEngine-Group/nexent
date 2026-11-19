@@ -115,6 +115,7 @@ def get_dreaming_schedule(
         "long_term_max_chars": None,
         "long_term_length_tolerance_percent": None,
         "summarization_max_attempts": None,
+        **(memory_dreaming_db.get_thresholds(tenant_id, user_id, USER_DREAMING_SCOPE) or {}),
     }
 
 
