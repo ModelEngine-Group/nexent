@@ -1,6 +1,6 @@
 -- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
--- v2.8.5_002_dreaming_user_config.sql copies the parameters before this cleanup.
+-- v2.9.0_013_dreaming_user_config.sql copies the parameters before this cleanup.
 ALTER TABLE nexent.memory_dreaming_schedule_t
     DROP CONSTRAINT IF EXISTS ck_memory_dreaming_length_tolerance,
     DROP COLUMN IF EXISTS min_score,
