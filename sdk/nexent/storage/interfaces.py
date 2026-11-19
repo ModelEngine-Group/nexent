@@ -29,8 +29,10 @@ from .models import (
     SearchQuery,
     StorageScope,
     VectorCollectionInfo,
+    VectorCollectionStatistics,
     VectorKey,
     VectorRecord,
+    VectorSummaryField,
     WriteReceipt,
 )
 from .queue import WorkQueue
@@ -169,6 +171,11 @@ class VectorStore(StoragePort, Protocol):
     def ensure_collection(self, collection: str, *, context: OperationContext) -> VectorCollectionInfo: ...
 
     def describe_collection(self, collection: str, *, context: OperationContext) -> VectorCollectionInfo: ...
+
+    def statistics(self, collection: str, fields: tuple[VectorSummaryField, ...] = (),
+                   *, context: OperationContext) -> VectorCollectionStatistics:
+        """Read physical collection metrics and bounded scalar payload summaries."""
+        ...
 
     def upsert(self, records: tuple[VectorRecord, ...], *, context: OperationContext) -> tuple[WriteReceipt, ...]: ...
 

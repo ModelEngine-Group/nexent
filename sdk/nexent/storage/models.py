@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Neutral values shared by storage consumers and Infrastructure adapters."""
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from math import isfinite
@@ -256,6 +257,45 @@ class VectorCollectionInfo:
     collection: str
     dimensions: int | None
     metric: str
+
+
+@dataclass(frozen=True)
+class VectorSummaryField:
+    """Select the first present scalar payload path, without a provider expression."""
+
+    name: str
+    paths: tuple[tuple[str, ...], ...]
+
+    def __post_init__(self):
+        def identifier(value):
+            return isinstance(value, str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}', value)
+
+        if (not identifier(self.name) or not isinstance(self.paths, (tuple, list))
+            or not 1 <= len(self.paths) <= 4 or any(not isinstance(path, (tuple, list))
+                or not 1 <= len(path) <= 8 or any(not identifier(part) for part in path) for path in self.paths)):
+            raise InvalidInput()
+        paths = tuple(tuple(path) for path in self.paths)
+        if len(set(paths)) != len(paths):
+            raise InvalidInput()
+        object.__setattr__(self, 'paths', paths)
+
+
+@dataclass(frozen=True)
+class VectorFieldStatistics:
+    name: str
+    distinct_count: int
+    top_values: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VectorCollectionStatistics:
+    collection: str
+    record_count: int
+    size_bytes: int
+    created_at_ms: int
+    query_count: int
+    cache_hit_count: int
+    summaries: tuple[VectorFieldStatistics, ...] = ()
 
 
 @dataclass(frozen=True)

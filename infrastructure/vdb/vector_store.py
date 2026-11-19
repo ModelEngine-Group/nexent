@@ -92,6 +92,8 @@ class ElasticsearchVectorStore:
             self.capabilities = CapabilitySet(self.capabilities.supported | {
                 "vector.put", "vector.collection.ensure", "vector.collection.describe",
             })
+        if any(binding.owns_collection for binding in bindings):
+            self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.statistics'})
         if any(binding.owns_collection and binding.writable for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {'vector.collection.delete-empty'})
         if any(binding.writable and binding.mutable_fields for binding in bindings):
@@ -199,6 +201,11 @@ class ElasticsearchVectorStore:
                     or embedding.get("similarity", "cosine") != binding.metric):
                     raise Conflict(operation_id=context.operation_id)
         return VectorCollectionInfo(collection, dimensions, binding.metric)
+
+    def statistics(self, collection, fields=(), *, context):
+        from infrastructure.vdb.vector_statistics import collection_statistics
+
+        return collection_statistics(self, collection, fields, context=context)
 
     def collection_exists(self, collection, *, context):
         binding = self._binding(collection, maintenance=True)
