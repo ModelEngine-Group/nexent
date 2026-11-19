@@ -8,7 +8,7 @@ from threading import Event
 from time import monotonic
 from uuid import uuid4
 
-from contracts.knowledge_summary import SUMMARY_DATASET
+from contracts.knowledge_summary import SUMMARY_DATASET, SUMMARY_MODEL_DATASET
 from contracts.roles import has_any_role
 from management.services.knowledge_base.collection_metadata_authorization import (
     metadata_identity,
@@ -42,9 +42,35 @@ from infrastructure.knowledge_summary import summary_ports
 logger = logging.getLogger(__name__)
 
 
+def summary_model_reference(records, context):
+    page = records.query(
+        SUMMARY_MODEL_DATASET, RecordQuery(), PageRequest(limit=2), context=context
+    )
+    if len(page.items) > 1 or page.next_cursor:
+        raise Conflict()
+    return page.items[0]["config_value"] if page.items else None
+
+
 class SummaryMetadata:
     def __init__(self, *, ports=summary_ports, identities=collection_metadata_ports):
         self.ports, self.identities = ports, identities
+
+    def _identity(self, actor, context):
+        context.remaining()
+        with self.identities(actor, context=context) as (identity, permissions, _):
+            metadata_identity(
+                identity, permissions, actor, "resources", context=context
+            )
+
+    def default_model(self, actor, *, context):
+        self._identity(actor, context)
+        with self.ports(
+            actor.tenant_id, actor.user_id, context=context, models=True
+        ) as (records, _):
+            self._scope(records, actor.tenant_id, actor)
+            value = summary_model_reference(records, context)
+        self._identity(actor, context)
+        return int(value) if value else None
 
     def _resolve(self, index_name, actor, target_tenant, *, edit, context):
         context.remaining()
@@ -77,7 +103,7 @@ class SummaryMetadata:
             return row["knowledge_id"], row["tenant_id"]
 
     @staticmethod
-    def _row(records, key, tenant, index_name, actor, context):
+    def _scope(records, tenant, actor):
         scope = records.scope
         if (
             scope.system
@@ -87,6 +113,10 @@ class SummaryMetadata:
             or scope.actor_id != actor.user_id
         ):
             raise ScopeDenied()
+
+    @staticmethod
+    def _row(records, key, tenant, index_name, actor, context):
+        SummaryMetadata._scope(records, tenant, actor)
         row = records.get(SUMMARY_DATASET, key, context=context)
         if row is None:
             raise NotFound()
@@ -188,6 +218,14 @@ async def read_summary(index_name, actor, *, target_tenant=None, context=None):
         lambda ctx: SummaryMetadata().read(
             index_name, actor, target_tenant=target_tenant, context=ctx
         ),
+        context=context,
+    )
+
+
+async def read_default_summary_model(actor, *, context=None):
+    return await run_summary_metadata(
+        "default-model",
+        lambda ctx: SummaryMetadata().default_model(actor, context=ctx),
         context=context,
     )
 

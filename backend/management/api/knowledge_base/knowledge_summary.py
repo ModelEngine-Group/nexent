@@ -6,17 +6,16 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
-from nexent.storage.errors import DeadlineExceeded, NotFound, ScopeDenied
+from nexent.storage.errors import Conflict, DeadlineExceeded, NotFound, OperationCancelled, ScopeDenied
 
 from contracts.knowledge import ChangeSummaryRequest, VectorDatabaseType
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, TokenExpiredError
 from permissions.models import CurrentUser
 from permissions.resource_access import resource_read_tenant
-from management.services.knowledge_base.summary_metadata import read_summary, update_summary
+from management.services.knowledge_base.summary_metadata import read_default_summary_model, read_summary, update_summary
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.knowledge_base.summary_service import KnowledgeSummaryService
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info, authenticate
-from management.services.configuration.tenant.settings import tenant_config_manager
 
 router = APIRouter(prefix="/summary")
 logger = logging.getLogger("knowledge_summary_app")
@@ -54,13 +53,13 @@ async def auto_summary(
         # Get model_id from tenant config if not provided
         if model_id is None and tenant_id:
             try:
-                tenant_config = tenant_config_manager.load_config(tenant_id)
-                model_id_str = tenant_config.get("LLM_ID")
-                if model_id_str:
-                    model_id = int(model_id_str)
+                model_id = await read_default_summary_model(ServicePrincipal(user_id, tenant_id))
+                if model_id is not None:
                     logger.info(f"Using LLM_ID {model_id} from tenant config for auto-summary")
                 else:
                     logger.warning(f"No LLM_ID configured for tenant {tenant_id}, summary may be placeholder")
+            except (Conflict, DeadlineExceeded, OperationCancelled, ScopeDenied):
+                raise
             except Exception as e:
                 logger.warning(f"Failed to get LLM_ID from tenant config: {e}")
 

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.knowledge_summary import SUMMARY_DATASET
+from contracts.knowledge_summary import SUMMARY_DATASET, SUMMARY_MODEL_DATASET
 from management.services.knowledge_base import summary_metadata as module
 from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown, ScopeDenied
 from nexent.storage.models import OperationContext, StorageScope, WriteOutcome
@@ -17,6 +17,7 @@ from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.knowledge_collection_metadata import bind_collection_metadata
 from infrastructure.rdb.knowledge_deletion_metadata import knowledge
 from infrastructure.rdb.knowledge_summary import bind_summary_records
+from infrastructure.rdb.tenant_config_record import TenantConfig
 
 
 @pytest.fixture
@@ -28,6 +29,7 @@ def storage(mocker):
         execution_options={"schema_translate_map": {"nexent": None}},
     )
     knowledge.create(engine)
+    TenantConfig.__table__.create(engine)
     actor = ServicePrincipal("reader", "tenant-a")
     roles, groups, opened = ["DEV"], [5], []
     identity = mocker.patch.object(
@@ -57,10 +59,18 @@ def storage(mocker):
                 port.close()
 
     @contextmanager
-    def ports(tenant, user, *, context):
+    def ports(tenant, user, *, context, models=False):
         assert user == actor.user_id
         port = bind_summary_records(
-            StorageScope("management", tenant, user, {SUMMARY_DATASET}), engine
+            StorageScope(
+                "management",
+                tenant,
+                user,
+                {SUMMARY_DATASET, SUMMARY_MODEL_DATASET}
+                if models
+                else {SUMMARY_DATASET},
+            ),
+            engine,
         )
         opened.append(port.scope)
         try:

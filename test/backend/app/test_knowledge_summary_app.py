@@ -187,6 +187,12 @@ def test_permission_utils_maps_permission_error_to_403(monkeypatch):
     assert exc_info.value.detail == "No permission to modify this knowledge base"
 
 
+@pytest.fixture(autouse=True)
+def default_model_boundary(monkeypatch):
+    from management.api.knowledge_base import knowledge_summary as module
+    monkeypatch.setattr(module, 'read_default_summary_model', AsyncMock(return_value=None))
+
+
 class TestAutoSummary:
     """Test auto summary generation endpoint"""
 
@@ -279,7 +285,7 @@ class TestAutoSummary:
 
     @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
+    @patch('management.api.knowledge_base.knowledge_summary.read_default_summary_model')
     def test_auto_summary_uses_tenant_llm_id(
         self, mock_config_manager, mock_user_info, mock_service_class, test_data
     ):
@@ -288,9 +294,7 @@ class TestAutoSummary:
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
 
-        mock_config = MagicMock()
-        mock_config.get.return_value = "5"
-        mock_config_manager.load_config.return_value = mock_config
+        mock_config_manager.return_value = 5
 
         mock_service_instance = MagicMock()
         mock_service_instance.generate = AsyncMock(return_value="summary")
@@ -302,14 +306,16 @@ class TestAutoSummary:
         )
 
         assert response.status_code == 200
-        mock_config_manager.load_config.assert_called_once_with("test_tenant_id")
+        assert mock_config_manager.await_count == 1
+        actor = mock_config_manager.await_args.args[0]
+        assert (actor.user_id, actor.tenant_id) == ('test_user_id', 'test_tenant_id')
 
         call_kwargs = mock_service_instance.generate.call_args.kwargs
         assert call_kwargs['model_id'] == 5
 
     @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
+    @patch('management.api.knowledge_base.knowledge_summary.read_default_summary_model')
     def test_auto_summary_tenant_config_no_llm_id(
         self, mock_config_manager, mock_user_info, mock_service_class, test_data
     ):
@@ -318,9 +324,7 @@ class TestAutoSummary:
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
 
-        mock_config = MagicMock()
-        mock_config.get.return_value = None
-        mock_config_manager.load_config.return_value = mock_config
+        mock_config_manager.return_value = None
 
         mock_service_instance = MagicMock()
         mock_service_instance.generate = AsyncMock(return_value="summary")
@@ -337,7 +341,7 @@ class TestAutoSummary:
 
     @patch('management.api.knowledge_base.knowledge_summary.KnowledgeSummaryService')
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
-    @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
+    @patch('management.api.knowledge_base.knowledge_summary.read_default_summary_model')
     def test_auto_summary_tenant_config_exception(
         self, mock_config_manager, mock_user_info, mock_service_class, test_data
     ):
@@ -346,7 +350,7 @@ class TestAutoSummary:
         mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
         mock_user_info.return_value = mock_user_info_value
 
-        mock_config_manager.load_config.side_effect = Exception("Config error")
+        mock_config_manager.side_effect = Exception("Config error")
 
         mock_service_instance = MagicMock()
         mock_service_instance.generate = AsyncMock(return_value="summary")

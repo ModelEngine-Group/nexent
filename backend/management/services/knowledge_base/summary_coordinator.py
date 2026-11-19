@@ -9,7 +9,7 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.constants.constants import FREQUENCY_MAP
-from contracts.knowledge_summary import SUMMARY_MODEL_DATASET
+from management.services.knowledge_base.summary_metadata import summary_model_reference
 from management.services.knowledge_base.summary_service import KnowledgeSummaryService
 from management.services.knowledge_base.summary_settings import (
     authorized_summary_journal,
@@ -22,7 +22,7 @@ from nexent.storage.errors import (
     OutcomeUnknown,
     ScopeDenied,
 )
-from nexent.storage.models import OperationContext, PageRequest, RecordQuery
+from nexent.storage.models import OperationContext
 
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.knowledge_summary import summary_ports
@@ -51,12 +51,7 @@ def is_due(last_summary_time, frequency, last_doc_update_time, *, now=None):
 
 
 def _model_id(records, context):
-    page = records.query(SUMMARY_MODEL_DATASET, RecordQuery(), PageRequest(limit=2), context=context)
-    if len(page.items) > 1 or page.next_cursor:
-        raise Conflict()
-    if not page.items:
-        return None
-    value = page.items[0]['config_value']
+    value = summary_model_reference(records, context)
     try:
         value = int(value)
     except (TypeError, ValueError):

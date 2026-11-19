@@ -425,4 +425,7 @@ Northbound 在 `management/services/northbound.py` 适配，公开路径与响�
 
 公开手动摘要 GET/POST 和 Agent 装配的摘要读取由 `management.services.knowledge_base.summary_metadata` 负责，使用现有 StorageInterface 记录端口。实际调用者先通过当前账号、成员和群组 DAC，再绑定获准的资源租户。手动更新以一次 CAS 在同一事务写入正文、时间戳和实际审计用户，提交前复查权限；冲突与结果未知显式报错，无自动重试。正常返回字段与提示保持。GET 在限定租户缺失时保持404，未限定缺失时保持原500合同。
 
-Agent 编译只读最终工具白名单内的摘要，在受管 control-io 中共享30秒预算。单项普通读取失败保留原告警继续行为，父截止和取消会中止。旧摘要 ORM 门面与无人调用的随机文档方法已删除。摘要生成仍由 Management 编排，通过既有 AgentOS 样本与 Model.invoke 执行；自动摘要 API 的旧默认配置读取及其他退役事项继续按 SPEC 迁移。
+Agent 编译只读最终工具白名单内的摘要，在受管 control-io 中共享30秒预算。单项普通读取失败保留原告警继续行为，父截止和取消会中止。旧摘要 ORM 门面与无人调用的随机文档方法已删除。摘要生成仍由 Management 编排，通过既有 AgentOS 样本与 Model.invoke 执行；自动摘要 API 的默认配置读取已使用同一 SI 服务，其余退役事项继续按 SPEC 迁移。
+
+
+公开 `auto_summary` 缺少显式 `model_id` 时，通过 Management 的 `read_default_summary_model` 读取当前实际租户的有限 SI `LLM_ID` 投影。当前身份在读取前后复查，根预算30秒。显式模型标识跳过此查询；配置空值、非法值与普通读取异常保持原有None行为。失效身份、重复活动配置及截止/取消中止生成，不添加模型替代或重试。自动调度复用同一有限查询，保留其原正数过滤规则。
