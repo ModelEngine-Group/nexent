@@ -4,7 +4,7 @@
 
 from sqlalchemy import and_, or_, select
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.group import query_group_ids_by_user
 from management.db.skill.models import SkillInfo, SkillInstance
 from contracts.errors.exceptions import ForbiddenError

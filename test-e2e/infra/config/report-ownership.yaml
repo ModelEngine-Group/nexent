@@ -73,6 +73,8 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  SI-STORAGE: system
+  GW-AUTH: system
   AGENT-CORE-CONFIG: agent_config
   JIUWEN-CONTEXT: context
   JIUWEN-MODEL-BRIDGE: runtime
@@ -108,6 +110,7 @@ feature_overrides:
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
   OPS-BOOTSTRAP: system
+  SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
   SAI-001: runtime

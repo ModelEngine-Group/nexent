@@ -69,6 +69,7 @@ function PermissionsProbe() {
     isAuthzReady,
     isAuthorized,
     isLoading,
+    isAuthzPromptModalOpen,
     canAccessRoute,
     refetch,
   } = useAuthorizationContext();
@@ -76,6 +77,7 @@ function PermissionsProbe() {
     <output
       data-testid="permissions"
       data-authorized={isAuthorized}
+      data-denied={isAuthzPromptModalOpen}
       data-workbench={canAccessRoute("/workbench")}
       data-loading={isLoading}
     >
@@ -119,6 +121,45 @@ function pendingRequest() {
   });
   return { promise, resolve, reject };
 }
+test("root resolves a single authorized route without a denial prompt", async () => {
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome();
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() =>
+    expect(state.replace).toHaveBeenCalledWith("/ops/dashboard")
+  );
+  expect(probe).toHaveAttribute("data-denied", "false");
+});
+
+test("OPS admin can open personal profile with only the system configuration grant", async () => {
+  state.pathname = "/zh/users";
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-denied", "false");
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test("OPS user can open the legacy system configuration alias", async () => {
+  state.pathname = "/zh/system-config";
+  const auth = response(["/ops/configuration"]);
+  auth.user.role = USER_ROLES.OPS;
+  auth.user.roles = [USER_ROLES.OPS];
+  state.request.mockResolvedValueOnce(auth);
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  expect(probe).toHaveAttribute("data-denied", "false");
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
 async function retryButton() {
   return screen.findByRole("button", { name: /page.retryAuthorization/ });
 }

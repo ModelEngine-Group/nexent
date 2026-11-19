@@ -30,9 +30,14 @@ def database_owner(monkeypatch):
         else:
             events.append("commit")
 
-    module = ModuleType("management.db.client")
+    @contextmanager
+    def bound_ambient_session(session):
+        yield session
+
+    module = ModuleType("infrastructure.rdb.client")
     module.get_db_session = get_db_session
-    monkeypatch.setitem(sys.modules, "management.db.client", module)
+    module.bound_ambient_session = bound_ambient_session
+    monkeypatch.setitem(sys.modules, "infrastructure.rdb.client", module)
     return events, sessions
 
 

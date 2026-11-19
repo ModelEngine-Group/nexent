@@ -79,6 +79,8 @@ _DIAGNOSTICS = {
     "MODEL_CONTENT_UNSUPPORTED": ("The request contains an unsupported content type.", "请求包含不支持的内容类型。"),
     "MODEL_MESSAGE_INVALID": ("The request message structure is invalid.", "请求消息的结构无效。"),
     "MODEL_REASONING_FORMAT_UNSUPPORTED": ("The configured reasoning parameter format is unsupported.", "不支持所配置的思考参数格式。"),
+    "TEMPERATURE_OUT_OF_RANGE": ("Temperature must be between 0 and 2. Clear it or enter a valid value.", "温度必须在 0 到 2 之间。请清空或输入合法值。"),
+    "TOP_P_OUT_OF_RANGE": ("Top P must be greater than 0 and at most 1. Clear it or enter a valid value.", "Top P 必须大于 0 且不超过 1。请清空或输入合法值。"),
     "MODEL_REQUEST_CONFIGURATION_INVALID": ("The model request configuration is invalid.", "模型请求配置无效。"),
     "MODEL_ROLE_UNSUPPORTED": ("The request contains an unsupported message role.", "请求包含不支持的消息角色。"),
     "MODEL_SNAPSHOT_MISMATCH": ("The request does not match the model configuration snapshot.", "请求与模型配置快照不一致。"),

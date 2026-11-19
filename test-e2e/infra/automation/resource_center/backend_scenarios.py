@@ -21,8 +21,8 @@ from sqlalchemy.orm import sessionmaker
 
 from contracts.review import ReviewDecisionRequest
 from gateway.authentication.auth import generate_session_jwt
+from infrastructure.rdb.client import db_client
 from management.api.repository.reviews import router
-from management.db.client import db_client
 from management.db.models import (
     AgentInfo, AgentRepository, McpMarketRecord, McpRecord, Notification, NotificationReceiver,
     ResourceTagAssignment, TagBucket, TagBucketResourceType, TagDefinition, TagValue,

@@ -1,0 +1,23 @@
+schema_version: '1.0'
+case_id: GW-AUTH-D3-002
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_gateway_exposure_network_boundary
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_gateway_exposure_network_boundary
+  AC-02:
+  - test_gateway_exposure_network_boundary
+  AC-03:
+  - test_gateway_exposure_network_boundary
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Starts local Gateway and separate upstream recording listeners. Authentication
+  is disabled for exposure isolation; GW-AUTH-D3-001 covers signed authentication.
+  No real DB/model proof.

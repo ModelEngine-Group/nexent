@@ -21,6 +21,8 @@ import { useAuthenticationContext } from "@/components/providers/AuthenticationP
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGlobalConfigStore } from "@/stores/global";
 
+const SECTION_ONLY_ROUTES = new Set(["/resource-space", "/agent-dev"]);
+
 /**
  * Homepage main content component
  */
@@ -57,7 +59,9 @@ export default function Homepage() {
       ? "/workbench"
       : canAccessRoute("/newchat")
         ? "/newchat"
-        : accessibleRoutes.find((route) => route !== "/");
+        : accessibleRoutes.find(
+            (route) => route !== "/" && !SECTION_ONLY_ROUTES.has(route)
+          );
 
   useEffect(() => {
     if (isEntryReady && hideHomePage && defaultEntry) {

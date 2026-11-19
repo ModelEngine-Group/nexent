@@ -11,6 +11,9 @@ export interface WorkbenchPinServer {
 export async function prepareWorkbench(page: Page, resourceCount = 1, options: { histories?: Array<Record<string, any>>; reasoning?: boolean; longDescriptions?: boolean; modelEffort?: string; agentEffort?: string; pinServer?: WorkbenchPinServer; samplingDefaults?: {temperature:number;top_p:number}; agentSamplingDefaults?: {temperature?:number;top_p?:number} } = {}) {
   const pinServer = options.pinServer ?? { scopes: new Map<string, number[]>(), rejectSave: false };
   const authorization = { permissions: ["agent:create", "skill:create"], userId: "workbench-fixture", tenantId: "workbench-tenant" };
+  // Controlled identity uses the same readable expiry cookie as a BFF login.
+  await page.context().addCookies([{ name: "nexent_token_expires_at", value: String(Math.floor(Date.now() / 1000) + 3600), url: process.env.NEXENT_BASE_URL ?? "http://localhost:3031" }]);
+  await page.addInitScript(() => localStorage.setItem("user_info", JSON.stringify({ id: "workbench-fixture", tenantId: "workbench-tenant", email: "fixture@nexent.test", role: "SPEED" })));
   const writes: string[] = [];
   const filters: Array<Record<string, any>> = [];
   const agent = { id: "7", agent_id: 7, name: "Internal Analyst", display_name: "Internal Analyst", description: options.longDescriptions ? "Long resource description ".repeat(80) : "Internal tenant agent", current_version_no: 3, is_available: true, model_ids: options.reasoning ? [1, 2, 3] : [1], model_names: options.reasoning ? ["Fixture Model", "Plain Model", "Automatic Model"] : ["Fixture Model"], model_params_override: options.reasoning || options.agentSamplingDefaults ? { "1": { ...options.agentSamplingDefaults, ...(options.reasoning ? {extra_params: { enable_thinking: false, ...(options.agentEffort ? { reasoning_effort: options.agentEffort } : {}) }} : {}) } } : undefined };
@@ -32,7 +35,7 @@ export async function prepareWorkbench(page: Page, resourceCount = 1, options: {
     else if (pathname.endsWith("knowledge-capabilities")) result = { code: 0, data: capabilities };
     else if (pathname === "/api/agent/workbench/capabilities/preview") result = { data: { agent_id: 7, version_no: 3, default_skill_mounts: [], default_skill_resources: [], knowledge: capabilities } };
     else if (pathname === "/api/model/list") result = { data: [
-      { ...options.samplingDefaults, model_id: 1, model_name: "fixture-model", display_name: "Fixture Model", model_type: "llm", model_factory: "openai", connect_status: "available",
+      { ...options.samplingDefaults, ...(options.samplingDefaults ? { profile_schema_version: 1 } : {}), model_id: 1, model_name: "fixture-model", display_name: "Fixture Model", model_type: "llm", model_factory: "openai", connect_status: "available",
         ...(options.reasoning ? { extra_params: { enable_thinking: false, ...(options.modelEffort ? { reasoning_effort: options.modelEffort } : {}) }, reasoning_capability: { status: "supported", control: "effort", levels: ["none", "minimal", "low", "medium", "high", "xhigh", "max"], controls: [{ type: "effort", values: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] }], source: "catalog" } } : {}) },
       ...(options.reasoning ? [{ model_id: 2, model_name: "plain-model", display_name: "Plain Model", model_type: "llm", model_factory: "openai", connect_status: "available", reasoning_capability: { status: "unsupported", control: "effort", levels: [], source: "catalog" } }] : []),
       ...(options.reasoning ? [{model_id: 3, model_name: "automatic-model", display_name:"Automatic Model", model_type:"llm", model_factory:"openai", connect_status:"available", extra_params:{enable_thinking:false}, reasoning_capability:{status:"supported", control:"effort", levels:["low","high"], default:"high", controls:[{type:"effort",values:["low","high"]}],source:"catalog"}}] : []),
@@ -48,6 +51,12 @@ export async function prepareWorkbench(page: Page, resourceCount = 1, options: {
       const offset = Number(new URL(request.url()).searchParams.get("offset") ?? 0);
       const limit = Number(new URL(request.url()).searchParams.get("limit") ?? 30);
       result = { code: 0, data: { items: (options.histories ?? []).slice(offset, offset + limit), metadata: { total: options.histories?.length ?? 0 } } };
+    }
+    else if (pathname === "/api/conversation/agent_groups") {
+      result = { code: 0, data: { items: [], pinned_items: [], included_items: [], next_cursor: null } };
+    }
+    else if (/^\/api\/conversation\/agent_groups\/[^/]+\/conversations$/.test(pathname)) {
+      result = { code: 0, data: { items: [], pinned_items: [], next_cursor: null } };
     }
     else if (pathname === "/api/conversation/workbench_pins" || pathname.endsWith("/workbench_pin")) {
       const scope = JSON.stringify([authorization.userId]);

@@ -83,7 +83,7 @@ def reliability_contract(fixture):
     child = """
 import os, sys
 from sqlalchemy.orm import sessionmaker
-from management.db.client import db_client
+from infrastructure.rdb.client import db_client
 from management.services.repository import reviews, review_notifications
 from management.db import repository_transactions
 from contracts.review import ReviewDecisionRequest

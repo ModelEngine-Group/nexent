@@ -30,7 +30,7 @@
   flex-shrink: 0;
 }
 .trajectory-panel {
-  padding: 16px;
+  padding: 12px 16px;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
   background: #fff;
@@ -80,12 +80,12 @@
   gap: 14px;
 }
 .trajectory-summary section {
-  min-height: 102px;
+  min-height: 88px;
   background: #fff;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
   border-left: 3px solid;
-  padding: 14px 16px;
+  padding: 10px 16px;
   min-width: 0;
 }
 .trajectory-summary header {
@@ -95,7 +95,7 @@
   gap: 0 10px;
   color: #777;
   font-size: 14px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   white-space: nowrap;
 }
 .trajectory-summary small {
@@ -134,7 +134,7 @@
   flex-direction: column;
   align-items: start;
   gap: 2px;
-  padding: 8px 0;
+  padding: 3px 0;
   min-width: 0;
 }
 .trajectory-link {
@@ -168,9 +168,29 @@
 .trajectory-table .ant-table-cell {
   padding-inline: 12px;
 }
+.trajectory-table
+  .ant-table.ant-table-middle
+  .ant-table-tbody
+  > .ant-table-row
+  > td {
+  padding-block: 8px;
+}
 .trajectory-table .ant-table-thead > tr > th {
   font-weight: 500;
   white-space: nowrap;
+}
+.trajectory-table-panel .ant-table-thead > tr > th.ant-table-column-sort,
+.trajectory-table-panel
+  .ant-table-thead
+  > tr
+  > th.ant-table-column-has-sorters:hover {
+  background: var(--ant-table-header-bg, var(--color-bg-3));
+}
+.trajectory-table-panel
+  .ant-table-tbody
+  > tr:not(.ant-table-row-selected)
+  > td.ant-table-column-sort:not(.ant-table-cell-row-hover) {
+  background: transparent;
 }
 .trajectory-version-tag {
   display: inline-block;
@@ -859,7 +879,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .trajectory-summary section {
-    min-height: 102px;
     padding: 12px;
   }
   .trajectory-info {

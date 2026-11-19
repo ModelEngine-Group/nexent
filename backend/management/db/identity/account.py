@@ -8,15 +8,15 @@ from sqlalchemy import select, text, update
 
 from contracts.errors.exceptions import AccountConflictError
 from contracts.roles import normalize_roles, roles_from_record
-from infrastructure.security.passwords import password_scheme
-from management.db.client import get_db_session
+from management.utils.account_passwords import password_scheme
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.membership import (
     check_admin_removal,
     lock_tenants,
     locked_members,
 )
 from management.db.models import UserAccount, UserTenant
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 
 def lock_account_keys(session, user_id: str, email: str | None) -> None:

@@ -239,6 +239,7 @@ function reducer(
 }
 
 interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
+  draftScope?: string;
   resetFlow: (agentId?: number | null) => void;
   markRunStarted: (agentId: number) => void;
   markRunFinished: (agentId: number) => void;
@@ -262,7 +263,9 @@ const Nl2AgentFlowContext = createContext<Nl2AgentFlowContextValue | null>(
   null
 );
 
-export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
+export const Nl2AgentFlowProvider: FC<
+  PropsWithChildren<{ draftScope?: string }>
+> = ({ children, draftScope }) => {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const resetFlow = useCallback(
     (agentId: number | null = null) => dispatch({ type: "reset", agentId }),
@@ -327,6 +330,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
   const value = useMemo(
     () => ({
       ...state,
+      draftScope,
       resetFlow,
       markRunStarted,
       markRunFinished,
@@ -343,6 +347,7 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       isCardInteractive,
     }),
     [
+      draftScope,
       isCardInteractive,
       markGenerationCompleted,
       markCompletionSynced,

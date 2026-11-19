@@ -27,7 +27,7 @@ from contracts.errors.exceptions import ForbiddenError
 from contracts.tool import McpBatchDeleteRequest
 from management.services.mcp.service import delete_mcp_service
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.auth import get_current_user_info
+from management.services.permission.identity.session import get_current_user_info
 
 router = APIRouter(prefix="/mcp-tools")
 logger = logging.getLogger("mcp_management_app")

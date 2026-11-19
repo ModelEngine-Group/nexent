@@ -10,7 +10,8 @@ import {
   formatMetric,
 } from "@/lib/trajectory";
 import { useConversationTrajectory } from "@/hooks/trajectory/useConversationTrajectory";
-import type { TrajectoryRecord } from "@/types/trajectory";
+import type { ImportedTrajectory, TrajectoryRecord } from "@/types/trajectory";
+import { TrajectoryExportButton } from "./TrajectoryExportButton";
 import { TrajectoryError } from "./TrajectoryFeedback";
 import { TrajectoryTimeline } from "./TrajectoryTimeline";
 import { TrajectoryNodeDetail } from "./TrajectoryNodeDetail";
@@ -19,11 +20,13 @@ import { CopyTraceId, nodeDuration } from "./TrajectoryPresentation";
 export function TrajectoryDrawer({
   row,
   queryId,
+  imported,
   onClose,
   onReset,
 }: {
   row: TrajectoryRecord;
   queryId?: string;
+  imported?: ImportedTrajectory;
   onClose: () => void;
   onReset?: () => void;
 }) {
@@ -33,8 +36,8 @@ export function TrajectoryDrawer({
   const [contentRevision, setContentRevision] = useState(0);
   const cache = useMemo(() => new BodyCache(), []);
   useEffect(() => () => cache.clear(), [cache]);
-  const query = useConversationTrajectory(row, queryId);
-  const pages = query.data?.pages;
+  const query = useConversationTrajectory(row, queryId, !imported);
+  const pages = imported?.pages ?? query.data?.pages;
   const nodes = useMemo(
     () => [
       ...new Map(
@@ -99,6 +102,7 @@ export function TrajectoryDrawer({
     <Drawer
       open
       title={t("trajectory.conversationDetail")}
+      extra={!imported && <TrajectoryExportButton row={row} />}
       closable={{ placement: "end", "aria-label": t("trajectory.close") }}
       onClose={onClose}
       size="min(1800px, 98vw)"
@@ -141,7 +145,7 @@ export function TrajectoryDrawer({
               </span>
             </div>
           </header>
-          {query.isPending && (
+          {!imported && query.isPending && (
             <div className="p-6 text-center">
               <Spin />
             </div>

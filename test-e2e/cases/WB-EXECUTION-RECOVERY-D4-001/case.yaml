@@ -1,0 +1,48 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-EXECUTION-RECOVERY-D4-001
+  feature_id: F-065
+  requirement_ids: [WB-EXECUTION-RECOVERY-20261116]
+  business_rule_ids: [F-065-RULE-01]
+  title: Execution navigation restores records, truthful status and composer draft
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify ordinary execution through the actual router, runtime, composer and historical renderer.
+  preconditions: [Local frontend with controlled authorized execution HTTP fixtures.]
+  test_data: {profile: mock}
+  steps:
+  - order: 1
+    action: Type an unsent execution draft, leave Workbench, return and reload; then start a new conversation.
+    expected: The draft restores without overwriting newer input and the new conversation remains isolated.
+  - order: 2
+    action: Open a running execution with three code actions, leave and resume with compact replay, then complete and reload.
+    expected: All code records and final output are visible before reload, duration is unchanged and no new execution starts.
+  - order: 3
+    action: Display a real-shaped failure and stopped branch, retry, leave and return.
+    expected: Failure and stop do not display success and the independent retry completes.
+  expected_results:
+  - Ordinary draft text survives navigation and reload with isolated conversation scope.
+  - Reentry and reload show identical complete records and generation duration.
+  - Terminal status and retry identity remain truthful.
+  forbidden_side_effects:
+  - No real model calls, tool actions, publication or persistent user mutation outside isolated fixtures.
+  actor: Authorized controlled tenant user
+  journey: [Type draft, Leave and return, Resume execution, Reload history, Retry failure]
+  final_business_result: [Execution conversation remains complete and usable after navigation.]
+  failure_evidence: [Screenshots, sanitized request counts and runtime state.]
+  acceptance:
+  - id: AC-01
+    description: Drafts and execution records restore before refresh with consistent duration.
+    steps: [1, 2]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: Real outcomes and independent retry remain correct without executing external actions.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  execution:
+    profiles: [{name: mock, required_services: []}]

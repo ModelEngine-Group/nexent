@@ -27,7 +27,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 
 @pytest.fixture(scope="function")
@@ -36,7 +36,7 @@ def client(mocker):
     # Mock boto3 and MinioClient before importing
     mocker.patch('boto3.client')
     # Patch MinioClient at both possible import paths
-    mocker.patch('management.db.client.MinioClient')
+    mocker.patch('infrastructure.object_storage.client.MinioClient')
     # Stub management.services.knowledge_base.service to avoid real VDB initialization
     import types
     import sys as _sys
@@ -51,7 +51,7 @@ def client(mocker):
 
     # Import after mocking (only backend path is required by app imports)
     from management.api.model.model_managment import router
-    from gateway.authentication.auth import authenticate
+    from management.services.permission.identity.session import authenticate
     from permissions.models import CurrentUser
 
     # Grant all model permissions so existing business-logic tests pass
@@ -2072,7 +2072,7 @@ def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker
     such handler, so emulate the same mapping here.
     """
     from fastapi import HTTPException as FastAPIHTTPException
-    from gateway.authentication.auth import authenticate
+    from management.services.permission.identity.session import authenticate
 
     def _expired_user():
         raise FastAPIHTTPException(

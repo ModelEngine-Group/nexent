@@ -57,6 +57,7 @@ model-assets/
 *coverage_html
 *.pytest_cache
 *.coverage
+.coverage*
 *coverage.xml
 
 # Log files

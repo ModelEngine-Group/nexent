@@ -13,6 +13,7 @@ export async function prepareControls(page: Page, histories: Array<Record<string
   const base = await prepareWorkbench(page, 1, { reasoning: true, histories });
   const state = { ...base, requests: [] as Array<{ path: string; body: any; effective: any; explicit: any }>,
     unavailable: false, delayed: false, release: () => {}, configDelay: 0,
+    omitEffortDefault: false, omitSamplingDefaults: false,
     configGate: undefined as Promise<void> | undefined,
     draft: { ...makeDraft(), model_ids: [1, 3], model_names: ["Default A", "Effort B"] },
   };
@@ -31,8 +32,9 @@ export async function prepareControls(page: Page, histories: Array<Record<string
       model_parameter_preferences: id === 92 ? { "3": { enable_thinking: true, reasoning_effort: "xhigh" } } : {} });
     return snapshots.get(id)!;
   };
-  const defaults = (id: number) => ({ temperature: id === 1 ? 0.6 : 1, top_p: id === 1 ? 0.85 : 1,
-    enable_thinking: false, ...(id === 4 ? { reasoning_budget_tokens: 2048 } : id !== 2 ? { reasoning_effort: "low" } : {}) });
+  const defaults = (id: number) => ({
+    ...(!state.omitSamplingDefaults ? { temperature: id === 1 ? 0.6 : 1, top_p: id === 1 ? 0.85 : 1 } : {}),
+    enable_thinking: false, ...(id === 4 ? { reasoning_budget_tokens: 2048 } : id !== 2 && !state.omitEffortDefault ? { reasoning_effort: "low" } : {}) });
   const rules = (id: number) => {
     const rule = (key: string, schema: any, editable = true) => ({ key, schema, visible: true, editable, required: false,
       allowed_scopes: ["conversation"], ui_group: "fixture", ...(key.startsWith("reasoning_") ? { condition: { key: "enable_thinking", op: "eq", value: true } } : {}) });
@@ -124,6 +126,7 @@ export async function prepareControls(page: Page, histories: Array<Record<string
         message: [], workbench_config: resources.get(id), workbench_config_version: 1 }] });
     }
     if (path === "/api/conversation/generate_title") return json({ code: 0, data: "Fixture conversation" });
+    if (path === "/api/conversation/creator_histories") return json({ code: 0, data: { items: [], total: 0 } });
     if (path === "/api/agent/search_info") return json(state.draft);
     if (path === "/api/agent/update") return json({ status: "success", agent_id: 42 });
     if (path === "/api/agent/published_list") return json([{ ...state.draft, id: "42", current_version_no: 1 }]);

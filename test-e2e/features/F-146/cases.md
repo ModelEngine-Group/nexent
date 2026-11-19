@@ -2,10 +2,9 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D2 [NB-CHAT-FINAL-ANSWER-001](../../cases/NB-CHAT-FINAL-ANSWER-001/case.yaml) · active
 - D2 [NB-CHAT-FINAL-ANSWER-D2-001](../../cases/NB-CHAT-FINAL-ANSWER-D2-001/case.yaml) · active
 - D3 [AGT-064](../../cases/AGT-064/case.yaml) · active
 - D3 [AGT-065](../../cases/AGT-065/case.yaml) · active
 - D3 [AGT-066](../../cases/AGT-066/case.yaml) · active
 - D3 [NB-CHAT-DISCONNECT-001](../../cases/NB-CHAT-DISCONNECT-001/case.yaml) · active
-- D3 [NB-OTEL-001](../../cases/NB-OTEL-001/case.yaml) · active
+- D3 [NB-OTEL-D3-001](../../cases/NB-OTEL-D3-001/case.yaml) · active

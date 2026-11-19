@@ -114,6 +114,23 @@ def test_creator_protocols_keep_their_own_card_boundaries(mode, enabled):
     assert (adapter.clarification is not None) == enabled
 
 
+def test_child_legacy_clarification_signal_returns_missing_information_without_card(loop_manager):
+    from nexent.core.agents.contracts.clarification import ClarificationForm
+    from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
+
+    observer = MessageObserver()
+    info = SimpleNamespace(run_role="subagent", agent_config=AgentConfig(
+        name="child", description="Child", model_name="fixture", tools=[]), observer=observer)
+    adapter = JiuwenAdapter(info)
+    adapter.manager, adapter.scope = loop_manager, RunCancellationScope(Event())
+    adapter._run_async = AsyncMock(side_effect=ClarificationRequested(ClarificationForm.model_validate(FORM)))
+    assert "birth date" in adapter.run()
+    result = adapter.events.finish()
+    assert result.status == "completed" and result.end_reason != "awaiting_input"
+    assert "birth date" in result.final_content and result.error is None
+    assert not any(json.loads(event)["type"] == "human_interaction" for event in observer.get_cached_message())
+
+
 @pytest.mark.asyncio
 async def test_model_finishes_observation_then_pauses_before_native_dispatch(saved_profile):
     from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested

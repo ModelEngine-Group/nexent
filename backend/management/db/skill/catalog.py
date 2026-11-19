@@ -6,8 +6,8 @@ from typing import Any, Collection, Dict, List, Optional
 from sqlalchemy import func, or_, update
 
 from contracts.constants.constants import STATUS_NOT_SHARED
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.repository_transactions import current_repository_session, lock_repository_source
 from management.db.models import SkillRepository
 

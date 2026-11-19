@@ -7,7 +7,7 @@ from copy import deepcopy
 from contracts.errors.exceptions import ConversationNotFoundError, ModelOutletValidationError
 from sqlalchemy import func, select
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ConversationRecord
 
 

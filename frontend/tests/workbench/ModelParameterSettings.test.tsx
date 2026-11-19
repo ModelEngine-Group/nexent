@@ -26,13 +26,19 @@ vi.mock("react-i18next", async (importOriginal) => ({
   }),
 }));
 
-function Harness({ changed }: { changed: (value: unknown) => void }) {
+function Harness({
+  changed,
+  inheritedValue = { temperature: 0.6, top_p: 0.85 },
+}: {
+  changed: (value: unknown) => void;
+  inheritedValue?: ModelParameterValue;
+}) {
   const [value, setValue] = useState<ModelParameterValue>({});
   return (
     <ModelParameterSettings
       value={value}
       defaultValue={{}}
-      inheritedValue={{ temperature: 0.6, top_p: 0.85 }}
+      inheritedValue={inheritedValue}
       onChange={(next) => {
         changed(next);
         setValue(next);
@@ -101,13 +107,9 @@ it("inherits until edited, preserves zero and decimals, then resets both overrid
   const panel = within(await screen.findByRole("region", { name: "高级设置" }));
   const temperature = panel.getByRole("spinbutton", { name: "温度" });
   const topP = panel.getByRole("spinbutton", { name: "Top P" });
-  expect(temperature).toHaveValue(0.6);
-  expect(topP).toHaveValue(0.85);
+  expect(temperature).toHaveValue("0.6");
+  expect(topP).toHaveValue("0.85");
   expect(temperature).not.toHaveAttribute("placeholder", "继承默认");
-  expect(panel.getByRole("slider", { name: "Top P 滑块" })).toHaveAttribute(
-    "aria-valuenow",
-    "0.85"
-  );
   fireEvent.blur(temperature);
   fireEvent.blur(topP);
   expect(changed).not.toHaveBeenCalled();
@@ -115,24 +117,20 @@ it("inherits until edited, preserves zero and decimals, then resets both overrid
     fireEvent.change(temperature, { target: { value: String(value) } });
     fireEvent.keyDown(temperature, { key: "Enter" });
     expect(changed).toHaveBeenLastCalledWith({ temperature: value });
-    expect(panel.getByRole("slider", { name: "温度 滑块" })).toHaveAttribute(
-      "aria-valuenow",
-      String(value)
-    );
   }
-  for (const value of [0, 0.95, 1]) {
+  for (const value of [0.005, 0.995, 1]) {
     fireEvent.change(topP, { target: { value: String(value) } });
     fireEvent.blur(topP);
     expect(changed).toHaveBeenLastCalledWith({ temperature: 2, top_p: value });
   }
   await userEvent.click(panel.getByRole("button", { name: "恢复默认" }));
   expect(changed).toHaveBeenLastCalledWith({});
-  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.6);
-  expect(panel.getByRole("spinbutton", { name: "Top P" })).toHaveValue(0.85);
+  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.6");
+  expect(panel.getByRole("spinbutton", { name: "Top P" })).toHaveValue("0.85");
   expect(requests).not.toHaveBeenCalled();
 });
 
-it.each(["", "-0.1", "2.1"])(
+it.each(["-0.1", "2.1"])(
   "invalid temperature %s stays uncommitted and reset clears errors",
   async (invalid) => {
     const changed = vi.fn();
@@ -150,24 +148,14 @@ it.each(["", "-0.1", "2.1"])(
   }
 );
 
-it("keyboard sliders commit decimal steps and Top P rejects values above one", async () => {
+it("keyboard steppers commit decimal steps and Top P rejects values above one", async () => {
   const changed = vi.fn();
   render(<Harness changed={changed} />);
   fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
     key: "Enter",
   });
-  const slider = await screen.findByRole("slider", { name: "温度 滑块" });
-  fireEvent.keyDown(slider, {
-    key: "ArrowRight",
-    code: "ArrowRight",
-    keyCode: 39,
-  });
-  expect(changed).not.toHaveBeenCalled();
-  fireEvent.keyUp(slider, {
-    key: "ArrowRight",
-    code: "ArrowRight",
-    keyCode: 39,
-  });
+  const temperature = await screen.findByRole("spinbutton", { name: "温度" });
+  fireEvent.keyDown(temperature, { key: "ArrowUp" });
   expect(changed).toHaveBeenLastCalledWith({ temperature: 0.7 });
   const topP = screen.getByRole("spinbutton", { name: "Top P" });
   fireEvent.change(topP, { target: { value: "1.1" } });
@@ -190,12 +178,8 @@ it("shows configured zero and exact decimal defaults without turning focus or re
   });
   const t = await screen.findByRole("spinbutton", { name: "温度" });
   const p = screen.getByRole("spinbutton", { name: "Top P" });
-  expect(t).toHaveValue(0);
-  expect(p).toHaveValue(0.87);
-  expect(screen.getByRole("slider", { name: "Top P 滑块" })).toHaveAttribute(
-    "aria-valuenow",
-    "0.87"
-  );
+  expect(t).toHaveValue("0");
+  expect(p).toHaveValue("0.87");
   fireEvent.blur(t);
   fireEvent.blur(p);
   expect(changed).not.toHaveBeenCalled();
@@ -205,12 +189,8 @@ it("shows configured zero and exact decimal defaults without turning focus or re
       inheritedValue={{ temperature: 0.45, top_p: 0.83 }}
     />
   );
-  expect(t).toHaveValue(0.45);
-  expect(p).toHaveValue(0.83);
-  expect(screen.getByRole("slider", { name: "温度 滑块" })).toHaveAttribute(
-    "aria-valuenow",
-    "0.45"
-  );
+  expect(t).toHaveValue("0.45");
+  expect(p).toHaveValue("0.83");
   fireEvent.blur(t);
   expect(changed).not.toHaveBeenCalled();
   rerender(
@@ -220,34 +200,46 @@ it("shows configured zero and exact decimal defaults without turning focus or re
       inheritedValue={{ temperature: 0.45, top_p: 0.83 }}
     />
   );
-  expect(t).toHaveValue(0.9);
-  expect(p).toHaveValue(0.83);
+  expect(t).toHaveValue("0.9");
+  expect(p).toHaveValue("0.83");
 });
 
-it("does not invent an unknown default or a zero slider handle, but permits a runtime override", async () => {
+it("keeps unset sampling editable and stops Top P stepping at 0.01", async () => {
   const changed = vi.fn();
-  render(
-    <ModelParameterSettings value={{}} defaultValue={{}} onChange={changed} />
-  );
+  render(<Harness changed={changed} inheritedValue={{}} />);
   fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
     key: "Enter",
   });
   const t = await screen.findByRole("spinbutton", { name: "温度" });
-  expect(t).toHaveValue(null);
-  expect(t).not.toHaveAttribute("placeholder", "继承默认");
+  const topP = screen.getByRole("spinbutton", { name: "Top P" });
+  expect(t).toHaveValue("");
+  expect(topP).toHaveValue("");
   expect(screen.queryByRole("slider")).not.toBeInTheDocument();
-  await waitFor(() =>
-    expect(
-      screen.getByText("请先在模型配置中设置默认值，或输入本次使用的数值。", {
-        exact: true,
-      })
-    ).toBeVisible()
-  );
   fireEvent.blur(t);
   expect(changed).not.toHaveBeenCalled();
-  fireEvent.change(t, { target: { value: "0.4" } });
+  fireEvent.change(t, { target: { value: "0" } });
   fireEvent.blur(t);
-  expect(changed).toHaveBeenLastCalledWith({ temperature: 0.4 });
+  expect(changed).toHaveBeenLastCalledWith({ temperature: 0 });
+  fireEvent.change(t, { target: { value: "" } });
+  fireEvent.blur(t);
+  expect(changed).toHaveBeenLastCalledWith({});
+  expect(t).toBeEnabled();
+
+  changed.mockClear();
+  fireEvent.change(topP, { target: { value: "0" } });
+  fireEvent.keyDown(topP, { key: "Enter" });
+  expect(topP).toHaveAttribute("aria-invalid", "true");
+  expect(changed).not.toHaveBeenCalled();
+  fireEvent.keyDown(topP, { key: "ArrowUp" });
+  expect(topP).toHaveValue("0.01");
+  expect(changed).toHaveBeenLastCalledWith({ top_p: 0.01 });
+  fireEvent.keyDown(topP, { key: "ArrowDown" });
+  expect(topP).toHaveValue("0.01");
+  fireEvent.change(topP, { target: { value: "" } });
+  fireEvent.blur(topP);
+  expect(changed).toHaveBeenLastCalledWith({});
+  expect(topP).toHaveValue("");
+  expect(topP).toBeEnabled();
 });
 
 it("restoring discards an uncommitted numeric draft without submitting or saving the intermediate value", async () => {
@@ -278,7 +270,7 @@ it("restoring discards an uncommitted numeric draft without submitting or saving
   expect(screen.getByRole("textbox", { name: "Composer draft" })).toHaveValue(
     "Keep this draft"
   );
-  expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.6);
+  expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue("0.6");
 });
 
 it("UI-SESSION-15 keeps the submenu open when focus and click target the same trigger", async () => {

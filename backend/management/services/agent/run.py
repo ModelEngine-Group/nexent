@@ -16,7 +16,7 @@ from management.services.agent.lifecycle import (
     agent_run_manager,
 )
 from management.services.agent.background import BackgroundExecutionState
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.preprocessing import (
     preprocess_manager,
@@ -63,12 +63,10 @@ from management.services.conversation.service import (
 from management.services.configuration.user.memory import (
     build_memory_context,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
 

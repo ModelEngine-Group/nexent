@@ -14,8 +14,8 @@ from urllib.parse import urlsplit, urlunsplit
 from contracts.errors.exceptions import ReviewConflictError, UnauthorizedError
 from contracts.review import ReviewListItem, ReviewListResponse, ReviewPagination
 from contracts.roles import has_any_role, roles_from_record
+from infrastructure.rdb.client import get_db_session
 from management.db.agent.models import AgentInfo
-from management.db.client import get_db_session
 from management.db.identity.models import UserTenant
 from management.db.identity.role_permission import check_role_permission
 from management.db.mcp.models import McpRecord

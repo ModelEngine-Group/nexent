@@ -11,12 +11,12 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from infrastructure.observability.trajectory_runtime import (
+from infrastructure.trace.trajectory_runtime import (
     authorize_capture,
     create_local_processor,
     request_conversation_cleanup,
 )
-from infrastructure.observability.trajectory_store import (
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
@@ -219,8 +219,8 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
         if str(path).endswith(".otlp.jsonl"):
             ticker[0] += elapsed
 
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: ticker[0])
-    monkeypatch.setattr("infrastructure.observability.trajectory_store.os.unlink", slow_unlink)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: ticker[0])
+    monkeypatch.setattr("infrastructure.trace.trajectory_store.os.unlink", slow_unlink)
     processor._maintain()
     assert sum((directory / f"{run}.otlp.jsonl").exists() for run in expired) == 2
     pending = [run for run in store.manifest(identity)["runs"] if run["trajectory_id"] in expired]
@@ -257,7 +257,7 @@ def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
 
     monkeypatch.setattr(config, "MONITORING_PROVIDER", "local_file")
     processor = SimpleNamespace(request_conversation_cleanup=Mock(return_value=True)) if present else None
-    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "infrastructure.trace.bootstrap", SimpleNamespace(
         local_trajectory_processor=processor,
     ))
     assert request_conversation_cleanup([123], "owner") is present

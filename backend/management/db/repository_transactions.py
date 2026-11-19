@@ -24,14 +24,17 @@ def repository_unit_of_work():
     if _session.get() is not None:
         yield _session.get()
         return
-    from management.db.client import get_db_session
+    # Imported lazily so this module stays importable under test stubs that
+    # replace the infrastructure client module.
+    from infrastructure.rdb.client import bound_ambient_session, get_db_session
 
     pending = []
     with get_db_session() as session:
         session_token = _session.set(session)
         callback_token = _callbacks.set(pending)
         try:
-            yield session
+            with bound_ambient_session(session):
+                yield session
         finally:
             _session.reset(session_token)
             _callbacks.reset(callback_token)
