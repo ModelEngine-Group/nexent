@@ -66,6 +66,24 @@ def test_invalid_vector_batch_never_opens_provider(store):
     factory.assert_not_called()
 
 
+def test_ensure_readback_failure_after_acknowledged_creation_is_unknown_without_replay(store):
+    port, client, _ = store
+    client.indices.exists.return_value = False
+    client.indices.create.return_value = {'acknowledged': True}
+    client.indices.get_mapping.side_effect = OSError('readback unavailable')
+    with pytest.raises(OutcomeUnknown):
+        port.ensure_collection('kb', context=context())
+    assert client.indices.create.call_count == client.indices.get_mapping.call_count == 1
+
+
+def test_ensure_failure_before_any_creation_remains_a_definitive_unavailable_read(store):
+    port, client, _ = store
+    client.indices.exists.side_effect = OSError('read unavailable')
+    with pytest.raises(Unavailable):
+        port.ensure_collection('kb', context=context())
+    client.indices.create.assert_not_called()
+
+
 def test_bulk_partial_failure_preserves_each_input_result(store):
     port, client, _ = store
     client.bulk.return_value = {

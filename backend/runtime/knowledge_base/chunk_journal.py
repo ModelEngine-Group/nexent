@@ -37,6 +37,9 @@ def assert_knowledge_open(records, knowledge_id, *, context):
                          PageRequest(limit=1), context=context)
     if rows.items:
         raise Conflict()
+    state = records.get(STATES, state_id(records.scope.tenant_id, knowledge_id), context=context)
+    if state is not None and state.get('collection_setup') is not None:
+        raise Conflict()
 
 
 class ChunkMutationJournal:
@@ -319,7 +322,7 @@ class ChunkMutationJournal:
 
     def revision(self, *, context):
         row = self._state(self.records, context)
-        if row is not None and row["active_count"]:
+        if row is not None and (row["active_count"] or row.get('collection_setup') is not None):
             raise Conflict()
         return row["epoch"] if row is not None else 0
 
@@ -369,6 +372,9 @@ class ChunkMutationJournal:
         return count
 
     def assert_drained(self, *, file_ref=None, context):
+        state = self._state(self.records, context)
+        if state is not None and state.get('collection_setup') is not None:
+            raise Conflict()
         terms = [Comparison("status", "in", list(ACTIVE_STATUSES))]
         if file_ref is not None:
             self._file(file_ref)

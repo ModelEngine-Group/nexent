@@ -13,12 +13,19 @@ from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import ModelVersion
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
+from contracts.knowledge_collections import (
+    KnowledgeCollectionEnsure,
+    KnowledgeCollectionEnsured,
+)
 from contracts.knowledge_documents import KnowledgeDocument
+from management.services.knowledge_base.chunks_authorization import (
+    chunks_resource_grant,
+)
 from management.services.knowledge_base.document_append import append_documents
 from management.services.knowledge_base.document_images import pin_document_image
 from management.services.knowledge_base.file_reader import KnowledgeFileReader
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import DeadlineExceeded, InvalidInput
+from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput
 from nexent.storage.models import OperationContext
 
 from backend.http.client import create_httpx_client
@@ -75,16 +82,31 @@ async def index_documents(index_name, data, actor, *, reader=None, client=None, 
                     items.append(item)
                 else:
                     logger.warning("knowledge_document_ignored position=%s", position)
+            model_id = row["embedding_model_id"]
+            if row["index_name"] != index_name:
+                raise InvalidInput()
+            binding, dimensions, model = None, 1024, None
+            if type(model_id) is int and model_id > 0:
+                model = await client.get_model(model_id, actor.user_id, actor.tenant_id)
+                if (not isinstance(model, ModelMetadata) or model.model_id != model_id
+                    or model.model_type not in {"embedding", "multi_embedding"}
+                    or items and not model.qualified_name):
+                    raise InvalidInput()
+                dimensions = model.embedding_dimensions
+                if type(dimensions) is not int or dimensions <= 0:
+                    raise InvalidInput()
+                binding = ModelVersion(model_id=model_id, revision=model.revision)
+            elif items:
+                raise InvalidInput()
+            grant = chunks_resource_grant(row)
+            ensured = await client.ensure_knowledge_collection(KnowledgeCollectionEnsure(
+                knowledge_id=grant.knowledge_id, expected_revision=grant.revision, dimensions=dimensions,
+                model_binding=binding), actor.user_id, actor.tenant_id)
+            if (not isinstance(ensured, KnowledgeCollectionEnsured) or ensured.knowledge_id != grant.knowledge_id
+                or ensured.expected_revision != grant.revision or ensured.dimensions != dimensions or ensured.present is not True):
+                raise Conflict()
             if not items:
                 return {"success": True, "message": "No documents to index", "total_indexed": 0, "total_submitted": 0}
-            model_id = row["embedding_model_id"]
-            if type(model_id) is not int or model_id <= 0 or row["index_name"] != index_name:
-                raise InvalidInput()
-            model = await client.get_model(model_id, actor.user_id, actor.tenant_id)
-            if (not isinstance(model, ModelMetadata) or model.model_id != model_id
-                or model.model_type not in {"embedding", "multi_embedding"} or not model.qualified_name):
-                raise InvalidInput()
-            binding = ModelVersion(model_id=model_id, revision=model.revision)
             documents = await _prepare(items, actor, model.qualified_name, context=context)
             count = await append_documents(index_name, documents, actor, reader=reader, client=client,
                                             context=context, model_binding=binding)

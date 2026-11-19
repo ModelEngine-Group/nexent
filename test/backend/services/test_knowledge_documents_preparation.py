@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import ObjectReference
+from contracts.knowledge_collections import KnowledgeCollectionEnsured
 from management.services.knowledge_base import documents as module
 from nexent.storage.errors import DeadlineExceeded, InvalidInput, ScopeDenied
 
@@ -25,6 +26,15 @@ def preparation(mocker):
                           qualified_name='repo/model')
     client = SimpleNamespace(get_model=AsyncMock(return_value=model))
     events, contexts = [], []
+
+    async def ensure(request, user, tenant):
+        assert (user, tenant) == (actor.user_id, actor.tenant_id)
+        events.append('ensure')
+        return KnowledgeCollectionEnsured(knowledge_id=request.knowledge_id, expected_revision=request.expected_revision,
+                                          present=True, dimensions=request.dimensions, metric='cosine')
+
+    client.ensure_knowledge_collection = AsyncMock(side_effect=ensure)
+    model.embedding_dimensions = 3
 
     async def blocking(name, action, *args, **kwargs):
         kwargs.pop('lane'); kwargs.pop('owner')
@@ -54,7 +64,7 @@ async def test_original_source_fields_empty_text_images_and_model_version_are_pr
                                                                    'image_url': 'images_in_attachments/a.png'}}]
     result = await module.index_documents('kb', data, s.actor, reader=s.reader, client=s.client)
     assert result == {'success': True, 'message': 'Successfully indexed 2 documents', 'total_indexed': 2, 'total_submitted': 2}
-    assert s.events == ['pin', 'append']
+    assert s.events == ['ensure', 'pin', 'append']
     call = s.append.await_args
     assert call.args[0] == 'kb' and call.args[2] == s.actor
     first, picture = call.args[1]
@@ -118,11 +128,23 @@ async def test_parent_deadline_cancels_model_query_without_append(preparation):
     s.append.assert_not_called()
 
 
-async def test_empty_documents_still_require_current_edit_access_without_model_or_append(preparation):
+async def test_empty_documents_require_current_edit_access_and_ensure_without_append(preparation):
     s = preparation
     result = await module.index_documents('kb', [], s.actor, reader=s.reader, client=s.client)
     assert result == {'success': True, 'message': 'No documents to index', 'total_indexed': 0, 'total_submitted': 0}
     assert s.reader.knowledge.call_count == 1
+    s.client.get_model.assert_awaited_once_with(2, s.actor.user_id, s.actor.tenant_id)
+    assert s.client.ensure_knowledge_collection.await_args.args[0].dimensions == 3
+    s.append.assert_not_called()
+
+
+async def test_unbound_legacy_empty_collection_uses_existing_explicit_1024_dimension_default(preparation):
+    s = preparation
+    s.row['embedding_model_id'] = None
+    result = await module.index_documents('kb', [], s.actor, reader=s.reader, client=s.client)
+    assert result['total_submitted'] == result['total_indexed'] == 0
+    request = s.client.ensure_knowledge_collection.await_args.args[0]
+    assert request.dimensions == 1024 and request.model_binding is None
     s.client.get_model.assert_not_called()
     s.append.assert_not_called()
 

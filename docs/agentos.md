@@ -335,9 +335,19 @@ process_source=UniversalImageExtractor 的记录按原规则处理。普通 embe
 
 Management 在全部批次确认后使用 SummaryScheduleJournal 和 StorageInterface 更新 last_doc_update_time，保留实际用户审计，不启用或更改摘要计划。时间维护沿原 best-effort 行为，失败只记录异常类型，不重试，不吞取消。整个适配受 180 秒父预算约束。官方文本种子已接入并读取租户子批量配置，标准图文追加能力已具备；公开 documents 的路由、X-Task-Id 进度及空集合创建语义尚未切换，不能据此认定该公开入口或 data-process 已退役。
 
-Management 的 `knowledge_base.documents.index_documents` 提供标准准备编排。它先使用当前实际用户取得 KB edit 授权，通过 Model.get 取得模型版本与 qualified_name，按原字段和默认值准备 source，固定所有 metadata.image_url，再调用 append_documents。它保留原响应字典、空正文、文档顺序、缺省与显式 null；图片原字节不作为传输参数。该服务不创建 SDK 适配器，不进行模型推理。公开路由接线还需处理上述进度及集合创建分支。
+Management 的 `knowledge_base.documents.index_documents` 提供标准准备编排。它先使用当前实际用户取得 KB edit 授权，通过 Model.get 取得模型版本与 qualified_name，使用标准 ensure 初始化集合，再按原字段和默认值准备 source、固定所有 metadata.image_url，最后调用 append_documents。空请求也初始化集合并保留原 0/0 响应。未绑定模型的旧空 KB 显式使用既有 1024 维默认值；已绑定模型要求有效配置维度，不探测或兜底。该服务不创建 SDK 适配器，不进行模型推理，公开路由接线仍需处理旧任务进度。
 
 Model.get 的 qualified_name 使用现有模型名称函数从 Runtime 私有 SI 记录投影仓库限定名称，缺名称时为 null，与执行 profile 的实际 request model ID 分别使用。它保留旧 source.embedding_model_name 的拼接规则，不用 display_name 替代，不返回凭据或构造 SDK。Management 标准准备要求有效名称并把该版本作为 ModelVersion 传给追加接口；KB 绑定 ID 变化在 Management 的 RPC 前拒绝，同模型版本变化由 Runtime 在推理前拒绝。原调用方可省略 model_binding，继续使用 ModelReference。
+
+### KnowledgeBase 集合初始化
+
+`ensure_knowledge_collection` 调用 `/internal/agentos/v1/knowledge/bases/collection/ensure`。`KnowledgeCollectionEnsure` 包含 knowledge_id、expected_revision、显式正整数 dimensions 和可选 model_binding。Runtime 通过 Management 的 `/internal/agentos/v1/knowledge/authorize-collection` 实时复核当前编辑权限，只操作 grant 指定的逻辑集合。显式模型绑定须匹配当前 KB 模型和版本，不调用推理或健康探测。成功 `KnowledgeCollectionEnsured` 必须明确 present=true，并返回匹配的资源修订、维度与 cosine metric。
+
+`inspect_knowledge_collection` 调用 `/internal/agentos/v1/knowledge/bases/collection/state`，只接受 knowledge_id 和 expected_revision，返回 `KnowledgeCollectionStatus.setup` 当前快照或 null。它查询持久元数据，不读取 ES、不重新创建集合、不清空未知状态。该方法与 manifest inspect 分开，不能用 ensure 载荷调用 inspect。
+
+Runtime 使用现有 KB 状态行中的 collection_setup 作为当前初始化围栏，快照只含操作 ID、真实 actor、资源修订、维度、模型绑定、phase 和 writer_ended。接纳与原文件、分块、删除共用事务锁；活动初始化阻止其他写入、不稳定读取及集合删除。确认完成时清空并推进 epoch，明确未生效的失败释放且不推进 epoch。可能已写入的错误保留 unknown，禁止自动重放；父预算耗尽时不延长记账时间，可能保留 writing 且结束未确认，须显式维护。未启动的初始化不能直接确认成功，其他编辑者不能接管原操作。
+
+部署该能力前须应用 `deploy/sql/migrations/v2.9.0_031_runtime_collection_setup.sql`。迁移仅为已有状态表增加 nullable JSONB 字段及注释，可重复执行，001 至 030 保持不变。当前还未完成新建 KB 的 Management 元数据创建接线、公开 documents 路由切换及 P4 未知初始化的维护处理。
 
 旧公开 documents 的图片准备已改用 Management 的授权读取和单键只读 StorageInterface，显式接收实际用户、租户及共享截止时间，保留原始字节。历史 images_in_attachments 仍沿用既有全局读取规则，严格 KB 归属待 P4 处理。该入口的向量化和进度投影仍待迁移，当前读取证明不能代替完整图片写入验收。
 

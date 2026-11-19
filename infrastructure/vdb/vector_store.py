@@ -235,26 +235,34 @@ class ElasticsearchVectorStore:
     def ensure_collection(self, collection, *, context):
         binding = self._binding(collection, write=True, maintenance=True)
         expected = binding.mapping()
-        with self._client(context) as client:
-            exists = self._call(client, "indices.exists", context, index=binding.index)
-            if not exists:
-                result = self._call(client, "indices.create", context, write=True, index=binding.index, mappings=expected)
-                if result.get("acknowledged") is not True:
-                    raise OutcomeUnknown(operation_id=context.operation_id)
-            elif binding.allow_unembedded and binding.dimensions is not None:
-                current = self._call(client, "indices.get_mapping", context, index=binding.index)
-                actual = current.get(binding.index, {}).get("mappings", {})
-                if not isinstance(actual, dict) or not isinstance(actual.get("properties"), dict):
-                    raise Conflict(operation_id=context.operation_id)
-                if "embedding" not in actual.get("properties", {}):
-                    base = {**expected, "properties": {name: value for name, value in expected["properties"].items() if name != "embedding"}}
-                    if not matches_mapping(base, actual):
-                        raise Conflict(operation_id=context.operation_id)
-                    result = self._call(client, "indices.put_mapping", context, write=True, index=binding.index,
-                        properties={"embedding": expected["properties"]["embedding"]})
+        changed = False
+        try:
+            with self._client(context) as client:
+                exists = self._call(client, "indices.exists", context, index=binding.index)
+                if not exists:
+                    result = self._call(client, "indices.create", context, write=True, index=binding.index, mappings=expected)
+                    changed = True
                     if result.get("acknowledged") is not True:
                         raise OutcomeUnknown(operation_id=context.operation_id)
-        return self.describe_collection(collection, context=context)
+                elif binding.allow_unembedded and binding.dimensions is not None:
+                    current = self._call(client, "indices.get_mapping", context, index=binding.index)
+                    actual = current.get(binding.index, {}).get("mappings", {})
+                    if not isinstance(actual, dict) or not isinstance(actual.get("properties"), dict):
+                        raise Conflict(operation_id=context.operation_id)
+                    if "embedding" not in actual.get("properties", {}):
+                        base = {**expected, "properties": {name: value for name, value in expected["properties"].items() if name != "embedding"}}
+                        if not matches_mapping(base, actual):
+                            raise Conflict(operation_id=context.operation_id)
+                        result = self._call(client, "indices.put_mapping", context, write=True, index=binding.index,
+                            properties={"embedding": expected["properties"]["embedding"]})
+                        changed = True
+                        if result.get("acknowledged") is not True:
+                            raise OutcomeUnknown(operation_id=context.operation_id)
+            return self.describe_collection(collection, context=context)
+        except StorageError as error:
+            if changed and not isinstance(error, OutcomeUnknown):
+                raise OutcomeUnknown(operation_id=context.operation_id) from error
+            raise
 
     def _filter(self, binding, where):
         terms = [

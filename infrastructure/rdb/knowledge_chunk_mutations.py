@@ -5,6 +5,7 @@ import sqlalchemy as sa
 from contracts.knowledge_chunk_mutation import CHANGES, STATES
 from nexent.storage.errors import ScopeDenied
 from nexent.storage.models import StorageScope
+from sqlalchemy.dialects.postgresql import JSONB
 
 from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
@@ -230,6 +231,8 @@ states = sa.Table(
         server_default="0",
         comment="Reserved, writing or unknown mutations; confirmed completion or failure releases one admission.",
     ),
+    sa.Column("collection_setup", sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+              nullable=True, comment="Current collection setup owner and result fence; NULL permits normal KB lifecycle operations."),
     *audit_columns(),
     sa.UniqueConstraint("tenant_id", "knowledge_id", name="uq_chunk_state_scope"),
     sa.CheckConstraint(
@@ -285,6 +288,8 @@ def bind_chunk_mutations(actor, engine, *, writable=True):
                         if isinstance(column.type, sa.Boolean)
                         else "integer"
                         if isinstance(column.type, sa.Integer)
+                        else "object"
+                        if isinstance(column.type, sa.JSON)
                         else "string",
                         nullable=column.nullable,
                     )

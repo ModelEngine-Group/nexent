@@ -17,6 +17,10 @@ from contracts.knowledge_base_deletion import (
     KnowledgeBaseDeleteLookup,
 )
 from contracts.knowledge_chunk_mutation import ChunkMutationIntent, ChunkMutationLookup
+from contracts.knowledge_collections import (
+    KnowledgeCollectionEnsure,
+    KnowledgeCollectionLookup,
+)
 from contracts.knowledge_documents import KnowledgeDocumentsAppend
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
@@ -52,6 +56,14 @@ def create_knowledge_router(service=None):
     @router.post(KnowledgeOperation.UPLOAD.value, include_in_schema=False)
     async def upload(request: Request):
         return await dispatch(request, KnowledgeFileUpload, service.upload, 202)
+
+    @router.post(KnowledgeOperation.ENSURE_COLLECTION.value, include_in_schema=False)
+    async def ensure_collection(request: Request):
+        return await dispatch(request, KnowledgeCollectionEnsure, service.ensure_collection, 200)
+
+    @router.post(KnowledgeOperation.INSPECT_COLLECTION.value, include_in_schema=False)
+    async def inspect_collection(request: Request):
+        return await dispatch(request, KnowledgeCollectionLookup, service.inspect_collection, 200)
 
     @router.post(KnowledgeOperation.APPEND_DOCUMENTS.value, include_in_schema=False)
     async def append_documents(request: Request):

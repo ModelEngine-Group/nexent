@@ -65,6 +65,11 @@ from contracts.knowledge_chunk_mutation import (
     ChunkMutationState,
     ChunkMutationTarget,
 )
+from contracts.knowledge_collections import (
+    KnowledgeCollectionEnsured,
+    KnowledgeCollectionGrant,
+    KnowledgeCollectionStatus,
+)
 from contracts.knowledge_documents import KnowledgeDocumentsAppended
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
@@ -127,6 +132,15 @@ class AgentOSClient:
 
     async def authorize_knowledge(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_AUTHORIZE, payload, user_id, tenant_id, KnowledgeFileGrant)
+
+    async def authorize_knowledge_collection(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.KNOWLEDGE_COLLECTION_AUTHORIZE, payload, user_id, tenant_id, KnowledgeCollectionGrant)
+
+    async def ensure_knowledge_collection(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.ENSURE_COLLECTION, payload, user_id, tenant_id, KnowledgeCollectionEnsured)
+
+    async def inspect_knowledge_collection(self, payload, user_id, tenant_id):
+        return await self._knowledge_request(KnowledgeOperation.INSPECT_COLLECTION, payload, user_id, tenant_id, KnowledgeCollectionStatus)
 
     async def authorize_knowledge_search(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_SEARCH_AUTHORIZE, payload, user_id, tenant_id, KnowledgeSearchGrant)
