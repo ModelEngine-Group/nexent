@@ -2,6 +2,7 @@
 
 """Shared Agent read projections and availability rules."""
 
+import logging
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -12,6 +13,8 @@ from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.model.repository import get_model_by_model_id_ignore_delete, get_model_records_by_ids, get_valid_model_ids
 from management.db.tool.repository import check_tool_is_available, query_agent_tools_for_list, search_tools_for_sub_agent
 from management.services.model.resolver import is_model_configured, resolve_model_record
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -102,15 +105,23 @@ def project_agent_models(
     overrides = agent.get("model_params_override")
     if isinstance(overrides, dict):
         from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-        from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
+        from nexent.core.model_service.profiles.outlet_storage import ProfileStorageError, decode_resolved_model_profile
         from nexent.core.model_service.registry import model_service_references
 
         current = dict(overrides)
         for model_id, record in records:
             if (record and record.get("model_type") in {"llm", "chat"}
                     and record.get("profile_schema_version") is not None and str(model_id) in current):
-                profile = decode_resolved_model_profile(record, registered_references=model_service_references())
-                current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)], profile=profile)
+                try:
+                    # The list cache carries 8-column rows; decoding needs the full
+                    # record, so resolve it uncached like the detail path does.
+                    full_record = resolve_model_record(model_id, None if detail else tenant_id)
+                    profile = decode_resolved_model_profile(full_record, registered_references=model_service_references())
+                    current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)], profile=profile)
+                except ProfileStorageError:
+                    # One broken model row must not fail the whole list page.
+                    logger.warning("Failed to decode model profile for parameter merge: model_id=%s", model_id)
+                    current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)])
         fields["model_params_override"] = current
     return AgentModelProjection(
         fields=fields,

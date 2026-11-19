@@ -8,6 +8,27 @@ import pytest
 from management.services.agent import read
 
 
+def _encoded_profile_row(profile, model_id):
+    """Full model_record_t projection exactly as the outlet persistence path writes it."""
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+
+    data = profile.model_dump(mode="json")
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = model_id
+    return encode_resolved_model_profile(profile.__class__.model_validate(data),
+                                         registered_references=model_service_references())
+
+
+@pytest.fixture
+def profile():
+    from management.services.model.profiles import build_outlet_draft
+    from test.backend.services.test_model_profile_service import draft_request
+
+    value, _ = build_outlet_draft(draft_request(parameter_values={"enable_thinking": True,
+        "reasoning_budget_tokens": 64, "temperature": 0.8, "max_output_tokens": 2048}), "a")
+    return value
+
+
 @pytest.fixture
 def records():
     models = {
@@ -78,3 +99,36 @@ def test_empty_batch_and_repository_error(mocker):
     models.side_effect = RuntimeError("database unavailable")
     with pytest.raises(RuntimeError, match="database unavailable"):
         read.load_agent_list_context([{"agent_id": 1}], "a")
+
+
+def _override_page_context(mocker, full_row):
+    """List-path page: 8-column batch rows in the cache, one agent with an override entry."""
+    slim = {1: {"model_id": 1, "tenant_id": "a", "delete_flag": "N", "model_type": "llm",
+                "display_name": "LLM", "model_name": "llm-model", "profile_schema_version": 1,
+                "connect_status": "available"}}
+    mocker.patch.object(read, "query_agent_tools_for_list", return_value=([], {}))
+    mocker.patch.object(read, "get_model_records_by_ids", return_value=slim)
+    full_fetch = mocker.patch("management.services.model.resolver.get_model_by_model_id",
+                              return_value=full_row)
+    agent = {"agent_id": 8, "model_ids": [1],
+             "model_params_override": {"1": {"temperature": 0, "extra_params": {"enable_thinking": False}}}}
+    return agent, read.load_agent_list_context([agent], "a"), full_fetch
+
+
+def test_list_projection_decodes_override_entries_from_full_rows(mocker, profile):
+    agent, context, full_fetch = _override_page_context(mocker, _encoded_profile_row(profile, 1))
+    view = read.project_agent_models(deepcopy(agent), "a", context.model_cache(), read_context=context).fields
+    full_fetch.assert_called_once_with(1, "a")
+    assert view["model_params_override"]["1"] == {"parameter_values": {"temperature": 0, "enable_thinking": False}}
+    assert view["model_ids"] == [1] and view["model_name"] == "LLM"
+
+
+def test_list_projection_survives_one_broken_profile_row(mocker, profile):
+    from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
+
+    broken_row = _encoded_profile_row(profile, 1)
+    del broken_row["resolved_profile"]
+    agent, context, _ = _override_page_context(mocker, broken_row)
+    view = read.project_agent_models(deepcopy(agent), "a", context.model_cache(), read_context=context).fields
+    assert view["model_params_override"]["1"] == read_agent_parameter_entry(agent["model_params_override"]["1"])
+    assert view["model_ids"] == [1]
