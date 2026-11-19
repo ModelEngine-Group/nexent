@@ -15,12 +15,30 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from contracts.knowledge import KEY_TENANT_HARD_LIMIT_BYTES
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, QuotaExceededError
-from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, get_private_knowledge_info_by_creator, get_private_knowledge_info_by_tenant_id, update_knowledge_record
-from management.db.configuration.tenant import delete_config_by_tenant_config_id, get_configs_by_tenant_id_and_keys, get_single_config_info, insert_config, update_config_by_tenant_config_id
+from contracts.errors.exceptions import (
+    AppException,
+    PlatformQuotaConflictError,
+    QuotaExceededError,
+)
+from contracts.knowledge import (
+    KEY_PLATFORM_CAPACITY_BYTES as KEY_PLATFORM_CAPACITY_BYTES,  # noqa: PLC0414 - Export to existing quota policies.
+)
+from contracts.knowledge import KEY_TENANT_HARD_LIMIT_BYTES
+from management.db.configuration.tenant import (
+    delete_config_by_tenant_config_id,
+    get_configs_by_tenant_id_and_keys,
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
+)
 from management.db.identity.user_tenant import get_user_email_map
+from management.db.knowledge_base.repository import (
+    get_knowledge_info_by_tenant_id,
+    get_private_knowledge_info_by_creator,
+    get_private_knowledge_info_by_tenant_id,
+    update_knowledge_record,
+)
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.storage import (
     get_committed_bytes_by_kb,
@@ -29,7 +47,13 @@ from management.services.knowledge_base.storage import (
 )
 from management.services.knowledge_base.usage_cache import (
     CACHE_TTL_SECONDS as CACHE_TTL_SECONDS,  # noqa: PLC0414 - Export the shared TTL to current quota policies.
-    _usage_cache, _usage_refresh_locks, invalidate_usage_cache, store_usage_cache, usage_refresh_guard,
+)
+from management.services.knowledge_base.usage_cache import (
+    _usage_cache,
+    _usage_refresh_locks,
+    invalidate_usage_cache,
+    store_usage_cache,
+    usage_refresh_guard,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +66,6 @@ KEY_WARNING_ENABLED = "KB_QUOTA_WARNING_ENABLED"
 KEY_WARNING_THRESHOLD_PCT = "KB_QUOTA_WARNING_THRESHOLD_PCT"
 KEY_CRITICAL_THRESHOLD_PCT = "KB_QUOTA_CRITICAL_THRESHOLD_PCT"
 KEY_HARD_LIMIT_EDITABLE = "KB_QUOTA_HARD_LIMIT_EDITABLE"
-KEY_PLATFORM_CAPACITY_BYTES = "PLATFORM_KB_STORAGE_CAPACITY_BYTES"
 KEY_PERSONAL_KB_QUOTA_DEFAULT = "PERSONAL_KB_QUOTA_DEFAULT"
 
 

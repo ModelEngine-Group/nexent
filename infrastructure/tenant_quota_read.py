@@ -93,18 +93,7 @@ def bind_tenant_quota_records(actor, tenant_id, engine, *, usage=False):
 def tenant_quota_read_ports(actor, *, context, usage=False):
     engine, owned = record_engine(context), []
     try:
-        identity = bind_cleanse_resources(
-            StorageScope(
-                "management",
-                actor.tenant_id,
-                actor.user_id,
-                {
-                    "cleanse_memberships",
-                    "cleanse_accounts",
-                },
-            ),
-            engine,
-        )
+        identity = bind_quota_identity(actor, engine)
         owned.append(identity)
 
         def records(tenant_id):
@@ -117,3 +106,11 @@ def tenant_quota_read_ports(actor, *, context, usage=False):
         close_owned(
             context, [port.close for port in reversed(owned)] + [engine.dispose]
         )
+
+
+def bind_quota_identity(actor, engine):
+    return bind_cleanse_resources(
+        StorageScope('management', actor.tenant_id, actor.user_id,
+                     {'cleanse_memberships', 'cleanse_accounts'}),
+        engine,
+    )

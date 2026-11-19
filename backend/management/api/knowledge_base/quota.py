@@ -29,6 +29,7 @@ from management.services.knowledge_base.inventory import (
     knowledge_listing_operation,
     list_knowledge_indices,
 )
+from management.services.knowledge_base.platform_quota import PlatformQuotaOverview
 from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.quota_read import read_tenant_quota
@@ -329,7 +330,7 @@ async def get_tenant_quota_usage(
 
 
 @platform_quota_router.get("/overview")
-def get_platform_overview(
+async def get_platform_overview(
     authorization: Optional[str] = Header(None),
 ):
     """
@@ -337,11 +338,16 @@ def get_platform_overview(
     Restricted to SU and ASSET_OWNER roles.
     """
     try:
-        _require_platform_quota_manager(authorization)
-        user_id, _ = get_current_user_id(authorization)
-
-        overview = QuotaService.get_platform_overview(ASSET_OWNER_TENANT_ID)
+        user_id, tenant_id = get_current_user_id(authorization)
+        async with knowledge_listing_operation() as context:
+            overview = await PlatformQuotaOverview().read(ServicePrincipal(user_id, tenant_id), context=context)
         return JSONResponse(status_code=HTTPStatus.OK, content=overview)
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                            detail="This operation requires SU or ASSET_OWNER role") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            content={"message": f"Error getting platform overview: {exc}"})
     except HTTPException:
         raise
     except TokenExpiredError as exc:

@@ -120,13 +120,14 @@ def mock_quota_service():
 
 @pytest.fixture
 def mock_platform_static():
-    """Mock QuotaService static platform methods."""
-    with patch("management.api.knowledge_base.quota.QuotaService.get_platform_overview") as mock_overview, \
+    """Mock the async overview and remaining synchronous platform writes."""
+    with patch("management.api.knowledge_base.quota.PlatformQuotaOverview") as mock_overview, \
          patch("management.api.knowledge_base.quota.QuotaService.set_platform_capacity") as mock_set_cap, \
          patch("management.api.knowledge_base.quota.QuotaService.set_tenant_hard_limit") as mock_set_tenant, \
          patch("management.api.knowledge_base.quota.QuotaService.delete_tenant_hard_limit") as mock_del:
+        overview_read = mock_overview.return_value.read = AsyncMock()
         yield {
-            "get_platform_overview": mock_overview,
+            "get_platform_overview": overview_read,
             "set_platform_capacity": mock_set_cap,
             "set_tenant_hard_limit": mock_set_tenant,
             "delete_tenant_hard_limit": mock_del,
@@ -493,15 +494,17 @@ class TestPlatformEndpoints:
         resp = client.get("/api/platform/quota/overview")
         assert resp.status_code == 200
 
-    def test_get_overview_denied_for_admin(self, client, mock_auth_admin):
+    def test_get_overview_denied_for_admin(self, client, mock_auth_admin, mock_platform_static):
+        from nexent.storage.errors import ScopeDenied
+
+        mock_platform_static["get_platform_overview"].side_effect = ScopeDenied()
         resp = client.get("/api/platform/quota/overview")
         assert resp.status_code == 403
 
     def test_get_overview_rejects_retired_role(self, client, mock_platform_static):
-        mock_platform_static["get_platform_overview"].return_value = {
-            "platform_capacity_bytes": None,
-            "tenants": [],
-        }
+        from nexent.storage.errors import ScopeDenied
+
+        mock_platform_static["get_platform_overview"].side_effect = ScopeDenied()
         with patch(
             "management.api.knowledge_base.quota.get_current_user_id",
             return_value=("speed-user-id", "speed-tenant"),
@@ -732,12 +735,9 @@ class TestQuotaEndpointErrors:
         response = client.delete("/api/tenants/other-tenant/quota")
         assert response.status_code == 403
 
-    def test_platform_overview_maps_service_error(self, client, mock_auth_su):
-        with patch(
-            "management.api.knowledge_base.quota.QuotaService.get_platform_overview",
-            side_effect=RuntimeError("overview failed"),
-        ):
-            response = client.get("/api/platform/quota/overview")
+    def test_platform_overview_maps_service_error(self, client, mock_auth_su, mock_platform_static):
+        mock_platform_static["get_platform_overview"].side_effect = RuntimeError("overview failed")
+        response = client.get("/api/platform/quota/overview")
 
         assert response.status_code == 500
         assert "overview failed" in response.json()["message"]

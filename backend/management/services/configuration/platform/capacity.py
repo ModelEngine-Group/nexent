@@ -44,7 +44,6 @@ from management.services.knowledge_base.quota_common import (
     get_tenant_committed_source_bytes,
     get_user_email_map,
     insert_config,
-    logger,
     logging,
     threading,
     time,
@@ -320,123 +319,6 @@ class PlatformCapacityPolicy:
         return {
             "capacity_bytes": capacity_bytes,
             "capacity_readable": _bytes_to_readable(capacity_bytes),
-        }
-
-    @staticmethod
-    def get_platform_overview(
-        asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
-    ) -> Dict[str, Any]:
-        """
-        Aggregate all tenants' hard limits and actual usage.
-        Returns per-tenant breakdown + platform totals.
-        """
-        from management.services.knowledge_base.quota import QuotaService
-
-        capacity_info = QuotaService.get_platform_capacity(asset_owner_tenant_id)
-
-        allocation_state = QuotaService._get_allocation_state(asset_owner_tenant_id)
-        tenant_ids = allocation_state["tenant_ids"]
-
-        tenants = []
-        total_allocated_bytes = 0
-        total_actual_bytes = 0
-        total_es_physical_bytes = 0
-
-        for tid in tenant_ids:
-            # Get hard limit for this tenant
-            hard_limit_bytes = allocation_state["hard_limits"].get(tid)
-            if hard_limit_bytes is not None:
-                total_allocated_bytes += hard_limit_bytes
-
-            # Get actual usage for this tenant
-            service = QuotaService(tid)
-            try:
-                usage = service.get_usage(force_refresh=True)
-                actual_bytes = usage.get("total_bytes", 0)
-                tenant_es_bytes = usage.get("es_physical_bytes", 0) or 0
-                warning_enabled = usage.get("warning_enabled", True)
-                warning_level = (
-                    usage.get("tenant_warning_level", "normal")
-                    if warning_enabled
-                    else "normal"
-                )
-            except Exception:
-                logger.warning("Failed to get usage for tenant %s", tid, exc_info=True)
-                actual_bytes = 0
-                warning_enabled = False
-                warning_level = "normal"
-                tenant_es_bytes = 0
-
-            total_actual_bytes += actual_bytes
-            total_es_physical_bytes += tenant_es_bytes
-
-            usage_pct = None
-            if hard_limit_bytes and hard_limit_bytes > 0:
-                usage_pct = round(actual_bytes / hard_limit_bytes * 100, 2)
-
-            # Try to get tenant name from config
-            from contracts.constants.constants import TENANT_NAME
-            from management.db.configuration.tenant import get_single_config_info as gsci
-
-            name_record = gsci(tid, TENANT_NAME)
-            tenant_name = name_record.get("config_value") if name_record else tid
-
-            tenants.append(
-                {
-                    "tenant_id": tid,
-                    "tenant_name": tenant_name or tid,
-                    "hard_limit_bytes": hard_limit_bytes,
-                    "hard_limit_readable": _bytes_to_readable(hard_limit_bytes),
-                    "actual_bytes": actual_bytes,
-                    "actual_readable": _bytes_to_readable(actual_bytes),
-                    "es_physical_bytes": tenant_es_bytes,
-                    "es_physical_readable": _bytes_to_readable(tenant_es_bytes),
-                    "usage_pct": usage_pct,
-                    "warning_level": warning_level,
-                    "warning_enabled": warning_enabled,
-                }
-            )
-
-        platform_capacity = capacity_info.get("capacity_bytes")
-        oversubscription_ratio = None
-        remaining_allocatable_bytes = None
-        allocation_percentage = None
-        if platform_capacity is not None:
-            remaining_allocatable_bytes = max(
-                platform_capacity - total_allocated_bytes, 0
-            )
-            if platform_capacity > 0:
-                oversubscription_ratio = round(
-                    total_allocated_bytes / platform_capacity, 4
-                )
-                allocation_percentage = round(
-                    total_allocated_bytes / platform_capacity * 100, 2
-                )
-            elif total_allocated_bytes == 0:
-                allocation_percentage = 0
-
-        return {
-            "platform_capacity_bytes": platform_capacity,
-            "platform_capacity_readable": capacity_info.get("capacity_readable"),
-            "tenants": tenants,
-            "total_allocated_bytes": total_allocated_bytes,
-            "total_allocated_readable": _bytes_to_readable(total_allocated_bytes),
-            "total_actual_bytes": total_actual_bytes,
-            "total_actual_readable": _bytes_to_readable(total_actual_bytes),
-            "total_es_physical_bytes": total_es_physical_bytes,
-            "total_es_physical_readable": _bytes_to_readable(total_es_physical_bytes),
-            "tenant_count": len(tenants),
-            "oversubscription_ratio": oversubscription_ratio,
-            "remaining_allocatable_bytes": remaining_allocatable_bytes,
-            "remaining_allocatable_readable": _bytes_to_readable(
-                remaining_allocatable_bytes
-            ),
-            "allocation_percentage": allocation_percentage,
-            "unmanaged_tenant_count": allocation_state["unmanaged_tenant_count"],
-            "capacity_management_enforced": (
-                platform_capacity is not None
-                and allocation_state["unmanaged_tenant_count"] == 0
-            ),
         }
 
     @staticmethod
