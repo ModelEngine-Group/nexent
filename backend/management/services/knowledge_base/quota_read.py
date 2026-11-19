@@ -27,6 +27,12 @@ from infrastructure.tenant_quota_read import CATALOG, CONFIGS, tenant_quota_read
 logger = logging.getLogger(__name__)
 
 
+def read_quota_config(records, key, *, context):
+    page = records.query(CONFIGS, RecordQuery(where=Comparison('config_key', 'eq', key)),
+                         PageRequest(limit=1), context=context)
+    return page.items[0]['config_value'] if page.items else None
+
+
 class TenantQuotaReader:
     def __init__(self, *, ports=tenant_quota_read_ports):
         self.ports = ports
@@ -59,13 +65,7 @@ class TenantQuotaReader:
 
     def _read_records(self, records, context):
         def config(key):
-            page = records.query(
-                CONFIGS,
-                RecordQuery(where=Comparison("config_key", "eq", key)),
-                PageRequest(limit=1),
-                context=context,
-            )
-            return page.items[0]["config_value"] if page.items else None
+            return read_quota_config(records, key, context=context)
 
         hard = hard_limit_values(
             config(KEY_TENANT_HARD_LIMIT_BYTES),

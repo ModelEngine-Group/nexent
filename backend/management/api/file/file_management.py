@@ -9,6 +9,7 @@ from http import HTTPStatus
 from typing import Annotated, List, Literal, Optional
 from urllib.parse import unquote, urlparse
 import httpx
+from nexent.storage.errors import DeadlineExceeded
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
@@ -143,6 +144,9 @@ async def upload_files(
         raise
     except QuotaExceededError:
         raise
+    except (TimeoutError, DeadlineExceeded):
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            content={"message": "File upload error."})
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="File upload error.")

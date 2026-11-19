@@ -23,7 +23,6 @@ from management.services.knowledge_base.quota_common import (
     List,
     Optional,
     PlatformQuotaConflictError,
-    QuotaExceededError,
     Tuple,
     _bytes_to_readable,
     _gb_to_bytes,
@@ -53,109 +52,6 @@ from management.services.knowledge_base.quota_common import (
 
 
 class PlatformCapacityPolicy:
-    def check_hard_limit(
-        self,
-        file_size_bytes: int,
-        index_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Check if adding file_size_bytes would exceed the tenant hard limit.
-        Returns quota_status dict if OK, raises QuotaExceededError if exceeded.
-        """
-        hard_limit_info = self.get_hard_limit()
-        hard_limit_bytes = hard_limit_info.get("hard_limit_bytes")
-
-        # No hard limit set = unlimited, always OK
-        if hard_limit_bytes is None:
-            return self._build_quota_status(index_name)
-
-        usage = self.get_usage(force_refresh=True)
-        current_bytes = usage.get("total_bytes", 0)
-        projected_bytes = current_bytes + file_size_bytes
-
-        if projected_bytes > hard_limit_bytes:
-            raise QuotaExceededError(
-                f"Tenant storage full: {_bytes_to_readable(projected_bytes)} exceeds "
-                f"hard limit of {_bytes_to_readable(hard_limit_bytes)}",
-                usage_bytes=current_bytes,
-                hard_limit_bytes=hard_limit_bytes,
-                exceeded_by_bytes=projected_bytes - hard_limit_bytes,
-            )
-
-        return self._build_quota_status(index_name)
-
-    def check_hard_limit_post_write(
-        self,
-        file_size_bytes: int,
-        index_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Post-write belt-and-suspenders check.
-        Returns quota_status if OK, raises QuotaExceededError if exceeded.
-        Called after MinIO write to handle race conditions.
-        """
-        hard_limit_info = self.get_hard_limit()
-        hard_limit_bytes = hard_limit_info.get("hard_limit_bytes")
-
-        if hard_limit_bytes is None:
-            return self._build_quota_status(index_name)
-
-        # Force refresh to get accurate post-write state
-        usage = self.get_usage(force_refresh=True)
-        if usage.get("total_bytes", 0) > hard_limit_bytes:
-            raise QuotaExceededError(
-                f"Tenant storage limit exceeded after write",
-                usage_bytes=usage["total_bytes"],
-                hard_limit_bytes=hard_limit_bytes,
-                exceeded_by_bytes=usage["total_bytes"] - hard_limit_bytes,
-            )
-
-        return self._build_quota_status(index_name)
-
-    def _build_quota_status(self, index_name: Optional[str] = None) -> Dict[str, Any]:
-        """Build dual-level quota status for upload responses."""
-        usage = self.get_usage(force_refresh=True, detail=True)
-        hard_limit_info = self.get_hard_limit()
-
-        # Tenant-level status
-        hard_limit_bytes = hard_limit_info.get("hard_limit_bytes")
-        tenant_usage_pct = usage.get("usage_pct")
-        tenant_warning_level = usage.get("tenant_warning_level", "normal")
-        kb_usage_pct = None
-        kb_warning_level = "normal"
-        if index_name:
-            kb_status = next(
-                (
-                    item
-                    for item in usage.get("breakdown", [])
-                    if item.get("index_name") == index_name
-                ),
-                None,
-            )
-            if kb_status:
-                kb_usage_pct = kb_status.get("usage_pct")
-                kb_warning_level = kb_status.get("kb_warning_level", "normal")
-
-        return {
-            "quota_status": {
-                "warning_enabled": usage.get("warning_enabled", True),
-                "tenant_level": {
-                    "usage_pct": tenant_usage_pct,
-                    "warning_level": tenant_warning_level,
-                    "hard_limit_bytes": hard_limit_bytes,
-                    "hard_limit_readable": hard_limit_info.get("hard_limit_readable"),
-                    "total_bytes": usage.get("total_bytes"),
-                    "total_readable": usage.get("total_readable"),
-                    "es_physical_bytes": usage.get("es_physical_bytes"),
-                    "es_physical_readable": usage.get("es_physical_readable"),
-                },
-                "kb_level": {
-                    "usage_pct": kb_usage_pct,
-                    "warning_level": kb_warning_level,
-                },
-            }
-        }
-
     @staticmethod
     def _quota_input_to_bytes(limit_gb: Optional[int], limit_mb: Optional[int]) -> int:
         """Convert an API quota value to bytes."""

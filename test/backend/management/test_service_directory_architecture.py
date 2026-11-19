@@ -147,6 +147,8 @@ MIGRATED_MODULES = {
     'file/staged_local_source.py',
     'file/upload.py',
     'file/upload_admission.py',
+    'file/upload_quota.py',
+    'file/upload_quota_read.py',
     'knowledge_base/admission.py',
     'knowledge_base/catalog_policy.py',
     'knowledge_base/chunk_browser.py',

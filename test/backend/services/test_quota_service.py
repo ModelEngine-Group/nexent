@@ -13,7 +13,6 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
 from management.services.knowledge_base.quota import (
     GB,
-    QuotaExceededError,
     QuotaService,
     _bytes_to_readable,
     _usage_cache,
@@ -398,95 +397,6 @@ class TestQuotaSummary:
 # Task 11.6 — Quota Enforcement
 # ═══════════════════════════════════════════════════════════════════════
 
-class TestQuotaEnforcement:
-    """Tests for check_hard_limit and check_hard_limit_post_write."""
-
-    def test_check_allows_when_no_hard_limit(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {"hard_limit_bytes": None}
-            result = quota_service.check_hard_limit(GB)
-            assert result is not None
-            assert "quota_status" in result
-
-    def test_check_allows_when_space_available(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {"hard_limit_bytes": 100 * GB}
-            mock_usage.return_value = {"total_bytes": 50 * GB}
-            result = quota_service.check_hard_limit(10 * GB)  # 50 + 10 < 100
-            assert result is not None
-
-    def test_check_raises_when_exceeded(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {"hard_limit_bytes": 100 * GB}
-            mock_usage.return_value = {"total_bytes": 95 * GB}
-            with pytest.raises(QuotaExceededError) as exc_info:
-                quota_service.check_hard_limit(10 * GB)  # 95 + 10 > 100
-            assert exc_info.value.usage_bytes == 95 * GB
-            assert exc_info.value.hard_limit_bytes == 100 * GB
-            assert exc_info.value.exceeded_by_bytes == 5 * GB
-
-    def test_check_raises_at_boundary(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {"hard_limit_bytes": 100 * GB}
-            mock_usage.return_value = {"total_bytes": 100 * GB}
-            with pytest.raises(QuotaExceededError):
-                quota_service.check_hard_limit(1)  # even 1 byte over
-
-    def test_post_write_check_allows_when_ok(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {"hard_limit_bytes": 100 * GB}
-            mock_usage.return_value = {"total_bytes": 80 * GB}
-            result = quota_service.check_hard_limit_post_write(0)
-            assert result is not None
-
-    def test_post_write_check_raises_on_race_condition(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {"hard_limit_bytes": 100 * GB}
-            mock_usage.return_value = {"total_bytes": 105 * GB}
-            with pytest.raises(QuotaExceededError):
-                quota_service.check_hard_limit_post_write(0)
-
-    def test_upload_status_contains_target_kb_and_warning_setting(self, quota_service):
-        with patch.object(quota_service, "get_hard_limit") as mock_limit, \
-             patch.object(quota_service, "get_usage") as mock_usage:
-            mock_limit.return_value = {
-                "hard_limit_bytes": 100 * GB,
-                "hard_limit_readable": "100 GB",
-            }
-            mock_usage.return_value = {
-                "total_bytes": 90 * GB,
-                "total_readable": "90 GB",
-                "usage_pct": 90,
-                "tenant_warning_level": "warning",
-                "warning_enabled": False,
-                "breakdown": [
-                    {
-                        "index_name": "target-kb",
-                        "usage_pct": 96,
-                        "kb_warning_level": "critical",
-                    },
-                    {
-                        "index_name": "other-kb",
-                        "usage_pct": 20,
-                        "kb_warning_level": "normal",
-                    },
-                ],
-            }
-
-            result = quota_service._build_quota_status("target-kb")["quota_status"]
-
-        assert result["warning_enabled"] is False
-        assert result["tenant_level"]["warning_level"] == "warning"
-        assert result["kb_level"] == {
-            "usage_pct": 96,
-            "warning_level": "critical",
-        }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1404,27 +1314,6 @@ class TestPersonalKbCapacity:
         assert result["details"]["kb-a"]["total_size_bytes"] == 1 * GB
         assert result["total_es_bytes"] == 4 * GB
 
-    def test_personal_usage_strict_allows_missing_es_index(
-        self, quota_service, mock_knowledge_db, mock_tenant_config_db
-    ):
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_tenant_id"
-        ].return_value = [
-            {"knowledge_id": 1, "index_name": "missing-kb", "created_by": "user-1"}
-        ]
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_creator"
-        ].return_value = mock_knowledge_db[
-            "get_private_knowledge_info_by_tenant_id"
-        ].return_value
-        mock_vdb = MagicMock()
-        mock_vdb.get_indices_detail.return_value = {}
-
-        with patch_import_context(
-            "management.services.knowledge_base.service.get_vector_db_core",
-            return_value=mock_vdb,
-        ):
-            quota_service.check_personal_user_quota("user-1", 1)
 
     def test_set_personal_user_quota_below_usage_rejected(
         self, quota_service, mock_knowledge_db, mock_tenant_config_db
@@ -1550,34 +1439,6 @@ class TestPersonalKbCapacity:
                     "user-1", 2 * GB
                 )
 
-    def test_check_personal_user_quota_exceeded(
-        self, quota_service, mock_knowledge_db
-    ):
-        kbs = [
-            {
-                "knowledge_id": 1,
-                "index_name": "kb-a",
-                "created_by": "user-1",
-            }
-        ]
-        mock_vdb = self._mock_personal_usage(
-            mock_knowledge_db, kbs, {"kb-a": "4 GB"}
-        )
-
-        with patch_import_context(
-            "management.services.knowledge_base.service.get_vector_db_core",
-            return_value=mock_vdb,
-        ), patch.object(
-            quota_service,
-            "_get_personal_effective_quota",
-            return_value=(5 * GB, "individual"),
-        ):
-            with pytest.raises(
-                AppException, match="Personal KB quota exceeded"
-            ):
-                quota_service.check_personal_user_quota(
-                    "user-1", 2 * GB
-                )
 
     def test_get_personal_self_capacity(self, quota_service, mock_knowledge_db):
         kbs = [
@@ -1918,20 +1779,6 @@ def test_pending_personal_upload_bytes_handles_invalid_knowledge_id(quota_servic
     get_committed.assert_not_called()
 
 
-def test_personal_quota_zero_bytes_allows_zero_byte_upload(
-    quota_service, mock_knowledge_db
-):
-    mock_knowledge_db["get_private_knowledge_info_by_creator"].return_value = []
-    with patch.object(
-        quota_service,
-        "_get_kb_storage_stats",
-        return_value={"stats": {}, "details": {}, "total_bytes": 0},
-    ), patch.object(
-        quota_service,
-        "_get_personal_effective_quota",
-        return_value=(0, "individual"),
-    ):
-        quota_service.check_personal_user_quota("user-1", 0)
 
 
 def test_personal_kb_quota_ignores_missing_or_unlimited_kb_record(quota_service):

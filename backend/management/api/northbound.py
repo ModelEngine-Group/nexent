@@ -1104,6 +1104,9 @@ async def upload_files(
         raise
     except AppException:
         raise
+    except (TimeoutError, DeadlineExceeded):
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            content={"message": "File upload error."})
     except Exception:
         logger.exception("File upload error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="File upload error.")

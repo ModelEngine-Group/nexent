@@ -46,6 +46,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from management.services.file.preview import build_preview_pdf_object_key
 from management.services.file.source_upload import upload_knowledge_source
 from management.services.file.upload_admission import admit_knowledge_uploads
+from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
 from nexent.core.concurrency import run_blocking
@@ -360,7 +361,7 @@ async def upload_files_impl(
                 from infrastructure.agentos_identity import ServicePrincipal
 
                 lifecycle_records = await admit_knowledge_uploads(
-                    lifecycle_record_specs, actor=ServicePrincipal(user_id, storage_context.tenant_id),
+                    lifecycle_record_specs, actor=ServicePrincipal(user_id, uploader_tenant_id),
                 )
                 if len(lifecycle_records) != len(lifecycle_record_indices):
                     raise RuntimeError("Lifecycle record batch creation returned an incomplete result")
@@ -368,23 +369,14 @@ async def upload_files_impl(
                     zip(lifecycle_record_indices, lifecycle_records))
         quota_service = None
         if storage_context:
-            from management.services.knowledge_base.quota import QuotaService
+            from management.services.file.upload_quota import UploadQuota
+
+            from infrastructure.agentos_identity import ServicePrincipal
 
             total_file_size = await _get_complete_upload_batch_size(file)
-            quota_service = QuotaService(storage_context.tenant_id, user_id)
+            quota_service = UploadQuota(ServicePrincipal(user_id, uploader_tenant_id), storage_context)
             try:
-                quota_status = quota_service.check_hard_limit(
-                    total_file_size,
-                    index_name=storage_context.index_name,
-                )
-                if (
-                    getattr(storage_context, "ingroup_permission", None) == "PRIVATE"
-                    and user_id
-                ):
-                    quota_service.check_personal_user_quota(
-                        user_id,
-                        total_file_size,
-                    )
+                quota_status = await quota_service.before(total_file_size)
             except Exception as quota_exc:
                 error_fields = ingestion_error_fields(quota_exc, "QUOTA")
                 for record in lifecycle_records_by_index.values():
@@ -540,11 +532,8 @@ async def upload_files_impl(
             )
 
             try:
-                quota_service.invalidate_usage_cache(storage_context.tenant_id)
-                quota_status = quota_service.check_hard_limit_post_write(
-                    0,
-                    index_name=storage_context.index_name,
-                )
+                invalidate_usage_cache(storage_context.tenant_id)
+                quota_status = await quota_service.after()
             except Exception as exc:
                 error_fields = ingestion_error_fields(exc, "STORAGE_COMMIT")
                 for record in lifecycle_records_by_index.values():
@@ -564,7 +553,7 @@ async def upload_files_impl(
                     object_names=uploaded_file_paths,
                     updated_by=user_id,
                 )
-                quota_service.invalidate_usage_cache(storage_context.tenant_id)
+                invalidate_usage_cache(storage_context.tenant_id)
                 raise
     else:
         raise Exception("Invalid destination. Must be 'local' or 'minio'.")

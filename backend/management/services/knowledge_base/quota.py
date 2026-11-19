@@ -183,19 +183,6 @@ class QuotaService(
 
         check_kb_capacity(kb_usage_bytes, upload_bytes, kb_quota, index_name)
 
-    def check_personal_user_quota(
-        self,
-        user_id: str,
-        upload_bytes: int,
-    ) -> None:
-        """Enforce only the user-level quota before a PRIVATE KB upload."""
-        usage_data = self._get_personal_usage_data(
-            strict=True,
-            user_id=user_id,
-            include_es=False,
-        )
-        self._check_personal_user_quota_from_usage(usage_data, user_id, upload_bytes)
-
     def check_personal_kb_quota(
         self,
         user_id: str,
