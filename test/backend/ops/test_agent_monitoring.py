@@ -141,5 +141,66 @@ def test_summary_averages_all_duration_samples_across_rows():
         {"execution_count": 1, "duration_sum_ms": 400, "duration_sample_count": 1},
         {"execution_count": 2, "duration_sum_ms": 0, "duration_sample_count": 0},
     ]
-    assert summarize_agent(rows) == {"execution_count": 6, "avg_duration_ms": 200, "duration_sample_count": 3}
-    assert summarize_agent(()) == {"execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0}
+    assert summarize_agent(rows) == {
+        "execution_count": 6, "avg_duration_ms": 200, "duration_sample_count": 3,
+        "succeeded_count": None, "failed_count": None, "success_rate": None,
+    }
+    assert summarize_agent(()) == {
+        "execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0,
+        "succeeded_count": 0, "failed_count": 0, "success_rate": None,
+    }
+
+
+@pytest.mark.parametrize("outcome,succeeded,failed", [
+    ("succeeded", 1, 0), ("failed", 0, 1), ("timed_out", 0, 1), ("cancelled", 0, 0), ("unknown", 0, 0),
+])
+@pytest.mark.parametrize("ended", [True, False])
+def test_explicit_terminal_result_counts_are_independent_of_missing_timing(started, outcome, succeeded, failed, ended):
+    document = _document(started, "result", outcome=outcome,
+                         **({"ended_at": "2026-11-01T00:00:00Z"} if ended else {}))
+    (_, row), = accumulate_agent([document])
+    assert row["execution_count"] == 1
+    assert row["succeeded_count"] == succeeded
+    assert row["failed_count"] == failed
+    assert row["duration_sample_count"] == 0
+
+
+def test_started_and_unknown_long_running_executions_do_not_imply_failure(started):
+    documents = [_document(started, "ongoing"), _document(started, "unknown", outcome="unknown",
+                  ended_at="2026-11-02T00:00:00Z", duration_ms=100_000_000)]
+    (_, row), = accumulate_agent(documents)
+    assert (row["execution_count"], row["succeeded_count"], row["failed_count"]) == (2, 0, 0)
+    assert summarize_agent([row])["success_rate"] is None
+
+
+@pytest.mark.parametrize("succeeded,failed,rate", [(0, 0, None), (0, 2, 0), (2, 0, 1), (2, 3, 0.4)])
+def test_success_rate_uses_confirmed_results_and_handles_zero_denominator(succeeded, failed, rate):
+    row = {"execution_count": succeeded + failed + 3, "duration_sum_ms": 0, "duration_sample_count": 0,
+           "succeeded_count": succeeded, "failed_count": failed}
+    result = summarize_agent([row])
+    assert result["succeeded_count"] == succeeded and result["failed_count"] == failed
+    assert result["success_rate"] == rate
+
+
+def test_success_rate_merges_exact_counts_across_dates_before_division():
+    rows = [
+        {"statistic_date": "2026-11-01", "execution_count": 1, "duration_sum_ms": 100,
+         "duration_sample_count": 1, "succeeded_count": 1, "failed_count": 0},
+        {"statistic_date": "2026-11-02", "execution_count": 4, "duration_sum_ms": 400,
+         "duration_sample_count": 4, "succeeded_count": 1, "failed_count": 3},
+    ]
+    result = summarize_agent(iter(rows))
+    assert result["succeeded_count"] == 2 and result["failed_count"] == 3
+    assert result["success_rate"] == 0.4
+    rows[1]["succeeded_count"] = rows[1]["execution_count"] = 2**53 + 9
+    assert summarize_agent(rows)["succeeded_count"] == 2**53 + 10
+
+
+@pytest.mark.parametrize("missing", ["succeeded_count", "failed_count"])
+def test_legacy_published_rows_keep_missing_result_metrics_unknown(missing):
+    known = {"execution_count": 2, "duration_sum_ms": 200, "duration_sample_count": 2,
+             "succeeded_count": 1, "failed_count": 1}
+    legacy = {key: value for key, value in known.items() if key != missing}
+    result = summarize_agent([known, legacy])
+    assert result["execution_count"] == 4 and result["avg_duration_ms"] == 100
+    assert result[missing] is None and result["success_rate"] is None

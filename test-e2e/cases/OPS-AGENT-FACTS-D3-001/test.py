@@ -30,7 +30,7 @@ from nexent.monitor.facts import emit_fact, get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
 from ops.monitoring import runtime
 from ops.monitoring.contracts import stable_key
-from ops.monitoring.search import DAILY, FACTS, filters, install_templates
+from ops.monitoring.search import DAILY, DAILY_FIELDS, FACTS, filters, install_templates, mapping
 from ops.monitoring.service import Monitoring
 from ops.monitoring.store import BATCH, DAY
 
@@ -129,6 +129,11 @@ def _run_across_midnight(tenant):
     return started, finished
 
 
+def _successful_metrics(count, average, samples):
+    return {"execution_count": count, "avg_duration_ms": average, "duration_sample_count": samples,
+            "succeeded_count": count, "failed_count": 0, "success_rate": 1.0 if count else None}
+
+
 @pytest.mark.asyncio
 async def test_agent_start_finish_and_replay(isolated_monitoring):
     service, tenant = isolated_monitoring
@@ -188,6 +193,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
         assert original["source_revision"] == original["published_source_revision"] > 0
         assert initial["execution_count"] == 1
         assert initial["duration_sum_ms"] == initial["duration_sample_count"] == 0
+        assert initial["succeeded_count"] == initial["failed_count"] == 0
 
         await _submit_and_read(service, tenant, finished)
         with monkeypatch.context() as patch:
@@ -211,6 +217,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
         assert current["agent_id"] == started["agent_id"] and current["initiator_group_ids"] == [12, 13]
         assert current["execution_count"] == 1
         assert current["duration_sample_count"] == 1 and current["duration_sum_ms"] == 350
+        assert current["succeeded_count"] == 1 and current["failed_count"] == 0
         assert service.es.count(index=f"{DAILY}-*", query=filters(
             tenant_id=tenant, fact_kind="agent", statistic_date="2026-11-01",
         ))["count"] == 0
@@ -337,25 +344,19 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         actual = await get(dict(selection, tenant_id=tenant))
         assert actual.status_code == 200
         observed = actual.json()
-        assert observed["data"] == {"execution_count": 1, "avg_duration_ms": duration_ms, "duration_sample_count": 1}
+        assert observed["data"] == _successful_metrics(1, duration_ms, 1)
         assert observed["data_as_of"] and observed["coverage_state"] == "covered" and not observed["is_stale"]
         assert (await get(selection)).json() == observed
 
         group_filtered = await get(dict(selection, group_ids=[99]))
-        assert group_filtered.json()["data"] == {
-            "execution_count": 1, "avg_duration_ms": 600, "duration_sample_count": 1,
-        }
+        assert group_filtered.json()["data"] == _successful_metrics(1, 600, 1)
         agent_filtered = await get(dict(selection, agent_id=22))
-        assert agent_filtered.json()["data"] == {
-            "execution_count": 1, "avg_duration_ms": 500, "duration_sample_count": 1,
-        }
+        assert agent_filtered.json()["data"] == _successful_metrics(1, 500, 1)
         dates = await get(dict(selection, start_date=previous.isoformat()))
-        assert dates.json()["data"] == {
-            "execution_count": 2, "avg_duration_ms": (duration_ms + 200) / 2, "duration_sample_count": 2,
-        }
+        assert dates.json()["data"] == _successful_metrics(2, (duration_ms + 200) / 2, 2)
         zero = (await get(dict(selection, group_ids=[555]))).json()
         assert zero["coverage_state"] == "covered"
-        assert zero["data"] == {"execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0}
+        assert zero["data"] == _successful_metrics(0, None, 0)
         missing_day = (previous - timedelta(days=1)).isoformat()
         uncovered = (await get(dict(selection, start_date=missing_day, end_date=missing_day))).json()
         assert uncovered["coverage_state"] == "uncovered" and uncovered["data_as_of"] is None
@@ -365,13 +366,9 @@ async def _verify_ops_query(service, tenant, day, duration_ms, monkeypatch):
         assert (await get(selection, actor="user")).status_code == 403
         assert (await get(selection, actor=None)).status_code == 401
         other_only = await get(dict(selection, tenant_id=other), actor="admin")
-        assert other_only.json()["data"] == {
-            "execution_count": 1, "avg_duration_ms": 800, "duration_sample_count": 1,
-        }
+        assert other_only.json()["data"] == _successful_metrics(1, 800, 1)
         all_tenants = await get(selection, actor="admin")
-        assert all_tenants.json()["data"] == {
-            "execution_count": 2, "avg_duration_ms": (duration_ms + 800) / 2, "duration_sample_count": 2,
-        }
+        assert all_tenants.json()["data"] == _successful_metrics(2, (duration_ms + 800) / 2, 2)
         views = await _verify_agent_views(client, service, selection, tenant, other, previous, duration_ms)
     return actual.request.url.raw_path.decode("ascii"), observed, views
 
@@ -388,7 +385,7 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
     assert listing["data"]["current_agent_count"] == listing["data"]["total"] == 1
     assert root["name"] == "internal-21" and root["display_name"] == "Agent 21"
     assert root["configured_group_ids"] == [12, 13] and root["model_ids"] == [7]
-    assert root["metrics"] == {"execution_count": 1, "avg_duration_ms": duration_ms, "duration_sample_count": 1}
+    assert root["metrics"] == _successful_metrics(1, duration_ms, 1)
     own = {key: value for key, value in selection.items() if key != "agent_id"}
     full = (await get(params=own)).json()["data"]
     assert full["current_agent_count"] == 3 and full["total"] == 10
@@ -422,7 +419,7 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
     assert [item["execution_count"] for item in global_series] == [1, 2]
     zero = (await get(params=dict(own, group_ids=[555]))).json()["data"]
     assert zero["current_agent_count"] == zero["total"] == 3
-    assert all(item["metrics"] == {"execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0}
+    assert all(item["metrics"] == _successful_metrics(0, None, 0)
                for item in zero["items"])
     missing = (previous - timedelta(days=1)).isoformat()
     unavailable = (await get("/trends", dict(selection, start_date=missing, end_date=missing))).json()["data"]
@@ -437,9 +434,7 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
     service.tick()
     current = (await get()).json()
     assert not current["is_stale"]
-    assert current["data"]["items"][0]["metrics"] == {
-        "execution_count": 2, "avg_duration_ms": (duration_ms + 250) / 2, "duration_sample_count": 2,
-    }
+    assert current["data"]["items"][0]["metrics"] == _successful_metrics(2, (duration_ms + 250) / 2, 2)
     return {"directory": listing, "rankings": ranked, "trends": series, "after_publication": current}
 
 
@@ -571,6 +566,138 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
             set_fact_sink(sink)
 
 
+def _mixed_result_events(tenant):
+    plans = [
+        (0, 21, "succeeded", True), (0, 21, "cancelled", True),
+        (0, 21, "unknown", True), (0, 21, "started", False),
+        (1, 21, "succeeded", True), (1, 21, "failed", True),
+        (1, 21, "failed", True), (1, 21, "timed_out", True),
+        (0, 22, "failed", True), (1, 22, "succeeded", True), (1, 22, "cancelled", True),
+        (0, 23, "started", False), (1, 23, "cancelled", True),
+        (1, 23, "unknown", True), (1, 23, "unknown", False),
+        (1, 24, "timed_out", False),
+    ]
+    roots = {offset: uuid4().hex for offset in (0, 1)}
+    events = []
+    for offset, agent_id, outcome, ended in plans:
+        run_id = roots[offset] if agent_id == 21 and outcome == "succeeded" else uuid4().hex
+        instant = datetime(2026, 11, 1, tzinfo=timezone.utc) + timedelta(days=offset)
+        started = {
+            "tenant_id": tenant, "fact_kind": "agent", "fact_id": run_id, "call_context_id": run_id,
+            "agent_run_id": run_id, "root_run_id": roots[offset] if agent_id == 22 else run_id,
+            "agent_id": agent_id, "is_root": agent_id != 22, "initiator_group_ids": [12, 13],
+            "started_at": instant.isoformat(), "record_revision": 1, "outcome": "started",
+        }
+        if agent_id == 22:
+            started["parent_run_id"] = roots[offset]
+        terminal = dict(started, record_revision=2, outcome=outcome) if outcome != "started" else started
+        if ended:
+            terminal.update(ended_at=(instant + timedelta(milliseconds=10)).isoformat(), duration_ms=10)
+        events.append((started, terminal))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_mixed_agent_results_merge_across_days_and_replay(isolated_monitoring, monkeypatch, record_property):
+    from contracts.constants import environment
+    from gateway.authentication import auth
+    from management.db.agent.models import AgentInfo
+    from permissions import rbac
+
+    service, tenant = isolated_monitoring
+    legacy = {"tenant_id": tenant, "fact_kind": "agent", "agent_id": 99, "statistic_date": "2026-11-01",
+              "publish_id": "legacy", "execution_count": 1, "duration_sum_ms": 10, "duration_sample_count": 1}
+    old_fields = {**DAILY_FIELDS, **dict.fromkeys(("execution_count", "duration_sum_ms", "duration_sample_count"), "long")}
+    service.es.indices.put_index_template(name=DAILY, index_patterns=[f"{DAILY}-*"], priority=200,
+                                          template={"mappings": mapping(old_fields)})
+    index = f"{DAILY}-2026.11"
+    service.es.index(index=index, id="legacy", document=legacy, refresh="wait_for")
+    assert "succeeded_count" not in service.es.indices.get_mapping(index=index)[index]["mappings"]["properties"]
+    install_templates(service.es, 0, runtime.MONITORING_KINDS.values())
+    upgraded = service.es.indices.get_mapping(index=index)[index]["mappings"]["properties"]
+    assert upgraded["succeeded_count"]["type"] == upgraded["failed_count"]["type"] == "long"
+    assert service.es.get(index=index, id="legacy")["_source"] == legacy
+
+    events = _mixed_result_events(tenant)
+    async with runtime.producer_lifespan():
+        for started, terminal in events:
+            emit_fact(started)
+            if terminal is not started:
+                emit_fact(terminal)
+        await _wait_for_agent_batch(service, tenant)
+        async with asyncio.timeout(15):
+            while True:
+                service.tick()
+                result = service.es.search(index=f"{FACTS}-*", size=100, query=filters(tenant_id=tenant))
+                sources = {hit["_source"]["fact_id"]: hit["_source"] for hit in result["hits"]["hits"]}
+                if len(sources) == len(events) and all(sources[final["fact_id"]]["outcome"] == final["outcome"]
+                                                       for _, final in events):
+                    break
+                await asyncio.sleep(0.1)
+        with service.store.engine.begin() as connection:
+            for number in (21, 22, 23, 24):
+                connection.execute(insert(AgentInfo).values(
+                    agent_id=number, version_no=0, tenant_id=tenant, name=f"result-{number}", delete_flag="N",
+                ))
+        monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
+        monkeypatch.setattr(environment, "MONITORING_PROVIDER", "otlp")
+        from ops.api import application
+
+        monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+        monkeypatch.setattr(auth, "get_current_user_context", lambda _: ("operator", tenant, "OPS"))
+        monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}})
+        monkeypatch.setattr(rbac, "_INITIALIZED", True)
+        app = application.create_app()
+        app.state.monitoring = service
+        params = {"start_date": "2026-11-01", "end_date": "2026-11-02", "group_ids": [12, 13]}
+        base = "/ops/v1/monitoring/agents"
+        expected = {21: (8, 2, 3, 0.4), 22: (3, 1, 1, 0.5), 23: (4, 0, 0, None), 24: (1, 0, 1, 0)}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops",
+                                     headers={"Authorization": "Bearer ops"}) as client:
+            async def read(suffix="/summary", **selection):
+                response = await client.get(base + suffix, params={**params, **selection})
+                assert response.status_code == 200
+                return response.json()
+
+            summaries = {}
+            for number, values in expected.items():
+                summaries[number] = await read(agent_id=number)
+                metrics = summaries[number]["data"]
+                assert tuple(metrics[field] for field in ("execution_count", "succeeded_count", "failed_count", "success_rate")) == values
+            assert summaries[24]["data"]["duration_sample_count"] == 0
+            assert summaries[24]["data"]["avg_duration_ms"] is None
+            directory = (await read(""))["data"]
+            assert directory["current_agent_count"] == directory["total"] == 4
+            assert {row["agent_id"]: row["metrics"] for row in directory["items"]} == {
+                number: body["data"] for number, body in summaries.items()
+            }
+            trend = (await read("/trends", agent_id=21))["data"]
+            assert [(row["succeeded_count"], row["failed_count"], row["success_rate"]) for row in trend] == [
+                (1, 0, 1), (1, 3, 0.25),
+            ]
+            assert summaries[21]["data"]["success_rate"] != sum(row["success_rate"] for row in trend) / 2
+            zero = await read(group_ids=[555])
+            assert zero["coverage_state"] == "covered"
+            assert zero["data"]["succeeded_count"] == zero["data"]["failed_count"] == 0
+            assert zero["data"]["success_rate"] is None
+            combined = await read()
+            assert (combined["data"]["succeeded_count"], combined["data"]["failed_count"],
+                    combined["data"]["success_rate"]) == (3, 5, 0.375)
+            for _, terminal in events:
+                emit_fact(terminal)
+            await _wait_for_agent_batch(service, tenant)
+            service.tick()
+            replay = service.es.search(index=f"{FACTS}-*", size=100, query=filters(tenant_id=tenant))
+            assert {hit["_source"]["fact_id"]: hit["_source"] for hit in replay["hits"]["hits"]} == sources
+            assert await read() == combined
+            assert (await read("/trends", agent_id=21))["data"] == trend
+            assert (await read(""))["data"] == directory
+            for number in expected:
+                assert await read(agent_id=number) == summaries[number]
+        record_property("success_rate_verification", json.dumps({"agents": summaries, "root_trend": trend,
+                                                                 "combined": combined, "covered_zero": zero}))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_peer", ["children"], indirect=True)
 async def test_real_parent_and_child_facts_publish_and_replay(
@@ -682,8 +809,8 @@ async def test_real_parent_and_child_facts_publish_and_replay(
             app = application.create_app()
             app.state.monitoring = service
             params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "group_ids": [12, 13]}
-            expected = {number: {"execution_count": row["execution_count"], "duration_sample_count": row["duration_sample_count"],
-                                 "avg_duration_ms": row["duration_sum_ms"] / row["duration_sample_count"]}
+            expected = {number: _successful_metrics(row["execution_count"],
+                        row["duration_sum_ms"] / row["duration_sample_count"], row["duration_sample_count"])
                         for number, row in by_agent.items()}
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops",
                                          headers={"Authorization": "Bearer ops"}) as client:
@@ -696,6 +823,8 @@ async def test_real_parent_and_child_facts_publish_and_replay(
                 summary = (await client.get("/ops/v1/monitoring/agents/summary", params=params)).json()
                 assert summary["data"]["execution_count"] == summary["data"]["duration_sample_count"] == 3
                 assert summary["data"]["avg_duration_ms"] == sum(event["duration_ms"] for event in terminals.values()) / 3
+                assert summary["data"]["succeeded_count"] == 3 and summary["data"]["failed_count"] == 0
+                assert summary["data"]["success_rate"] == 1
                 trend = (await client.get("/ops/v1/monitoring/agents/trends", params=params)).json()["data"]
                 assert len(trend) == 1 and all(trend[0][key] == value for key, value in summary["data"].items())
             record_property("parent_child_metrics", json.dumps({"agents": expected, "combined": summary}))

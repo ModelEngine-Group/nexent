@@ -218,7 +218,14 @@ Authorization: Bearer <session-token>
 
 ```json
 {
-  "data": {"execution_count": 2, "avg_duration_ms": 250.0, "duration_sample_count": 2},
+  "data": {
+    "execution_count": 2,
+    "avg_duration_ms": 250.0,
+    "duration_sample_count": 2,
+    "succeeded_count": 1,
+    "failed_count": 1,
+    "success_rate": 0.5
+  },
   "data_as_of": "2026-11-18T08:40:00+00:00",
   "coverage_state": "covered",
   "is_stale": false
@@ -230,6 +237,23 @@ over all selected duration samples. A covered selection with zero matches
 returns zero executions and samples and a null average. An uncovered
 selection returns null metrics. Partial coverage can report the published
 subset, and `is_stale` indicates that source changes or failed writes are pending.
+
+Summary, resource metrics and daily trends include `succeeded_count`,
+`failed_count` and `success_rate`. An explicit `succeeded` terminal fact counts
+as success. Explicit `failed` and `timed_out` terminal facts count as failure,
+including results with missing timing fields. Cancelled,
+ongoing and unknown outcomes enter neither result counter. The ratio is
+`succeeded_count / (succeeded_count + failed_count)` in the range 0 through 1,
+with null for a zero denominator. Selected dates and groups merge integer
+counts before division. Main and child results belong to their own executions.
+An execution's duration alone never establishes a timeout.
+
+Ops adds the new long counters to existing daily index mappings at startup.
+Previously published daily rows missing these counters keep their existing
+execution and duration metrics, with unknown result counts and a null success
+rate. Normal recomputation of a changed day fills the result counters from
+source facts. Existing historical publications require recomputation before
+their success metrics become available.
 
 ## Storage and process resources
 
@@ -281,8 +305,8 @@ independently of date, initiating group and name search. An optional Agent
 selection also scopes this count. Historical usage for an absent catalog
 entry remains in the list with `is_current=false` and without current names.
 
-`metrics` contains `execution_count`, `avg_duration_ms` and
-`duration_sample_count`. Resource metrics are null when the selected tenant
+`metrics` contains `execution_count`, `avg_duration_ms`, `duration_sample_count`,
+`succeeded_count`, `failed_count` and `success_rate`. Resource metrics are null when the selected tenant
 and dates lack complete coverage and no matching observations are available.
 Complete zero-use resources report zero executions and a null average.
 Trends include every requested date. Unknown dates have null metrics, and

@@ -52,6 +52,8 @@ def test_agent_summary_distinguishes_zero_from_unavailable(
     data, status = read_agents(service, tenant="tenant", start=DAY, end=DAY, groups=[12, 13], agent_id=21)
 
     assert (data["execution_count"], data["avg_duration_ms"], data["duration_sample_count"]) == metrics
+    assert data["succeeded_count"] == data["failed_count"] == metrics[0]
+    assert data["success_rate"] is None
     assert status == {"coverage_state": label, "data_as_of": state["source_snapshot_at"], "is_stale": not up_to_date}
     if published:
         clause = point.documents.call_args.args[0]["bool"]["filter"]

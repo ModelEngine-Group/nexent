@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -63,6 +63,12 @@ case:
   - order: 15
     action: Replay the terminal facts, publish again and compare Agent-specific and combined HTTP summaries, trends and resource pages to the observed executions.
     expected: Main and child count one and two respectively, with duration sums and sample counts matching the ES facts. Replay changes neither counts nor duration and creates no additional document.
+  - order: 16
+    action: Submit start and terminal revisions with mixed main and child outcomes on two dates, including explicit timed_out failure and excluded results, and publish through the normal Ops worker.
+    expected: Succeeded and failed counts match explicit terminal outcomes by Agent and day, including missing timing fields. A zero denominator returns null. Cross-day success rate divides merged counts and differs from an average of daily rates.
+  - order: 17
+    action: Replay terminal observations and query existing summaries, resource pages and daily trends, including a selection with no matching executions.
+    expected: Published counters and rates remain identical after replay, all interfaces agree, and the empty covered selection returns zero counts and a null rate.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -75,6 +81,7 @@ case:
   - Ops authorization controls explicit and implicit tenant selection.
   - Agent directory, trends and rankings agree with published metrics and distinguish current metadata from historical usage.
   - Actual child invocations preserve their independent identity and timing through source facts, daily publication and queries with trajectory disabled.
+  - Ended-result success metrics follow the confirmed outcome contract across dates and remain idempotent through all existing query surfaces.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -82,6 +89,7 @@ case:
   - Duplicate counts from matching multiple groups or unauthorized cross-tenant results.
   - Inflated current totals from published snapshots or lost historical usage for absent catalog entries.
   - An extra child execution or duration sample from terminal replay, or child attribution to its parent's execution ID.
+  - A success denominator containing cancelled, ongoing or unknown executions, a guessed timeout, or a mean of daily success rates.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -113,3 +121,8 @@ case:
     steps: [14, 15]
     expected_results: [11]
     forbidden_side_effects: [6]
+  - id: AC-07
+    description: Agent success metrics merge confirmed result counts across dates and remain stable after terminal replay.
+    steps: [16, 17]
+    expected_results: [12]
+    forbidden_side_effects: [7]

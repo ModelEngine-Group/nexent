@@ -13,6 +13,7 @@ RunId = Annotated[str, Field(min_length=1, max_length=128)]
 DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
               "initiator_group_ids", "agent_id")
 COUNTERS = ("execution_count", "duration_sum_ms", "duration_sample_count")
+RESULT_COUNTERS = ("succeeded_count", "failed_count")
 
 
 class AgentFact(Fact):
@@ -44,9 +45,11 @@ def accumulate_agent(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
         dimensions = {field: fact[field] for field in DIMENSIONS}
         key = stable_key(*dimensions.values())
         if key not in groups:
-            groups[key] = {**dimensions, **dict.fromkeys(COUNTERS, 0)}
+            groups[key] = {**dimensions, **dict.fromkeys(COUNTERS + RESULT_COUNTERS, 0)}
         row = groups[key]
         row["execution_count"] += 1
+        row["succeeded_count"] += fact["outcome"] == "succeeded"
+        row["failed_count"] += fact["outcome"] in {"failed", "timed_out"}
         duration = fact.get("duration_ms")
         if fact.get("ended_at") is not None and duration is not None:
             row["duration_sum_ms"] += duration
@@ -55,16 +58,25 @@ def accumulate_agent(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
 
 
 def summarize_agent(rows: Iterable[dict]) -> dict:
-    """Compute a weighted average over complete, measured executions."""
+    """Merge exact counts before computing duration averages and success rate."""
     totals = dict.fromkeys(COUNTERS, 0)
+    results = dict.fromkeys(RESULT_COUNTERS, 0)
     for row in rows:
         for counter in totals:
             totals[counter] += row[counter]
+        for counter in results:
+            if row.get(counter) is None:
+                results[counter] = None
+            elif results[counter] is not None:
+                results[counter] += row[counter]
     samples = totals["duration_sample_count"]
+    denominator = sum(results.values()) if all(value is not None for value in results.values()) else None
     return {
         "execution_count": totals["execution_count"],
         "avg_duration_ms": totals["duration_sum_ms"] / samples if samples else None,
         "duration_sample_count": samples,
+        **results,
+        "success_rate": results["succeeded_count"] / denominator if denominator else None,
     }
 
 
@@ -72,5 +84,5 @@ AGENT_MONITORING = MonitoringKind(
     fact_model=AgentFact,
     aggregate=accumulate_agent,
     fact_fields={"is_root": "boolean", "parent_run_id": "keyword", "agent_version_no": "integer"},
-    daily_fields=dict.fromkeys(COUNTERS, "long"),
+    daily_fields=dict.fromkeys(COUNTERS + RESULT_COUNTERS, "long"),
 )

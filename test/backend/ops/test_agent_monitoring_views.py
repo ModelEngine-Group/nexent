@@ -79,9 +79,11 @@ def test_views_keep_tenant_identity_exact_counts_and_weighted_durations(publicat
     assert current == 4 and len(items) == 5
     assert lookup["a", 21]["metrics"] == {
         "execution_count": 4, "avg_duration_ms": 250, "duration_sample_count": 4,
+        "succeeded_count": None, "failed_count": None, "success_rate": None,
     }
     assert lookup["a", 22]["metrics"] == {
         "execution_count": 0, "avg_duration_ms": None, "duration_sample_count": 0,
+        "succeeded_count": 0, "failed_count": 0, "success_rate": None,
     }
     assert lookup["b", 21]["metrics"] is None
     assert lookup["a", 99]["metrics"]["execution_count"] == 2**53 + 1
@@ -101,7 +103,8 @@ def test_trends_fill_known_zero_uncovered_and_stale(publication):
         service, tenant=None, start=PREVIOUS - timedelta(days=1), end=DAY, groups=[], agent_id=None,
     )
     assert history[0] == {"statistic_date": PREVIOUS - timedelta(days=1), "execution_count": None,
-                          "avg_duration_ms": None, "duration_sample_count": None, "coverage_state": "uncovered"}
+                          "avg_duration_ms": None, "duration_sample_count": None, "coverage_state": "uncovered",
+                          "succeeded_count": None, "failed_count": None, "success_rate": None}
     # The controlled catalog also contains an uncovered tenant, so these global days remain partial.
     assert history[1]["execution_count"] is None and history[1]["coverage_state"] == "partial"
     assert status["is_stale"] and status["coverage_state"] == "partial"
@@ -117,6 +120,20 @@ def test_single_tenant_complete_dates_report_zero(publication, monkeypatch):
     )
     assert status["coverage_state"] == "covered"
     assert all(row["execution_count"] == 0 and row["coverage_state"] == "covered" for row in history)
+    assert all(row["succeeded_count"] == row["failed_count"] == 0 and row["success_rate"] is None for row in history)
+
+
+def test_views_and_daily_trends_merge_result_counts_before_division(publication):
+    service, rows, _ = publication
+    rows[0].update(succeeded_count=1, failed_count=0)
+    rows[1].update(execution_count=4, succeeded_count=1, failed_count=3)
+    rows[2].update(succeeded_count=0, failed_count=0)
+    items, _, history, _ = query.read_agent_views(
+        service, tenant=None, start=PREVIOUS, end=DAY, groups=[12, 13], agent_id=None,
+    )
+    result, = [item["metrics"] for item in items if (item["tenant_id"], item["agent_id"]) == ("a", 21)]
+    assert (result["succeeded_count"], result["failed_count"], result["success_rate"]) == (2, 3, 0.4)
+    assert [row["success_rate"] for row in history] == [1, 0.25]
 
 
 @pytest.fixture
