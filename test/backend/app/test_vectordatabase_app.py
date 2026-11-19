@@ -116,6 +116,7 @@ RedisService = MagicMock()
 # Import routes and services
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, DuplicateError
+from contracts.knowledge import VectorDatabaseType
 from management.api.knowledge_base.vectordatabase import create_new_index, router
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 
@@ -1315,7 +1316,7 @@ async def test_health_check_success(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.health_check") as mock_health:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_health") as mock_health:
 
         expected_response = {"status": "ok", "elasticsearch": "connected"}
         mock_health.return_value = expected_response
@@ -1326,6 +1327,41 @@ async def test_health_check_success(vdb_core_mock):
         # Verify
         assert response.status_code == 200
         assert response.json() == expected_response
+
+
+@pytest.mark.asyncio
+async def test_health_preserves_datamate_query_selection_without_native_core():
+    with patch('management.api.knowledge_base.vectordatabase.check_knowledge_health', new_callable=AsyncMock) as check:
+        check.return_value = {'status': 'healthy', 'elasticsearch': 'connected', 'indices_count': 3}
+        response = client.get('/indices/health', params={'db_type': 'datamate', 'tenant_id': 'selected'})
+    assert response.status_code == 200 and response.json()['indices_count'] == 3
+    check.assert_awaited_once_with(VectorDatabaseType.DATAMATE, 'selected')
+    route = next(route for route in router.routes if route.path == '/indices/health')
+    assert not route.dependant.dependencies
+
+
+@pytest.mark.asyncio
+async def test_health_rejects_unknown_provider_before_any_operation():
+    with patch('management.api.knowledge_base.vectordatabase.check_knowledge_health', new_callable=AsyncMock) as check:
+        response = client.get('/indices/health', params={'db_type': 'unknown'})
+    assert response.status_code == 422
+    check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reported_health_deadline_keeps_application_envelope_without_error_log(caplog):
+    from backend.http.server.exception_handlers import register_exception_handlers
+
+    proof_app = FastAPI()
+    proof_app.include_router(router)
+    register_exception_handlers(proof_app)
+    with patch('management.api.knowledge_base.vectordatabase.check_knowledge_health', new_callable=AsyncMock) as check:
+        check.side_effect = DeadlineExceeded()
+        with TestClient(proof_app) as proof_client:
+            response = proof_client.get('/indices/health')
+    assert response.status_code == 500
+    assert response.json() == {'message': 'Storage operation deadline exceeded'}
+    assert not [record for record in caplog.records if record.levelname == 'ERROR']
 
 
 @pytest.mark.asyncio
@@ -1740,7 +1776,7 @@ async def test_health_check_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.health_check") as mock_health:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_health") as mock_health:
         # Setup the mock to raise an exception
         mock_health.side_effect = Exception("Elasticsearch connection failed")
 
@@ -1756,7 +1792,7 @@ async def test_health_check_exception(vdb_core_mock):
 
         # Verify health_check was called
         # Use ANY for the vdb_core parameter because the actual object may differ
-        mock_health.assert_called_once_with(ANY)
+        mock_health.assert_awaited_once_with(VectorDatabaseType.ELASTICSEARCH, None)
 
 
 @pytest.mark.asyncio
@@ -1855,7 +1891,7 @@ async def test_health_check_timeout_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.health_check") as mock_health:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_health") as mock_health:
 
         # Setup the mock to raise a timeout exception
         mock_health.side_effect = TimeoutError("Health check timed out")
@@ -1871,7 +1907,7 @@ async def test_health_check_timeout_exception(vdb_core_mock):
         assert response.json() == {"detail": expected_error_detail}
 
         # Verify health_check was called
-        mock_health.assert_called_once_with(ANY)
+        mock_health.assert_awaited_once_with(VectorDatabaseType.ELASTICSEARCH, None)
 
 
 @pytest.mark.asyncio
@@ -1882,7 +1918,7 @@ async def test_health_check_connection_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.health_check") as mock_health:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_health") as mock_health:
 
         # Setup the mock to raise a connection exception
         mock_health.side_effect = ConnectionError(
@@ -1899,7 +1935,7 @@ async def test_health_check_connection_exception(vdb_core_mock):
         assert response.json() == {"detail": expected_error_detail}
 
         # Verify health_check was called
-        mock_health.assert_called_once_with(ANY)
+        mock_health.assert_awaited_once_with(VectorDatabaseType.ELASTICSEARCH, None)
 
 
 @pytest.mark.asyncio
@@ -1910,7 +1946,7 @@ async def test_health_check_permission_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.health_check") as mock_health:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_health") as mock_health:
 
         # Setup the mock to raise a permission exception
         mock_health.side_effect = PermissionError(
@@ -1927,7 +1963,7 @@ async def test_health_check_permission_exception(vdb_core_mock):
         assert response.json() == {"detail": expected_error_detail}
 
         # Verify health_check was called
-        mock_health.assert_called_once_with(ANY)
+        mock_health.assert_awaited_once_with(VectorDatabaseType.ELASTICSEARCH, None)
 
 
 @pytest.mark.asyncio
@@ -1938,7 +1974,7 @@ async def test_health_check_validation_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.health_check") as mock_health:
+            patch("management.api.knowledge_base.vectordatabase.check_knowledge_health") as mock_health:
 
         # Setup the mock to raise a validation exception
         mock_health.side_effect = ValueError(
@@ -1955,7 +1991,7 @@ async def test_health_check_validation_exception(vdb_core_mock):
         assert response.json() == {"detail": expected_error_detail}
 
         # Verify health_check was called
-        mock_health.assert_called_once_with(ANY)
+        mock_health.assert_awaited_once_with(VectorDatabaseType.ELASTICSEARCH, None)
 
 
 @pytest.mark.asyncio

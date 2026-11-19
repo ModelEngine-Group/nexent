@@ -50,6 +50,12 @@ class StoragePort(Protocol):
     def close(self) -> None: ...
 
 
+class CollectionInventory(StoragePort, Protocol):
+    def count(self, *, context: OperationContext) -> int:
+        """Count visible collections in a trusted binding, without exposing names."""
+        ...
+
+
 class KeyValueStore(StoragePort, Protocol):
     def get(self, key: str, *, context: OperationContext) -> KVEntry | None: ...
 
@@ -226,3 +232,4 @@ class StorageInterface:
     objects: ObjectStore | None = None
     vectors: VectorStore | None = None
     queue: WorkQueue | None = None
+    collections: CollectionInventory | None = None

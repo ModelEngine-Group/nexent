@@ -41,29 +41,6 @@ __all__ = (
 
 class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
     @staticmethod
-    def health_check(vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)):
-        """
-        Check the health status of the API and Elasticsearch
-
-        Args:
-            vdb_core: VectorDatabaseCore instance
-
-        Returns:
-            Response containing health status information
-        """
-        try:
-            # Try to list indices as a health check
-            indices = vdb_core.get_user_indices()
-            return {
-                "status": "healthy",
-                "elasticsearch": "connected",
-                "indices_count": len(indices),
-            }
-        except Exception as e:
-            raise Exception(f"Health check failed: {str(e)}")
-
-
-    @staticmethod
     def get_external_file_chunks(
         index_name: str,
         page: Optional[int] = None,

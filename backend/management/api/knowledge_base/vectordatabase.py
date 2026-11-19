@@ -56,6 +56,7 @@ from management.services.knowledge_base.document_admission import (
 )
 from management.services.knowledge_base.documents import index_documents
 from management.services.knowledge_base.file_reader import read_document_error
+from management.services.knowledge_base.health import check_knowledge_health
 from management.services.knowledge_base.inventory import (
     knowledge_listing_operation,
     list_knowledge_indices,
@@ -781,11 +782,14 @@ async def get_document_error_info(
 
 # Health check
 @router.get("/health")
-def health_check(vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)):
+async def health_check(db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH,
+                       tenant_id: str | None = None):
     """Check API and Elasticsearch health"""
     try:
-        # Try to list indices as a health check
-        return ElasticSearchService.health_check(vdb_core)
+        return await check_knowledge_health(db_type, tenant_id)
+    except (DeadlineExceeded, RuntimeServiceTimeoutError) as error:
+        # Preserve the application's 500 envelope without re-logging a reported timeout.
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': str(error)})
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"{str(e)}")
 

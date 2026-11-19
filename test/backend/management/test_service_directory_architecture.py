@@ -223,6 +223,7 @@ MIGRATED_MODULES = {
     'knowledge_base/file_selection.py',
     'knowledge_base/file_listing.py',
     'knowledge_base/file_source_display.py',
+    'knowledge_base/health.py',
     'knowledge_base/ingestion.py',
     'knowledge_base/ingestion_coordinator.py',
     'knowledge_base/ingestion_dispatch.py',

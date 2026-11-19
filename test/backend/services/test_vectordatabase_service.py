@@ -1022,44 +1022,7 @@ class TestElasticSearchService(unittest.TestCase):
             weight_accurate=0.3
         )
 
-    def test_health_check_healthy(self):
-        """
-        Test health check when Elasticsearch is healthy.
 
-        This test verifies that:
-        1. The health check correctly reports a healthy status when Elasticsearch is available
-        2. The response includes the connection status and indices count
-        3. The health_check method returns without raising exceptions
-        """
-        # Setup
-        self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
-
-        # Execute
-        result = ElasticSearchService.health_check(vdb_core=self.mock_vdb_core)
-
-        # Assert
-        self.assertEqual(result["status"], "healthy")
-        self.assertEqual(result["elasticsearch"], "connected")
-        self.assertEqual(result["indices_count"], 2)
-
-    def test_health_check_unhealthy(self):
-        """
-        Test health check when Elasticsearch is unhealthy.
-
-        This test verifies that:
-        1. When Elasticsearch is unavailable, an exception is raised
-        2. The exception has the correct status code (500)
-        3. The exception message contains "Health check failed"
-        """
-        # Setup
-        self.mock_vdb_core.get_user_indices.side_effect = Exception(
-            "Connection error")
-
-        # Execute and Assert
-        with self.assertRaises(Exception) as context:
-            ElasticSearchService.health_check(vdb_core=self.mock_vdb_core)
-
-        self.assertIn("Health check failed", str(context.exception))
 
             # Basic functionality test - just verify the response is correct type
             # The detailed function calls are tested in their own unit tests
@@ -1438,26 +1401,6 @@ class TestElasticSearchService(unittest.TestCase):
 
 
 
-    def test_health_check_success_status_200(self):
-        """
-        Test health_check method returns status code 200 on success.
-
-        This test verifies that:
-        1. The health_check method successfully checks Elasticsearch health
-        2. The response is a dictionary with a "healthy" status
-        3. The method completes without raising exceptions, implying a 200 status code
-        """
-        # Setup
-        self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
-
-        # Execute
-        result = ElasticSearchService.health_check(vdb_core=self.mock_vdb_core)
-
-        # Assert
-        self.assertEqual(result["status"], "healthy")
-        self.assertEqual(result["elasticsearch"], "connected")
-        # Verify successful response status - 200
-        self.assertIsInstance(result, dict)  # Success response is a dictionary
 
 
     def test_semantic_search_success_status_200(self):
