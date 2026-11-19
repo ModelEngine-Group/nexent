@@ -49,7 +49,8 @@ def test_public_files_keep_shape_tags_and_actual_actor(public):
     }
     name, actor = s.query.await_args.args
     assert (name, actor.user_id, actor.tenant_id) == ("kb", "reader", "tenant-a")
-    assert s.tags.call_args.kwargs == {"index_name": "kb", "tenant_id": "tenant-a"}
+    assert s.tags.await_args.kwargs == {"index_name": "kb", "actor": s.query.await_args.args[1]}
+    assert s.tags.await_count == 1
 
 
 @pytest.mark.parametrize(

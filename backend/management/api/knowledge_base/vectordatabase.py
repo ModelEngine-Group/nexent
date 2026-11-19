@@ -79,7 +79,7 @@ from management.services.permission.identity.session import (
     get_current_user_context,
     get_current_user_id,
 )
-from management.services.tag.projection import project_authorized_document_tags
+from management.services.tag.document_projection import project_authorized_document_tags
 from management.utils.knowledge_permission import (
     require_knowledge_base_edit_permission,
     require_knowledge_base_read_permission,
@@ -657,10 +657,10 @@ async def get_index_files(
 
         # The read permission check above authorized this page; project tags in
         # one batch so each row never issues its own assignment request.
-        files = project_authorized_document_tags(
+        files = await project_authorized_document_tags(
             result.get("files", []),
             index_name=index_name,
-            tenant_id=tenant_id,
+            actor=ServicePrincipal(user_id, tenant_id),
         )
         # Transform result to match frontend expectations
         return {"status": "success", "files": files}

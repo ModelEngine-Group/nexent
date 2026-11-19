@@ -330,6 +330,7 @@ MIGRATED_MODULES = {
     'tag/identity.py',
     'tag/library.py',
     'tag/projection.py',
+    'tag/document_projection.py',
     'tag/resources.py',
     'tool/catalog.py',
     'tool/common.py',
