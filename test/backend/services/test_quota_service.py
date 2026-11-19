@@ -9,7 +9,6 @@ quota enforcement, summary, and platform quota.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.services.knowledge_base.quota import (
     GB,
@@ -324,57 +323,8 @@ class TestPersonalKbCapacity:
 
         assert quota_service.get_personal_user_quota("user-1") is None
 
-    def test_set_personal_user_quota_updates_config(
-        self, quota_service, mock_tenant_config_db, mock_knowledge_db
-    ):
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_tenant_id"
-        ].return_value = []
-        mock_tenant_config_db["get_single_config_info"].return_value = None
-        mock_tenant_config_db["insert_config"].return_value = True
 
-        result = quota_service.set_personal_user_quota(
-            "user-1", quota_limit_bytes=2 * GB
-        )
 
-        assert result["user_id"] == "user-1"
-        assert result["quota_limit_bytes"] == 2 * GB
-        inserted = mock_tenant_config_db["insert_config"].call_args.args[0]
-        assert inserted["config_key"] == "PERSONAL_KB_QUOTA_user-1"
-        assert inserted["config_value"] == str(2 * GB)
-
-    def test_set_personal_user_quota_keeps_legacy_non_strict_usage_mode(
-        self, quota_service, mock_tenant_config_db
-    ):
-        mock_tenant_config_db["get_single_config_info"].return_value = None
-        mock_tenant_config_db["insert_config"].return_value = True
-        usage_data = {"kbs": [], "stats": {}}
-
-        with patch.object(
-            quota_service,
-            "_get_personal_usage_data",
-            return_value=usage_data,
-        ) as get_usage:
-            quota_service.set_personal_user_quota(
-                "user-1", quota_limit_bytes=2 * GB
-            )
-
-        get_usage.assert_called_once_with(user_id="user-1", include_es=False)
-
-    def test_set_personal_user_quota_unlimited_deletes_config(
-        self, quota_service, mock_tenant_config_db
-    ):
-        mock_tenant_config_db["get_single_config_info"].return_value = {
-            "tenant_config_id": 42
-        }
-        mock_tenant_config_db["delete_config_by_tenant_config_id"].return_value = True
-
-        result = quota_service.set_personal_user_quota("user-1", unlimited=True)
-
-        assert result["quota_limit_bytes"] is None
-        mock_tenant_config_db[
-            "delete_config_by_tenant_config_id"
-        ].assert_called_once_with(42)
 
     def test_get_personal_default_quota_reads_config(
         self, quota_service, mock_tenant_config_db
@@ -743,40 +693,6 @@ class TestPersonalKbCapacity:
         assert result["total_es_bytes"] == 4 * GB
 
 
-    def test_set_personal_user_quota_below_usage_rejected(
-        self, quota_service, mock_knowledge_db, mock_tenant_config_db
-    ):
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_tenant_id"
-        ].return_value = [
-            {
-                "knowledge_id": 1,
-                "index_name": "kb-a",
-                "created_by": "user-1",
-            }
-        ]
-        mock_knowledge_db[
-            "get_private_knowledge_info_by_creator"
-        ].return_value = mock_knowledge_db[
-            "get_private_knowledge_info_by_tenant_id"
-        ].return_value
-        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = {1: 10 * GB}
-        mock_tenant_config_db["get_single_config_info"].return_value = None
-        mock_vdb = MagicMock()
-        mock_vdb.get_indices_detail.return_value = {
-            "kb-a": {"base_info": {"store_size": "10 GB"}}
-        }
-
-        with patch_import_context(
-            "management.services.knowledge_base.service.get_vector_db_core",
-            return_value=mock_vdb,
-        ):
-            with pytest.raises(AppException, match="below current usage") as raised:
-                quota_service.set_personal_user_quota(
-                    "user-1", quota_limit_bytes=5 * GB
-                )
-
-            assert raised.value.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE
 
     def _mock_personal_usage(self, mock_knowledge_db, kbs, stats):
         mock_knowledge_db[

@@ -777,9 +777,10 @@ class TestPersonalCapacityAPI:
         mock_quota_service.get_personal_capacity_summary.assert_called_once_with()
 
     def test_set_user_quota_requires_value_or_unlimited(
-        self, client, mock_personal_auth
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
+        mock_personal_configuration.side_effect = ValueError('Provide quota_limit_bytes or unlimited=true')
 
         resp = client.put(
             "/api/capacity/personal/users/user-1/quota", json={}
@@ -789,10 +790,10 @@ class TestPersonalCapacityAPI:
         assert "Provide quota_limit_bytes" in resp.json()["message"]
 
     def test_set_user_quota_maps_value_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.side_effect = ValueError(
+        mock_personal_configuration.side_effect = ValueError(
             "below usage"
         )
 
@@ -805,10 +806,10 @@ class TestPersonalCapacityAPI:
         assert "below usage" in resp.json()["message"]
 
     def test_set_user_quota_returns_localizable_below_usage_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.side_effect = (
+        mock_personal_configuration.side_effect = (
             AppException(
                 ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE,
                 "Personal KB quota 1 KB is below current usage 2 KB",
@@ -829,10 +830,10 @@ class TestPersonalCapacityAPI:
         }
 
     def test_set_user_quota_maps_quota_exceeded(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.side_effect = (
+        mock_personal_configuration.side_effect = (
             AppException(ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED, "too high")
         )
 
@@ -846,10 +847,10 @@ class TestPersonalCapacityAPI:
         assert resp.json()["code"] == ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED.value
 
     def test_set_user_quota_maps_service_unavailable(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.side_effect = (
+        mock_personal_configuration.side_effect = (
             AppException(ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE, "es down")
         )
 
@@ -863,10 +864,10 @@ class TestPersonalCapacityAPI:
         assert resp.json()["code"] == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE.value
 
     def test_set_user_quota_success(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.return_value = {
+        mock_personal_configuration.return_value = {
             "user_id": "user-1",
             "quota_limit_bytes": 1024,
             "quota_limit_readable": "1.0 KB",
@@ -879,8 +880,9 @@ class TestPersonalCapacityAPI:
 
         assert resp.status_code == 200
         assert resp.json()["quota_limit_bytes"] == 1024
-        mock_quota_service.set_personal_user_quota.assert_called_once_with(
-            "user-1", quota_limit_bytes=1024, unlimited=False
+        mock_personal_configuration.assert_awaited_once_with(
+            'user-write', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'),
+            {'subject_user_id': 'user-1', 'quota_limit_bytes': 1024, 'unlimited': False}
         )
 
     def test_get_default_quota_returns_unlimited(
@@ -993,10 +995,10 @@ class TestPersonalCapacityAPI:
         assert "Error getting personal KB capacity summary" in response.json()["message"]
 
     def test_set_user_quota_unlimited_clears_quota(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.return_value = {
+        mock_personal_configuration.return_value = {
             "user_id": "user-1",
             "quota_limit_bytes": None,
         }
@@ -1007,15 +1009,16 @@ class TestPersonalCapacityAPI:
         )
 
         assert response.status_code == 200
-        mock_quota_service.set_personal_user_quota.assert_called_once_with(
-            "user-1", quota_limit_bytes=None, unlimited=True
+        mock_personal_configuration.assert_awaited_once_with(
+            'user-write', 'test-tenant', ServicePrincipal('admin-user-id', 'test-tenant'),
+            {'subject_user_id': 'user-1', 'quota_limit_bytes': None, 'unlimited': True}
         )
 
     def test_set_user_quota_maps_unexpected_service_error(
-        self, client, mock_personal_auth, mock_quota_service
+        self, client, mock_personal_auth, mock_personal_configuration
     ):
         mock_personal_auth()
-        mock_quota_service.set_personal_user_quota.side_effect = RuntimeError("db down")
+        mock_personal_configuration.side_effect = RuntimeError("db down")
 
         response = client.put(
             "/api/capacity/personal/users/user-1/quota",

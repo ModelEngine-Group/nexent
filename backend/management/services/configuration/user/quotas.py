@@ -17,15 +17,12 @@ from management.services.knowledge_base.quota_common import (
     KEY_WARNING_THRESHOLD_PCT,
     MB,
     Any,
-    AppException,
     Dict,
-    ErrorCode,
     List,
     Optional,
     PlatformQuotaConflictError,
     QuotaExceededError,
     Tuple,
-    _bytes_to_readable,
     _gb_to_bytes,
     _is_displayable_tenant_id,
     _mb_to_bytes,
@@ -65,46 +62,6 @@ class PersonalQuotaPolicy:
             self._get_tenant_config(_personal_quota_key(user_id))
         )
 
-    def set_personal_user_quota(
-        self,
-        user_id: str,
-        quota_limit_bytes: Optional[int] = None,
-        unlimited: bool = False,
-    ) -> Dict[str, Any]:
-        """Set or clear a user's individual personal KB quota."""
-        if unlimited or quota_limit_bytes is None:
-            self._delete_tenant_config(_personal_quota_key(user_id))
-            return {
-                "user_id": user_id,
-                "quota_limit_bytes": None,
-                "quota_limit_readable": None,
-            }
-
-        quota_limit_bytes = int(quota_limit_bytes)
-        usage_data = self._get_personal_usage_data(user_id=user_id, include_es=False)
-        user_usage = self._aggregate_personal_storage_by_user(
-            usage_data, user_ids={user_id}
-        ).get(user_id, {"total_bytes": 0})
-        user_usage_bytes = user_usage["total_bytes"]
-        if quota_limit_bytes < user_usage_bytes:
-            raise AppException(
-                ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE,
-                message=(
-                    f"Personal KB quota {_bytes_to_readable(quota_limit_bytes)} is below "
-                    f"current usage {_bytes_to_readable(user_usage_bytes)}"
-                ),
-                details={
-                    "quota_limit_bytes": quota_limit_bytes,
-                    "usage_bytes": user_usage_bytes,
-                },
-            )
-
-        self._set_tenant_config(_personal_quota_key(user_id), str(quota_limit_bytes))
-        return {
-            "user_id": user_id,
-            "quota_limit_bytes": quota_limit_bytes,
-            "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
-        }
 
     def get_personal_default_quota(self) -> Optional[int]:
         """Return the tenant default personal KB quota in bytes, or None."""

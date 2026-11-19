@@ -3,14 +3,21 @@
 
 from contextlib import contextmanager
 
+from nexent.storage.errors import InvalidInput
+
 from infrastructure.knowledge_collection_metadata import bind_collection_permissions
 from infrastructure.quota_write import bind_quota_write_records
 from infrastructure.rdb.composition import close_owned, record_engine
-from infrastructure.tenant_quota_read import bind_quota_identity
+from infrastructure.tenant_quota_read import (
+    bind_quota_identity,
+    bind_tenant_quota_records,
+)
 
 
 @contextmanager
-def personal_quota_configuration_ports(actor, *, context, writable=False):
+def personal_capacity_ports(actor, *, context, writable=False, usage=False):
+    if usage and writable:
+        raise InvalidInput()
     engine, owned = record_engine(context, connections=2 if writable else 1), []
     try:
         identity = bind_quota_identity(actor, engine)
@@ -19,7 +26,8 @@ def personal_quota_configuration_ports(actor, *, context, writable=False):
         owned.append(permissions)
 
         def records(tenant):
-            port = bind_quota_write_records(actor, tenant, engine, writable=writable)
+            port = (bind_tenant_quota_records(actor, tenant, engine, usage=True) if usage
+                    else bind_quota_write_records(actor, tenant, engine, writable=writable))
             owned.append(port)
             return port
 

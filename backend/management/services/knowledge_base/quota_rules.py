@@ -32,6 +32,13 @@ def parse_personal_quota(raw):
         return 0
 
 
+def check_user_quota_allocation(limit, used):
+    if limit < used:
+        raise AppException(ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE,
+            message=f'Personal KB quota {bytes_to_readable(limit)} is below current usage {bytes_to_readable(used)}',
+            details={'quota_limit_bytes': limit, 'usage_bytes': used})
+
+
 def check_tenant_capacity(used, pending, limit):
     if limit is not None and used + pending > limit:
         raise AppException(

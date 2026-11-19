@@ -10,7 +10,6 @@ from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from contracts.constants.constants import (
-    PERSONAL_KB_CAPACITY_MANAGE_PERMISSION,
     PERSONAL_KB_CAPACITY_READ_PERMISSION,
     QUOTA_PAYLOAD_DESCRIPTION,
     TARGET_TENANT_ID_DESCRIPTION,
@@ -27,9 +26,11 @@ from management.services.knowledge_base.inventory import (
     knowledge_listing_operation,
     list_knowledge_indices,
 )
+from management.services.knowledge_base.personal_capacity_access import (
+    PersonalQuotaDenied,
+)
 from management.services.knowledge_base.personal_quota_configuration import (
     InvalidPersonalQuotaPayload,
-    PersonalQuotaDenied,
     personal_quota_configuration,
 )
 from management.services.knowledge_base.platform_quota import PlatformQuotaOverview
@@ -590,28 +591,20 @@ def get_personal_capacity_summary(
 
 
 @personal_quota_router.put("/users/{user_id}/quota")
-def set_personal_user_quota(
+async def set_personal_user_quota(
     user_id: str = Path(..., description="User ID"),
     payload: Dict[str, Any] = Body(..., description=QUOTA_PAYLOAD_DESCRIPTION),
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_MANAGE_PERMISSION)),
+    current_user: CurrentUser = Depends(authenticate),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Set or clear a user's personal KB quota."""
     try:
-        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        target_tenant_id = tenant_id or current_user.tenant_id
         quota_limit_bytes = payload.get("quota_limit_bytes")
         unlimited = bool(payload.get("unlimited", False))
-        if quota_limit_bytes is None and not unlimited:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Provide quota_limit_bytes or unlimited=true",
-            )
-        service = QuotaService(target_tenant_id, current_user.user_id)
-        result = service.set_personal_user_quota(
-            user_id,
-            quota_limit_bytes=quota_limit_bytes,
-            unlimited=unlimited,
-        )
+        result = await personal_quota_configuration('user-write', target_tenant_id,
+            ServicePrincipal(current_user.user_id, current_user.tenant_id),
+            {'subject_user_id': user_id, 'quota_limit_bytes': quota_limit_bytes, 'unlimited': unlimited})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AppException:
         raise
@@ -619,6 +612,13 @@ def set_personal_user_quota(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except HTTPException:
         raise
+    except PersonalQuotaDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Cannot access personal KB capacity") from exc
+    except (TimeoutError, DeadlineExceeded) as exc:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"Error setting personal KB quota: {exc!s}") from None
     except Exception as exc:
         logger.exception("Error setting personal KB quota")
         raise HTTPException(
