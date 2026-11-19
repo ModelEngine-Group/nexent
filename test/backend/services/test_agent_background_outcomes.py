@@ -38,12 +38,20 @@ async def test_background_requires_completed_and_persisted_terminal_projection(p
         frames.append(event(2, "agentos_terminal", json.dumps({"status": status})))
     if not persisted:
         persist.side_effect = RuntimeError("controlled storage failure")
-    transport = SimpleNamespace(resume=AsyncMock(side_effect=[response(*frames), response()]))
+
+    async def acknowledge(*_args):
+        persist.assert_called_once()
+
+    transport = SimpleNamespace(
+        resume=AsyncMock(side_effect=[response(*frames), response()]),
+        acknowledge_projection=AsyncMock(side_effect=acknowledge),
+    )
 
     if status is None:
         with pytest.raises(RuntimeServiceUnavailableError):
             await background._project(transport, REFERENCE, record)
         persist.assert_not_called()
+        transport.acknowledge_projection.assert_not_awaited()
         return
     if not persisted:
         with pytest.raises(RuntimeError, match="controlled storage failure"):
@@ -57,6 +65,10 @@ async def test_background_requires_completed_and_persisted_terminal_projection(p
             await background._project(transport, REFERENCE, record)
         assert error.value.detail == {"code": "AGENTOS_BACKGROUND_NOT_COMPLETED"}
     persist.assert_called_once()
+    if persisted:
+        transport.acknowledge_projection.assert_awaited_once_with(REFERENCE, "owner", "tenant")
+    else:
+        transport.acknowledge_projection.assert_not_awaited()
     fields = persist.call_args.kwargs
     assert fields["projection_run_id"] == REFERENCE.run_id
     assert fields["message_source"] is MessageSource.AUTOMATION
@@ -80,7 +92,9 @@ async def test_background_cancellation_closes_journal_without_committing(project
 
     from starlette.responses import StreamingResponse
 
-    transport = SimpleNamespace(resume=AsyncMock(return_value=StreamingResponse(journal())))
+    transport = SimpleNamespace(
+        resume=AsyncMock(return_value=StreamingResponse(journal())), acknowledge_projection=AsyncMock(),
+    )
     task = asyncio.create_task(background._project(transport, REFERENCE, record))
     try:
         await asyncio.wait_for(started.wait(), timeout=1)
@@ -91,3 +105,4 @@ async def test_background_cancellation_closes_journal_without_committing(project
 
     assert closed.is_set()
     persist.assert_not_called()
+    transport.acknowledge_projection.assert_not_awaited()

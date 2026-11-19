@@ -78,7 +78,14 @@ async def test_saved_turn_projection_uses_the_reserved_message_origin(mocker, so
     receipt = mocker.patch.object(service, "get_prepared_projection_receipt", return_value=None)
     project = mocker.patch.object(service, "resume_assistant_projection", new=AsyncMock())
     close = mocker.patch.object(service.store, "close_turn")
-    await service._finish_projection(turn, SimpleNamespace(resume=AsyncMock()))
+
+    async def acknowledge(*_args):
+        project.assert_awaited_once()
+        close.assert_not_called()
+
+    client = SimpleNamespace(resume=AsyncMock(), acknowledge_projection=AsyncMock(side_effect=acknowledge))
+    await service._finish_projection(turn, client)
     assert receipt.call_args.kwargs["message_source"] == source
     assert project.await_args.kwargs["message_source"] == source
+    client.acknowledge_projection.assert_awaited_once_with(turn.reference, turn.user_id, turn.tenant_id)
     close.assert_called_once_with(turn)

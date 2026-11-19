@@ -33,7 +33,9 @@ def setup(mocker):
               "projection_message_index": 3, "projection_memory_agent_id": 7, "user_message_id": 25}
     task = {"task_id": 6, "timeout_seconds": 120}
     read_task = mocker.patch.object(runner.agent_automation_db, "get_task", return_value=task)
-    client = SimpleNamespace(inspect_run=AsyncMock(), stop_run=AsyncMock(), resume=AsyncMock())
+    client = SimpleNamespace(
+        inspect_run=AsyncMock(), stop_run=AsyncMock(), resume=AsyncMock(), acknowledge_projection=AsyncMock(),
+    )
     mocker.patch.object(runner, "_agentos_client", return_value=client)
     recovery = runner.AgentAutomationRunner()
     finish = mocker.patch.object(recovery, "_finish_run")
@@ -70,6 +72,7 @@ async def test_recovery_never_projects_without_a_terminal_owned_run(setup, case)
     if case in {"local", "no-task"}:
         setup.client.inspect_run.assert_not_awaited()
     setup.client.stop_run.assert_not_awaited()
+    setup.client.acknowledge_projection.assert_not_awaited()
     setup.finish_projection.assert_not_called()
     setup.finish.assert_not_called()
 
@@ -130,6 +133,10 @@ async def test_terminal_recovery_reuses_receipt_or_projects_the_original_prompt(
             setup.client.resume, REF, ACTOR, TENANT, message_index=3, message_source=MessageSource.AUTOMATION,
             memory_agent_id=7, memory_source_message_id=25,
         )
+    if outcome in {"receipt", "project"}:
+        setup.client.acknowledge_projection.assert_awaited_once_with(REF, ACTOR, TENANT)
+    else:
+        setup.client.acknowledge_projection.assert_not_awaited()
 
 
 @pytest.mark.parametrize("kind", ["canceled", "repeated-failure", "scheduled-success", "pause-race", "stale-receipt"])

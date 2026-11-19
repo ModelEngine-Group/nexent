@@ -41,7 +41,7 @@ async def test_prepared_admission_tracks_the_same_identity_as_its_journal(mocker
     assert result.conversation_id == 42 and result.run_id == RUN_ID
     ledger.assert_called_once_with(IDENTITY)
     track.assert_called_once_with(IDENTITY)
-    journal.assert_called_once_with("tenant", "owner", 42, RUN_ID)
+    journal.assert_called_once_with("tenant", "owner", 42, RUN_ID, retain_for_projection=True)
     journal.return_value.start.assert_called_once_with()
     producer.assert_awaited_once()
     assert producer.await_args.args[:4] == (payload, ACTOR, IDENTITY, journal.return_value)
