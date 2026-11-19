@@ -8,6 +8,8 @@ from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
+
+from contracts.constants import environment
 from ops.services.trajectory import saved_imports
 from ops.services.trajectory.access import Actor
 from ops.services.trajectory.exchange import ExchangeLimits
@@ -187,3 +189,58 @@ def test_invalid_sorting_is_rejected_without_changing_files(store, sort_by, sort
         store.list(OWNER, sort_by=sort_by, sort_order=sort_order)
     assert error.value.status == 422
     assert store.list(OWNER)["items"] == [item]
+
+
+def test_configured_store_uses_deployment_root_and_limits(tmp_path, monkeypatch):
+    monkeypatch.setattr(environment, "TRAJECTORY_ROOT_DIR", str(tmp_path))
+    monkeypatch.setattr(environment, "TRAJECTORY_EXCHANGE_MAX_ZIP_BYTES", 123)
+    monkeypatch.setattr(environment, "TRAJECTORY_QUERY_MAX_CANDIDATES", 7)
+    store = saved_imports.configured_store()
+    assert store.root == tmp_path
+    assert store.limits.compressed_bytes == 123
+    assert store.candidates == 7
+
+
+@pytest.mark.parametrize("actor", [Actor("", "local", "OPS"), Actor("admin", "", "SU")])
+def test_incomplete_identity_cannot_create_an_owner_directory(store, actor):
+    with pytest.raises(QueryError) as error:
+        store.list(actor)
+    assert (error.value.code, error.value.status) == ("unauthenticated", 401)
+    assert not store.root.exists()
+
+
+def test_listing_rejects_a_busy_owner_without_modifying_storage(store):
+    item = save(store)["item"]
+    owner_path = store.root / ".imports/local/admin"
+    with saved_imports.Directory.root(owner_path) as owner, owner.lock(".lock"):
+        with pytest.raises(QueryError) as error:
+            store.list(OWNER)
+        assert (error.value.code, error.value.status) == ("import_store_busy", 503)
+    assert store.list(OWNER)["items"] == [item]
+
+
+def test_read_rejects_metadata_for_a_different_owner(store):
+    item = save(store)["item"]
+    path = store.root / ".imports/local/admin" / item["import_id"] / "record.json"
+    metadata = json.loads(path.read_text())
+    metadata["user_id"] = "other"
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(QueryError) as error:
+        store.read(OWNER, item["import_id"])
+    assert (error.value.code, error.value.status) == ("invalid_saved_import", 422)
+
+
+def test_listing_and_read_fail_closed_when_limits_decrease(store):
+    first, second = save(store)["item"], save(store)["item"]
+    limited = saved_imports.SavedImports(
+        store.root, limits=replace(ExchangeLimits(), compressed_bytes=3), candidates=1
+    )
+    with pytest.raises(QueryError) as error:
+        limited.list(OWNER, page_size=1)
+    assert (error.value.code, error.value.status) == ("query_budget_exceeded", 503)
+    with pytest.raises(QueryError) as error:
+        limited.read(OWNER, first["import_id"])
+    assert (error.value.code, error.value.status) == ("archive_too_large", 413)
+    assert {item["import_id"] for item in store.list(OWNER)["items"]} == {
+        first["import_id"], second["import_id"]
+    }

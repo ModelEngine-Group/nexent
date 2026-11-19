@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import zipfile
+from dataclasses import replace
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -186,3 +187,114 @@ def test_export_retention_does_not_rewrite_source_metadata(source):
         export_conversation(service, ACTOR, "1")
     assert error.value.code == "nothing_to_export"
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("change", ["missing", "cleanup", "expired_during_read"])
+def test_export_does_not_return_a_missing_or_changed_snapshot(source, mocker, change):
+    service, _ = source
+    row = service.catalog.resolve.return_value
+    manifest = service.archive.manifest(row, persist_retention=False)
+    expected = ("snapshot_reset", 409)
+    if change == "missing":
+        mocker.patch.object(service.archive, "manifest", return_value=None)
+        expected = ("nothing_to_export", 409)
+    elif change == "cleanup":
+        mocker.patch.object(
+            service.archive,
+            "manifest",
+            side_effect=[
+                manifest,
+                {**manifest, "cleanup_version": manifest["cleanup_version"] + 1},
+            ],
+        )
+    else:
+        mocker.patch.object(
+            service.archive, "opened", side_effect=QueryError("content_expired", 410)
+        )
+    with pytest.raises(QueryError) as error:
+        export_conversation(service, ACTOR, "1")
+    assert (error.value.code, error.value.status) == expected
+
+
+@pytest.mark.parametrize(
+    "limit", ["compressed_bytes", "unpacked_bytes", "meta_bytes", "response_bytes", "files"]
+)
+def test_import_rejects_each_size_budget(source, limit):
+    raw = export_conversation(source[0], ACTOR, "1")
+    with pytest.raises(QueryError) as error:
+        import_archive(io.BytesIO(raw), limits=replace(ExchangeLimits(), **{limit: 1}))
+    assert (error.value.code, error.value.status) == ("archive_too_large", 413)
+
+
+@pytest.mark.parametrize(
+    "change", ["duplicate_key", "nested_metadata", "schema_type", "bad_publication", "multi_conversation"]
+)
+def test_import_rejects_inconsistent_archive_metadata(source, change):
+    raw = export_conversation(source[0], ACTOR, "1")
+
+    def inconsistent(entries):
+        path = "t/u/7/1/meta.json"
+        if change == "duplicate_key":
+            entries[path] = b'{"schema_version":1,' + entries[path][1:]
+            return
+        if change == "multi_conversation":
+            entries["t/u/7/2/meta.json"] = entries[path]
+            return
+        meta = json.loads(entries[path])
+        if change == "nested_metadata":
+            value = []
+            for _ in range(65):
+                value = [value]
+            meta["extra"] = value
+        elif change == "schema_type":
+            meta["schema_version"] = True
+        else:
+            meta["runs"][0]["publication_no"] = meta["publication_no"] + 1
+        entries[path] = json.dumps(meta).encode()
+
+    with pytest.raises(QueryError) as error:
+        import_archive(io.BytesIO(repack(raw, inconsistent)))
+    assert (error.value.code, error.value.status) == ("invalid_archive", 422)
+
+
+@pytest.mark.parametrize("state,availability", [
+    ("expired", "expired"), ("corrupt", "corrupt"), ("writing", "unarchived"),
+    ("incomplete", "partial"), ("writing", None),
+])
+def test_import_respects_capture_state_and_only_reads_published_data(source, state, availability):
+    raw = export_conversation(source[0], ACTOR, "1")
+
+    def change(entries):
+        path = "t/u/7/1/meta.json"
+        meta = json.loads(entries[path])
+        run = meta["runs"][0]
+        run["capture_state"] = state
+        if availability == "unarchived":
+            run["publication_no"] = None
+        if availability in {"expired", "corrupt", "unarchived"}:
+            del entries[f"t/u/7/1/{run['trajectory_id']}.otlp.jsonl"]
+        entries[path] = json.dumps(meta).encode()
+
+    package = io.BytesIO(repack(raw, change))
+    if availability is None:
+        with pytest.raises(QueryError) as error:
+            import_archive(package)
+        assert (error.value.code, error.value.status) == ("invalid_archive", 422)
+    else:
+        first, *rest = import_archive(package)["pages"]
+        assert first["run"]["availability"] == availability
+        assert (first["snapshot"] is not None) == (availability == "partial")
+        assert all(page["snapshot"] for page in rest)
+
+
+def test_import_translates_spool_io_errors(source, mocker):
+    raw = export_conversation(source[0], ACTOR, "1")
+    mocker.patch(
+        "ops.services.trajectory.exchange.tempfile.TemporaryFile",
+        side_effect=OSError("disk unavailable"),
+    )
+    with pytest.raises(QueryError) as error:
+        import_archive(io.BytesIO(raw))
+    assert (error.value.code, error.value.status, error.value.retry_after) == (
+        "storage_unavailable", 503, 2
+    )
