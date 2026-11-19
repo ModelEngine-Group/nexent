@@ -4,6 +4,7 @@
 from nexent.storage.errors import InvalidInput
 from nexent.storage.models import StorageScope
 
+from infrastructure.object_storage.exact import ExactKeyObjectStore
 from infrastructure.object_storage.port import ObjectBinding, S3ObjectStore
 
 
@@ -23,7 +24,7 @@ def bind_preview_objects(object_names: frozenset[str]):
         allow_system=True,
         exact_keys=frozenset(object_names),
     )
-    return S3ObjectStore(scope, binding, _configured_client)
+    return ExactKeyObjectStore(scope, binding, _configured_client)
 
 
 def _configured_client(remaining):

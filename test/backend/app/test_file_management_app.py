@@ -7,21 +7,20 @@ We stub external dependencies before importing the app module to avoid
 side effects and real network/storage calls.
 """
 
-from test.common.contract_stubs import install_shared_contract_stub
-import sys
 import json
+
+# --- Bootstrap: insert stub modules BEFORE importing the app under test ---
+# Add project backend root to sys.path
+import os
+import sys
 import types
 from typing import Any, AsyncGenerator, Dict, List
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
-from unittest.mock import AsyncMock, MagicMock
 
-
-# --- Bootstrap: insert stub modules BEFORE importing the app under test ---
-
-# Add project backend root to sys.path
-import os
+from test.common.contract_stubs import install_shared_contract_stub
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../../.."))
@@ -136,8 +135,6 @@ def _stub_get_preview_stream(actual_object_name, start=None, end=None):
     mock_s.iter_chunks = MagicMock(return_value=iter([b"PDF content"]))
     return mock_s
 
-sfms_stub.resolve_preview_file = _stub_resolve_preview_file
-sfms_stub.get_preview_stream = _stub_get_preview_stream
 sfms_stub.upload_to_minio = _stub_upload_to_minio
 sfms_stub.upload_files_impl = _stub_upload_files_impl
 sfms_stub.get_file_url_impl = _stub_get_file_url_impl
@@ -241,10 +238,26 @@ setattr(consts_pkg, "exceptions", exceptions_stub)
 file_management_app = __import__(
     "management.api.file.file_management", fromlist=["*"]
 )
+file_management_app.resolve_preview_file = _stub_resolve_preview_file
+file_management_app.get_preview_stream = _stub_get_preview_stream
 
 
-from management.api.file import storage as file_storage
+def test_preview_preparation_deadline_keeps_production_envelope_without_error(monkeypatch, caplog):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from nexent.storage.errors import DeadlineExceeded
+
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(side_effect=DeadlineExceeded()))
+    app = FastAPI()
+    app.include_router(file_management_app.file_management_config_router)
+    with TestClient(app) as client:
+        response = client.get('/file/preview/knowledge_base/owned.pdf', headers={'Authorization': MOCK_AUTH})
+    assert response.status_code == 500 and response.json() == {'message': 'Failed to preview file'}
+    assert not [r for r in caplog.records if r.levelname == 'ERROR']
+
+
 from management.api.file import http as file_http
+from management.api.file import storage as file_storage
 
 # --- Helpers ---
 
@@ -2261,6 +2274,7 @@ class TestFileAuditEntries:
     def test_kb_upload_emits_audit_entry(self, monkeypatch, caplog):
         """Successful KB source upload records names/count/index, not content."""
         import logging
+
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
@@ -2298,6 +2312,7 @@ class TestFileAuditEntries:
     def test_storage_upload_emits_audit_entry(self, monkeypatch, caplog):
         """Successful chat-attachment upload records folder and filenames."""
         import logging
+
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 

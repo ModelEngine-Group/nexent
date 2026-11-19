@@ -6,13 +6,21 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from management.api.conversation import conversation_share as conversation_share_app
-
 
 app = FastAPI()
 app.include_router(conversation_share_app.router)
 client = TestClient(app)
+
+
+def test_share_preview_preparation_timeout_keeps_production_envelope(mocker, caplog):
+    from nexent.storage.errors import DeadlineExceeded
+
+    mocker.patch.object(conversation_share_app, 'get_share_asset_service', return_value={'object_name': 'attachments/owner/owned.pdf'})
+    mocker.patch.object(conversation_share_app, 'resolve_preview_file', new_callable=AsyncMock, side_effect=DeadlineExceeded())
+    response = client.get('/share/owned-share/assets/owned-asset/preview')
+    assert response.status_code == 500 and response.json() == {'message': 'Failed to preview asset'}
+    assert not [r for r in caplog.records if r.levelname == 'ERROR']
 
 
 def test_parse_range_header():

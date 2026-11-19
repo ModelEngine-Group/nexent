@@ -21,12 +21,11 @@ from management.services.file.service import (
     check_file_access,
     get_file_stream_impl,
     get_file_url_impl,
-    get_preview_stream,
     list_files_impl,
-    resolve_preview_file,
     upload_files_impl,
 )
 from management.services.file.object_deletion import delete_file_impl
+from management.services.file.preview import get_preview_stream, resolve_preview_file
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.identity.session import get_current_user_id
 from management.services.knowledge_base.ingestion import submit_knowledge_files
@@ -569,6 +568,8 @@ async def preview_file(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to preview file'})
     except Exception as e:
         logger.error(f"[preview_file] Unexpected error: object_name={object_name}, error={str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to preview file")

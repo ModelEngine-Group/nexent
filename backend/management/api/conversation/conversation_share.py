@@ -7,7 +7,8 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Header, HTTPException, Path as PathParam, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.storage.errors import DeadlineExceeded
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
@@ -17,7 +18,8 @@ from management.services.conversation.sharing import (
     get_share_asset_service,
     get_share_snapshot_service,
 )
-from management.services.file.service import get_file_stream_impl, get_preview_stream, resolve_preview_file
+from management.services.file.service import get_file_stream_impl
+from management.services.file.preview import get_preview_stream, resolve_preview_file
 from management.services.permission.identity.session import get_current_user_id
 
 from management.api.file.http import build_content_disposition_header
@@ -146,6 +148,8 @@ async def preview_share_asset_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except UnsupportedFileTypeException as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to preview asset'})
     except Exception as e:
         logger.error("Failed to resolve share asset preview: %s", str(e), exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to preview asset")

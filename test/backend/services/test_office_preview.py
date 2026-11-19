@@ -195,27 +195,30 @@ async def test_cache_lock_is_shared_by_waiters_and_late_arrivals(mocker):
     release = asyncio.Event()
     ready = False
 
-    async def convert(*args):
+    async def convert(*args, **kwargs):
         nonlocal ready
         entered.set()
         await release.wait()
         ready = True
 
-    mocker.patch.object(preview, "_is_pdf_cache_valid", side_effect=lambda _: ready)
+    mocker.patch.object(preview, "_is_pdf_cache_valid", side_effect=lambda _, **kwargs: ready)
     conversion = mocker.patch.object(preview, "convert_preview", side_effect=convert)
     first = asyncio.create_task(
-        preview._convert_office_to_cached_pdf("docs/same.docx", "preview/same.pdf")
+        preview._convert_office_to_cached_pdf("docs/same.docx", "preview/same.pdf",
+            context=OperationContext('owned-first', monotonic()+120))
     )
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=1)
     second = asyncio.create_task(
-        preview._convert_office_to_cached_pdf("docs/same.docx", "preview/same.pdf")
+        preview._convert_office_to_cached_pdf("docs/same.docx", "preview/same.pdf",
+            context=OperationContext('owned-second', monotonic()+120))
     )
     await asyncio.sleep(0)
     shared = preview._conversion_locks["docs/same.docx"]
     release.set()
     await first
     third = asyncio.create_task(
-        preview._convert_office_to_cached_pdf("docs/same.docx", "preview/same.pdf")
+        preview._convert_office_to_cached_pdf("docs/same.docx", "preview/same.pdf",
+            context=OperationContext('owned-third', monotonic()+120))
     )
     await asyncio.gather(second, third)
     conversion.assert_awaited_once()

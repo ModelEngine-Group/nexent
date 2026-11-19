@@ -11,9 +11,7 @@ import httpx
 from contracts.constants.constants import (
     ASSET_OWNER_ATTACHMENTS_PREFIX,
     ASSET_OWNER_TENANT_ID,
-    FILE_PREVIEW_SIZE_LIMIT,
     MODEL_CONFIG_MAPPING,
-    OFFICE_MIME_TYPES,
 )
 from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
 from contracts.errors.ingestion import ingestion_error_fields
@@ -22,21 +20,16 @@ from contracts.errors.exceptions import (
     AppException,
     FileTooLargeException,
     NotFoundException,
-    OfficeConversionException,
-    UnsupportedFileTypeException,
 )
 from contracts.errors.ingestion import ingestion_error_fields
 from fastapi import UploadFile
 from management.db.file.attachment import (
     copy_file,
-    file_exists,
     generate_object_name,
     get_content_type,
-    get_file_range,
     get_file_size_from_minio,
     get_file_size_from_minio_strict,
     get_file_stream,
-    get_file_stream_raw,
     get_file_url,
     list_files,
     upload_fileobj,
@@ -686,14 +679,6 @@ from management.services.file.access import (
     check_file_access_batch,
     validate_s3_url_access,
     validate_urls_access,
-)
-from management.services.file.preview import (
-    _conversion_locks,
-    _conversion_locks_guard,
-    _convert_office_to_cached_pdf,
-    _is_pdf_cache_valid,
-    get_preview_stream,
-    resolve_preview_file,
 )
 from management.services.model.media import (
     get_llm_model,

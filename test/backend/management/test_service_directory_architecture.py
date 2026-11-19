@@ -144,6 +144,7 @@ MIGRATED_MODULES = {
     'file/run_cleanse_service.py',
     'file/service.py',
     'file/object_deletion.py',
+    'file/preview_storage.py',
     'file/source_finalize.py',
     'file/source_publish.py',
     'file/source_reconcile.py',

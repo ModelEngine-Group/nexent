@@ -6,13 +6,13 @@ from hashlib import md5
 
 from nexent.storage.errors import (
     CapabilityUnsupported,
-    InvalidInput,
     OutcomeUnknown,
     ScopeDenied,
     Unavailable,
 )
 from nexent.storage.models import DeleteReceipt, ObjectRef
 
+from infrastructure.object_storage.exact import opaque_key
 from infrastructure.object_storage.port import S3ObjectStore
 
 
@@ -30,12 +30,7 @@ class ExactObjectDeletionStore(S3ObjectStore):
             raise ScopeDenied()
         if expected is not None or ref.version is not None:
             raise CapabilityUnsupported(operation_id=context.operation_id)
-        try:
-            valid = isinstance(ref.key, str) and 0 < len(ref.key.encode('utf-8')) <= 1024 and '\x00' not in ref.key
-        except UnicodeError:
-            valid = False
-        if not valid:
-            raise InvalidInput()
+        opaque_key(ref.key)
         with self._client(context) as client:
             client.meta.events.register('before-call.s3.DeleteObjects', _delete_checksum)
             response = self._call(client, 'delete_objects', context, write=True, Bucket=binding.bucket,
