@@ -16,7 +16,7 @@ from infrastructure.knowledge_vectors import knowledge_index, vector_binding
 
 
 def grant():
-    return KnowledgeFileGrant(
+    return KnowledgeFileGrant(source_display={"size_bytes":None,"created_at":None},
         knowledge_id=1,
         file_id="a" * 32,
         file_version=0,

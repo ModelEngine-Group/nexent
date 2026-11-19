@@ -233,6 +233,7 @@ class KnowledgeUploadWorker:
                         request,
                         actor=actor,
                         source=grant.source,
+                        source_display=grant.source_display,
                         filename=grant.filename,
                         collection=grant.collection,
                         generation=Revision(handle["attempt_id"]),

@@ -12,6 +12,7 @@ from infrastructure.rdb.account_record import (
 )
 from infrastructure.rdb.knowledge_deletion_metadata import knowledge
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
+from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
 from infrastructure.storage.catalog import (
     DatasetCatalog,
@@ -51,7 +52,7 @@ TABLES = {
     "cleanse_groups": TenantGroupInfo.__table__,
 }
 FIELDS = {
-    "cleanse_files": "file_id tenant_id knowledge_id original_filename status stage source_generation source_space source_key source_revision source_sha256 bucket_name object_name local_source_path deletion_request delete_flag",
+    "cleanse_files": "file_id tenant_id knowledge_id original_filename status stage source_generation source_space source_key source_revision source_sha256 bucket_name object_name local_source_path file_size uploaded_at create_time update_time created_by updated_by deletion_request delete_flag",
     "cleanse_knowledge": "knowledge_id tenant_id index_name embedding_model_id created_by group_ids ingroup_permission knowledge_sources deletion_request delete_flag",
     "cleanse_memberships": "user_tenant_id user_id tenant_id delete_flag",
     "cleanse_accounts": "account_id tenant_id user_id user_roles delete_flag",
@@ -60,6 +61,7 @@ FIELDS = {
 }
 FIELDS["knowledge_file_history"] = FIELDS["cleanse_files"]
 INTEGER_FIELDS = {
+    "file_size",
     "embedding_model_id",
     "knowledge_id",
     "source_generation",
@@ -107,5 +109,7 @@ def bind_cleanse_resources(scope, engine):
             )
         )
     return SQLRecordStore(
-        scope, DatasetCatalog(tuple(definitions)), tables, engine, revision_fields={}
+        scope, DatasetCatalog(tuple(definitions)), tables, engine, revision_fields={},
+        audit_mappings={name: RecordAudit('create_time','update_time','created_by','updated_by',
+            extra_dates=frozenset({'uploaded_at'})) for name in ('cleanse_files','knowledge_file_history') if name in tables},
     )

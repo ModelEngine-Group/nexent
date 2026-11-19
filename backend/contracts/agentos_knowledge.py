@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+from datetime import datetime
 from enum import Enum
 from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
@@ -163,11 +164,33 @@ class KnowledgeAuthorizationRequest(KnowledgeFileReference):
         return self
 
 
+class KnowledgeFileSourceDisplay(Contract):
+    size_bytes: int | None = Field(ge=0, le=2**63-1)
+    created_at: str | None = Field(max_length=64)
+
+    @field_validator('created_at')
+    @classmethod
+    def aware_time(cls, value):
+        if value is not None and datetime.fromisoformat(value).tzinfo is None:
+            raise ValueError('Expected an aware source timestamp')
+        return value
+
+
 class KnowledgeFileGrant(KnowledgeAuthorizationRequest):
     source: ObjectReference | None
+    source_display: KnowledgeFileSourceDisplay | None
     filename: str = Field(min_length=1, max_length=1024)
     collection: str = Field(min_length=1, max_length=100)
     embedding_model_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode='after')
+    def source_scope(self):
+        execution = self.action in {'upload','execute'}
+        if execution and (self.source is None or self.source_display is None):
+            raise ValueError('Execution requires source identity and display')
+        if not execution and (self.source is not None or self.source_display is not None):
+            raise ValueError('Lookup grants cannot carry source display')
+        return self
 
 
 class KnowledgeJobLookup(KnowledgeFileReference):

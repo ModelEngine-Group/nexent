@@ -41,7 +41,7 @@ def setup(mocker):
         parser_version="v2",
         embedding_model={"model_id": 2, "revision": "model-v1"},
     )
-    grant = KnowledgeFileGrant(
+    grant = KnowledgeFileGrant(source_display={"size_bytes":None,"created_at":None},
         action="upload",
         knowledge_id=1,
         file_id=payload.file_id,

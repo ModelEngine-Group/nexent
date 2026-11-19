@@ -4,6 +4,7 @@
 from contracts.agentos_knowledge import (
     KnowledgeAuthorizationRequest,
     KnowledgeFileGrant,
+    KnowledgeFileSourceDisplay,
     ObjectReference,
 )
 from contracts.knowledge_cleanse import knowledge_artifact_prefix, parse_cleanse_request
@@ -57,6 +58,7 @@ class KnowledgeAuthorization:
             file_version=request.file_version,
             filename=file["original_filename"],
             source=source,
+            source_display=KnowledgeFileSourceDisplay(size_bytes=file['file_size'],created_at=file['uploaded_at']) if execution else None,
             collection=knowledge["index_name"],
             embedding_model_id=knowledge.get("embedding_model_id"),
             artifact=request.artifact,

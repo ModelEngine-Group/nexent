@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from contracts.agentos import ModelMetadata, ModelResult
-from contracts.agentos_knowledge import KnowledgeFileUpload
+from contracts.agentos_knowledge import KnowledgeFileSourceDisplay, KnowledgeFileUpload
 from nexent.storage.errors import (
     CapabilityUnsupported,
     Conflict,
@@ -48,7 +48,7 @@ def setup(mocker):
 
     mocker.patch("runtime.knowledge_base.ingestion.run_blocking", side_effect=direct)
     actor = ServicePrincipal("user", "tenant")
-    value = artifact(["first", "second"])
+    value = artifact(["first", "second"], locations=[{"element_type":"NarrativeText"}]*2)
     content = value.model_dump_json().encode()
     reference = value.source.model_copy(
         update={"key": "artifact", "sha256": hashlib.sha256(content).hexdigest()}
@@ -115,6 +115,7 @@ def setup(mocker):
     )
     arguments = {
         "actor": actor,
+        "source_display": KnowledgeFileSourceDisplay(size_bytes=6,created_at='2026-11-19T01:02:03+00:00'),
         "source": value.source,
         "filename": "source.txt",
         "collection": "kb",
@@ -405,7 +406,11 @@ async def test_json_reads_pinned_source_before_final_chunking(setup):
     s.objects.open_read.side_effect = lambda ref, **kw: io.BytesIO(
         content if ref.key == "artifact" else source
     )
+    s.arguments['source_display'] = KnowledgeFileSourceDisplay(size_bytes=len(source),created_at='2026-11-19T01:02:03+00:00')
     result = await s.service.execute(s.request, **s.arguments)
+    row=s.vectors.upsert.call_args.args[0][0]
+    assert row.payload['location']['path_or_url']==s.value.source.key
+    assert row.payload['location']['file_size']==len(source)
     assert len(result.chunk_keys) == 1
     assert references == [
         ObjectRef("files", "artifact", Revision("v1")),

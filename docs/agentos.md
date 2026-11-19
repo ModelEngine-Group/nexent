@@ -429,3 +429,10 @@ Agent 编译只读最终工具白名单内的摘要，在受管 control-io 中�
 
 
 公开 `auto_summary` 缺少显式 `model_id` 时，通过 Management 的 `read_default_summary_model` 读取当前实际租户的有限 SI `LLM_ID` 投影。当前身份在读取前后复查，根预算30秒。显式模型标识跳过此查询；配置空值、非法值与普通读取异常保持原有None行为。失效身份、重复活动配置及截止/取消中止生成，不添加模型替代或重试。自动调度复用同一有限查询，保留其原正数过滤规则。
+
+
+### File.upload 来源展示快照
+
+Management 的内部 `KnowledgeFileGrant` 必须包含 `source_display`。upload/execute 返回 `KnowledgeFileSourceDisplay(size_bytes, created_at)`，inspect/delete 返回None；缺字段不兼容。大小是已授权生命周期记录的可空非负int8，时间是其可空UTC上传时间，历史缺值不补零或当前时刻。最终部署须同步更新两个服务的契约版本。
+
+Runtime 使用 grant.source.key 作为向量 location.path_or_url，使用有效 grant.filename，并固定 file_size、create_time 和逻辑 source_type=file。文本、表格、JSON及图片走同一写入位置，解析器不能覆盖来源或嵌套公共展示块。批次授权复查包含快照，变化时停止写入。公开上传参数不变，也不传Management的本地路径。历史向量维护和公开文件列表的标准摘要迁移仍按退役SPEC推进。

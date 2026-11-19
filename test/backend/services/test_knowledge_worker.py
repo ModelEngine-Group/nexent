@@ -141,7 +141,7 @@ async def setup(mocker):
     lookup = KnowledgeJobLookup(
         knowledge_id=1, file_id=request.file_id, file_version=0, job_id=state.job_id
     )
-    grant = KnowledgeFileGrant(
+    grant = KnowledgeFileGrant(source_display={"size_bytes":None,"created_at":None},
         knowledge_id=1,
         file_id=request.file_id,
         file_version=0,
@@ -286,12 +286,15 @@ async def test_delete_during_model_call_blocks_vector_write_and_final_publicatio
     s.vectors.upsert.assert_not_called()
 
 
-async def test_changed_grant_after_model_call_stops_before_upsert(setup):
+@pytest.mark.parametrize('change',[{'collection':'other'},
+    {'source_display':{'size_bytes':9,'created_at':None}}])
+async def test_changed_grant_after_model_call_stops_before_upsert(setup, change):
     s = setup
+    changed=type(s.grant).model_validate({**s.grant.model_dump(mode='json'),**change})
     s.client.authorize_knowledge.side_effect = [
         s.grant,
         s.grant,
-        s.grant.model_copy(update={"collection": "other"}),
+        changed,
     ]
     with pytest.raises(Conflict):
         await s.worker.process(s.lookup, s.actor, owner_id="owner", context=s.context)

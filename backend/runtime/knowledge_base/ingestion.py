@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from threading import Lock
 
 from contracts.agentos import EmbeddingInvocation
-from contracts.agentos_knowledge import CleanseArtifact, KnowledgeFileUpload
+from contracts.agentos_knowledge import (
+    CleanseArtifact,
+    KnowledgeFileSourceDisplay,
+    KnowledgeFileUpload,
+)
+from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
     CapabilityUnsupported,
@@ -206,6 +211,7 @@ class KnowledgeIngestor:
         *,
         actor,
         source,
+        source_display,
         filename,
         collection,
         generation,
@@ -218,6 +224,7 @@ class KnowledgeIngestor:
     ):
         if (
             not isinstance(request, KnowledgeFileUpload)
+            or not isinstance(source_display, KnowledgeFileSourceDisplay)
             or not isinstance(generation, Revision)
             or not isinstance(filename, str)
             or not 1 <= len(filename) <= 1024
@@ -320,13 +327,18 @@ class KnowledgeIngestor:
                         "content": item["content"],
                         "filename": filename,
                         "location": {
-                            **{key: value for key, value in item.get("metadata", {}).items() if key not in {"kind", "image_ref"}},
+                            **{key: value for key, value in item.get("metadata", {}).items()
+                               if key not in {'kind', 'image_ref', PUBLIC_CHUNK_SOURCE_KEY}},
                             **({"kind": "image", "image_ref": item["_image_ref"]} if "_image_ref" in item else {}),
                             **(
                                 {"language": item["language"]}
                                 if "language" in item
                                 else {}
                             ),
+                            'path_or_url': source.key,
+                            'file_size': source_display.size_bytes,
+                            'create_time': source_display.created_at,
+                            'source_type': 'file',
                         },
                     },
                     generation,

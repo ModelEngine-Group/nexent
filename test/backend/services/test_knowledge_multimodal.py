@@ -73,7 +73,8 @@ async def test_mixed_embedding_preserves_order_refs_and_not_bytes(setup):
     assert [payload.input_type for payload in payloads] == ["text", "image"]
     assert base64.b64decode(payloads[1].input[0].partition(",")[2]) == image.raw
     rows = s.vectors.upsert.call_args.args[0]
-    assert rows[1].payload["location"] == {"page_number": 2, "kind": "image", "image_ref": image.ref.model_dump()}
+    assert rows[1].payload["location"] == {"page_number": 2, "kind": "image", "image_ref": image.ref.model_dump(),
+        'path_or_url':s.value.source.key,'file_size':6,'create_time':'2026-11-19T01:02:03+00:00','source_type':'file'}
     assert base64.b64encode(image.raw).decode() not in json.dumps([row.payload for row in rows])
     hit = KnowledgeSearchService._dto(SearchHit(rows[1].key, 1, "test.cosine", rows[1].payload, rows[1].generation))
     assert hit.image_ref == image.ref and hit.location["page_number"] == 2
@@ -127,7 +128,7 @@ async def test_image_failure_prevents_all_inference_and_writes(setup, failure):
 def test_image_subgrant_rejects_other_versions_and_sources(setup, mocker):
     s = setup
     image = add_image(s)
-    grant = KnowledgeFileGrant(**s.request.model_dump(include={"knowledge_id", "file_id", "file_version", "artifact", "parser_version"}),
+    grant = KnowledgeFileGrant(source_display={"size_bytes":None,"created_at":None},**s.request.model_dump(include={"knowledge_id", "file_id", "file_version", "artifact", "parser_version"}),
                                action="execute", source=s.value.source, filename="file.pdf", collection="kb")
     grant.artifact = grant.artifact.model_copy(update={'key': 'artifacts/' + grant.artifact.sha256 + '.json'})
     mocker.patch.object(knowledge_objects, "_configured_environment", return_value=SimpleNamespace(MINIO_DEFAULT_BUCKET="files"))
@@ -157,7 +158,7 @@ def test_private_images_are_pinned_to_the_authorized_manifest_job(setup, mocker,
         parts[position] = 'd' * 32 if foreign != 'version' else '5'
         ref = ref.model_copy(update={'key': '/'.join(parts)})
     value = image.value.model_copy(update={'blocks': [CleanseBlock(ordinal=0, kind='image', sha256=ref.sha256, object_ref=ref)]})
-    grant = KnowledgeFileGrant(knowledge_id=1, file_id=s.request.file_id, file_version=s.request.file_version,
+    grant = KnowledgeFileGrant(source_display={"size_bytes":None,"created_at":None},knowledge_id=1, file_id=s.request.file_id, file_version=s.request.file_version,
                                action='execute', artifact=artifact, source=s.value.source, parser_version=value.parser_version,
                                filename='file.pdf', collection='kb')
     mocker.patch.object(knowledge_objects, '_configured_environment', return_value=SimpleNamespace(MINIO_DEFAULT_BUCKET='files'))
