@@ -18,7 +18,9 @@ feature:
     description: Read execution counts and weighted average durations from published Agent rows with inclusive dates, initiating group and Agent filters, and enforce the Ops tenant scope.
   - rule_id: OPS-AGENT-FACTS-RULE-05
     description: Current Agent counts use active draft rows independently of historical date and group filters. Published resource pages, inclusive daily trends and exact top five counts preserve per-tenant identities, known zero, unknown coverage and deterministic ordering.
+  - rule_id: OPS-AGENT-FACTS-RULE-06
+    description: Each actual child Adapter run has its existing independent invocation ID, immediate parent and root ID, two revisions and independent timing. Terminal replay preserves one fact per execution with trajectory capture disabled.
   required_test_stages: [D3]
   source:
-    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119]
+    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119]
     notes: Agent collection contract and shared Ops monitoring pipeline.

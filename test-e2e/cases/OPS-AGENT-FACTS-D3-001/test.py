@@ -221,7 +221,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
 
 
 @pytest.fixture
-def model_peer():
+def model_peer(request):
     received = []
     release = Event()
 
@@ -233,10 +233,17 @@ def model_peer():
             self.end_headers()
             if not release.wait(20):
                 return
+            content = "<final_answer>ops-agent-ready</final_answer>"
+            if getattr(request, "param", None) == "children":
+                model = received[-1]["model"]
+                if model == "child-model":
+                    content = "<final_answer>child-ready</final_answer>"
+                elif sum(item["model"] == model for item in received) == 1:
+                    content = '<code>\nchild(task="first")\nchild(task="second")\n</code>'
             chunk = {
                 "id": "ops-agent-model", "object": "chat.completion.chunk", "created": 1,
                 "model": "model", "choices": [{"index": 0, "finish_reason": "stop",
-                                               "delta": {"content": "<final_answer>ops-agent-ready</final_answer>"}}],
+                                               "delta": {"content": content}}],
             }
             self.wfile.write(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode())
 
@@ -560,5 +567,138 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
             release.set()
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
+            await threads.shutdown(timeout=8)
+            set_fact_sink(sink)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_peer", ["children"], indirect=True)
+async def test_real_parent_and_child_facts_publish_and_replay(
+    isolated_monitoring, model_peer, monkeypatch, record_property,
+):
+    from contracts.constants import environment
+    from gateway.authentication import auth
+    from management.db.agent.models import AgentInfo
+    from permissions import rbac
+
+    service, tenant = isolated_monitoring
+    base, requests, release = model_peer
+    release.set()
+    manager = get_monitoring_manager()
+    monkeypatch.setattr(manager, "_config", MonitoringConfig(enable_telemetry=False, provider="local_file"))
+    assert not manager.is_enabled and not local_capture_enabled(manager)
+    child = AgentConfig(name="child", agent_id=22, version_no=4, description="Controlled child",
+                        model_name="child", tools=[], max_steps=2)
+    info = AgentRunInfo(
+        query="Delegate twice to the child", observer=MessageObserver(),
+        agent_config=AgentConfig(name="root", agent_id=21, version_no=3, description="Controlled parent",
+                                 model_name="model", tools=[], worker_agents=[child], max_steps=3),
+        model_config_list=[ModelConfig(cite_name=alias, model_name=model, url=base, api_key="synthetic")
+                           for alias, model in (("model", "model"), ("child", "child-model"))],
+        stop_event=Event(), tenant_id=tenant, user_id="owner", conversation_id=124,
+        workspace_run_id=uuid4().hex, history=[],
+    )
+    metadata = AgentRunMetadata(tenant_id=tenant, agent_id=21, is_debug=False, monitoring_group_ids=(12, 13))
+    threads = ThreadManager("ops-agent-children", {
+        lane: LanePolicy(lane, 2, 4) for lane in ("agent-run", "model-tool-io", "sandbox", "control-io")
+    })
+    events = []
+    async with runtime.producer_lifespan():
+        sink = get_fact_sink()
+
+        def capture(event):
+            if event["fact_kind"] == "agent":
+                events.append(dict(event))
+            sink(event)
+
+        set_fact_sink(capture)
+        threads.start()
+        try:
+            with agent_monitoring_context(metadata):
+                async with asyncio.timeout(30):
+                    async for _ in agent_run(info, thread_manager=threads):
+                        pass
+            assert info.attempt_outcome == "completed"
+            assert [item["model"] for item in requests].count("model") == 2
+            assert [item["model"] for item in requests].count("child-model") == 2
+            starts = {event["fact_id"]: event for event in events if event["record_revision"] == 1}
+            terminals = {event["fact_id"]: event for event in events if event["record_revision"] == 2}
+            assert len(events) == 6 and len(starts) == len(terminals) == 3
+            root = terminals[info.workspace_run_id]
+            children = [event for event in terminals.values() if not event["is_root"]]
+            assert root["agent_id"] == 21 and len(children) == 2
+            assert len({event["fact_id"] for event in children}) == 2
+            assert all(event["parent_run_id"] == event["root_run_id"] == root["fact_id"] for event in children)
+            assert all(event["agent_id"] == 22 and event["agent_version_no"] == 4 for event in children)
+            for run_id, event in terminals.items():
+                assert event["agent_run_id"] == run_id and event["outcome"] == "succeeded"
+                assert event["started_at"] == starts[run_id]["started_at"] and event["duration_ms"] > 0
+                assert event["tenant_id"] == tenant and event["initiator_group_ids"] == (12, 13)
+                assert root["started_at"] <= event["started_at"] <= event["ended_at"] <= root["ended_at"]
+            assert root["duration_ms"] >= sum(event["duration_ms"] for event in children)
+            async with asyncio.timeout(15):
+                while True:
+                    service.tick()
+                    hits = service.es.search(index=f"{FACTS}-*", query=filters(tenant_id=tenant, fact_kind="agent"))
+                    sources = {hit["_id"]: hit["_source"] for hit in hits["hits"]["hits"]}
+                    if len(sources) == 3 and all(source["record_revision"] == 2 for source in sources.values()):
+                        break
+                    await asyncio.sleep(0.1)
+            assert set(sources) == {stable_key(tenant, "agent", run_id) for run_id in terminals}
+            for event in terminals.values():
+                source = sources[stable_key(tenant, "agent", event["fact_id"])]
+                assert source["duration_ms"] == event["duration_ms"] and source["outcome"] == "succeeded"
+                if not event["is_root"]:
+                    assert source["parent_run_id"] == source["root_run_id"] == root["fact_id"]
+            for event in terminals.values():
+                emit_fact(event)
+                await _wait_for_agent_batch(service, tenant)
+            service.tick()
+            replayed = service.es.search(index=f"{FACTS}-*", query=filters(tenant_id=tenant, fact_kind="agent"))
+            assert {hit["_id"]: hit["_source"] for hit in replayed["hits"]["hits"]} == sources
+            day = date.fromisoformat(root["started_at"][:10])
+            with service.publication_snapshot(tenant, "agent", day, day) as (states, point):
+                state, = states
+                daily = list(point.documents(filters(tenant_id=tenant, fact_kind="agent", publish_id=str(state["publish_id"]))))
+            assert state["source_revision"] == state["published_source_revision"]
+            by_agent = {row["agent_id"]: row for row in daily}
+            assert by_agent[21]["execution_count"] == by_agent[21]["duration_sample_count"] == 1
+            assert by_agent[21]["duration_sum_ms"] == root["duration_ms"]
+            assert by_agent[22]["execution_count"] == by_agent[22]["duration_sample_count"] == 2
+            assert by_agent[22]["duration_sum_ms"] == sum(event["duration_ms"] for event in children)
+            with service.store.engine.begin() as connection:
+                for number in (21, 22):
+                    connection.execute(insert(AgentInfo).values(
+                        agent_id=number, version_no=0, tenant_id=tenant, name=f"agent-{number}", delete_flag="N",
+                    ))
+            monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
+            monkeypatch.setattr(environment, "MONITORING_PROVIDER", "otlp")
+            from ops.api import application
+
+            monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+            monkeypatch.setattr(auth, "get_current_user_context", lambda _: ("operator", tenant, "OPS"))
+            monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}})
+            monkeypatch.setattr(rbac, "_INITIALIZED", True)
+            app = application.create_app()
+            app.state.monitoring = service
+            params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "group_ids": [12, 13]}
+            expected = {number: {"execution_count": row["execution_count"], "duration_sample_count": row["duration_sample_count"],
+                                 "avg_duration_ms": row["duration_sum_ms"] / row["duration_sample_count"]}
+                        for number, row in by_agent.items()}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops",
+                                         headers={"Authorization": "Bearer ops"}) as client:
+                for number in (21, 22):
+                    response = await client.get("/ops/v1/monitoring/agents/summary", params=dict(params, agent_id=number))
+                    assert response.status_code == 200 and response.json()["data"] == expected[number]
+                listing = (await client.get("/ops/v1/monitoring/agents", params=params)).json()["data"]
+                assert listing["current_agent_count"] == listing["total"] == 2
+                assert {item["agent_id"]: item["metrics"] for item in listing["items"]} == expected
+                summary = (await client.get("/ops/v1/monitoring/agents/summary", params=params)).json()
+                assert summary["data"]["execution_count"] == summary["data"]["duration_sample_count"] == 3
+                assert summary["data"]["avg_duration_ms"] == sum(event["duration_ms"] for event in terminals.values()) / 3
+                trend = (await client.get("/ops/v1/monitoring/agents/trends", params=params)).json()["data"]
+                assert len(trend) == 1 and all(trend[0][key] == value for key, value in summary["data"].items())
+            record_property("parent_child_metrics", json.dumps({"agents": expected, "combined": summary}))
+        finally:
             await threads.shutdown(timeout=8)
             set_fact_sink(sink)

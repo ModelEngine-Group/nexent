@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Collect source facts for the executed portion of a main Agent run."""
+"""Collect source facts for the executed portion of an Agent run."""
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -20,21 +20,29 @@ class AgentRunObservation:
             "fact_id": run_id,
             "call_context_id": run_id,
             "agent_run_id": run_id,
-            "root_run_id": run_id,
+            "root_run_id": metadata.monitoring_root_run_id,
             "agent_id": metadata.agent_id,
             "agent_version_no": metadata.agent_version_no,
-            "is_root": True,
+            "is_root": run_id == metadata.monitoring_root_run_id,
             "initiator_group_ids": metadata.monitoring_group_ids,
         }
+        if not self._identity["is_root"]:
+            self._identity["parent_run_id"] = metadata.monitoring_parent_run_id
         self._terminal: dict | None = None
 
     @classmethod
     def from_context(cls, metadata: AgentRunMetadata | None):
-        """Collect only root executions with a trusted tenant and Agent identity."""
+        """Require trusted execution ancestry independently of trajectory capture."""
         if get_fact_sink() is None or metadata is None or metadata.is_debug:
             return None
         run_id = metadata.monitoring_run_id
-        if not run_id or run_id != metadata.monitoring_root_run_id:
+        root_id = metadata.monitoring_root_run_id
+        parent_id = metadata.monitoring_parent_run_id
+        if not run_id or not root_id:
+            return None
+        if run_id == root_id and parent_id is not None:
+            return None
+        if run_id != root_id and parent_id in {None, run_id}:
             return None
         if not metadata.tenant_id or metadata.agent_id is None:
             return None

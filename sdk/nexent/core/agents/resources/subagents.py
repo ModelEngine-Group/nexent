@@ -211,6 +211,7 @@ class SubAgentToolWrapper:
                 agent_version_no=self._runtime_identity.get("version_no"),
                 agent_version_name=self._agent_version_name,
                 monitoring_run_id=str(invocation_id),
+                monitoring_parent_run_id=parent.monitoring_run_id,
             )
             attributes = manager.build_agent_run_attributes(metadata, attributes={
                 "subagent.invocation_id": invocation_id,

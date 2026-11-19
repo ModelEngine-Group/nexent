@@ -174,6 +174,31 @@ publisher groups Agent executions by start day, tenant, initiating groups
 and Agent ID. It writes the execution count, exact duration sum and number of
 ended executions with a measured duration. A measured zero is a valid sample.
 
+### Child Agent capture
+
+Internal child executions reuse `SubAgentToolWrapper`'s existing invocation ID
+as `fact_id`, `agent_run_id` and `call_context_id`. The wrapper records the
+enclosing execution as `monitoring_parent_run_id`, preserves the root execution
+and initiating group snapshot, and selects the child's configured resource and
+version. Child facts have `is_root=false`, `parent_run_id` and `root_run_id`.
+Nested children point to their immediate parent. Two actual calls of the same
+child resource have different execution IDs.
+
+`orchestration.children.invoke_child` measures `adapter.run` through the same
+observation used by the main Agent. Validation and preparation precede this
+measurement, and terminal reporting follows Adapter cleanup. The existing typed
+`RunResult` supplies completed, failed or stopped status. Exceptions and
+cancellation retain the child's existing propagation behavior. A run stopped
+before entering the measured boundary emits no Agent fact.
+
+Child capture uses the public fact sink independently of trajectory recording.
+Start, terminal and replay retain the same execution identity. The shared writer,
+daily publication and Agent queries count main and child executions separately.
+Parent duration includes the time spent waiting for its child calls, while each
+child retains its independently measured duration. The D3 case executes a main
+Agent calling one child twice and compares all three facts with daily and query
+metrics before and after terminal replay.
+
 ## Agent summary query
 
 Use `GET /ops/v1/monitoring/agents/summary` directly on Ops or

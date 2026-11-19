@@ -207,6 +207,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         current,
         monitoring_run_id=run_id,
         monitoring_root_run_id=run_id,
+        monitoring_parent_run_id=None,
         agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
         agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
         agent_version_no=getattr(agent_run_info.agent_config, "version_no", None),

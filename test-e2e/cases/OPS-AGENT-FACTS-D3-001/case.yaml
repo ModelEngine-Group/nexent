@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -57,6 +57,12 @@ case:
   - order: 13
     action: Request every added view as Ops, Super Admin, a regular user and an unauthenticated client.
     expected: All views enforce the same tenant boundary and preserve distinct identities across tenants.
+  - order: 14
+    action: Run an actual main Agent that invokes the same child twice with trajectory capture disabled, then persist and publish all observed facts.
+    expected: There are three independent execution IDs and one final ES document per actual execution. Both child executions retain the root and immediate parent, their own duration and their inherited tenant and initiating groups.
+  - order: 15
+    action: Replay the terminal facts, publish again and compare Agent-specific and combined HTTP summaries, trends and resource pages to the observed executions.
+    expected: Main and child count one and two respectively, with duration sums and sample counts matching the ES facts. Replay changes neither counts nor duration and creates no additional document.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -68,12 +74,14 @@ case:
   - The Ops summary matches the real run and applies date, group and Agent filters.
   - Ops authorization controls explicit and implicit tenant selection.
   - Agent directory, trends and rankings agree with published metrics and distinguish current metadata from historical usage.
+  - Actual child invocations preserve their independent identity and timing through source facts, daily publication and queries with trajectory disabled.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
   - An Agent aggregate on the end day or a premature switch to an unconfirmed publication.
   - Duplicate counts from matching multiple groups or unauthorized cross-tenant results.
   - Inflated current totals from published snapshots or lost historical usage for absent catalog entries.
+  - An extra child execution or duration sample from terminal replay, or child attribution to its parent's execution ID.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -100,3 +108,8 @@ case:
     steps: [12, 13]
     expected_results: [10]
     forbidden_side_effects: [4, 5]
+  - id: AC-06
+    description: Actual child executions are independently measured and remain idempotent through the shared monitoring pipeline.
+    steps: [14, 15]
+    expected_results: [11]
+    forbidden_side_effects: [6]

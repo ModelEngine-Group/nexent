@@ -2,10 +2,15 @@
 
 """Resolve one child invocation without inheriting parent model or conversation state."""
 
+from concurrent.futures import CancelledError
 from copy import deepcopy
 
 from nexent.core.agents.contracts.config import copy_invocation_config
+from nexent.core.agents.contracts.output import RunResult
 from nexent.core.agents.orchestration.execution import execute_adapter
+from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.monitor import get_agent_monitoring_context
+from nexent.monitor.agent_fact import AgentRunObservation
 
 
 def child_run_info(parent, config, scope):
@@ -37,7 +42,26 @@ def invoke_child(info, task):
         raise ValueError("Child task must be a non-empty string")
     info.query = task
     info.run_role = "subagent"
-    return execute_adapter(info)
+    info.run_result = None
+    metadata = get_agent_monitoring_context()
+    observation = (
+        AgentRunObservation.from_context(metadata) if metadata and metadata.monitoring_parent_run_id else None
+    )
+    try:
+        run_scope = observation.measure(info.stop_event) if observation is not None else None
+        result = execute_adapter(info, run_scope=run_scope)
+        info.attempt_outcome = info.run_result.status if isinstance(info.run_result, RunResult) else (
+            "stopped" if info.stop_event.is_set() else "completed")
+        return result
+    except (RunTerminated, CancelledError):
+        info.attempt_outcome = "stopped"
+        raise
+    except Exception:
+        info.attempt_outcome = "failed"
+        raise
+    finally:
+        if observation is not None:
+            observation.report_terminal(info.attempt_outcome)
 
 
 def child_invocation_factory(parent):
