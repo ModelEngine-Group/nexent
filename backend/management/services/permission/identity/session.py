@@ -393,7 +393,7 @@ def get_current_user_context(
             elif record:
                 tenant_id = resolve_tenant_id_from_user_tenant_record(record)
         return identity["user_id"], tenant_id, roles
-    user_id, tenant_id = _resolve_session_user(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
 
 
     user_tenant_record = get_user_tenant_by_user_id(user_id)
