@@ -47,7 +47,8 @@ def _finding(row, file_ids):
     item = LegacyTaskFinding(task_id_hash=hashlib.sha256(row['task_id'].encode()).hexdigest(), origin=row['origin'],
         status=row['status'], revision=row['revision'], file_id=row['file_id'], auxiliary_present=row['auxiliary_present'])
     if not row['result_present']: item.issues.append('LEGACY_RESULT_MISSING')
-    elif not row['metadata_valid']: item.issues.append('LEGACY_METADATA_INVALID')
+    elif not row['metadata_valid'] and row['index_matches'] is not False and row['tenant_matches'] is not False:
+        item.issues.append('LEGACY_METADATA_INVALID')
     if row['index_matches'] is False: item.issues.append('LEGACY_TASK_INDEX_CONFLICT')
     if row['tenant_matches'] is False: item.issues.append('LEGACY_TASK_TENANT_CONFLICT')
     if row['status'] not in {'SUCCESS', 'FAILURE', 'REVOKED'}: item.issues.append('LEGACY_TASK_NOT_TERMINAL')

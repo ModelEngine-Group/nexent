@@ -103,14 +103,25 @@ class LegacyTaskRecords:
                 payload, result = {}, {}
         index, tenant = result.get('index_name'), result.get('tenant_id')
         file_id = result.get('file_id')
-        row = {'task_id': task_id, 'status': payload['status'] if valid else 'UNKNOWN',
-            'revision': hashlib.sha256(raw or b'').hexdigest(), 'result_present': raw is not None, 'metadata_valid': valid,
-            'index_matches': None if index is None else index == self._index,
-            'tenant_matches': None if tenant is None else tenant == self.scope.tenant_id,
-            'file_id': file_id if isinstance(file_id, str) and re.fullmatch(r'[0-9a-f]{32}', file_id) else None,
-            'origin': 'pg_reference' if task_id in self._known else 'index_metadata'}
-        if archive and (task_id in self._known or row['index_matches'] is True):
-            if row['index_matches'] is False or row['tenant_matches'] is False: raise ScopeDenied()
+        index_matches = None if index is None else index == self._index
+        tenant_matches = None if tenant is None else tenant == self.scope.tenant_id
+        in_scope = index_matches is not False and tenant_matches is not False
+        known = task_id in self._known
+        # Keep the PG reference and conflict flags while redacting the foreign result.
+        row = {
+            'task_id': task_id,
+            'status': payload['status'] if valid and in_scope else 'UNKNOWN',
+            'revision': hashlib.sha256((raw or b'') if in_scope else b'').hexdigest(),
+            'result_present': raw is not None,
+            'metadata_valid': valid and in_scope,
+            'index_matches': index_matches,
+            'tenant_matches': tenant_matches,
+            'file_id': file_id if in_scope and isinstance(file_id, str) and re.fullmatch(r'[0-9a-f]{32}', file_id) else None,
+            'origin': 'pg_reference' if known else 'index_metadata',
+        }
+        if archive and known and not in_scope:
+            raise ScopeDenied()
+        if archive and in_scope and (known or index_matches is True):
             row['archive'] = [self._value('backend', 'celery-task-meta-'+task_id, raw, 'raw',
                 client.pttl('celery-task-meta-'+task_id))]
         return row
@@ -182,6 +193,8 @@ class LegacyTaskRecords:
         self._authorize(dataset, fields=fields, consistency=consistency)
         if key not in self._known: raise ScopeDenied()
         with self._client('backend', context) as client: row = self._result(client, key, context, archive=bool(fields))
+        if row['index_matches'] is False or row['tenant_matches'] is False:
+            return {**row, 'auxiliary_present': []}
         return self._archive_auxiliary(row, context) if fields else self._auxiliary(row, context)
 
     def query(self, dataset, query, page, *, context):
@@ -201,7 +214,7 @@ class LegacyTaskRecords:
                     except UnicodeError: continue
                     if not TASK_ID.fullmatch(task_id): continue
                     row = self._result(client, task_id, context, archive=bool(query.fields))
-                    if row['index_matches'] is True:
+                    if row['index_matches'] is True and row['tenant_matches'] is not False:
                         selected.append(row)
                 if not self._buffer and not self._scan: break
         self._finished = not self._buffer and not self._scan

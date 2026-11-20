@@ -69,6 +69,45 @@ def test_redis_only_discovery_selects_exact_index_without_exporting_other_tasks(
     assert page.items[0]['origin'] == 'index_metadata' and page.next_cursor is None
 
 
+@pytest.mark.parametrize('fields', [(), ('archive',)])
+def test_redis_only_discovery_skips_foreign_tenant_even_with_matching_index(store, fields):
+    port, backend, general, _ = store
+    backend.scan.return_value = (0, [b'celery-task-meta-foreign', b'celery-task-meta-only'])
+    backend.get.side_effect = [
+        b'{"status":"SUCCESS","result":{"index_name":"old-kb","tenant_id":"tenant-b"}}',
+        b'{"status":"SUCCESS","result":{"index_name":"old-kb","tenant_id":"tenant-a"}}',
+    ]
+    general.dump.return_value = None
+
+    page = port.query(LEGACY_TASKS, RecordQuery(fields=fields), PageRequest(), context=context())
+
+    assert [row['task_id'] for row in page.items] == ['only']
+    assert page.next_cursor is None
+    assert 'foreign' not in str(general.mock_calls)
+    if fields:
+        backend.pttl.assert_called_once_with('celery-task-meta-only')
+
+
+@pytest.mark.parametrize(('index', 'tenant'), [('other-kb', 'tenant-a'), ('old-kb', 'tenant-b')])
+def test_pg_reference_reports_scope_conflict_without_returning_foreign_task_data(store, index, tenant):
+    port, backend, general, _ = store
+    backend.get.return_value = json.dumps({'status': 'SUCCESS', 'result': {
+        'index_name': index, 'tenant_id': tenant, 'file_id': 'a' * 32,
+    }}).encode()
+
+    row = port.get(LEGACY_TASKS, 'known', context=context())
+
+    assert row['index_matches'] is False or row['tenant_matches'] is False
+    assert row['status'] == 'UNKNOWN'
+    assert row['file_id'] is None
+    assert row['revision'] == 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    assert row['auxiliary_present'] == []
+    assert not general.mock_calls
+    with pytest.raises(ScopeDenied):
+        port.get(LEGACY_TASKS, 'known', fields=('archive',), context=context())
+    backend.pttl.assert_not_called()
+
+
 def test_scan_cursor_is_private_ordered_and_bound_to_live_handle(store):
     port, backend, _, _ = store
     backend.scan.side_effect = [(7, [b'celery-task-meta-known']), (0, [])]
