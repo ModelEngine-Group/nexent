@@ -4,8 +4,8 @@ from unittest.mock import patch, MagicMock, call
 import json
 import redis
 
-from management.services.knowledge_base import task_state as redis_service_module
-from management.services.knowledge_base.task_state import RedisService, get_redis_service
+from infrastructure.redis import legacy_task_state as redis_service_module
+from infrastructure.redis.legacy_task_state import RedisService, get_redis_service
 
 
 class TestRedisService(unittest.TestCase):
@@ -29,7 +29,7 @@ class TestRedisService(unittest.TestCase):
         self.env_patcher.stop()
 
     @patch('redis.from_url')
-    @patch('management.services.knowledge_base.task_state.REDIS_URL', 'redis://localhost:6379/0')
+    @patch('infrastructure.redis.legacy_task_state.REDIS_URL', 'redis://localhost:6379/0')
     def test_client_property(self, mock_from_url):
         """Test client property creates and returns Redis client"""
         # Setup
@@ -52,14 +52,14 @@ class TestRedisService(unittest.TestCase):
         mock_from_url.assert_called_once()  # Still only called once
 
     @patch('redis.from_url')
-    @patch('management.services.knowledge_base.task_state.REDIS_URL', None)
+    @patch('infrastructure.redis.legacy_task_state.REDIS_URL', None)
     def test_client_property_no_env_var(self, mock_from_url):
         """Test client property raises error when REDIS_URL is not set"""
         # Setup
         self.env_patcher.stop()
         with patch.dict('os.environ', {}, clear=True):
             # Create a fresh instance to ensure it uses the new environment
-            from management.services.knowledge_base.task_state import RedisService
+            from infrastructure.redis.legacy_task_state import RedisService
             redis_service = RedisService()
 
             # Execute & Verify
@@ -67,7 +67,7 @@ class TestRedisService(unittest.TestCase):
                 _ = redis_service.client
 
     @patch('redis.from_url')
-    @patch('management.services.knowledge_base.task_state.REDIS_BACKEND_URL', 'redis://localhost:6379/1')
+    @patch('infrastructure.redis.legacy_task_state.REDIS_BACKEND_URL', 'redis://localhost:6379/1')
     def test_backend_client_property(self, mock_from_url):
         """Test backend_client property creates and returns Redis client"""
         # Setup
@@ -89,8 +89,8 @@ class TestRedisService(unittest.TestCase):
         mock_from_url.assert_called_once()  # Still only called once
 
     @patch('redis.from_url')
-    @patch('management.services.knowledge_base.task_state.REDIS_BACKEND_URL', None)
-    @patch('management.services.knowledge_base.task_state.REDIS_URL', 'redis://localhost:6379/0')
+    @patch('infrastructure.redis.legacy_task_state.REDIS_BACKEND_URL', None)
+    @patch('infrastructure.redis.legacy_task_state.REDIS_URL', 'redis://localhost:6379/0')
     def test_backend_client_fallback(self, mock_from_url):
         """Test backend_client falls back to REDIS_URL when REDIS_BACKEND_URL is not set"""
         # Setup
@@ -98,7 +98,7 @@ class TestRedisService(unittest.TestCase):
         self.env_patcher.stop()
         with patch.dict('os.environ', {'REDIS_URL': 'redis://localhost:6379/0'}):
             # Create a fresh instance to ensure it uses the new environment
-            from management.services.knowledge_base.task_state import RedisService
+            from infrastructure.redis.legacy_task_state import RedisService
             redis_service = RedisService()
 
             # Execute
@@ -113,15 +113,15 @@ class TestRedisService(unittest.TestCase):
             self.assertEqual(client, self.mock_backend_client)
 
     @patch('redis.from_url')
-    @patch('management.services.knowledge_base.task_state.REDIS_BACKEND_URL', None)
-    @patch('management.services.knowledge_base.task_state.REDIS_URL', None)
+    @patch('infrastructure.redis.legacy_task_state.REDIS_BACKEND_URL', None)
+    @patch('infrastructure.redis.legacy_task_state.REDIS_URL', None)
     def test_backend_client_no_env_vars(self, mock_from_url):
         """Test backend_client raises error when no Redis URLs are set"""
         # Setup
         self.env_patcher.stop()
         with patch.dict('os.environ', {}, clear=True):
             # Create a fresh instance to ensure it uses the new environment
-            from management.services.knowledge_base.task_state import RedisService
+            from infrastructure.redis.legacy_task_state import RedisService
             redis_service = RedisService()
 
             # Execute & Verify
@@ -129,7 +129,7 @@ class TestRedisService(unittest.TestCase):
                 _ = redis_service.backend_client
 
     @patch('redis.from_url')
-    @patch('management.services.knowledge_base.task_state.REDIS_URL', 'redis://localhost:6379/0')
+    @patch('infrastructure.redis.legacy_task_state.REDIS_URL', 'redis://localhost:6379/0')
     def test_mark_and_check_task_cancelled(self, mock_from_url):
         """mark_task_cancelled should set flag and is_task_cancelled should read it."""
         mock_client = MagicMock()
@@ -239,8 +239,8 @@ class TestRedisService(unittest.TestCase):
         self.mock_redis_client.delete.side_effect = redis.RedisError(
             "delete failed")
 
-        with patch('management.services.knowledge_base.task_state.logger.warning', side_effect=Exception("warn boom")), \
-                patch('management.services.knowledge_base.task_state.logger.error') as mock_error:
+        with patch('infrastructure.redis.legacy_task_state.logger.warning', side_effect=Exception("warn boom")), \
+                patch('infrastructure.redis.legacy_task_state.logger.error') as mock_error:
             result = self.redis_service._cleanup_single_task_related_keys(
                 "task123")
 
@@ -597,8 +597,8 @@ class TestRedisService(unittest.TestCase):
         self.mock_backend_client.ping.assert_not_called()
         self.assertFalse(result)
 
-    @patch('management.services.knowledge_base.task_state._redis_service', None)
-    @patch('management.services.knowledge_base.task_state.RedisService')
+    @patch('infrastructure.redis.legacy_task_state._redis_service', None)
+    @patch('infrastructure.redis.legacy_task_state.RedisService')
     def test_get_redis_service(self, mock_redis_service_class):
         """Test get_redis_service function creates and returns singleton instance"""
         # Setup

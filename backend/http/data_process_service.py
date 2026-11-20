@@ -35,6 +35,30 @@ service_processes = {
     'flower': None,
 }
 
+def recover_data_process_tasks() -> dict[str, int]:
+    """Fail tasks that had started in the previous data-process worker set."""
+    from management.db.knowledge_base.file_lifecycle import fail_interrupted_file_tasks
+
+    from infrastructure.redis.legacy_task_state import get_redis_service
+
+    records = fail_interrupted_file_tasks()
+    task_ids = {
+        str(task_id)
+        for record in records
+        for task_id in (
+            record.get("process_task_id"),
+            record.get("forward_task_id"),
+            record.get("parent_task_id"),
+        )
+        if task_id
+    }
+    redis_service = get_redis_service()
+    canceled = sum(redis_service.mark_task_cancelled(task_id) for task_id in task_ids)
+    result = {"knowledge_files": len(records), "cancel_markers": int(canceled)}
+    logger.info("Data-process startup recovery completed: %s", result)
+    return result
+
+
 class ServiceManager:
     """Manage all data processing related services"""
 
@@ -61,7 +85,7 @@ class ServiceManager:
             import redis
             redis_client = redis.from_url(redis_url, socket_timeout=5, socket_connect_timeout=5)
             redis_client.ping()
-            from management.services.knowledge_base.task_state import get_redis_service
+            from infrastructure.redis.legacy_task_state import get_redis_service
             cleanup_stats = get_redis_service().cleanup_error_info_keys()
             logger.info(f"Redis error info cleanup stats: {cleanup_stats}")
             logger.info(f"✅ Redis connection successful: {redis_url}")
@@ -499,8 +523,6 @@ except Exception as e_exec:
             if service_name == "Celery Workers" and service_enabled:
                 # Redis must be available for cancellation markers, while
                 # recovery must finish before Celery can consume work.
-                from management.recovery import recover_data_process_tasks
-
                 recover_data_process_tasks()
             if service_enabled:
                 enabled_count += 1

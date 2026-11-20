@@ -21,7 +21,7 @@ def boundary(monkeypatch):
                                       'deleted_minio': True, 'source_available': False, 'lifecycle_deleted': True})
     monkeypatch.setattr(module.ElasticSearchService, 'delete_document_by_scope', service)
     redis = Mock(side_effect=AssertionError('Document deletion must not open Redis'))
-    monkeypatch.setattr('management.services.knowledge_base.task_state.get_redis_service', redis)
+    monkeypatch.setattr('infrastructure.redis.legacy_task_state.get_redis_service', redis)
     return module, service, audit, redis
 
 

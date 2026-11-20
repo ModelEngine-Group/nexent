@@ -68,9 +68,9 @@ file_mgmt_module.get_file_stream_impl = AsyncMock()
 file_mgmt_module.check_file_access = MagicMock(return_value=True)
 sys.modules["management.services.file.service"] = file_mgmt_module
 
-redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
+redis_service_module = types.ModuleType("infrastructure.redis.legacy_task_state")
 redis_service_module.get_redis_service = MagicMock()
-sys.modules["management.services.knowledge_base.task_state"] = redis_service_module
+sys.modules["infrastructure.redis.legacy_task_state"] = redis_service_module
 
 vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
 
@@ -419,7 +419,7 @@ class TestDeleteDocuments:
         expected = {"status": "success", "scope": "full", "deleted_es_count": 3}
         with patch("management.api.northbound.delete_knowledge_document_for_northbound",
                    new_callable=AsyncMock, return_value=expected) as adapter, patch(
-                   "management.services.knowledge_base.task_state.get_redis_service") as redis:
+                   "infrastructure.redis.legacy_task_state.get_redis_service") as redis:
             response = client.delete("/nb/v1/knowledge/indices/kb1/documents",
                                      params={"path_or_url": "s3://bucket/key", "scope": "full"})
         assert response.status_code == 200 and response.json() == expected
@@ -796,11 +796,10 @@ class TestUploadAndDownload:
         assert info_response.status_code == 200
         assert info_response.json()["url"] == "https://files.example/guide"
 
-    def test_download_base64_encodes_file_content(self, client, mock_northbound_context):
+    def test_download_base64_encodes_file_content(self, client, mock_northbound_context, monkeypatch):
         mock_northbound_context.return_value = ASSET_CTX
-        stream = MagicMock()
-        stream.read.return_value = b"hello"
-        file_mgmt_module.get_file_stream_impl.return_value = (stream, "text/plain")
+        monkeypatch.setattr("management.api.northbound.read_download",
+                            AsyncMock(return_value=(b"hello", "text/plain")))
 
         response = client.get(
             "/nb/v1/knowledge/file/download/docs/guide.txt", params={"download": "base64"}
@@ -810,9 +809,10 @@ class TestUploadAndDownload:
         assert response.json()["base64"] == "aGVsbG8="
         assert response.json()["content_type"] == "text/plain"
 
-    def test_download_stream_sets_filename_headers(self, client, mock_northbound_context):
+    def test_download_stream_sets_filename_headers(self, client, mock_northbound_context, monkeypatch):
         mock_northbound_context.return_value = ASSET_CTX
-        file_mgmt_module.get_file_stream_impl.return_value = ([b"hello"], "text/plain")
+        monkeypatch.setattr("management.api.northbound.read_download",
+                            AsyncMock(return_value=(b"hello", "text/plain")))
 
         response = client.get(
             "/nb/v1/knowledge/file/download/docs/guide.txt", params={"download": "stream"}
@@ -830,7 +830,7 @@ class TestDeleteDocumentsCoverage:
         expected = {"status": "success", "scope": "full", "deleted_es_count": 3}
         with patch("management.api.northbound.delete_knowledge_document_for_northbound",
                    new_callable=AsyncMock, return_value=expected) as adapter, patch(
-                   "management.services.knowledge_base.task_state.get_redis_service") as redis:
+                   "infrastructure.redis.legacy_task_state.get_redis_service") as redis:
             response = client.delete("/nb/v1/knowledge/indices/kb1/documents",
                                      params={"path_or_url": "s3://bucket/key", "scope": "full"})
         assert response.status_code == 200 and response.json() == expected
@@ -843,7 +843,7 @@ class TestDeleteDocumentsCoverage:
         expected = {"status": "success", "scope": "source_only", "deleted_es_count": 0}
         with patch("management.api.northbound.delete_knowledge_document_for_northbound",
                    new_callable=AsyncMock, return_value=expected) as adapter, patch(
-                   "management.services.knowledge_base.task_state.get_redis_service") as redis:
+                   "infrastructure.redis.legacy_task_state.get_redis_service") as redis:
             response = client.delete("/nb/v1/knowledge/indices/kb1/documents",
                                      params={"path_or_url": "s3://bucket/key", "scope": "source_only"})
         assert response.status_code == 200 and response.json() == expected

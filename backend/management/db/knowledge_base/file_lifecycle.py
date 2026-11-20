@@ -61,7 +61,7 @@ def list_file_records(
 
 
 def fail_interrupted_file_tasks() -> List[Dict[str, Any]]:
-    """Fail ingestion stages that had actually started before worker restart.
+    """Fail legacy ingestion stages that had started before worker restart.
 
     FORWARDING without a forward task ID is still queued behind a completed
     process task and is intentionally left for the existing Celery chain.
@@ -71,6 +71,7 @@ def fail_interrupted_file_tasks() -> List[Dict[str, Any]]:
             session.query(KnowledgeFileLifecycle)
             .filter(
                 KnowledgeFileLifecycle.delete_flag == "N",
+                KnowledgeFileLifecycle.ingestion_request.is_(None),
                 or_(
                     KnowledgeFileLifecycle.status == "PROCESSING",
                     and_(

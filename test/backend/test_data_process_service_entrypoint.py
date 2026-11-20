@@ -256,10 +256,41 @@ def test_main_exits_when_service_dependencies_fail(service_module, monkeypatch):
     assert stopped == [True]
 
 
+def test_recover_data_process_tasks_marks_each_celery_id_cancelled_once(service_module, monkeypatch):
+    records = [
+        {
+            "process_task_id": "process-1",
+            "forward_task_id": "forward-1",
+            "parent_task_id": "parent-1",
+        },
+        {
+            "process_task_id": "process-1",
+            "forward_task_id": None,
+            "parent_task_id": "parent-2",
+        },
+    ]
+    redis_service = MagicMock()
+    redis_service.mark_task_cancelled.side_effect = [True, True, False, True]
+    lifecycle = types.ModuleType("management.db.knowledge_base.file_lifecycle")
+    lifecycle.fail_interrupted_file_tasks = MagicMock(return_value=records)
+    monkeypatch.setitem(sys.modules, lifecycle.__name__, lifecycle)
+    task_state = types.ModuleType("infrastructure.redis.legacy_task_state")
+    task_state.get_redis_service = MagicMock(return_value=redis_service)
+    monkeypatch.setitem(sys.modules, task_state.__name__, task_state)
+
+    result = service_module.recover_data_process_tasks()
+
+    assert result == {"knowledge_files": 2, "cancel_markers": 3}
+    assert {
+        invocation.args[0]
+        for invocation in redis_service.mark_task_cancelled.call_args_list
+    } == {"process-1", "forward-1", "parent-1", "parent-2"}
+
+
 def test_missing_redis_client_returns_failure_without_cleanup(service_module, monkeypatch):
     monkeypatch.setitem(sys.modules, "redis", None)
     cleanup_service = MagicMock()
-    task_state = types.ModuleType("management.services.knowledge_base.task_state")
+    task_state = types.ModuleType("infrastructure.redis.legacy_task_state")
     task_state.get_redis_service = cleanup_service
     monkeypatch.setitem(sys.modules, task_state.__name__, task_state)
     logger = MagicMock()

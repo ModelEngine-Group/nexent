@@ -116,7 +116,8 @@ def test_fail_interrupted_file_tasks_reuses_failed_state(monkeypatch):
     assert forwarding.status == "FAILED"
     assert forwarding.error_stage == "FORWARD"
     assert forwarding.version == 5
-    recovery_filter = query.filter.call_args.args[1]
+    _, ownership_filter, recovery_filter = query.filter.call_args.args
+    assert ownership_filter.compare(lifecycle_db.KnowledgeFileLifecycle.ingestion_request.is_(None))
     assert "forward_task_id IS NOT NULL" in str(recovery_filter)
 
 

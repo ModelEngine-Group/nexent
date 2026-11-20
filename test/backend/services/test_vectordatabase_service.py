@@ -335,7 +335,7 @@ sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
 sys.modules['psycopg2.extensions'] = MagicMock()
 
-# Mock redis before management.services.knowledge_base.task_state is imported
+# Mock redis before infrastructure.redis.legacy_task_state is imported
 sys.modules['redis'] = MagicMock()
 sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
@@ -346,7 +346,7 @@ sys.modules['redis.lock'] = MagicMock()
 sys.modules['services'] = _create_package_mock('services')
 
 # Create mock redis_service module
-redis_service_mock = types.ModuleType('management.services.knowledge_base.task_state')
+redis_service_mock = types.ModuleType('infrastructure.redis.legacy_task_state')
 redis_service_mock.get_redis_service = MagicMock(return_value=MagicMock(
     is_task_cancelled=MagicMock(return_value=False),
     save_progress_info=MagicMock(return_value=True),
@@ -354,7 +354,7 @@ redis_service_mock.get_redis_service = MagicMock(return_value=MagicMock(
     get_progress_info=MagicMock(return_value=None),
     get_error_info=MagicMock(return_value=None),
 ))
-sys.modules['management.services.knowledge_base.task_state'] = redis_service_mock
+sys.modules['infrastructure.redis.legacy_task_state'] = redis_service_mock
 setattr(sys.modules['services'], 'redis_service', redis_service_mock)
 
 # Create mock group_service module

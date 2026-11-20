@@ -92,7 +92,7 @@ summary_service_mock.KnowledgeSummaryService = MagicMock()
 sys.modules['management.services.knowledge_base.summary_service'] = summary_service_mock
 
 # Mock other services that might be imported
-sys.modules['management.services.knowledge_base.task_state'] = types.ModuleType('management.services.knowledge_base.task_state')
+sys.modules['infrastructure.redis.legacy_task_state'] = types.ModuleType('infrastructure.redis.legacy_task_state')
 sys.modules['management.services.permission.identity.groups'] = types.ModuleType('management.services.permission.identity.groups')
 
 # knowledge_summary_app only needs this request model from contracts.agent. Keeping

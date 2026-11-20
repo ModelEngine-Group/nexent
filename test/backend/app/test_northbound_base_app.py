@@ -51,6 +51,7 @@ class NorthboundContext:
 # management.services.northbound - provides only NorthboundContext
 northbound_service_module = types.ModuleType("management.services.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
+northbound_service_module.search_hybrid_for_northbound = AsyncMock()
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
 northbound_service_module.start_streaming_chat = MagicMock()
@@ -109,10 +110,10 @@ file_reads_module = types.ModuleType("infrastructure.file_reads")
 file_reads_module.read_attachment_size = MagicMock(return_value=0)
 sys.modules[file_reads_module.__name__] = file_reads_module
 
-# management.services.knowledge_base.task_state - stub to avoid importing redis dependency
-redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
+# infrastructure.redis.legacy_task_state - stub to avoid importing redis dependency
+redis_service_module = types.ModuleType("infrastructure.redis.legacy_task_state")
 redis_service_module.get_redis_service = MagicMock()
-sys.modules["management.services.knowledge_base.task_state"] = redis_service_module
+sys.modules["infrastructure.redis.legacy_task_state"] = redis_service_module
 
 # management.services.knowledge_base.service - stub to avoid heavy SDK imports
 vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
@@ -383,7 +384,7 @@ sys.modules["management.db.identity.user_tenant"] = MagicMock()
 sys.modules["management.services.permission.api_keys"] = MagicMock()
 sys.modules["management.services.monitor.audit"] = MagicMock()
 auth_utils_module.get_user_language = lambda request: "en"
-sys.modules["management.services.knowledge_base.task_state"] = MagicMock()
+sys.modules["infrastructure.redis.legacy_task_state"] = MagicMock()
 
 from contracts.a2a import GatewayA2AServerSettings as A2AServerSettings
 from fastapi.testclient import TestClient  # noqa: E402

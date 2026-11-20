@@ -426,7 +426,7 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
@@ -553,7 +553,7 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
     # Setup mocks
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service", return_value=redis_service_mock), \
             patch("management.services.knowledge_base.file_listing.list_knowledge_files") as mock_list_files, \
             patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_knowledge_base") as mock_full_delete, \
             patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
@@ -1697,7 +1697,7 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={"file_id": 'fid-failed'}, headers=auth_data["auth_header"])
@@ -1719,7 +1719,7 @@ async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(au
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={"file_id": 'fid-processing'}, headers=auth_data["auth_header"])
@@ -1741,7 +1741,7 @@ async def test_get_document_error_info_returns_lifecycle_stage_without_legacy_st
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={"file_id": 'fid-uploaded'}, headers=auth_data["auth_header"])
@@ -1824,7 +1824,7 @@ async def test_get_document_error_info_no_task_id(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
@@ -1846,7 +1846,7 @@ async def test_get_document_error_info_json_error_code(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
@@ -1868,7 +1868,7 @@ async def test_get_document_error_info_regex_error_code(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
@@ -2489,7 +2489,7 @@ async def test_get_document_error_info_regex_fallback(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
@@ -2511,7 +2511,7 @@ async def test_get_document_error_info_regex_failure_returns_none(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission") as permission, \
             patch("management.api.knowledge_base.vectordatabase.read_document_error", new=AsyncMock(return_value=expected)) as read, \
-            patch("management.services.knowledge_base.task_state.get_redis_service") as redis, \
+            patch("infrastructure.redis.legacy_task_state.get_redis_service") as redis, \
             patch("management.db.knowledge_base.file_lifecycle.get_file_record") as native:
         response = client.get(f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
                               params={}, headers=auth_data["auth_header"])
@@ -2942,7 +2942,7 @@ class TestVectordatabaseAuditEntries:
         with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
                 patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                       return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-                patch("management.services.knowledge_base.task_state.get_redis_service", return_value=redis_service_mock), \
+                patch("infrastructure.redis.legacy_task_state.get_redis_service", return_value=redis_service_mock), \
                 patch("management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
                       new_callable=AsyncMock, return_value={"message": "Documents deleted successfully"}), \
                 patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):

@@ -36,29 +36,6 @@ def recover_config_tasks() -> dict[str, int]:
     return result
 
 
-def recover_data_process_tasks() -> dict[str, int]:
-    """Fail tasks that had started in the previous data-process worker set."""
-    from management.db.knowledge_base.file_lifecycle import fail_interrupted_file_tasks
-    from management.services.knowledge_base.task_state import get_redis_service
-
-    records = fail_interrupted_file_tasks()
-    task_ids = {
-        str(task_id)
-        for record in records
-        for task_id in (
-            record.get("process_task_id"),
-            record.get("forward_task_id"),
-            record.get("parent_task_id"),
-        )
-        if task_id
-    }
-    redis_service = get_redis_service()
-    canceled = sum(redis_service.mark_task_cancelled(task_id) for task_id in task_ids)
-    result = {"knowledge_files": len(records), "cancel_markers": int(canceled)}
-    logger.info("Data-process startup recovery completed: %s", result)
-    return result
-
-
 def recover_northbound_tasks() -> dict[str, int]:
     """Fail protocol tasks owned by the previous northbound process."""
     from management.db.a2a.repository import fail_active_tasks_on_startup

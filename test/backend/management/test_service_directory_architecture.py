@@ -7,6 +7,8 @@ import os
 import re
 from pathlib import Path
 
+import tomllib
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
@@ -227,6 +229,9 @@ MIGRATED_MODULES = {
     'knowledge_base/file_listing.py',
     'knowledge_base/file_source_display.py',
     'knowledge_base/health.py',
+    'knowledge_base/hybrid.py',
+    'knowledge_base/hybrid_tags.py',
+    'knowledge_base/image_ticket.py',
     'knowledge_base/ingestion.py',
     'knowledge_base/ingestion_coordinator.py',
     'knowledge_base/ingestion_dispatch.py',
@@ -263,7 +268,6 @@ MIGRATED_MODULES = {
     'knowledge_base/summary_service.py',
     'knowledge_base/summary_settings.py',
     'knowledge_base/tag_projection.py',
-    'knowledge_base/task_state.py',
     'knowledge_base/tool_files.py',
     'knowledge_base/usage_cache.py',
     'mcp/addressing.py',
@@ -539,3 +543,18 @@ def test_skill_knowledge_utilities_have_canonical_locations():
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 assert not (node.module or "").startswith("management.services"), source
+
+
+def test_management_image_uses_kombu_without_packaging_the_legacy_worker():
+    manifest = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = manifest["project"]["optional-dependencies"]
+    management = {
+        re.split(r'[<>=\[]', requirement, maxsplit=1)[0]
+        for requirement in extras['management-cleanse']
+    }
+    assert "kombu" in management
+    assert management.isdisjoint({"celery", "flower"})
+
+    dockerfile = PROJECT_ROOT / "deploy/images/dockerfiles/main/Dockerfile"
+    assert "backend/data_process/" not in dockerfile.read_text(encoding="utf-8")
+    assert not (MANAGEMENT_SERVICES / "knowledge_base/task_state.py").exists()

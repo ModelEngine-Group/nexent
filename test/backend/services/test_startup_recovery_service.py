@@ -67,41 +67,6 @@ def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     assert reap.call_args_list == [call("tenant-1", timeout_minutes=0), call("tenant-2", timeout_minutes=0)]
 
 
-def test_recover_data_process_tasks_marks_each_celery_id_cancelled_once(monkeypatch):
-    records = [
-        {
-            "process_task_id": "process-1",
-            "forward_task_id": "forward-1",
-            "parent_task_id": "parent-1",
-        },
-        {
-            "process_task_id": "process-1",
-            "forward_task_id": None,
-            "parent_task_id": "parent-2",
-        },
-    ]
-    redis_service = MagicMock()
-    redis_service.mark_task_cancelled.side_effect = [True, True, False, True]
-    _install_module(
-        monkeypatch,
-        "management.db.knowledge_base.file_lifecycle",
-        fail_interrupted_file_tasks=MagicMock(return_value=records),
-    )
-    _install_module(
-        monkeypatch,
-        "management.services.knowledge_base.task_state",
-        get_redis_service=MagicMock(return_value=redis_service),
-    )
-
-    result = startup_recovery_service.recover_data_process_tasks()
-
-    assert result == {"knowledge_files": 2, "cancel_markers": 3}
-    assert {
-        invocation.args[0]
-        for invocation in redis_service.mark_task_cancelled.call_args_list
-    } == {"process-1", "forward-1", "parent-1", "parent-2"}
-
-
 def test_recover_northbound_tasks_fails_active_a2a_tasks(monkeypatch):
     fail_active = MagicMock(return_value=6)
     _install_module(
