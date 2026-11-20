@@ -286,13 +286,15 @@ class ElasticsearchVectorStore:
                 raise OutcomeUnknown(operation_id=context.operation_id) from error
             raise
 
-    def _filter(self, binding, where):
+    def _filter(self, binding, where, *, vectors_only=False):
         terms = [
             {"term": {"_si_tenant": self.scope.tenant_id}},
             {"term": {"_si_collection": binding.collection}},
         ]
         if where is not None:
             terms.append(predicate(binding, where))
+        if vectors_only:
+            terms.append({"exists": {"field": "embedding"}})
         return {"bool": {"filter": terms}}
 
     def _bulk(self, client, operations, context, count, *, delete=False):
@@ -576,25 +578,23 @@ class ElasticsearchVectorStore:
             hits.append(SearchHit(key, float(score), score_kind, data, generation, highlights=terms))
         return tuple(hits)
 
-    def scan(self, collection, where, page, *, context, include_vector=True, allow_missing_vector=False):
+    def scan(self, collection, where, page, *, context, include_vector=True, allow_missing_vector=False, vectors_only=False):
         from infrastructure.vdb.vector_scan import scan_vectors
 
-        if (type(include_vector) is not bool or type(allow_missing_vector) is not bool
+        if (type(include_vector) is not bool or type(allow_missing_vector) is not bool or type(vectors_only) is not bool
             or allow_missing_vector and not include_vector):
             raise InvalidInput()
         binding = self._binding(collection, maintenance=not include_vector or allow_missing_vector)
         if allow_missing_vector and not binding.allow_unembedded:
             raise CapabilityUnsupported()
         return scan_vectors(self, binding, where, page, context=context,
-                            include_vector=include_vector, allow_missing_vector=allow_missing_vector)
+                            include_vector=include_vector, allow_missing_vector=allow_missing_vector, vectors_only=vectors_only)
 
     def count(self, collection, where, *, context, vectors_only=False):
         if type(vectors_only) is not bool:
             raise InvalidInput()
         binding = self._binding(collection, maintenance=True)
-        query = self._filter(binding, where)
-        if vectors_only:
-            query["bool"]["filter"].append({"exists": {"field": "embedding"}})
+        query = self._filter(binding, where, vectors_only=vectors_only)
         with self._client(context) as client:
             result = self._call(
                 client, "count", context, index=binding.index, query=query

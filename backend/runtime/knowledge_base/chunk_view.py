@@ -213,17 +213,23 @@ class ChunkReadView:
         state = history.states.get(record.key.key)
         return state is None or state.alive and state.latest["chunk_index"] == data.get("chunk_index")
 
-    def has_manual_create(self, record, *, context):
+    def _mutation_state(self, record, *, context):
         data = record.payload
         if data.get("knowledge_id") != self.knowledge_id:
             raise ScopeDenied()
         if record.generation is None:
-            return False
+            return None
         manifest = None if data.get("file_id") is None else {
             "file_id": data["file_id"], "visible_version": data["file_version"],
             "visible_generation": record.generation.value}
-        state = self._history(manifest, context=context).states.get(record.key.key)
+        return self._history(manifest, context=context).states.get(record.key.key)
+
+    def has_manual_create(self, record, *, context):
+        state = self._mutation_state(record, context=context)
         return bool(state and state.alive and state.creation)
+
+    def has_confirmed_mutation(self, record, *, context):
+        return self._mutation_state(record, context=context) is not None
 
     @staticmethod
     def _scan(vectors, resource, where, *, context, include_vectors=False):

@@ -219,6 +219,7 @@ class VectorStore(StoragePort, Protocol):
     def scan(
         self, collection: str, where: Comparison | Junction | None, page: PageRequest,
         *, context: OperationContext, include_vector: bool = True, allow_missing_vector: bool = False,
+        vectors_only: bool = False,
     ) -> Page[VectorRecord]:
         """Read scoped keys; explicitly optional vectors distinguish absence from invalid data."""
         ...

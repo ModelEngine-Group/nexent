@@ -28,10 +28,10 @@ def _after(cursor, fingerprint):
     return data['after']
 
 
-def scan_vectors(store, binding, where, page, *, context, include_vector=True, allow_missing_vector=False):
+def scan_vectors(store, binding, where, page, *, context, include_vector=True, allow_missing_vector=False, vectors_only=False):
     if not isinstance(page, PageRequest):
         raise InvalidInput()
-    query = store._filter(binding, where)
+    query = store._filter(binding, where, vectors_only=vectors_only)
     read_schema = asdict(binding)
     # Write policies and nullable projection additions do not change key ordering.
     read_schema.pop('mutable_fields')
