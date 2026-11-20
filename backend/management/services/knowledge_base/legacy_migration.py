@@ -50,6 +50,7 @@ from infrastructure.knowledge_ingestion import (
     knowledge_ingestion_ports,
     legacy_file_id_occupied,
     reserve_legacy_identity,
+    restore_legacy_identity,
 )
 from infrastructure.legacy_tasks import legacy_task_records
 
@@ -67,7 +68,8 @@ async def _deadline(context):
 class LegacyMigrationService:
     def __init__(self, *, ports=knowledge_ingestion_ports, client=None, sources=None, parser_version=None,
                  cancellation_scope=None, tasks=legacy_task_records, file_id_occupied=legacy_file_id_occupied,
-                 reserve_identity=reserve_legacy_identity, activate_identity=activate_legacy_identity):
+                 reserve_identity=reserve_legacy_identity, activate_identity=activate_legacy_identity,
+                 restore_identity=restore_legacy_identity):
         self.ports = ports
         self.client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
         self.sources = sources or KnowledgeSourceInspector(cancellation_scope=cancellation_scope)
@@ -76,6 +78,7 @@ class LegacyMigrationService:
         self.file_id_occupied = file_id_occupied
         self.reserve_identity = reserve_identity
         self.activate_identity = activate_identity
+        self.restore_identity = restore_identity
 
     @staticmethod
     async def _blocking(method, *args):
@@ -231,7 +234,7 @@ class LegacyMigrationService:
     def _reserve(self, plan, actor, context):
         return self.reserve_identity(actor, plan, context=context)
 
-    def _activate(self, plan, actor, context):
+    def _change_mapping(self, plan, actor, context, change, journal_method):
         with self.ports(actor.tenant_id, actor.user_id, context=context) as (_, resources):
             resource = KnowledgeSearchAuthorizationPolicy(resources, user_id=actor.user_id).authorize(
                 KnowledgeSearchAuthorization(knowledge_ids=[plan.knowledge_id]),
@@ -242,9 +245,9 @@ class LegacyMigrationService:
                 raise Conflict()
 
             def apply(records, row):
-                return IngestionJournal(records).admit_legacy(plan, row, context=context)
+                return journal_method(IngestionJournal(records), plan, row, context=context)
 
-            return self.activate_identity(actor, plan, apply, context=context)
+            return change(actor, plan, apply, context=context)
 
     async def activate_file_id(self, plan, actor, *, context, task_archive=None):
         self._plan(plan, actor, mapping=True)
@@ -257,7 +260,16 @@ class LegacyMigrationService:
                 pass
             else:
                 await self._revalidate_mapping(plan, actor, context, task_archive)
-            return await self._blocking(self._activate, plan, actor, context)
+            return await self._blocking(
+                self._change_mapping, plan, actor, context, self.activate_identity, IngestionJournal.admit_legacy,
+            )
+
+    async def restore_file_id(self, plan, actor, *, context):
+        self._plan(plan, actor, mapping=True)
+        async with _deadline(context):
+            return await self._blocking(
+                self._change_mapping, plan, actor, context, self.restore_identity, IngestionJournal.restore_legacy,
+            )
 
     async def inspect(self, plan, actor, *, context):
         mapping = isinstance(plan, KnowledgeIngestionIntent) and plan.legacy_snapshot is not None and (

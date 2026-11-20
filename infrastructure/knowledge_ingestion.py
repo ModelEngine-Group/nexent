@@ -14,6 +14,7 @@ from infrastructure.rdb.knowledge_ingestion import (
     bind_ingestion_records,
     bind_legacy_file_id_occupancy,
     reserve_legacy_file_identity,
+    restore_legacy_file_identity,
 )
 from infrastructure.rdb.knowledge_ingestion_dispatch import bind_ingestion_dispatch
 
@@ -34,6 +35,14 @@ def activate_legacy_identity(actor, plan, apply, *, context):
     engine = record_engine(context)
     try:
         return activate_legacy_file_identity(actor, plan, apply, engine, context=context)
+    finally:
+        close_owned(context, [engine.dispose])
+
+
+def restore_legacy_identity(actor, plan, restore, *, context):
+    engine = record_engine(context)
+    try:
+        return restore_legacy_file_identity(actor, plan, restore, engine, context=context)
     finally:
         close_owned(context, [engine.dispose])
 

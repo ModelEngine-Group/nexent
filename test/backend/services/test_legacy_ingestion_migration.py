@@ -24,6 +24,7 @@ from infrastructure.rdb.knowledge_ingestion import (
     activate_legacy_file_identity,
     bind_legacy_file_id_occupancy,
     reserve_legacy_file_identity,
+    restore_legacy_file_identity,
 )
 from test.backend.infrastructure.test_knowledge_ingestion_records import (
     records as records,  # noqa: PLC0414
@@ -226,6 +227,9 @@ def reservation(historical, monkeypatch):
     h.m.service.activate_identity = lambda actor, plan, apply, *, context: activate_legacy_file_identity(
         actor, plan, apply, h.engine, context=context,
     )
+    h.m.service.restore_identity = lambda actor, plan, restore, *, context: restore_legacy_file_identity(
+        actor, plan, restore, h.engine, context=context,
+    )
     return h, table
 
 
@@ -332,3 +336,43 @@ async def test_activation_rolls_back_rekey_when_admission_cannot_commit(reservat
         assert mapping['activated_at'] is None and mapping['version'] == 1
         row = conn.execute(h.table.select()).mappings().one()
         assert row['file_id'] == h.old_id and row['ingestion_request'] is None
+
+
+
+async def test_mapped_restore_recovers_the_original_row_and_is_idempotent(reservation):
+    h, identities = reservation
+    s = h.m.s
+    plan = await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+        context=context())
+    await h.m.service.reserve_file_id(plan, s.actor, context=context())
+    with pytest.raises(Conflict):
+        await h.m.service.restore_file_id(plan, s.actor, context=context())
+    await h.m.service.activate_file_id(plan, s.actor, context=context())
+    restored = await h.m.service.restore_file_id(plan, s.actor, context=context())
+    assert restored['file_id'] == h.old_id and restored['ingestion_request'] is None
+    assert restored['status'] == h.row['status'] and restored['version'] == h.row['version'] + 2
+    assert await h.m.service.restore_file_id(plan, s.actor, context=context()) == restored
+    with h.engine.connect() as conn:
+        mapping = conn.execute(identities.select()).mappings().one()
+        assert mapping['activated_at'] is None and mapping['version'] == 3
+        assert conn.execute(h.table.select()).mappings().one()['file_id'] == h.old_id
+    s.cleanse.submit.assert_not_called()
+
+
+async def test_mapped_restore_refuses_after_cleanse_reservation(reservation):
+    h, identities = reservation
+    s = h.m.s
+    plan = await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+        context=context())
+    await h.m.service.reserve_file_id(plan, s.actor, context=context())
+    activated = await h.m.service.activate_file_id(plan, s.actor, context=context())
+    with h.engine.begin() as conn:
+        conn.execute(h.table.update().where(h.table.c.file_id == h.target_id).values(
+            stage='CLEANSE_SUBMITTING', status='PROCESSING', version=activated['version'] + 1,
+        ))
+    with pytest.raises(Conflict):
+        await h.m.service.restore_file_id(plan, s.actor, context=context())
+    with h.engine.connect() as conn:
+        assert conn.execute(identities.select()).mappings().one()['activated_at'] is not None
+        current = conn.execute(h.table.select()).mappings().one()
+        assert current['file_id'] == h.target_id and current['stage'] == 'CLEANSE_SUBMITTING'

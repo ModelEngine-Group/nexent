@@ -164,26 +164,44 @@ def reserve_legacy_file_identity(actor, plan, engine, *, context):
         store.close()
 
 
+def _lock_lifecycle(tx, file_id, context):
+    where = tx._where(INGESTION_DATASET, file_id)
+    statement = sa.select(files.c.file_id).where(where).with_for_update()
+    return where, tx._execute(tx._connection, statement, context).scalar_one_or_none() is not None
+
+
+def _lock_mapping(tx, evidence, context):
+    identities = legacy_file_identities
+    where = tx._where(LEGACY_FILE_IDENTITIES, evidence["original_file_id"])
+    statement = sa.select(identities).where(where).with_for_update()
+    row = tx._execute(tx._connection, statement, context).mappings().one_or_none()
+    if row is None or any(row[name] != value for name, value in evidence.items()):
+        raise Conflict()
+    return where, row["activated_at"] is not None
+
+
+def _set_mapping_activation(tx, where, *, active, actor, context):
+    identities = legacy_file_identities
+    statement = identities.update().where(where).values(
+        activated_at=sa.func.now() if active else None,
+        update_time=sa.func.now(), updated_by=actor.user_id, version=identities.c.version + 1,
+    )
+    if tx._execute(tx._connection, statement, context).rowcount != 1:
+        raise Conflict()
+
+
 def activate_legacy_file_identity(actor, plan, apply, engine, *, context):
     """Change the primary key, admit ingestion, and publish the alias in one commit."""
     evidence = _mapping_evidence(actor, plan)
     original_id = evidence["original_file_id"]
     target_id = evidence["standard_file_id"]
-    identities = legacy_file_identities
     store = _legacy_identity_store(actor, engine, writable=True)
     try:
         with store.transaction(context=context) as tx:
             # Match reservation's lifecycle-first lock order.
-            original = tx._where(INGESTION_DATASET, original_id)
-            source = tx._execute(tx._connection, sa.select(files.c.file_id).where(original).with_for_update(), context)
-            has_source = source.scalar_one_or_none() is not None
-            mapping = tx._where(LEGACY_FILE_IDENTITIES, original_id)
-            registration = tx._execute(
-                tx._connection, sa.select(identities).where(mapping).with_for_update(), context,
-            ).mappings().one_or_none()
-            if registration is None or any(registration[name] != value for name, value in evidence.items()):
-                raise Conflict()
-            if registration["activated_at"] is not None:
+            original, has_source = _lock_lifecycle(tx, original_id, context)
+            mapping, activated = _lock_mapping(tx, evidence, context)
+            if activated:
                 if has_source:
                     raise Conflict()
                 row = tx.get(INGESTION_DATASET, target_id, context=context)
@@ -208,13 +226,46 @@ def activate_legacy_file_identity(actor, plan, apply, engine, *, context):
             admitted = apply(tx, tx.get(INGESTION_DATASET, target_id, context=context))
             if admitted["stage"] != "INGEST_ACCEPTED":
                 raise Conflict()
-            activate = identities.update().where(mapping).values(
-                activated_at=sa.func.now(), update_time=sa.func.now(),
-                updated_by=actor.user_id, version=identities.c.version + 1,
-            )
-            if tx._execute(tx._connection, activate, context).rowcount != 1:
-                raise Conflict()
+            _set_mapping_activation(tx, mapping, active=True, actor=actor, context=context)
             return admitted
+    finally:
+        store.close()
+
+
+def restore_legacy_file_identity(actor, plan, restore, engine, *, context):
+    """Restore an unstarted migration without ever exposing two lifecycle identities."""
+    evidence = _mapping_evidence(actor, plan)
+    original_id = evidence["original_file_id"]
+    target_id = evidence["standard_file_id"]
+    store = _legacy_identity_store(actor, engine, writable=True)
+    try:
+        with store.transaction(context=context) as tx:
+            _, has_source = _lock_lifecycle(tx, original_id, context)
+            mapping, activated = _lock_mapping(tx, evidence, context)
+            if not activated:
+                original = tx.get(INGESTION_DATASET, original_id, context=context)
+                if (original is None or original["ingestion_request"] is not None
+                    or original["version"] != evidence["lifecycle_revision"] + 2):
+                    raise Conflict()
+                restore(tx, {**original, "file_id": target_id})
+                return original
+            if has_source:
+                raise Conflict()
+            target, exists = _lock_lifecycle(tx, target_id, context)
+            if not exists:
+                raise Conflict()
+            current = tx.get(INGESTION_DATASET, target_id, context=context)
+            if (current["ingestion_request"] is None
+                or current["version"] != evidence["lifecycle_revision"] + 1):
+                raise Conflict()
+            restored = restore(tx, current)
+            move = files.update().where(target, files.c.version == restored["version"]).values(
+                file_id=original_id, update_time=files.c.update_time,
+            ).returning(files.c.file_id)
+            if tx._execute(tx._connection, move, context).scalar_one_or_none() != original_id:
+                raise Conflict()
+            _set_mapping_activation(tx, mapping, active=False, actor=actor, context=context)
+            return tx.get(INGESTION_DATASET, original_id, context=context)
     finally:
         store.close()
 
