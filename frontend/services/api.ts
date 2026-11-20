@@ -478,6 +478,15 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
     kbFiles: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    /** One folder level: direct folders + server-paginated files. */
+    kbFolderTree: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders/tree`,
+    kbFolders: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders`,
+    kbFolderMove: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders/move`,
+    kbFileMove: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files/move`,
     kbUploadTasks: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
     retryKbUploadTasks: (id: string) =>
