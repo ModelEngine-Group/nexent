@@ -24,10 +24,31 @@
   word-break: break-all;
 }
 
+.drawerTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.questionIcon {
+  color: #8c8c8c;
+  font-size: 13px;
+  cursor: help;
+}
+
 .rows {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.rowsHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr) 32px;
+  gap: 8px;
+  color: #595959;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .row {

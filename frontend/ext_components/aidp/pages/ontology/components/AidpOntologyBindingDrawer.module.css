@@ -11,28 +11,6 @@
   line-height: 22px;
 }
 
-.label em {
-  margin-right: 4px;
-  color: #e02128;
-  font-style: normal;
-}
-
-.hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #f0f7ff;
-  color: #191919;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.hint :global(.anticon) {
-  color: #0067d1;
-}
-
 .muted {
   color: #8c8c8c;
 }

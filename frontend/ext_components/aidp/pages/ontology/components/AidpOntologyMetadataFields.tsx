@@ -15,11 +15,9 @@ import {
   Empty,
   Form,
   Input,
-  Modal,
   Segmented,
   Select,
   Skeleton,
-  Space,
   Table,
   Tooltip,
   type TableColumnsType,
@@ -683,6 +681,35 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             icon={<ReloadOutlined spin={query.isFetching} />}
             onClick={() => void query.refetch()}
           />
+          <Button
+            loading={saving}
+            disabled={!canManage || selectedFields.length === 0}
+            onClick={handleBatchUnbind}
+          >
+            {t("aidpKnowledge.ontologyMetadataUnbind")}
+          </Button>
+          <Button
+            loading={saving}
+            disabled={!canManage || selectedFields.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyMetadataDelete")}
+          </Button>
+          <Tooltip
+            title={
+              atLimit
+                ? t("aidpKnowledge.ontologyMetadataFieldLimitReached")
+                : undefined
+            }
+          >
+            <Button
+              type="primary"
+              disabled={!canManage || atLimit}
+              onClick={openCreate}
+            >
+              {t("aidpKnowledge.ontologyMetadataFieldCreate")}
+            </Button>
+          </Tooltip>
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -722,40 +749,13 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               ],
             }}
           >
-            <Button
-              aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
-              icon={<SettingOutlined />}
-            />
+            <Tooltip title={t("aidpKnowledge.ontologyMetadataColumnSettings")}>
+              <Button
+                aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
+                icon={<SettingOutlined />}
+              />
+            </Tooltip>
           </Dropdown>
-          <Button
-            loading={saving}
-            disabled={!canManage || selectedFields.length === 0}
-            onClick={handleBatchUnbind}
-          >
-            {t("aidpKnowledge.ontologyMetadataUnbind")}
-          </Button>
-          <Button
-            loading={saving}
-            disabled={!canManage || selectedFields.length === 0}
-            onClick={handleBatchDelete}
-          >
-            {t("aidpKnowledge.ontologyMetadataDelete")}
-          </Button>
-          <Tooltip
-            title={
-              atLimit
-                ? t("aidpKnowledge.ontologyMetadataFieldLimitReached")
-                : undefined
-            }
-          >
-            <Button
-              type="primary"
-              disabled={!canManage || atLimit}
-              onClick={openCreate}
-            >
-              {t("aidpKnowledge.ontologyMetadataFieldCreate")}
-            </Button>
-          </Tooltip>
         </div>
       </div>
 
@@ -831,15 +831,15 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         </div>
       )}
 
-      <Modal
+      <Drawer
+        rootClassName={drawerStyles.drawer}
         open={createOpen}
-        width={520}
+        width={560}
         title={t("aidpKnowledge.ontologyMetadataCreateModalTitle")}
-        onCancel={() => setCreateOpen(false)}
+        onClose={() => setCreateOpen(false)}
         destroyOnHidden
-        centered
         footer={
-          <Space>
+          <div className={drawerStyles.footer}>
             <Button onClick={() => setCreateOpen(false)}>
               {t("common.cancel")}
             </Button>
@@ -850,12 +850,13 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             >
               {t("common.confirm")}
             </Button>
-          </Space>
+          </div>
         }
       >
         <Form
           form={createForm}
           layout="vertical"
+          className={drawerStyles.form}
           initialValues={{ field_type: "string" }}
         >
           <Form.Item
@@ -910,7 +911,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             </div>
           )}
         </Form>
-      </Modal>
+      </Drawer>
 
       <Drawer
         rootClassName={drawerStyles.drawer}

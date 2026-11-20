@@ -1,27 +1,26 @@
-.taskHeader {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-.taskTitle {
-  margin: 0;
-  color: #191919;
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 24px;
-}
-
 .legend {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
+  min-width: 0;
   color: #595959;
   font-size: 12px;
   line-height: 20px;
+}
+
+.legendTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legendHelp {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
 }
 
 .legendItem {
@@ -35,13 +34,19 @@
 }
 
 .statusLine {
-  display: flex;
+  display: grid;
+  grid-template-columns: 6px 48px minmax(60px, 1fr) 36px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  white-space: nowrap;
   font-size: 13px;
   line-height: 20px;
+}
+
+.statusLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .statusDot {
@@ -52,10 +57,9 @@
 }
 
 .progressTrack {
-  display: inline-block;
-  width: 70px;
+  display: block;
+  width: 100%;
   height: 4px;
-  margin-left: 8px;
   overflow: hidden;
   border-radius: 2px;
   background: #f0f0f0;
@@ -68,8 +72,6 @@
 }
 
 .progressValue {
-  width: 32px;
-  flex-shrink: 0;
   color: #595959;
   text-align: right;
 }

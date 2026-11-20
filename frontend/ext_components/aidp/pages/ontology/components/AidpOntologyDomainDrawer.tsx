@@ -16,6 +16,7 @@ import {
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import styles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
+import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 
 interface AidpOntologyDomainDrawerProps {
   open: boolean;
@@ -128,7 +129,13 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
       >
         <Form.Item
           name="name"
-          label={t("aidpKnowledge.ontologyDomainName")}
+          required
+          label={
+            <AidpOntologyFieldLabel
+              label={t("aidpKnowledge.ontologyDomainName")}
+              help={t("aidpKnowledge.ontologyDomainNameHint")}
+            />
+          }
           extra={`${nameLength}/${ONTOLOGY_NAME_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
           rules={[
             {
@@ -139,14 +146,16 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
             },
           ]}
         >
-          <Input
-            maxLength={ONTOLOGY_NAME_MAX_CHARS}
-            placeholder={t("aidpKnowledge.ontologyDomainNamePlaceholder")}
-          />
+          <Input maxLength={ONTOLOGY_NAME_MAX_CHARS} />
         </Form.Item>
         <Form.Item
           name="description"
-          label={t("aidpKnowledge.ontologyDomainDescription")}
+          label={
+            <AidpOntologyFieldLabel
+              label={t("aidpKnowledge.ontologyDomainDescription")}
+              help={t("aidpKnowledge.ontologyDomainDescriptionHint")}
+            />
+          }
           extra={`${descriptionLength}/${ONTOLOGY_DESCRIPTION_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
           rules={[
             {
@@ -157,12 +166,7 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
             },
           ]}
         >
-          <Input.TextArea
-            autoSize={{ minRows: 3, maxRows: 6 }}
-            placeholder={t(
-              "aidpKnowledge.ontologyDomainDescriptionPlaceholder"
-            )}
-          />
+          <Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} />
         </Form.Item>
         {errorMessage && (
           <div className={styles.error} role="alert">

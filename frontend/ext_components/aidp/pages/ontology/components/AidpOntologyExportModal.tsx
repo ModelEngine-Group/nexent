@@ -121,8 +121,14 @@ const AidpOntologyExportModal: React.FC<AidpOntologyExportModalProps> = ({
             onChange={setKind}
             options={[
               { value: "all", label: t("aidpKnowledge.ontologyExportKindAll") },
-              { value: "type", label: "Type" },
-              { value: "entity", label: "Entity" },
+              {
+                value: "type",
+                label: t("aidpKnowledge.ontologyEntityKindType"),
+              },
+              {
+                value: "entity",
+                label: t("aidpKnowledge.ontologyEntityKindEntity"),
+              },
             ]}
           />
         </label>

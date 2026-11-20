@@ -92,9 +92,7 @@ const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
           </div>
           <Input
             value={confirmText}
-            placeholder={t(
-              "aidpKnowledge.ontologyDomainDeleteInputPlaceholder"
-            )}
+            aria-label={t("aidpKnowledge.ontologyDomainDeleteInputLabel")}
             onChange={(event) => setConfirmText(event.target.value)}
             onPressEnter={() => void handleDelete()}
             autoFocus

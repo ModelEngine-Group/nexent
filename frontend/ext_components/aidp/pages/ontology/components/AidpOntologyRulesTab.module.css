@@ -29,3 +29,15 @@
   font-size: 14px;
   line-height: 22px;
 }
+
+.columnTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.columnHelp {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
+}

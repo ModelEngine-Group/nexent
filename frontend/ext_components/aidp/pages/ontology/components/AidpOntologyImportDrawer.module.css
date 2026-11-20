@@ -4,10 +4,16 @@
   gap: 16px;
 }
 
-.hint {
-  color: #595959;
-  font-size: 14px;
-  line-height: 22px;
+.drawerTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.questionIcon {
+  color: #8c8c8c;
+  font-size: 13px;
+  cursor: help;
 }
 
 .dropzone {
@@ -142,9 +148,4 @@
   color: #8c8c8c;
   font-size: 12px;
   line-height: 22px;
-}
-
-.asyncHint {
-  font-size: 12px;
-  line-height: 20px;
 }

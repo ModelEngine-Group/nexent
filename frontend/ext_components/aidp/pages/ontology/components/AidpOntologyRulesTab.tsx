@@ -20,6 +20,7 @@ import {
   type TableColumnsType,
 } from "antd";
 import {
+  QuestionCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
@@ -315,6 +316,15 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
     );
   };
 
+  const columnTitle = (label: string, help: string) => (
+    <span className={ruleStyles.columnTitle}>
+      {label}
+      <Tooltip title={help}>
+        <QuestionCircleOutlined className={ruleStyles.columnHelp} />
+      </Tooltip>
+    </span>
+  );
+
   const columns: TableColumnsType<AidpOntologyRule> = [
     {
       title: t("aidpKnowledge.ontologyRulesName"),
@@ -335,7 +345,10 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
         ]
       : []),
     {
-      title: t("aidpKnowledge.ontologyRulesEnabled"),
+      title: columnTitle(
+        t("aidpKnowledge.ontologyRulesEnabled"),
+        t("aidpKnowledge.ontologyRulesEnabledHint")
+      ),
       dataIndex: "enabled",
       key: "enabled",
       width: 110,
@@ -350,13 +363,19 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       ),
     },
     {
-      title: t("aidpKnowledge.ontologyRulesCandidateRules"),
+      title: columnTitle(
+        t("aidpKnowledge.ontologyRulesCandidateRules"),
+        t("aidpKnowledge.ontologyRulesCandidateHint")
+      ),
       key: "conditions",
       width: 120,
       render: (_value: unknown, record) => renderConditions(record),
     },
     {
-      title: t("aidpKnowledge.ontologyRulesAggregation"),
+      title: columnTitle(
+        t("aidpKnowledge.ontologyRulesAggregation"),
+        t("aidpKnowledge.ontologyRulesAggregationColumnHint")
+      ),
       key: "aggregation",
       width: 120,
       render: (_value: unknown, record) =>
@@ -365,7 +384,10 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
           : t("aidpKnowledge.ontologyRulesMultiplyShort"),
     },
     {
-      title: t("aidpKnowledge.ontologyRulesActionCoefficient"),
+      title: columnTitle(
+        t("aidpKnowledge.ontologyRulesActionCoefficient"),
+        t("aidpKnowledge.ontologyRulesCoefficientColumnHint")
+      ),
       key: "coefficient",
       width: 130,
       render: (_value: unknown, record) =>
@@ -429,12 +451,12 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   const columnKeys = columns.map((column) => String(column.key));
   const { tableContainer, columnWidths, totalWidth, handleResize } =
     useAidpOntologyColumnWidths(columnKeys, {
-      name: 1.3,
-      description: 1.8,
-      enabled: 0.8,
-      conditions: 1.4,
-      aggregation: 0.8,
-      coefficient: 0.8,
+      name: 1.2,
+      description: 1.5,
+      enabled: 1.1,
+      conditions: 1.5,
+      aggregation: 1.2,
+      coefficient: 1.2,
       created_at: 1.8,
       updated_at: 1.8,
       actions: 1.0,
@@ -548,6 +570,25 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
             icon={<ReloadOutlined spin={query.isFetching} />}
             onClick={refresh}
           />
+          <Button
+            disabled={!canManage || selectedKeys.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyDelete")}
+          </Button>
+          <Tooltip
+            title={
+              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached") : undefined
+            }
+          >
+            <Button
+              type="primary"
+              disabled={!canManage || atLimit}
+              onClick={openCreate}
+            >
+              {t("aidpKnowledge.ontologyRulesCreateAction")}
+            </Button>
+          </Tooltip>
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -603,30 +644,13 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
               ],
             }}
           >
-            <Button
-              aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
-              icon={<SettingOutlined />}
-            />
+            <Tooltip title={t("aidpKnowledge.ontologyMetadataColumnSettings")}>
+              <Button
+                aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
+                icon={<SettingOutlined />}
+              />
+            </Tooltip>
           </Dropdown>
-          <Button
-            disabled={!canManage || selectedKeys.length === 0}
-            onClick={handleBatchDelete}
-          >
-            {t("aidpKnowledge.ontologyDelete")}
-          </Button>
-          <Tooltip
-            title={
-              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached") : undefined
-            }
-          >
-            <Button
-              type="primary"
-              disabled={!canManage || atLimit}
-              onClick={openCreate}
-            >
-              {t("aidpKnowledge.ontologyRulesCreateAction")}
-            </Button>
-          </Tooltip>
         </div>
       </div>
 

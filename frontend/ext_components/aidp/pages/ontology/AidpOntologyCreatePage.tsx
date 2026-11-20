@@ -27,6 +27,7 @@ import {
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
+import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import styles from "./AidpOntologyCreatePage.module.css";
 
 interface CreateFormValues {
@@ -154,7 +155,13 @@ const AidpOntologyCreatePage: React.FC = () => {
             >
               <Form.Item
                 name="name"
-                label={t("aidpKnowledge.ontologyDomainName")}
+                required
+                label={
+                  <AidpOntologyFieldLabel
+                    label={t("aidpKnowledge.ontologyDomainName")}
+                    help={t("aidpKnowledge.ontologyDomainNameHint")}
+                  />
+                }
                 extra={`${nameValue.length}/${ONTOLOGY_NAME_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
                 rules={[
                   {
@@ -165,14 +172,16 @@ const AidpOntologyCreatePage: React.FC = () => {
                   },
                 ]}
               >
-                <Input
-                  maxLength={ONTOLOGY_NAME_MAX_CHARS}
-                  placeholder={t("aidpKnowledge.ontologyDomainNamePlaceholder")}
-                />
+                <Input maxLength={ONTOLOGY_NAME_MAX_CHARS} />
               </Form.Item>
               <Form.Item
                 name="description"
-                label={t("aidpKnowledge.ontologyDomainDescription")}
+                label={
+                  <AidpOntologyFieldLabel
+                    label={t("aidpKnowledge.ontologyDomainDescription")}
+                    help={t("aidpKnowledge.ontologyDomainDescriptionHint")}
+                  />
+                }
                 extra={`${descriptionValue.length}/${ONTOLOGY_DESCRIPTION_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
                 rules={[
                   {
@@ -183,12 +192,7 @@ const AidpOntologyCreatePage: React.FC = () => {
                   },
                 ]}
               >
-                <Input.TextArea
-                  autoSize={{ minRows: 4, maxRows: 8 }}
-                  placeholder={t(
-                    "aidpKnowledge.ontologyDomainDescriptionPlaceholder"
-                  )}
-                />
+                <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} />
               </Form.Item>
             </Form>
             {errorMessage && (

@@ -44,6 +44,12 @@
   line-height: 20px;
 }
 
+.requiredMark {
+  margin-left: 4px;
+  color: #e02128;
+  font-style: normal;
+}
+
 .conditionList {
   display: flex;
   flex-direction: column;
@@ -84,12 +90,6 @@
   gap: 8px;
 }
 
-.rangeLabel {
-  color: #191919;
-  font-size: 14px;
-  line-height: 22px;
-}
-
 .rangeRow {
   display: flex;
   gap: 12px;
@@ -99,12 +99,6 @@
   flex: 1;
   min-width: 0;
   margin-bottom: 0 !important;
-}
-
-.rangeHint {
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 20px;
 }
 
 .fullWidth {

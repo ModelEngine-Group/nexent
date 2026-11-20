@@ -611,6 +611,22 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             icon={<ReloadOutlined spin={query.isFetching} />}
             onClick={refresh}
           />
+          <Button
+            disabled={!canManage || selectedKeys.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyDelete")}
+          </Button>
+          <Button
+            type="primary"
+            disabled={!canManage}
+            onClick={() => {
+              setEditing(null);
+              setDrawerOpen(true);
+            }}
+          >
+            {t("aidpKnowledge.ontologyEntityCreateAction")}
+          </Button>
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -730,27 +746,13 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
               ],
             }}
           >
-            <Button
-              aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
-              icon={<SettingOutlined />}
-            />
+            <Tooltip title={t("aidpKnowledge.ontologyMetadataColumnSettings")}>
+              <Button
+                aria-label={t("aidpKnowledge.ontologyMetadataColumnSettings")}
+                icon={<SettingOutlined />}
+              />
+            </Tooltip>
           </Dropdown>
-          <Button
-            disabled={!canManage || selectedKeys.length === 0}
-            onClick={handleBatchDelete}
-          >
-            {t("aidpKnowledge.ontologyDelete")}
-          </Button>
-          <Button
-            type="primary"
-            disabled={!canManage}
-            onClick={() => {
-              setEditing(null);
-              setDrawerOpen(true);
-            }}
-          >
-            {t("aidpKnowledge.ontologyEntityCreateAction")}
-          </Button>
         </div>
       </div>
       {query.isError && entities.length > 0 && (

@@ -13,8 +13,13 @@ import {
   InputNumber,
   Select,
   Tag,
+  Tooltip,
 } from "antd";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  PlusOutlined,
+  QuestionCircleOutlined,
+} from "@ant-design/icons";
 
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { validateMetadataText } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
@@ -199,7 +204,14 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
       width={640}
       onClose={handleClose}
       destroyOnHidden
-      title={t("aidpKnowledge.ontologyAnnotateTitle")}
+      title={
+        <span className={styles.drawerTitle}>
+          {t("aidpKnowledge.ontologyAnnotateTitle")}
+          <Tooltip title={t("aidpKnowledge.ontologyAnnotateHint")}>
+            <QuestionCircleOutlined className={styles.questionIcon} />
+          </Tooltip>
+        </span>
+      }
       footer={
         <div className={drawerStyles.footer}>
           {result ? (
@@ -263,6 +275,11 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
         ) : (
           <>
             <div className={styles.rows}>
+              <div className={styles.rowsHeader}>
+                <span>{t("aidpKnowledge.ontologyAnnotateFieldHeader")}</span>
+                <span>{t("aidpKnowledge.ontologyAnnotateValueHeader")}</span>
+                <span aria-hidden="true" />
+              </div>
               {rows.map((row) => {
                 const definition = row.field
                   ? fieldByName.get(row.field)
@@ -272,9 +289,6 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
                     <Select
                       className={styles.fieldSelect}
                       value={row.field}
-                      placeholder={t(
-                        "aidpKnowledge.ontologyAnnotateFieldPlaceholder"
-                      )}
                       options={optionFields.map((option) => ({
                         ...option,
                         disabled: option.disabled && option.value !== row.field,
@@ -291,9 +305,6 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
                         value={
                           typeof row.value === "number" ? row.value : undefined
                         }
-                        placeholder={t(
-                          "aidpKnowledge.ontologyAnnotateValuePlaceholder"
-                        )}
                         onChange={(value) => updateRow(row.key, { value })}
                         step={1}
                       />
@@ -301,9 +312,6 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
                       <Input
                         className={styles.valueInput}
                         value={String(row.value ?? "")}
-                        placeholder={t(
-                          "aidpKnowledge.ontologyAnnotateValuePlaceholder"
-                        )}
                         onChange={(event) =>
                           updateRow(row.key, { value: event.target.value })
                         }
@@ -328,9 +336,6 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
             >
               {t("aidpKnowledge.ontologyAnnotateAddField")}
             </Button>
-            <div className={styles.hint}>
-              {t("aidpKnowledge.ontologyAnnotateHint")}
-            </div>
           </>
         )}
 

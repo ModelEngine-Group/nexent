@@ -4,8 +4,8 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, App, Button, Drawer, Typography, Upload } from "antd";
-import { InboxOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Drawer, Tooltip, Upload } from "antd";
+import { InboxOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
@@ -165,7 +165,14 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
       width={640}
       onClose={handleClose}
       destroyOnHidden
-      title={t("aidpKnowledge.ontologyImportTitle")}
+      title={
+        <span className={styles.drawerTitle}>
+          {t("aidpKnowledge.ontologyImportTitle")}
+          <Tooltip title={t("aidpKnowledge.ontologyImportTitleHint")}>
+            <QuestionCircleOutlined className={styles.questionIcon} />
+          </Tooltip>
+        </span>
+      }
       footer={
         <div className={drawerStyles.footer}>
           {result ? (
@@ -189,10 +196,6 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
       }
     >
       <div className={styles.body}>
-        <div className={styles.hint}>
-          {t("aidpKnowledge.ontologyImportHint")}
-        </div>
-
         {!result && (
           <Upload.Dragger
             className={styles.dropzone}
@@ -355,9 +358,6 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
             {errorMessage}
           </div>
         )}
-        <Typography.Text className={styles.asyncHint} type="secondary">
-          {t("aidpKnowledge.ontologyImportAsyncHint")}
-        </Typography.Text>
       </div>
     </Drawer>
   );

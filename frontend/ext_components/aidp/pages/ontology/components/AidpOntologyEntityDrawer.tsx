@@ -142,42 +142,17 @@ const toDataType = (value: unknown): PropertyDataType =>
 
 /** Value control follows the property data_type. */
 const PropertyValueInput: React.FC<{ name: number }> = ({ name }) => {
-  const { t } = useTranslation();
   const dataType = Form.useWatch(["properties", name, "data_type"]) as
     PropertyDataType | undefined;
   switch (dataType) {
     case "list[str]":
-      return (
-        <Select
-          mode="tags"
-          tokenSeparators={[",", "，"]}
-          placeholder={t(
-            "aidpKnowledge.ontologyEntityPropertyMultiPlaceholder"
-          )}
-        />
-      );
+      return <Select mode="tags" tokenSeparators={[",", "，"]} />;
     case "datetime":
-      return (
-        <DatePicker
-          showTime
-          className={styles.valueControl}
-          placeholder={t("aidpKnowledge.ontologyEntityPropertyDatePlaceholder")}
-        />
-      );
+      return <DatePicker showTime className={styles.valueControl} />;
     case "float":
-      return (
-        <InputNumber
-          className={styles.valueControl}
-          precision={3}
-          placeholder={t(
-            "aidpKnowledge.ontologyEntityPropertyNumberPlaceholder"
-          )}
-        />
-      );
+      return <InputNumber className={styles.valueControl} precision={3} />;
     default:
-      return (
-        <Input placeholder={t("aidpKnowledge.ontologyEntityPropertyInput")} />
-      );
+      return <Input />;
   }
 };
 
@@ -228,6 +203,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     setErrorMessage(null);
     setSaving(false);
     setPropertiesOpen(false);
+    setApiNameTouched(false);
     onClose();
   };
 
@@ -349,10 +325,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         })),
     [entity?.properties]
   );
-
-  useEffect(() => {
-    if (open) setApiNameTouched(editing);
-  }, [editing, open]);
 
   // Fill the API name from the display name while the user has not edited it.
   // Chinese names cannot be transliterated here, so they stay manual.
@@ -570,11 +542,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             },
           ]}
         >
-          <Input
-            maxLength={ENTITY_API_NAME_MAX_CHARS}
-            showCount
-            placeholder={t("aidpKnowledge.ontologyEntityNamePlaceholder")}
-          />
+          <Input maxLength={ENTITY_API_NAME_MAX_CHARS} showCount />
         </Form.Item>
 
         <Form.Item
@@ -641,9 +609,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             autoSize={{ minRows: 3, maxRows: 6 }}
             maxLength={ENTITY_DESCRIPTION_MAX_CHARS}
             showCount
-            placeholder={t(
-              "aidpKnowledge.ontologyEntityDescriptionPlaceholder"
-            )}
           />
         </Form.Item>
 
@@ -751,18 +716,29 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 {fields.length > 0 && (
                   <div className={styles.propertyHeader}>
                     <span>
-                      {t("aidpKnowledge.ontologyEntityPropertyName")}
                       <em>*</em>
+                      <FieldLabel
+                        label={t("aidpKnowledge.ontologyEntityPropertyName")}
+                        help={t("aidpKnowledge.ontologyEntityPropertyNameHelp")}
+                      />
                     </span>
                     <span>
-                      {t("aidpKnowledge.ontologyEntityPropertyType")}
                       <em>*</em>
+                      <FieldLabel
+                        label={t("aidpKnowledge.ontologyEntityPropertyType")}
+                        help={t("aidpKnowledge.ontologyEntityPropertyTypeHelp")}
+                      />
                     </span>
                     <span>
                       {t("aidpKnowledge.ontologyEntityPropertyValue")}
                     </span>
                     <span>
-                      {t("aidpKnowledge.ontologyEntityPropertyRange")}
+                      <FieldLabel
+                        label={t("aidpKnowledge.ontologyEntityPropertyRange")}
+                        help={t(
+                          "aidpKnowledge.ontologyEntityPropertyRangeHelp"
+                        )}
+                      />
                     </span>
                     <span aria-hidden="true" />
                   </div>
@@ -787,11 +763,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                       ]}
                       className={styles.propertyDense}
                     >
-                      <Input
-                        placeholder={t(
-                          "aidpKnowledge.ontologyEntityPropertyNamePlaceholder"
-                        )}
-                      />
+                      <Input />
                     </Form.Item>
                     <Form.Item
                       {...field}

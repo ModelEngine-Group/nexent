@@ -30,6 +30,7 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import type {
   AidpOntologyRuleActionValue,
   AidpOntologyRuleCondition,
@@ -201,31 +202,16 @@ const ConditionValueInput: React.FC<{ name: number; fieldType: FieldType }> = ({
   name,
   fieldType,
 }) => {
-  const { t } = useTranslation();
   const operator = Form.useWatch(["conditions", name, "operator"]) as
     string | undefined;
   if (operator && NO_VALUE_OPERATORS.has(operator)) return null;
   if (fieldType === "number") {
-    return (
-      <InputNumber
-        className={styles.fullWidth}
-        precision={3}
-        placeholder={t("aidpKnowledge.ontologyRulesNumberPlaceholder")}
-      />
-    );
+    return <InputNumber className={styles.fullWidth} precision={3} />;
   }
   if (fieldType === "date") {
-    return (
-      <DatePicker
-        showTime
-        className={styles.fullWidth}
-        placeholder={t("aidpKnowledge.ontologyRulesDatePlaceholder")}
-      />
-    );
+    return <DatePicker showTime className={styles.fullWidth} />;
   }
-  return (
-    <Input placeholder={t("aidpKnowledge.ontologyRulesTextPlaceholder")} />
-  );
+  return <Input />;
 };
 
 const question = (text: string) => (
@@ -480,7 +466,12 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
           </Form.Item>
           <Form.Item
             name="description"
-            label={t("aidpKnowledge.ontologyRulesDescription")}
+            label={
+              <AidpOntologyFieldLabel
+                label={t("aidpKnowledge.ontologyRulesDescription")}
+                help={t("aidpKnowledge.ontologyRulesDescriptionHint")}
+              />
+            }
           >
             <Input.TextArea
               autoSize={{ minRows: 3, maxRows: 6 }}
@@ -507,9 +498,20 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
               {question(t("aidpKnowledge.ontologyRulesFilterHint"))}
             </div>
             <div className={styles.conditionHeader}>
-              <span>{t("aidpKnowledge.ontologyRulesMetadataName")}</span>
-              <span>{t("aidpKnowledge.ontologyRulesFieldTypeColumn")}</span>
-              <span>{t("aidpKnowledge.ontologyRulesValueColumn")}</span>
+              <span>
+                {t("aidpKnowledge.ontologyRulesMetadataName")}
+                <em className={styles.requiredMark}>*</em>
+                {question(t("aidpKnowledge.ontologyRulesConditionFieldHelp"))}
+              </span>
+              <span>
+                {t("aidpKnowledge.ontologyRulesOperatorColumn")}
+                <em className={styles.requiredMark}>*</em>
+                {question(t("aidpKnowledge.ontologyRulesOperatorHelp"))}
+              </span>
+              <span>
+                {t("aidpKnowledge.ontologyRulesValueColumn")}
+                {question(t("aidpKnowledge.ontologyRulesConditionValueHelp"))}
+              </span>
               <span aria-hidden="true" />
             </div>
             <Form.List name="conditions">
@@ -536,9 +538,6 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                                 showSearch
                                 optionFilterProp="label"
                                 options={fieldOptions}
-                                placeholder={t(
-                                  "aidpKnowledge.ontologyRulesFieldPlaceholder"
-                                )}
                                 onChange={(value: string) => {
                                   form.setFieldValue(
                                     ["conditions", field.name, "field_type"],
@@ -620,7 +619,13 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             </Form.List>
             <Form.Item
               name="logical_operator"
-              label={`* ${t("aidpKnowledge.ontologyRulesLogicalOperator")}`}
+              required
+              label={
+                <AidpOntologyFieldLabel
+                  label={t("aidpKnowledge.ontologyRulesLogicalOperator")}
+                  help={t("aidpKnowledge.ontologyRulesLogicalOperatorHint")}
+                />
+              }
               className={styles.logicalOperator}
             >
               <Radio.Group>
@@ -641,7 +646,13 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             </div>
             <Form.Item
               name="action_source"
-              label={`* ${t("aidpKnowledge.ontologyRulesActionCoefficient")}`}
+              required
+              label={
+                <AidpOntologyFieldLabel
+                  label={t("aidpKnowledge.ontologyRulesActionCoefficient")}
+                  help={t("aidpKnowledge.ontologyRulesActionCoefficientHint")}
+                />
+              }
             >
               <Radio.Group>
                 <Radio value="coefficient">
@@ -654,7 +665,13 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             </Form.Item>
             <Form.Item
               name="effect_mode"
-              label={`* ${t("aidpKnowledge.ontologyRulesAggregation")}`}
+              required
+              label={
+                <AidpOntologyFieldLabel
+                  label={t("aidpKnowledge.ontologyRulesAggregation")}
+                  help={t("aidpKnowledge.ontologyRulesAggregationHint")}
+                />
+              }
             >
               <Radio.Group>
                 <Radio value="add">
@@ -670,20 +687,24 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
               <>
                 <Form.Item
                   name="field"
-                  label={`* ${t("aidpKnowledge.ontologyRulesScaleMetadata")}`}
+                  label={
+                    <AidpOntologyFieldLabel
+                      label={t("aidpKnowledge.ontologyRulesScaleMetadata")}
+                      help={t("aidpKnowledge.ontologyRulesScaleMetadataHint")}
+                    />
+                  }
                   rules={[{ required: true }]}
-                  extra={t("aidpKnowledge.ontologyRulesScaleMetadataHint")}
                 >
-                  <Select
-                    options={scaleFieldOptions}
-                    placeholder={t(
-                      "aidpKnowledge.ontologyRulesScaleMetadataPlaceholder"
-                    )}
-                  />
+                  <Select options={scaleFieldOptions} />
                 </Form.Item>
                 <Form.Item
                   name="field_transform"
-                  label={`* ${t("aidpKnowledge.ontologyRulesScaleMethod")}`}
+                  label={
+                    <AidpOntologyFieldLabel
+                      label={t("aidpKnowledge.ontologyRulesScaleMethod")}
+                      help={t("aidpKnowledge.ontologyRulesScaleMethodHint")}
+                    />
+                  }
                   rules={[{ required: true }]}
                 >
                   <Radio.Group>
@@ -697,63 +718,47 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                 </Form.Item>
                 <Form.Item
                   name="field_scale"
-                  label={`* ${t("aidpKnowledge.ontologyRulesScaleCoefficient")}`}
+                  label={
+                    <AidpOntologyFieldLabel
+                      label={t("aidpKnowledge.ontologyRulesScaleCoefficient")}
+                      help={t(
+                        "aidpKnowledge.ontologyRulesScaleCoefficientHint"
+                      )}
+                    />
+                  }
                   rules={[{ required: true }]}
                 >
-                  <InputNumber
-                    className={styles.fullWidth}
-                    precision={2}
-                    placeholder={t(
-                      "aidpKnowledge.ontologyRulesNumberPlaceholder"
-                    )}
-                  />
+                  <InputNumber className={styles.fullWidth} precision={2} />
                 </Form.Item>
                 {transform === "linear" && (
                   <div className={styles.rangeBlock}>
-                    <div className={styles.rangeLabel}>
-                      * {t("aidpKnowledge.ontologyRulesLinearRange")}
-                    </div>
+                    <AidpOntologyFieldLabel
+                      label={t("aidpKnowledge.ontologyRulesLinearRange")}
+                      help={t("aidpKnowledge.ontologyRulesLinearRangeHint")}
+                    />
                     <div className={styles.rangeRow}>
                       <Form.Item
                         name="range_start"
+                        label={t("aidpKnowledge.ontologyRulesRangeMin")}
                         className={styles.rangeItem}
                       >
                         {scaleFieldType === "date" ? (
-                          <DatePicker
-                            className={styles.fullWidth}
-                            placeholder={t(
-                              "aidpKnowledge.ontologyRulesRangeStartDate"
-                            )}
-                          />
+                          <DatePicker className={styles.fullWidth} />
                         ) : (
-                          <InputNumber
-                            className={styles.fullWidth}
-                            placeholder={t(
-                              "aidpKnowledge.ontologyRulesRangeStartNumber"
-                            )}
-                          />
+                          <InputNumber className={styles.fullWidth} />
                         )}
                       </Form.Item>
-                      <Form.Item name="range_end" className={styles.rangeItem}>
+                      <Form.Item
+                        name="range_end"
+                        label={t("aidpKnowledge.ontologyRulesRangeMax")}
+                        className={styles.rangeItem}
+                      >
                         {scaleFieldType === "date" ? (
-                          <DatePicker
-                            className={styles.fullWidth}
-                            placeholder={t(
-                              "aidpKnowledge.ontologyRulesRangeEndDate"
-                            )}
-                          />
+                          <DatePicker className={styles.fullWidth} />
                         ) : (
-                          <InputNumber
-                            className={styles.fullWidth}
-                            placeholder={t(
-                              "aidpKnowledge.ontologyRulesRangeEndNumber"
-                            )}
-                          />
+                          <InputNumber className={styles.fullWidth} />
                         )}
                       </Form.Item>
-                    </div>
-                    <div className={styles.rangeHint}>
-                      {t("aidpKnowledge.ontologyRulesRangeHint")}
                     </div>
                   </div>
                 )}
@@ -761,16 +766,15 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             ) : (
               <Form.Item
                 name="coefficient"
-                label={`* ${t("aidpKnowledge.ontologyRulesCoefficient")}`}
+                label={
+                  <AidpOntologyFieldLabel
+                    label={t("aidpKnowledge.ontologyRulesCoefficient")}
+                    help={t("aidpKnowledge.ontologyRulesCoefficientHint")}
+                  />
+                }
                 rules={[{ required: true }]}
               >
-                <InputNumber
-                  className={styles.fullWidth}
-                  precision={2}
-                  placeholder={t(
-                    "aidpKnowledge.ontologyRulesNumberPlaceholder"
-                  )}
-                />
+                <InputNumber className={styles.fullWidth} precision={2} />
               </Form.Item>
             )}
           </section>

@@ -13,13 +13,13 @@ import {
   Table,
   type TableColumnsType,
 } from "antd";
-import { InfoCircleOutlined } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
+import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
 import styles from "./AidpOntologyBindingDrawer.module.css";
 
@@ -159,11 +159,11 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
     >
       <div className={styles.body}>
         <div className={styles.label}>
-          <em>*</em> {t("aidpKnowledge.ontologyBindingSelectLabel")}
-        </div>
-        <div className={styles.hint}>
-          <InfoCircleOutlined />
-          {t("aidpKnowledge.ontologyBindingSelectHint")}
+          <AidpOntologyFieldLabel
+            label={t("aidpKnowledge.ontologyBindingSelectLabel")}
+            help={t("aidpKnowledge.ontologyBindingSelectHelp")}
+            required
+          />
         </div>
         {kbQuery.isLoading || bindingsQuery.isLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />

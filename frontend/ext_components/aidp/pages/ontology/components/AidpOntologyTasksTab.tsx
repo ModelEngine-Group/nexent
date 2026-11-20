@@ -4,8 +4,19 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Popover, Table, type TableColumnsType } from "antd";
-import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import {
+  Button,
+  Input,
+  Popover,
+  Table,
+  Tooltip,
+  type TableColumnsType,
+} from "antd";
+import {
+  QuestionCircleOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
@@ -79,11 +90,12 @@ const toTaskRow = (task: AidpOntologyTask): DemoTaskRow => ({
 });
 
 /**
- * Demo-only task fixtures.
+ * Local mock task fixtures.
  *
- * AIDP exposes no task query API that Nexent may call, so these rows exist only
- * when the local mock data source is active. Real mode renders the empty state
- * and explains that only the initial acceptance response is available.
+ * AIDP does expose GET /KnowledgeBase/Tenants/{tenant}/Tasks (task_list
+ * envelope), so real mode uses that API. These rows are only for the local mock
+ * data source. AIDP tasks carry no ontology domain id, so the real list is
+ * tenant-wide rather than scoped to this ontology.
  */
 const DEMO_TASKS: DemoTaskRow[] = [
   {
@@ -141,6 +153,12 @@ const DEMO_TASKS: DemoTaskRow[] = [
   },
 ];
 
+const localizedTaskType = (t: (key: string) => string, raw: string): string => {
+  const key = `aidpKnowledge.ontologyTaskType.${raw}`;
+  const label = t(key);
+  return label === key ? raw : label;
+};
+
 const STATUS_COLOR: Record<TaskStatus, string> = {
   queued: "#8c8c8c",
   running: "#0067d1",
@@ -169,18 +187,21 @@ const AidpOntologyTasksTab: React.FC = () => {
     if (demo) return DEMO_TASKS;
     return (tasksQuery.data?.value ?? []).map(toTaskRow);
   }, [demo, tasksQuery.data?.value]);
+  const statusLabel = (status: TaskStatus) =>
+    t(`aidpKnowledge.ontologyTaskStatus.${status}`);
+
+  const taskNameLabel = (raw: string) => localizedTaskType(t, raw);
+
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rows;
     return rows.filter(
       (task) =>
         task.name.toLowerCase().includes(needle) ||
+        localizedTaskType(t, task.name).toLowerCase().includes(needle) ||
         task.id.toLowerCase().includes(needle)
     );
-  }, [rows, search]);
-
-  const statusLabel = (status: TaskStatus) =>
-    t(`aidpKnowledge.ontologyTaskStatus.${status}`);
+  }, [rows, search, t]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<TaskStatus, number> = {
@@ -209,10 +230,10 @@ const AidpOntologyTasksTab: React.FC = () => {
             className={styles.nameLink}
             onClick={() => setActiveTask(record)}
           >
-            {value}
+            {taskNameLabel(value)}
           </button>
         ) : (
-          value
+          taskNameLabel(value)
         ),
     },
     {
@@ -240,7 +261,9 @@ const AidpOntologyTasksTab: React.FC = () => {
               style={{ background: STATUS_COLOR[record.status] }}
               aria-hidden="true"
             />
-            <span>{statusLabel(record.status)}</span>
+            <span className={styles.statusLabel}>
+              {statusLabel(record.status)}
+            </span>
             <span className={styles.progressTrack}>
               <span
                 className={styles.progressBar}
@@ -278,7 +301,9 @@ const AidpOntologyTasksTab: React.FC = () => {
       render: (_value, record) =>
         record.status === "failed" ? (
           <Popover
+            trigger="click"
             placement="bottomRight"
+            overlayStyle={{ maxWidth: 420 }}
             title={t("aidpKnowledge.ontologyTaskFailureTitle")}
             content={
               <div className={styles.failureDetail}>
@@ -350,30 +375,6 @@ const AidpOntologyTasksTab: React.FC = () => {
 
   return (
     <div className={tableStyles.tab}>
-      <div className={styles.taskHeader}>
-        <h2 className={styles.taskTitle}>
-          {t("aidpKnowledge.ontologyTaskCenterTitle")}
-        </h2>
-        <div className={styles.legend}>
-          <span>{t("aidpKnowledge.ontologyTaskWeekSummary")}</span>
-          <span className={styles.legendItem}>
-            {t("aidpKnowledge.ontologyTaskTotal")}{" "}
-            {demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)}
-          </span>
-          {(["running", "failed", "success", "queued"] as TaskStatus[]).map(
-            (status) => (
-              <span key={status} className={styles.legendItem}>
-                <span
-                  className={styles.statusDot}
-                  style={{ background: STATUS_COLOR[status] }}
-                  aria-hidden="true"
-                />
-                {statusLabel(status)} {statusCounts[status]}
-              </span>
-            )
-          )}
-        </div>
-      </div>
       <div className={tableStyles.toolbar}>
         <Input
           allowClear
@@ -383,6 +384,36 @@ const AidpOntologyTasksTab: React.FC = () => {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        <div className={styles.legend}>
+          <span className={styles.legendTitle}>
+            {t("aidpKnowledge.ontologyTaskWeekSummary")}
+            <Tooltip title={t("aidpKnowledge.ontologyTaskStatusHint")}>
+              <QuestionCircleOutlined className={styles.legendHelp} />
+            </Tooltip>
+          </span>
+          <span className={styles.legendItem}>
+            {t("aidpKnowledge.ontologyTaskTotal")}{" "}
+            {demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)}
+          </span>
+          {(
+            [
+              "running",
+              "failed",
+              "success",
+              "queued",
+              "terminated",
+            ] as TaskStatus[]
+          ).map((status) => (
+            <span key={status} className={styles.legendItem}>
+              <span
+                className={styles.statusDot}
+                style={{ background: STATUS_COLOR[status] }}
+                aria-hidden="true"
+              />
+              {statusLabel(status)} {statusCounts[status]}
+            </span>
+          ))}
+        </div>
         <div className={tableStyles.toolbarActions}>
           <Button
             type="text"

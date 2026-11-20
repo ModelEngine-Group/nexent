@@ -6,10 +6,9 @@
 
 .propertyRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(
-      0,
-      0.8fr
-    ) auto;
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr)
+    auto;
   align-items: start;
   gap: 8px;
 }
@@ -106,10 +105,9 @@
 
 .propertyHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(
-      0,
-      0.8fr
-    ) auto;
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr)
+    auto;
   gap: 8px;
   color: #191919;
   font-size: 13px;
@@ -117,7 +115,7 @@
 }
 
 .propertyHeader em {
-  margin-left: 4px;
+  margin-right: 4px;
   color: #e02128;
   font-style: normal;
 }
