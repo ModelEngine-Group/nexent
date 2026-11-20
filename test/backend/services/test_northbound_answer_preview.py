@@ -2,12 +2,10 @@
 
 """Complete-mode previews are wire-only projections of canonical root answers."""
 
-import json
-from unittest.mock import MagicMock
 
 import pytest
 
-from .test_agent_run_final_answers import service_tests, stream_capture
+from .test_agent_run_final_answers import stream_capture
 from .test_northbound_final_answer_stream import answer, answers
 
 
@@ -21,8 +19,7 @@ async def test_preview_arrives_before_source_completion_and_is_not_persisted(str
     def source():
         yield {"type": "model_output_thinking", "content": "Real thought", "step_id": "root-step"}
         yield answer("Hello ", attempt_id="accepted", agent_name="root")
-        published = [json.loads(call.args[0].removeprefix("data: ").strip())
-                     for call in stream_capture.channel.publish.call_args_list]
+        published = stream_capture.published
         assert [event["content"] for event in previews(published)] == ["Hello "]
         assert answers(published) == []
         yield answer("世界", attempt_id="accepted", agent_name="root")
@@ -74,7 +71,7 @@ async def test_only_smolagents_complete_mode_produces_previews(stream_capture, o
 @pytest.mark.parametrize("outcome", ["failed", "stopped"])
 async def test_failed_or_stopped_preview_never_becomes_confirmed_answer(stream_capture, outcome):
     events, batch = await stream_capture(
-        [answer("Partial"), answer("", "complete")], outcome=outcome, final_answer_mode="complete")
+        [answer("Partial"), answer("", "complete")], status=outcome, final_answer_mode="complete")
     assert [event["content"] for event in previews(events)] == ["Partial"]
     assert answers(events) == []
     assert batch["terminal_status"] == outcome
@@ -96,9 +93,8 @@ async def test_rollback_drops_rejected_preview_from_canonical_storage(stream_cap
 
 
 @pytest.mark.asyncio
-async def test_persistence_error_leaves_preview_unconfirmed(stream_capture, monkeypatch):
-    monkeypatch.setattr(service_tests.agent_execution, "persist_assistant_run_batch",
-                        MagicMock(side_effect=RuntimeError("controlled persistence failure")))
+async def test_persistence_error_leaves_preview_unconfirmed(stream_capture):
+    stream_capture.persist.side_effect = RuntimeError("controlled persistence failure")
     events, batch = await stream_capture(
         [answer("Draft"), answer("", "complete")], final_answer_mode="complete")
     assert [event["content"] for event in previews(events)] == ["Draft"]

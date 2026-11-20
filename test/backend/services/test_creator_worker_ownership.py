@@ -20,6 +20,8 @@ def worker(monkeypatch):
         creator_lease_async=AsyncMock(return_value=True),
         is_cancelled_async=AsyncMock(return_value=False),
         mark_stream_completed_async=AsyncMock(),
+        mark_run_finished=MagicMock(),
+        _run_managed=AsyncMock(),
     )
     channel = SimpleNamespace(
         generation=None, publish=AsyncMock(), complete=MagicMock(),

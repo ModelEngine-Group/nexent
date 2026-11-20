@@ -1,94 +1,141 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Execution facts cross the real stream buffer and commit boundary privately."""
+"""Keep recorded execution facts inside the signed journal and durable projection."""
 
+import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from test.backend.services import test_agent_model_attempt_persistence as fixtures
+from contracts.agentos import AgentRunReference
+from contracts.conversation import MessageSource
+from management.services.agent import prepared_projection, prepared_turn
+from runtime.agentos import prepared_run
+from ..app.test_agentos_prepared_run import ACTOR, payload, runtime
+from .test_agentos_conversation_projection import response
+
+
+@pytest.fixture
+def capture(runtime, payload, mocker):
+    frames = []
+    journal = runtime.journal.return_value
+    journal.append.side_effect = lambda index, chunk: frames.append(f"id: {payload.run_id}:{index}\n".encode() + chunk.encode())
+
+    def terminal(status):
+        frames.append(
+            f'id: {payload.run_id}:{len(frames) + 1}\nevent: agentos_terminal\ndata: {json.dumps({"status": status})}\n\n'.encode(),
+        )
+
+    journal.repair_terminal.side_effect = terminal
+    persist = Mock(return_value=4242)
+
+    async def run_blocking(_name, call, **kwargs):
+        assert call is prepared_projection.persist_prepared_assistant_projection
+        return persist(**{k: v for k, v in kwargs.items() if k not in {"lane", "owner"}})
+
+    mocker.patch.object(prepared_projection, "run_blocking", side_effect=run_blocking)
+
+    async def run(source, *, public=True):
+        mocker.patch.object(prepared_run, "agent_run", new=source)
+        reference = await prepared_run.start_prepared_run(payload, ACTOR)
+        await asyncio.wait_for(asyncio.gather(*list(runtime.tasks)), timeout=2)
+        client = SimpleNamespace(resume=AsyncMock(side_effect=lambda *_args: response(*frames)))
+        turn = SimpleNamespace(reference=reference, user_id=ACTOR.user_id, tenant_id=ACTOR.tenant_id, message_index=9)
+
+        async def finish(_turn, _client):
+            return await prepared_projection.resume_assistant_projection(
+                client.resume, reference, ACTOR.user_id, ACTOR.tenant_id, message_index=9,
+                message_source=MessageSource.CHAT, assistant_message_id=4242,
+            )
+
+        if not public:
+            return await finish(turn, client)
+        mocker.patch.object(prepared_turn, "_finish_projection", side_effect=finish)
+        output = await prepared_turn._stream_turn(turn, client)
+        return b"".join([chunk async for chunk in output.body_iterator])
+
+    return SimpleNamespace(frames=frames, persist=persist, run=run)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('invocation', [None, 'child-invocation'])
-async def test_execution_fact_gets_real_index_and_is_committed_without_public_sse(monkeypatch, invocation):
-    service = fixtures.agent_execution
-    batches = []
-    fixtures._configure_stream_mocks(monkeypatch, batches)
-    info = fixtures._agent_run_info()
-    record_keys = []
+@pytest.mark.parametrize("invocation", [None, "child-invocation"])
+async def test_execution_fact_gets_real_unit_index_and_commits_without_public_sse(capture, invocation):
+    observed = {}
 
-    async def source(*_args, **_kwargs):
+    async def source(info, **_kwargs):
         history = info.observer.execution_history
-        key = history.register('actual-agent-owner', {'OUTPUT': 'masked *** result'})
-        history.get(key).summary = 'safe summary'
-        record_keys.append(key)
-        yield json.dumps({'type': 'execution_result', 'content': json.dumps({'execution_key': key}),
-                          'invocation_id': invocation, 'tool_call_id': 'actual-call'})
-        yield json.dumps({'type': 'final_answer', 'content': 'done'})
+        key = history.register("actual-agent-owner", {"OUTPUT": "masked *** result"})
+        record = history.get(key)
+        observed.update(history=history, key=key, record=record)
+        yield json.dumps({
+            "type": "execution_result", "content": json.dumps({"execution_key": key}),
+            "invocation_id": invocation, "tool_call_id": "actual-call",
+        })
+        record.summary = "safe summary"
+        yield json.dumps({"type": "final_answer", "content": "done"})
 
-    monkeypatch.setattr(service, 'agent_run', source)
-    chunks = [chunk async for chunk in service._stream_agent_chunks(
-        fixtures._agent_request(), 'user1', 'tenant1', info, MagicMock(),
-        channel=SimpleNamespace(publish=AsyncMock()),
-    )]
-    assert len(batches) == 1
-    units = batches[0]['message_units']
-    assert [unit['type'] for unit in units] == ['execution_result', 'final_answer']
+    public = await capture.run(source)
+
+    units = capture.persist.call_args.kwargs["message_units"]
+    assert capture.persist.call_args.kwargs["assistant_message_id"] == 4242
+    assert [unit["type"] for unit in units] == ["execution_result", "final_answer"]
     fact = units[0]
-    assert fact['unit_index'] == 0 and fact['invocation_id'] == invocation
-    assert fact['tool_call_id'] == 'actual-call'
-    assert json.loads(fact['unit_content']) == {
-        'content': '<OUTPUT>masked *** result</OUTPUT>', 'summary': 'safe summary',
-    }
-    assert '_execution_key' not in fact
-    assert all('execution_result' not in chunk and record_keys[0] not in chunk for chunk in chunks)
-    record = info.observer.execution_history.get(record_keys[0])
-    assert record.reference == 'message:4242/unit-index:0' and record.persisted
+    assert (fact["unit_index"], fact["invocation_id"], fact["tool_call_id"]) == (0, invocation, "actual-call")
+    assert json.loads(fact["unit_content"]) == {"content": "<OUTPUT>masked *** result</OUTPUT>", "summary": "safe summary"}
+    assert "_execution_key" not in fact
+    assert observed["key"].encode() not in b"".join(capture.frames)
+    assert b"agentos_execution_fact" in b"".join(capture.frames)
+    assert b"agentos_execution" not in public and b"masked *** result" not in public
+    assert b'"content":"done"' in public
+    record = observed["record"]
+    assert record.reference.endswith("/execution:1")
+    assert json.loads(observed["history"].read("actual-agent-owner", record.reference))["text"] == record.text
 
 
 @pytest.mark.asyncio
-async def test_unregistered_execution_key_cannot_create_or_publish_an_execution_fact(monkeypatch):
-    service = fixtures.agent_execution
-    batches = []
-    fixtures._configure_stream_mocks(monkeypatch, batches)
+async def test_unregistered_or_repeated_execution_key_cannot_create_public_facts(capture):
+    async def source(info, **_kwargs):
+        key = info.observer.execution_history.register("owner", {"OUTPUT": "only once"})
+        for item in ("unknown-key", key, key, [], "another-unregistered-key"):
+            yield json.dumps({"type": "execution_result", "content": {"execution_key": item}})
+        yield json.dumps({"type": "final_answer", "content": "done"})
 
-    async def source(*_args, **_kwargs):
-        yield json.dumps({'type': 'execution_result', 'content': {'execution_key': 'untrusted-key'}})
-        yield json.dumps({'type': 'final_answer', 'content': 'done'})
+    public = await capture.run(source)
 
-    monkeypatch.setattr(service, 'agent_run', source)
-    chunks = [chunk async for chunk in service._stream_agent_chunks(
-        fixtures._agent_request(), 'user1', 'tenant1', fixtures._agent_run_info(), MagicMock(),
-        channel=SimpleNamespace(publish=AsyncMock()),
-    )]
-    assert len(batches) == 1
-    assert [unit['type'] for unit in batches[0]['message_units']] == ['final_answer']
-    assert all('untrusted-key' not in chunk for chunk in chunks)
+    assert [unit["type"] for unit in capture.persist.call_args.kwargs["message_units"]] == ["execution_result", "final_answer"]
+    assert b"unknown-key" not in b"".join(capture.frames)
+    assert b"only once" not in public
 
 
 @pytest.mark.asyncio
-async def test_batch_rollback_keeps_execution_fact_readable_from_buffer(monkeypatch):
-    service = fixtures.agent_execution
-    fixtures._configure_stream_mocks(monkeypatch, [])
-    monkeypatch.setattr(service, 'persist_assistant_run_batch', MagicMock(side_effect=RuntimeError('DB offline')))
-    monkeypatch.setattr(service, 'update_message_status', MagicMock())
-    info = fixtures._agent_run_info()
-    keys = []
+async def test_rollback_leaves_original_result_in_owned_buffer_and_journal(capture, payload):
+    observed = {}
+    capture.persist.side_effect = RuntimeError("database offline")
 
-    async def source(*_args, **_kwargs):
-        key = info.observer.execution_history.register('owner', {'OUTPUT': 'preserved buffer'})
-        keys.append(key)
-        yield json.dumps({'type': 'execution_result', 'content': {'execution_key': key}})
-        yield json.dumps({'type': 'final_answer', 'content': 'done'})
+    async def source(info, **_kwargs):
+        history = info.observer.execution_history
+        key = history.register("owner", {"OUTPUT": "preserved buffer"})
+        observed.update(history=history, record=history.get(key))
+        yield json.dumps({"type": "execution_result", "content": {"execution_key": key}})
+        yield json.dumps({"type": "final_answer", "content": "done"})
 
-    monkeypatch.setattr(service, 'agent_run', source)
-    chunks = [chunk async for chunk in service._stream_agent_chunks(
-        fixtures._agent_request(), 'user1', 'tenant1', info, MagicMock(),
-        channel=SimpleNamespace(publish=AsyncMock()),
-    )]
-    record = info.observer.execution_history.get(keys[0])
-    assert not record.persisted and info.attempt_outcome == 'failed'
-    assert json.loads(info.observer.execution_history.read('owner', record.reference))['text'] == record.text
-    assert any('"type": "error"' in chunk for chunk in chunks)
+    public = await capture.run(source)
+
+    record = observed["record"]
+    assert record.persisted is False
+    assert json.loads(observed["history"].read("owner", record.reference))["text"] == record.text
+    with pytest.raises(PermissionError):
+        observed["history"].read("another-agent", record.reference)
+    assert b"preserved buffer" not in public
+    assert b"preserved buffer" in b"".join(capture.frames)
+    assert capture.persist.call_count == 1
+    reference = AgentRunReference(conversation_id=payload.conversation_id, run_id=payload.run_id)
+    capture.persist.side_effect = None
+    replay = await prepared_projection.resume_assistant_projection(
+        AsyncMock(return_value=response(*capture.frames)), reference, ACTOR.user_id, ACTOR.tenant_id,
+        message_index=9, message_source=MessageSource.CHAT, assistant_message_id=4242,
+    )
+    assert replay.assistant_message_id == 4242
+    assert capture.persist.call_count == 2
+    assert capture.persist.call_args_list[0] == capture.persist.call_args_list[1]

@@ -7,7 +7,7 @@ import sys
 
 
 from contracts.errors.exceptions import AccountConflictError
-from management.configuration.runtime import load_system_configuration
+from infrastructure.system_configuration.runtime import load_system_configuration
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):

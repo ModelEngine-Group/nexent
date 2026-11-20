@@ -49,12 +49,32 @@ def test_environment_reaches_sdk_configuration(
     monkeypatch.setitem(sys.modules, "contracts.constants.environment", None if fallback else constants)
     monkeypatch.setitem(sys.modules, "backend.contracts.constants.environment", constants)
     get_manager = mocker.patch("nexent.monitor.get_monitoring_manager")
+    mocker.patch("nexent.monitor.configure_monitoring_records")
     runpy.run_path(str(ROOT / "infrastructure/trace/bootstrap.py"))
     get_manager.return_value.configure.assert_called_once()
     config, = get_manager.return_value.configure.call_args.args
     assert isinstance(config, MonitoringConfig)
     assert config.excluded_elasticsearch_operations == expected_es
     assert config.excluded_span_names == expected_names
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_model_record_writer_is_configured_independently_of_telemetry(mocker, monkeypatch, enabled):
+    from contracts.constants import environment
+    from infrastructure.rdb.model_monitoring import write_model_monitoring_record
+
+    monkeypatch.setattr(environment, "ENABLE_TELEMETRY", False)
+    monkeypatch.setattr(environment, "ENABLE_MODEL_MONITORING", enabled)
+    monkeypatch.setattr(environment, "MODEL_MONITORING_BATCH_SIZE", 17)
+    monkeypatch.setattr(environment, "MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", 3)
+    mocker.patch("nexent.monitor.get_monitoring_manager")
+    configure = mocker.patch("nexent.monitor.configure_monitoring_records")
+
+    runpy.run_path(str(ROOT / "infrastructure/trace/bootstrap.py"))
+
+    configure.assert_called_once_with(
+        write_model_monitoring_record if enabled else None, batch_size=17, flush_interval=3,
+    )
 
 
 def test_monitoring_example_matches_backend_and_sdk_defaults():

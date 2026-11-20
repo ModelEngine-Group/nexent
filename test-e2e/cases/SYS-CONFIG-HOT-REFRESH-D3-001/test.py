@@ -16,9 +16,9 @@ from pathlib import Path
 import psycopg2
 import pytest
 import redis
-from management.configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
-from management.configuration.repository import SystemConfigurationRepository
-from management.configuration.runtime import CONFIGURATION_CHANNEL
+from infrastructure.system_configuration.catalog import DEFAULT_CATALOG, ConfigurationValidationError
+from infrastructure.system_configuration.repository import SystemConfigurationRepository
+from infrastructure.system_configuration.runtime import CONFIGURATION_CHANNEL
 from psycopg2.extensions import parse_dsn
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
@@ -498,9 +498,9 @@ def test_subsequent_business_checks_use_refreshed_snapshot():
 @pytest.mark.stage("D3")
 @pytest.mark.asyncio
 async def test_database_lock_timeout_preserves_snapshot_and_recovers(monkeypatch):
-    from management.configuration import database as database_module
-    from management.configuration.database import ConfigurationDatabase
-    from management.configuration.runtime import SystemConfigurationRuntime
+    from infrastructure.system_configuration import database as database_module
+    from infrastructure.system_configuration.database import ConfigurationDatabase
+    from infrastructure.system_configuration.runtime import SystemConfigurationRuntime
 
     parameters = parse_dsn(DATABASE_URL)
     for name, value in {

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from contracts.constants.environment import OPS_MONITORING_ENABLED
-from management.utils.exception_handlers import register_exception_handlers
+from backend.http.server.exception_handlers import register_exception_handlers
 from backend.http.server.health import install_health_contract
 
 try:

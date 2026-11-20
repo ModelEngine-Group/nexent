@@ -228,8 +228,8 @@ consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 consts_provider_mod.MODEL_ENGINE_URL_MARKER = "open/router"
 install_shared_contract_stub(consts_provider_mod, 'provider')
 
-# Stub management.services.model.provider used by service
-services_provider_mod = types.ModuleType("management.services.model.provider")
+# Stub runtime.model.provider used by service
+services_provider_mod = types.ModuleType("runtime.model.provider")
 
 
 async def _prepare_model_dict(**kwargs):
@@ -250,10 +250,10 @@ services_provider_mod.prepare_model_dict = _prepare_model_dict
 services_provider_mod.merge_existing_model_attributes = _merge_existing_model_attributes
 services_provider_mod.merge_existing_model_tokens = _merge_existing_model_tokens
 services_provider_mod.get_provider_models = _get_provider_models
-sys.modules["management.services.model.provider"] = services_provider_mod
+sys.modules["runtime.model.provider"] = services_provider_mod
 
-# Stub management.services.model.health used by service
-services_health_mod = types.ModuleType("management.services.model.health")
+# Stub runtime.model.health used by service
+services_health_mod = types.ModuleType("runtime.model.health")
 
 
 async def _embedding_dimension_check(model_config):
@@ -288,6 +288,7 @@ services_health_mod._infer_model_factory = _infer_model_factory
 services_health_mod._normalize_embedding_url = _normalize_embedding_url
 services_health_mod._embedding_url_candidates = _embedding_url_candidates
 sys.modules["management.services.model.adapter"] = mock.MagicMock()
+sys.modules["infrastructure.model_adapter"] = sys.modules["management.services.model.adapter"]
 
 # Stub parent utils package and memory helpers used by service imports. Some
 # test modules replace `utils` with a plain mock during collection, so keep this
@@ -407,6 +408,8 @@ def _get_model_by_model_id(model_id: int, tenant_id: str):
 
 db_mm_mod.get_model_by_model_id = _get_model_by_model_id
 db_mm_mod.update_model_record = _noop
+db_mm_mod.get_created_model_ids = lambda *args: set()
+sys.modules["infrastructure.rdb.model_records"] = db_mm_mod
 sys.modules["database"] = database_mod
 sys.modules["management.db.model.repository"] = db_mm_mod
 for _attachment_func in [
@@ -513,7 +516,7 @@ def _add_repo_to_name(model_repo, model_name):
 def isolate_embedding_probe():
     """Keep real URL resolution while isolating external dimension requests."""
     with mock.patch(
-        "management.services.model.probe.embedding_dimension_check",
+        "runtime.model.probe.embedding_dimension_check",
         new=mock.AsyncMock(return_value=0),
     ):
         yield
@@ -526,7 +529,7 @@ def import_svc(module="management", *, isolate_storage=True):
     sys.modules["management.db.model.repository"] = db_mm_mod
     setattr(database_mod, "model_management_db", db_mm_mod)
     sys.modules.pop("management.services.model.management", None)
-    sys.modules.pop("management.services.model.management", None)
+    sys.modules.pop("runtime.model.registry", None)
     # Keep the new pure SDK default resolver real inside the isolated SDK shell.
     sampling_spec = importlib.util.spec_from_file_location(
         "nexent.core.models.sampling",
@@ -535,17 +538,31 @@ def import_svc(module="management", *, isolate_storage=True):
     sampling_module = importlib.util.module_from_spec(sampling_spec)
     sampling_spec.loader.exec_module(sampling_module)
     sys.modules["nexent.core.models.sampling"] = sampling_module
+    if module == "commands":
+        sys.modules["contracts.constants.environment"].RUNTIME_SERVICE_URL = "http://runtime"
+        concurrency = types.ModuleType("nexent.core.concurrency")
+
+        async def run_blocking(task, fn, *args, lane, owner, **kwargs):
+            return fn(*args, **kwargs)
+
+        concurrency.run_blocking = run_blocking
+        sys.modules["nexent.core.concurrency"] = concurrency
     with mock.patch("infrastructure.object_storage.client.MinioClient", return_value=minio_client_mock):
-        svc = importlib.import_module("management.services.model." + module)
+        path = {
+            "registry": "runtime.model.registry",
+            "commands": "management.services.model.commands",
+            "reasoning": "infrastructure.model_reasoning",
+        }.get(module, "management.services.model." + module)
+        svc = importlib.import_module(path)
+        if module == "registry":
+            svc.get_created_model_ids = db_mm_mod.get_created_model_ids
     if not isolate_storage:
         return svc
     # These tests own legacy preprocessing/orchestration. The resolved storage
     # translator has its own unit and database suites and is a collaborator here.
     svc._create_model_configuration = lambda data, user, tenant: svc.create_model_record(data, user, tenant)
-    def update_configuration(record, changes, user, tenant, *, scope_update=False):
-        if scope_update:
-            return svc.update_model_record(record["model_id"], changes, user, tenant)
-        return svc.update_model_record(record["model_id"], changes, user)
+    def update_configuration(model_id, changes, user, tenant, *, scope_update=False):
+        return svc.update_model_record(model_id, changes, user, tenant)
     svc._update_model_configuration = update_configuration
     return svc
 
@@ -673,7 +690,7 @@ def test_apply_model_reasoning_default_uses_a_safe_default_for_unknown_profiles(
 
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_success_llm():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]) as mock_get_by_display, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
@@ -694,7 +711,7 @@ async def test_create_model_for_tenant_success_llm():
         # Called twice: once for the display-name conflict check and once by
         # _ids_for_created_models to resolve the new model's id for backfill.
         mock_get_by_display.assert_any_call("huggingface/llama", tenant_id)
-        assert mock_get_by_display.call_count == 2
+        assert mock_get_by_display.call_count == 1
         # create_model_record called once for non-multimodal
         assert mock_create.call_count == 1
 
@@ -702,7 +719,7 @@ async def test_create_model_for_tenant_success_llm():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_open_router_disables_ssl():
     """When base_url contains 'open/router' ssl_verify should be set to False and model_factory to 'modelengine'."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
@@ -729,7 +746,7 @@ async def test_create_model_for_tenant_open_router_disables_ssl():
 
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_conflict_raises():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[{"model_id": "exists", "model_type": "llm"}]):
         user_id = "u1"
@@ -750,7 +767,7 @@ async def test_create_model_for_tenant_conflict_raises():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_display_name_conflict_valueerror():
     """Test that display_name conflict raises ValueError (covers lines 65-72)"""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_model = {"model_id": 1, "display_name": "existing_name"}
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[existing_model]):
@@ -773,7 +790,7 @@ async def test_create_model_for_tenant_display_name_conflict_valueerror():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_allows_same_display_name_across_multimodal_slots():
     """Image understanding, image generation, and video understanding are separate slots."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "display_name": "Qwen3.6-27B", "model_type": "vlm"},
@@ -798,7 +815,7 @@ async def test_create_model_for_tenant_allows_same_display_name_across_multimoda
 
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_blocks_duplicate_within_same_multimodal_slot():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(
         svc,
@@ -819,7 +836,7 @@ async def test_create_model_for_tenant_blocks_duplicate_within_same_multimodal_s
 
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_multi_embedding_creates_two_records():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
@@ -841,10 +858,10 @@ async def test_create_model_for_tenant_multi_embedding_creates_two_records():
 
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_embedding_sets_dimension():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=1536)) as mock_dim, \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=1536)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
 
@@ -867,10 +884,10 @@ async def test_create_model_for_tenant_embedding_sets_dimension():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_embedding_sets_default_chunk_batch():
     """chunk_batch defaults to 10 when not provided for embedding models."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-3-small")):
 
@@ -896,10 +913,10 @@ async def test_create_model_for_tenant_embedding_sets_default_chunk_batch():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_multi_embedding_sets_default_chunk_batch():
     """chunk_batch defaults to 10 when not provided for multi_embedding models (covers line 79)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
 
@@ -933,7 +950,7 @@ async def test_create_model_for_tenant_multi_embedding_sets_default_chunk_batch(
 
 @pytest.mark.asyncio
 async def test_create_provider_models_for_tenant_success():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     req = {"provider": "silicon", "model_type": "llm"}
     models = [{"id": "silicon/a"}, {"id": "silicon/b"}]
@@ -951,7 +968,7 @@ async def test_create_provider_models_for_tenant_success():
 
 @pytest.mark.asyncio
 async def test_create_provider_models_attaches_models_dev_reasoning_capability():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     req = {
         "provider": "zhipu",
@@ -968,7 +985,7 @@ async def test_create_provider_models_attaches_models_dev_reasoning_capability()
 
     with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)), \
             mock.patch.object(svc, "merge_existing_model_attributes", return_value=models), \
-            mock.patch("management.services.model.reasoning.resolve_reasoning_capability", return_value=capability), \
+            mock.patch("infrastructure.model_reasoning.resolve_reasoning_capability", return_value=capability), \
             mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m):
         out = await svc.create_provider_models_for_tenant("t1", req)
 
@@ -977,7 +994,7 @@ async def test_create_provider_models_attaches_models_dev_reasoning_capability()
 
 @pytest.mark.asyncio
 async def test_create_provider_models_for_tenant_exception():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     req = {"provider": "silicon", "model_type": "llm"}
     with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(side_effect=Exception("boom"))):
@@ -990,7 +1007,7 @@ async def test_create_provider_models_for_tenant_exception():
 @pytest.mark.parametrize("status_code", [401, 403, 502, None])
 async def test_provider_catalog_error_preserves_upstream_status(status_code):
     """Preserve develop's classified provider failure through a domain error."""
-    svc = import_svc()
+    svc = import_svc("registry")
     error = {
         "_error": "authentication_failed",
         "_message": "Provider denied access",
@@ -1013,7 +1030,7 @@ async def test_provider_catalog_error_preserves_upstream_status(status_code):
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_dashscope_provider():
     """Test batch_create_models_for_tenant with DASHSCOPE provider uses DASHSCOPE_BASE_URL."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "dashscope",
@@ -1039,7 +1056,7 @@ async def test_batch_create_models_for_tenant_dashscope_provider():
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_dashscope_stt_uses_realtime_url():
     """DashScope STT batch creation must use the realtime websocket URL."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "dashscope",
@@ -1064,7 +1081,7 @@ async def test_batch_create_models_for_tenant_dashscope_stt_uses_realtime_url():
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_dashscope_tts_uses_realtime_url():
     """DashScope TTS batch creation must use the realtime websocket URL."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "dashscope",
@@ -1089,7 +1106,7 @@ async def test_batch_create_models_for_tenant_dashscope_tts_uses_realtime_url():
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_tokenpony_provider():
     """Test batch_create_models_for_tenant with TOKENPONY provider uses TOKENPONY_BASE_URL."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "tokenpony",
@@ -1115,7 +1132,7 @@ async def test_batch_create_models_for_tenant_tokenpony_provider():
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_other_provider():
     """Test batch_create_models_for_tenant with non-Silicon/ModelEngine provider (covers lines 138-140)"""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "openai",  # Not Silicon or ModelEngine
@@ -1149,7 +1166,7 @@ async def test_batch_create_models_for_tenant_other_provider():
 
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_flow():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "silicon",
@@ -1177,14 +1194,14 @@ async def test_batch_create_models_for_tenant_flow():
         mock_get_existing.assert_called_once_with("t1", "silicon", "llm")
         mock_delete.assert_called_once_with("del-id", "u1", "t1")
         mock_update.assert_called_once_with(
-            "keep-id", {"max_tokens": 4096}, "u1")
+            "keep-id", {"max_tokens": 4096}, "u1", "t1")
         mock_prep.assert_awaited()
         mock_create.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_batch_create_models_uses_requested_type_for_each_model():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "silicon",
@@ -1208,7 +1225,7 @@ async def test_batch_create_models_uses_requested_type_for_each_model():
 @pytest.mark.asyncio
 async def test_batch_create_models_max_tokens_update():
     """Test batch_create_models updates max_tokens when display_name exists and max_tokens changed (covers lines 160->173, 168->171)"""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {
         "provider": "silicon",
@@ -1258,7 +1275,7 @@ async def test_batch_create_models_max_tokens_update():
 
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_exception():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     batch_payload = {"provider": "other", "type": "llm",
                      "models": [{"id": "x"}], "api_key": "k"}
@@ -1271,7 +1288,7 @@ async def test_batch_create_models_for_tenant_exception():
 
 
 async def test_list_provider_models_for_tenant_success():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing = [
         {"model_repo": "huggingface", "model_name": "llama"},
@@ -1284,7 +1301,7 @@ async def test_list_provider_models_for_tenant_success():
 
 
 async def test_list_provider_models_for_tenant_exception():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", side_effect=Exception("db")):
         with pytest.raises(Exception) as exc:
@@ -1294,7 +1311,7 @@ async def test_list_provider_models_for_tenant_exception():
 
 async def test_update_single_model_for_tenant_success_single_model():
     """Update succeeds for a single non-embedding model with no display_name change."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "name"},
@@ -1316,6 +1333,7 @@ async def test_update_single_model_for_tenant_success_single_model():
             1,
             {"display_name": "name", "description": "updated", "model_type": "llm"},
             "u1",
+            "t1",
         )
 
 
@@ -1324,7 +1342,7 @@ async def test_update_single_model_for_tenant_splits_repo_prefix_from_model_name
     split on update, otherwise the model_name column accumulates a repo prefix
     on every save ("deepseek-ai/X" -> "deepseek-ai/deepseek-ai/X"), breaking
     provider catalog matching and connectivity probes."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 7, "model_type": "llm", "display_name": "name",
@@ -1348,7 +1366,7 @@ async def test_update_single_model_for_tenant_splits_repo_prefix_from_model_name
 async def test_update_single_model_for_tenant_keeps_bare_model_name_and_repo():
     """A bare model_name (no repo prefix) must pass through unchanged and must
     NOT clobber an existing model_repo that the payload does not carry."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 8, "model_type": "llm", "display_name": "name",
@@ -1372,7 +1390,7 @@ async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max
     max_tokens column so the SDK's pre-W2 auto-fill cannot read a stale value
     and trip CallerMaxTokensOverrideForbidden at the W2 dispatch boundary.
     """
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "name", "max_tokens": 204800},
@@ -1397,7 +1415,7 @@ async def test_update_single_model_for_tenant_preserves_embedding_max_tokens():
     """Embedding rows must NOT have max_tokens mirrored from max_output_tokens —
     max_tokens is repurposed as the vector dimension on those rows.
     """
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 10, "model_type": "embedding", "display_name": "emb", "max_tokens": 4096},
@@ -1420,7 +1438,7 @@ async def test_update_single_model_for_tenant_preserves_embedding_max_tokens():
 
 async def test_update_single_model_for_tenant_conflict_new_display_name():
     """Updating to a new conflicting display_name raises ValueError."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "old_name"},
@@ -1441,7 +1459,7 @@ async def test_update_single_model_for_tenant_conflict_new_display_name():
 
 async def test_update_single_model_for_tenant_not_found_raises_lookup_error():
     """If no model is found for current_display_name, raise LookupError."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]):
         with pytest.raises(LookupError):
@@ -1450,7 +1468,7 @@ async def test_update_single_model_for_tenant_not_found_raises_lookup_error():
 
 async def test_update_single_model_for_tenant_multi_embedding_updates_both():
     """Updating multi_embedding models updates both embedding and multi_embedding records."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 10, "model_type": "embedding", "display_name": "emb_name"},
@@ -1471,12 +1489,12 @@ async def test_update_single_model_for_tenant_multi_embedding_updates_both():
         # model_type should be stripped from update payload for multi_embedding flow
         expected_update = {"display_name": "emb_name",
                            "description": "updated"}
-        mock_update.assert_any_call(10, expected_update, "u1")
-        mock_update.assert_any_call(11, expected_update, "u1")
+        mock_update.assert_any_call(10, expected_update, "u1", "t1")
+        mock_update.assert_any_call(11, expected_update, "u1", "t1")
 
 
 async def test_batch_update_models_for_tenant_success():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [{"model_id": "1", "max_tokens": 4096}, {"model_id": "2", "max_tokens": 8192}]
     with mock.patch.object(svc, "update_model_record") as mock_update:
@@ -1488,7 +1506,7 @@ async def test_batch_update_models_for_tenant_success():
 
 async def test_batch_update_models_for_tenant_by_name_factory():
     """Batch update resolves model_id via get_model_by_name_factory when model_id is not numeric."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [{"model_id": "openai/gpt-4", "max_tokens": 4096}]
     with mock.patch.object(
@@ -1502,7 +1520,7 @@ async def test_batch_update_models_for_tenant_by_name_factory():
 
 
 async def test_batch_update_models_for_tenant_exception():
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [{"model_id": "1"}]
     with mock.patch.object(svc, "update_model_record", side_effect=Exception("oops")):
@@ -1513,7 +1531,7 @@ async def test_batch_update_models_for_tenant_exception():
 
 async def test_delete_model_for_tenant_not_found_raises_lookup_error():
     """If no models are found for display_name, raise LookupError."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]):
         with pytest.raises(LookupError):
@@ -1523,7 +1541,7 @@ async def test_delete_model_for_tenant_not_found_raises_lookup_error():
 @pytest.mark.asyncio
 async def test_delete_model_for_tenant_embedding_deletes_both():
     """Embedding + multi_embedding models are both deleted."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [
         {
@@ -1554,7 +1572,7 @@ async def test_delete_model_for_tenant_embedding_deletes_both():
 @pytest.mark.asyncio
 async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
     """Inner exceptions during cleanup must be logged but must not abort the delete."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [
         {"model_id": "id-emb", "model_type": "embedding",
@@ -1575,7 +1593,7 @@ async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
 @pytest.mark.asyncio
 async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
     """Outer exceptions during cleanup must be logged but must not abort the delete."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [
         {"model_id": "id-emb", "model_type": "embedding"},
@@ -1593,7 +1611,7 @@ async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
 
 async def test_delete_model_for_tenant_non_embedding():
     """Non-embedding model deletes a single record."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [
         {"model_id": "id", "model_type": "llm"},
@@ -1742,7 +1760,7 @@ async def test_list_models_for_tenant_type_mapping():
     with mock.patch.object(svc, "get_model_records", return_value=records), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
-            mock.patch("management.services.model.reasoning.resolve_reasoning_capability", return_value=None):
+            mock.patch("infrastructure.model_reasoning.resolve_reasoning_capability", return_value=None):
 
         result = await svc.list_models_for_tenant("t1")
 
@@ -1920,10 +1938,10 @@ async def test_list_models_for_admin_type_mapping():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_embedding_dimension_none():
     """Test that dimension=None raises ValueError (covered by outer exception handler, line 116)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=None)), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=None)), \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
 
         model_data = {
@@ -1943,7 +1961,7 @@ async def test_create_model_for_tenant_embedding_dimension_none():
 @pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_modelengine_provider():
     """Test MODELENGINE provider sets model_url to empty string (covers line 185)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     # Ensure MODELENGINE exists in ProviderEnum
     if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
@@ -1973,7 +1991,7 @@ async def test_batch_create_models_for_tenant_modelengine_provider():
 
 async def test_update_single_model_for_tenant_api_key_sets_ssl_verify():
     """Test that providing api_key in model_data auto-sets ssl_verify (covers lines 305-308)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "name"},
@@ -1996,7 +2014,7 @@ async def test_update_single_model_for_tenant_api_key_sets_ssl_verify():
 
 async def test_update_single_model_for_tenant_empty_api_key_sets_ssl_verify_false():
     """Test that empty api_key in model_data sets ssl_verify to False (covers lines 305-308)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "name"},
@@ -2026,7 +2044,7 @@ async def test_update_single_model_for_tenant_open_router_url_keeps_ssl_verify_f
     connectivity. Mirrors the create-path exemption in
     create_model_for_tenant.
     """
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {
@@ -2053,7 +2071,7 @@ async def test_update_single_model_for_tenant_open_router_url_keeps_ssl_verify_f
 
 async def test_update_single_model_for_tenant_open_router_url_in_payload_keeps_ssl_verify_false():
     """The open/router exemption also applies when the update payload carries the URL itself."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "name"},
@@ -2076,7 +2094,7 @@ async def test_update_single_model_for_tenant_open_router_url_in_payload_keeps_s
 
 async def test_update_single_model_for_tenant_generic_exception():
     """Test that generic exceptions are caught and re-raised (covers lines 329-331)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_models = [
         {"model_id": 1, "model_type": "llm", "display_name": "name"},
@@ -2096,7 +2114,7 @@ async def test_update_single_model_for_tenant_generic_exception():
 
 async def test_batch_update_models_for_tenant_by_name_only_not_found():
     """Test batch_update with model_name only (no slash) when model not found (covers lines 351-352, 359-360)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     models = [{"model_id": "gpt-4", "max_tokens": 4096}]  # No slash -> goes to else branch
 
@@ -2112,7 +2130,7 @@ async def test_batch_update_models_for_tenant_by_name_only_not_found():
 
 async def test_delete_model_for_tenant_generic_exception():
     """Test that generic exceptions are caught and re-raised (covers line 426)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(
         svc,
@@ -2127,10 +2145,10 @@ async def test_delete_model_for_tenant_generic_exception():
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_true():
     """Test that non-empty api_key and no open/router URL sets ssl_verify=True (covers line 73)."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=1536)), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=1536)), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
 
@@ -2159,7 +2177,7 @@ async def test_batch_create_models_for_tenant_update_branch_persists_operator_ca
     batch defaults and re-confirmed could not push the new
     context_window_tokens / max_output_tokens onto an existing row.
     """
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_row = {
         "model_id": 42,
@@ -2217,7 +2235,7 @@ async def test_batch_create_models_for_tenant_update_branch_skips_provider_candi
     silently rewrite a row's operator-set capacity (or its NULLs) with
     catalog hints.
     """
-    svc = import_svc()
+    svc = import_svc("registry")
 
     existing_row = {
         "model_id": 7,
@@ -2580,12 +2598,12 @@ def _existing_embedding_record(base_url, model_type="embedding"):
 @pytest.mark.asyncio
 async def test_cmt_embedding_persists_normalized_endpoint_url():
     """create_model_for_tenant: a bare base URL is stored with /embeddings appended."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2603,13 +2621,13 @@ async def test_cmt_embedding_persists_normalized_endpoint_url():
 @pytest.mark.asyncio
 async def test_cmt_embedding_falls_back_to_bare_url_when_endpoint_fails():
     """create_model_for_tenant: providers serving the bare URL are stored as given."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     # First candidate (/embeddings) fails, second candidate (bare URL) succeeds.
     mock_dim = mock.AsyncMock(side_effect=[None, 768])
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2627,12 +2645,12 @@ async def test_cmt_embedding_falls_back_to_bare_url_when_endpoint_fails():
 @pytest.mark.asyncio
 async def test_cmt_embedding_prefers_endpoint_when_both_candidates_work():
     """create_model_for_tenant: the tie-break is deterministic, /embeddings wins."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2646,12 +2664,12 @@ async def test_cmt_embedding_prefers_endpoint_when_both_candidates_work():
 @pytest.mark.asyncio
 async def test_cmt_embedding_url_already_has_embeddings_probes_once():
     """create_model_for_tenant: an already-complete endpoint URL yields one candidate."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=512)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2665,12 +2683,12 @@ async def test_cmt_embedding_url_already_has_embeddings_probes_once():
 @pytest.mark.asyncio
 async def test_cmt_embedding_all_candidates_fail_raises():
     """create_model_for_tenant: no candidate answering raises."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=None)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2686,12 +2704,12 @@ async def test_cmt_embedding_all_candidates_fail_raises():
 @pytest.mark.asyncio
 async def test_cmt_multi_embedding_persists_resolved_url_on_both_records():
     """create_model_for_tenant: multi_embedding writes the resolved URL to both records."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=2048)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "clip-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2710,12 +2728,12 @@ async def test_cmt_multi_embedding_persists_resolved_url_on_both_records():
 @pytest.mark.asyncio
 async def test_cmt_embedding_infers_factory_from_resolved_url():
     """create_model_for_tenant: model_factory is inferred from the persisted URL."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=1536)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value="dashscope") as mock_infer:
@@ -2730,12 +2748,12 @@ async def test_cmt_embedding_infers_factory_from_resolved_url():
 @pytest.mark.asyncio
 async def test_cmt_embedding_localhost_replaced_before_url_resolution():
     """create_model_for_tenant: localhost is rewritten before candidates are probed."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=1024)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2749,13 +2767,13 @@ async def test_cmt_embedding_localhost_replaced_before_url_resolution():
 @pytest.mark.asyncio
 async def test_usm_embedding_reprobes_changed_base_url():
     """update_single_model_for_tenant: a changed URL is resolved before persisting."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant(
@@ -2771,14 +2789,14 @@ async def test_usm_embedding_reprobes_changed_base_url():
 @pytest.mark.asyncio
 async def test_usm_embedding_skips_probe_when_url_unchanged():
     """update_single_model_for_tenant: re-saving the same URL does not probe."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=768)
     stored = "https://api.jina.ai/v1/embeddings"
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record(stored)), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant("u1", "t1", "Test Emb", {"base_url": stored})
@@ -2790,13 +2808,13 @@ async def test_usm_embedding_skips_probe_when_url_unchanged():
 @pytest.mark.asyncio
 async def test_usm_embedding_raises_when_new_url_unreachable():
     """update_single_model_for_tenant: an unreachable URL blocks the save."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=None)
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         with pytest.raises(ValueError) as exc:
@@ -2810,13 +2828,13 @@ async def test_usm_embedding_raises_when_new_url_unreachable():
 @pytest.mark.asyncio
 async def test_usm_non_embedding_base_url_is_not_resolved():
     """update_single_model_for_tenant: LLM URLs keep their root form."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://api.openai.com/v1", "llm")), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant(
@@ -2829,13 +2847,13 @@ async def test_usm_non_embedding_base_url_is_not_resolved():
 @pytest.mark.asyncio
 async def test_usm_embedding_localhost_replaced_before_url_resolution():
     """update_single_model_for_tenant: localhost is rewritten before candidates are probed."""
-    svc = import_svc()
+    svc = import_svc("registry")
 
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
-            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
+            mock.patch("runtime.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant(
@@ -3045,14 +3063,14 @@ def test_backfill_survives_insert_failure():
 
 
 def test_create_model_for_tenant_returns_backfill_result():
-    svc = import_svc()
+    svc = import_svc("commands")
     model_data = {
         "display_name": "m1", "model_name": "m1", "model_type": "llm",
         "api_key": "k", "base_url": "http://x", "connect_status": "available",
         "model_repo": "",
     }
     backfill_result = [{"config_key": "LLM_ID", "model_id": 7, "display_name": "m1", "model_type": "llm"}]
-    with mock.patch.object(svc, "create_model_record", return_value=True), \
+    with mock.patch.object(svc, "_command", new=mock.AsyncMock(return_value=[7])), \
             mock.patch.object(svc, "_backfill_default_model_slots", return_value=backfill_result):
         result = __import__("asyncio").run(
             svc.create_model_for_tenant("u1", "t1", model_data))
@@ -3128,14 +3146,14 @@ def test_create_model_for_tenant_respects_skip_default_backfill():
     backfill (the batch dialog finalizes once after its loop)."""
     import asyncio
 
-    svc = import_svc()
+    svc = import_svc("commands")
     model_data = {
         "display_name": "m1", "model_name": "m1", "model_type": "llm",
         "api_key": "k", "base_url": "http://x", "connect_status": "available",
         "model_repo": "",
     }
     backfill_result = []
-    with mock.patch.object(svc, "create_model_record", return_value=True), \
+    with mock.patch.object(svc, "_command", new=mock.AsyncMock(return_value=[7])), \
             mock.patch.object(svc, "_backfill_default_model_slots", return_value=backfill_result) as mock_backfill:
         result = asyncio.run(svc.create_model_for_tenant(
             "u1", "t1", model_data, skip_default_backfill=True))
@@ -3195,11 +3213,11 @@ def test_backfill_swap_pool_never_resurrects_old_models():
 
 def test_saved_outlet_enrichment_uses_projection_without_legacy_normalization(monkeypatch):
     svc = import_svc("reasoning")
-    projection_module = types.ModuleType("management.services.model.outlet_projection")
+    projection_module = types.ModuleType("infrastructure.model_adapter")
     projection_module.project_saved_outlet = mock.Mock(return_value={
         "extra_params": {"enable_thinking": False}, "migration_status": "migrated",
         "migration_review_required": True})
-    monkeypatch.setitem(sys.modules, "management.services.model.outlet_projection", projection_module)
+    monkeypatch.setitem(sys.modules, "infrastructure.model_adapter", projection_module)
     model = {"model_type": "llm", "profile_schema_version": 1,
              "extra_params": {"parameter_values": {}, "api_parameters": []}}
     with mock.patch.object(svc, "resolve_reasoning_capability") as old_lookup, \
