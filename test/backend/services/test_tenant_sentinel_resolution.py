@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Gateway tenant_id sentinel must be resolved against real user_tenant rows."""
 
 from unittest.mock import patch
