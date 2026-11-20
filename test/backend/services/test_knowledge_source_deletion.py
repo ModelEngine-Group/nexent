@@ -103,6 +103,24 @@ def test_immutable_version_is_targeted_without_touching_other_keys(setup):
     assert s.objects.delete.call_count == 1 and s.objects.delete.call_args.args == (target,)
 
 
+def test_existing_null_version_intent_never_deletes_the_mutable_object(setup):
+    s = setup
+    source = {"space": "files", "key": "source.txt", "version": "version:null", "sha256": "a" * 64}
+    target = ObjectRef("files", "source.txt", Revision("version:null"))
+    with s.s.engine.begin() as conn:
+        conn.execute(s.s.table.update().values(
+            source_revision=source["version"], deletion_request=intent(source=source).model_dump(mode="json"),
+        ))
+    s.objects.stat.side_effect = [ObjectMetadata(target, 11, "text/plain", "one", source["sha256"]), NotFound()]
+    with pytest.raises(OutcomeUnknown):
+        s.deletion.advance(s.row(), context=context())
+
+    s.objects.stat.assert_not_called()
+    s.objects.delete.assert_not_called()
+    assert s.row()["stage"] == "DELETE_SOURCE_PENDING"
+    assert s.records.get(HISTORY, 17, context=context())["status"] == "COMMITTED"
+
+
 def test_unknown_delete_is_only_probed_and_never_replayed(setup):
     s = setup
     s.objects.delete.side_effect = OutcomeUnknown()

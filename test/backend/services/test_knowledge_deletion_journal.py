@@ -118,6 +118,25 @@ def test_runtime_submission_and_source_cleanup_each_have_one_cas_owner(setup):
         s.journal.observe_runtime(done, child, context=context())
 
 
+def test_null_version_cannot_be_admitted_or_start_runtime_deletion(setup):
+    s = setup
+    source = s.intent.source.model_copy(update={"version": "version:null"})
+    unsafe = s.intent.model_copy(update={"source": source})
+    with s.engine.begin() as conn:
+        conn.execute(s.table.update().values(source_revision=source.version))
+    with pytest.raises(Conflict):
+        s.journal.admit(unsafe, s.row(), context=context())
+    assert s.row()["deletion_request"] is None
+
+    with s.engine.begin() as conn:
+        conn.execute(s.table.update().values(
+            status="DELETE_REQUESTED", stage="DELETE_ACCEPTED", deletion_request=unsafe.model_dump(mode="json"),
+        ))
+    with pytest.raises(Conflict):
+        s.journal.begin_runtime(s.row(), context=context())
+    assert s.row()["stage"] == "DELETE_ACCEPTED"
+
+
 def test_source_only_preserves_vectors_and_clears_only_live_source_pointer(setup):
     s = setup
     value = intent(scope="source_only")

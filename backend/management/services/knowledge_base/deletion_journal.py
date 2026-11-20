@@ -5,7 +5,12 @@ import re
 from datetime import UTC, datetime
 
 from contracts.agentos_knowledge import KnowledgeJobState, ObjectReference
-from contracts.knowledge_deletion import DELETION_DATASET, KnowledgeDeletionIntent
+from contracts.knowledge_deletion import (
+    DELETION_DATASET,
+    NULL_SOURCE_VERSION,
+    KnowledgeDeletionIntent,
+    is_immutable_source_version,
+)
 from nexent.storage.errors import (
     Conflict,
     InvalidInput,
@@ -70,6 +75,8 @@ class DeletionJournal:
             raise Conflict() from None
         if source.space != 'files' or source.key != row['object_name']:
             raise Conflict()
+        if source.version == NULL_SOURCE_VERSION:
+            raise Conflict()
         upload_hash = row['source_upload_sha256']
         if upload_hash == source.sha256 and row['upload_owner_service']:
             return source
@@ -82,7 +89,7 @@ class DeletionJournal:
         return (
             ingestion is not None and ingestion.legacy_snapshot is not None
             and ingestion.legacy_snapshot.tenant_id == row['tenant_id']
-            and ingestion.source == source and source.version.startswith('version:')
+            and ingestion.source == source and is_immutable_source_version(source.version)
             and ingestion.knowledge_id == row['knowledge_id'] and ingestion.file_id == row['file_id']
             and ingestion.file_version == row['source_generation']
             and row['source_upload_sha256'] in {None, source.sha256}
@@ -121,6 +128,8 @@ class DeletionJournal:
     def admit(self, intent, row, *, context):
         if not isinstance(intent, KnowledgeDeletionIntent):
             raise InvalidInput()
+        if intent.source is not None and intent.source.version == NULL_SOURCE_VERSION:
+            raise Conflict()
         self._identity(row, intent)
         if row["deletion_request"] is not None:
             previous = KnowledgeDeletionIntent.model_validate(row["deletion_request"])
@@ -178,6 +187,8 @@ class DeletionJournal:
     def begin_runtime(self, row, *, context):
         intent = self._phase(row, {"DELETE_ACCEPTED"})
         if intent.scope != "full":
+            raise Conflict()
+        if intent.source is not None and intent.source.version == NULL_SOURCE_VERSION:
             raise Conflict()
         pending = self._patch(row, {"stage": "DELETE_RUNTIME_SUBMITTING"}, context)
         return pending, intent.runtime_request()

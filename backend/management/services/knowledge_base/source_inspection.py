@@ -6,6 +6,7 @@ import re
 
 from contracts.agentos_knowledge import ObjectReference
 from contracts.constants import environment
+from contracts.knowledge_deletion import NULL_SOURCE_VERSION, is_immutable_source_version
 from contracts.knowledge_maintenance import (
     INSPECTION_FILES,
     INSPECTION_LEDGER,
@@ -155,9 +156,9 @@ class KnowledgeSourceInspector:
                 if alias_key is not None:
                     item.issues.append('SOURCE_ALIAS_PROVEN')
                 version = metadata.ref.version.value
-                if version.startswith('version:') and version not in {'version:', 'version:null'}:
+                if is_immutable_source_version(version):
                     item.source_deletion_evidence = 'immutable_version'
-                elif version.startswith('etag:') or version == 'version:null':
+                elif version.startswith('etag:') or version == NULL_SOURCE_VERSION:
                     item.source_deletion_evidence = (
                         'confirmed_publisher'
                         if row['upload_owner_service'] and row['source_upload_sha256'] == digest.hexdigest()

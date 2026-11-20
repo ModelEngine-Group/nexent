@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
-from contracts.knowledge_deletion import DELETION_KNOWLEDGE_DATASET
+from contracts.knowledge_deletion import (
+    DELETION_KNOWLEDGE_DATASET,
+    NULL_SOURCE_VERSION,
+    is_immutable_source_version,
+)
 from contracts.knowledge_ingestion import KnowledgeIngestionIntent
 from management.services.file.source_publish import validate_scope
 from management.services.knowledge_base.deletion_journal import (
@@ -110,7 +114,7 @@ class SourceDeletion:
     def _matches_digest(self, row, source, metadata, context):
         if metadata.sha256 is not None:
             return metadata.sha256 == source.sha256
-        if not source.version.startswith('version:') or row['ingestion_request'] is None:
+        if not is_immutable_source_version(source.version) or row['ingestion_request'] is None:
             return False
         try:
             ingestion = KnowledgeIngestionIntent.model_validate(row['ingestion_request'])
@@ -139,26 +143,27 @@ class SourceDeletion:
             raise Conflict()
         allowed = {'DELETE_ACCEPTED'} if intent.scope == 'source_only' else {'DELETE_SOURCE_PENDING'}
         self.journal._phase(row, allowed | {'DELETE_SOURCE_DELETING'})
+        source = intent.source
+        if source is not None and source.version == NULL_SOURCE_VERSION:
+            raise OutcomeUnknown(operation_id=context.operation_id)
+        immutable = source is not None and is_immutable_source_version(source.version)
         self._ledger(self.records, row, intent, context)
         metadata = self._stat(row, context)
         if row['stage'] == 'DELETE_SOURCE_DELETING':
             # A previous write may have reached storage; subsequent calls only observe absence.
             return row if metadata is not None else self._finish(row, context)
         if metadata is not None:
-            source = intent.source
             if (source is None or source.key != row['object_name'] or metadata.ref.space != source.space
                     or metadata.ref.key != source.key or metadata.ref.version != Revision(source.version)
                     or metadata.size != row['file_size'] or not self._matches_digest(row, source, metadata, context)):
                 raise Conflict()
-            if not source.version.startswith('version:') and (
-                not source.version.startswith('etag:') or row['source_upload_sha256'] != source.sha256
-                or not row['upload_owner_service'] or row['storage_object_id'] is None
-            ):
+            if not immutable and (not source.version.startswith('etag:') or row['source_upload_sha256'] != source.sha256
+                                  or not row['upload_owner_service'] or row['storage_object_id'] is None):
                 # Unversioned deletion needs the closed single-publisher path, never a guessed legacy owner.
                 raise OutcomeUnknown(operation_id=context.operation_id)
         row = self.journal.begin_source(row, context=context)
         if metadata is not None:
-            target = metadata.ref if intent.source.version.startswith('version:') else ObjectRef('files', intent.source.key)
+            target = metadata.ref if immutable else ObjectRef('files', source.key)
             receipt = self.objects.delete(target, context=context)
             if receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.deleted:
                 raise OutcomeUnknown(operation_id=context.operation_id)

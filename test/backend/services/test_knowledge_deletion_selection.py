@@ -198,10 +198,11 @@ def test_active_legacy_id_and_northbound_path_choose_the_same_deletion_intent(se
 
 
 
-@pytest.mark.parametrize("evidence", ["valid", "unversioned", "wrong-hash", "wrong-tenant", "missing-ledger", "wrong-ledger", "deleted-ledger"])
+@pytest.mark.parametrize("evidence", ["valid", "unversioned", "null-version", "wrong-hash", "wrong-tenant", "missing-ledger",
+                                      "wrong-ledger", "deleted-ledger"])
 def test_legacy_delete_needs_versioned_source_and_committed_history(selection, mocker, evidence):
     s = selection
-    revision = "etag:one" if evidence == "unversioned" else "version:one"
+    revision = {"unversioned": "etag:one", "null-version": "version:null"}.get(evidence, "version:one")
     source = {"space": "files", "key": "source.txt", "version": revision, "sha256": "a" * 64}
     snapshot = LegacyIngestionSnapshot(tenant_id="other" if evidence == "wrong-tenant" else "tenant-a", resource_revision="b" * 64,
         lifecycle_revision=1, legacy_quiesced=True, previous={"status": "COMPLETED", "processing_attempt": 0})
@@ -222,6 +223,6 @@ def test_legacy_delete_needs_versioned_source_and_committed_history(selection, m
     else:
         with pytest.raises(Unavailable):
             s.select()
-    if evidence in {"unversioned", "wrong-hash", "wrong-tenant"}:
+    if evidence in {"unversioned", "null-version", "wrong-hash", "wrong-tenant"}:
         ledger.assert_not_called()
     assert s.s.row()["deletion_request"] is None
