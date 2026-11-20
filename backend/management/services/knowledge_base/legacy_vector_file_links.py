@@ -1,0 +1,105 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Relate historical parsed records to exact lifecycle rows without opening any source."""
+
+from collections import defaultdict
+from urllib.parse import urlsplit
+
+from contracts.knowledge_ingestion import is_historical_file_id
+from contracts.knowledge_maintenance import LegacyVectorFileLink
+from nexent.storage.errors import Conflict, ScopeDenied
+
+FILE_LINK_FIELDS = (
+    'file_id', 'public_file_id', 'tenant_id', 'knowledge_id', 'index_name', 'bucket_name',
+    'source_key', 'object_name', 'local_source_path', 'delete_flag', 'deletion_request',
+    'status', 'source_generation', 'version',
+)
+
+
+def _object_key(value, bucket):
+    if not value:
+        return None
+    if '://' in value:
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return None
+        if (parsed.scheme != 's3' or parsed.netloc != bucket or not parsed.path.startswith('/')
+            or value != f's3://{bucket}{parsed.path}'):
+            return None
+        value = parsed.path[1:]
+    if value and not value.startswith('/') and not any(part in {'', '.', '..'} for part in value.split('/')):
+        return value
+    return None
+
+
+class LegacyVectorFileLinks:
+    def __init__(self, rows, knowledge, actor):
+        self.rows = {}
+        self.by_id = defaultdict(set)
+        self.by_address = defaultdict(set)
+        self.conflicting = set()
+        for row in rows:
+            if (row['tenant_id'] != actor.tenant_id or row['knowledge_id'] != knowledge['knowledge_id']
+                or row['index_name'] != knowledge['index_name']):
+                raise ScopeDenied()
+            file_id = row['file_id']
+            if not is_historical_file_id(file_id) or file_id in self.rows:
+                raise Conflict()
+            self.rows[file_id] = row
+            self.by_id[file_id].add(file_id)
+            if is_historical_file_id(row['public_file_id']):
+                self.by_id[row['public_file_id']].add(file_id)
+            bucket = row['bucket_name']
+            source_key = _object_key(row['source_key'], bucket)
+            object_key = _object_key(row['object_name'], bucket)
+            keys = {key for key in (source_key, object_key) if key}
+            local = row['local_source_path']
+            if (len(keys) > 1 or row['source_key'] and source_key is None
+                or row['object_name'] and object_key is None and row['object_name'] != local):
+                self.conflicting.add(file_id)
+            # Retired rows still make a reused address ambiguous.
+            for key in keys:
+                self.by_address[key].add(file_id)
+                if bucket:
+                    self.by_address[f's3://{bucket}/{key}'].add(file_id)
+                    self.by_address[f'/{bucket}/{key}'].add(file_id)
+            if local and '://' not in local:
+                self.by_address[local].add(file_id)
+
+    def find(self, source, tenant_id):
+        metadata = source.get('metadata')
+        if metadata is not None and not isinstance(metadata, dict):
+            return LegacyVectorFileLink(status='unresolved')
+        fields = (source, metadata or {})
+        if any(part.get('tenant_id') not in (None, tenant_id) for part in fields):
+            return LegacyVectorFileLink(status='conflict')
+        raw_ids = [part['file_id'] for part in fields if part.get('file_id') is not None]
+        origin = source.get('process_source')
+        parsed = type(source.get('index')) is int and source['index'] >= 0 and isinstance(origin, str) and bool(origin.strip())
+        if not raw_ids and not parsed:
+            return LegacyVectorFileLink(status='unresolved')
+        address = source.get('path_or_url')
+        if address is not None and not isinstance(address, str):
+            return LegacyVectorFileLink(status='conflict')
+        by_address = self.by_address.get(address, set()) if isinstance(address, str) and address else set()
+        evidence = [self.by_id.get(value, set()) if is_historical_file_id(value) else set() for value in raw_ids]
+        if not raw_ids or address:
+            evidence.append(by_address)
+        if any(len(matches) > 1 for matches in evidence):
+            return LegacyVectorFileLink(status='ambiguous')
+        matches = set().union(*evidence)
+        if matches and (len(matches) != 1 or not all(evidence)):
+            return LegacyVectorFileLink(status='conflict')
+        if not matches:
+            return LegacyVectorFileLink(status='unresolved')
+        file_id = matches.pop()
+        if file_id in self.conflicting:
+            return LegacyVectorFileLink(status='conflict')
+        row = self.rows[file_id]
+        if (row['delete_flag'] != 'N' or row['deletion_request'] is not None
+            or row['status'] not in {'UPLOADED', 'FAILED', 'COMPLETED'}
+            or any(type(row[name]) is not int or row[name] < 0 for name in ('source_generation', 'version'))):
+            return LegacyVectorFileLink(status='unresolved')
+        return LegacyVectorFileLink(status='matched', file_id=row['file_id'],
+            via='file_id' if raw_ids else 'source_address', source_generation=row['source_generation'],
+            lifecycle_revision=row['version'])

@@ -5,6 +5,7 @@ import hashlib
 import math
 import re
 import sys
+from collections import Counter
 
 from contracts.knowledge_maintenance import (
     LEGACY_DOCUMENTS,
@@ -16,6 +17,8 @@ from contracts.knowledge_maintenance import (
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
+from management.services.knowledge_base.file_reader import KnowledgeFileReader
+from management.services.knowledge_base.legacy_vector_file_links import FILE_LINK_FIELDS, LegacyVectorFileLinks
 from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import PageRequest, RecordQuery
 
@@ -72,11 +75,17 @@ def _finding(row, metadata, actor):
 
 
 class LegacyVectorInspector:
-    def __init__(self, *, resources=knowledge_resource_ports, vectors=legacy_vector_records, cancellation_scope=None):
+    def __init__(self, *, resources=knowledge_resource_ports, vectors=legacy_vector_records, files=None,
+                 cancellation_scope=None):
         self.resources, self.vectors = resources, vectors
         self.cancellation_scope = cancellation_scope
+        self.files = files or KnowledgeFileReader()
 
-    def scan(self, knowledge_id, actor, emit, *, page_size=100, context):
+    def _file_links(self, knowledge, actor, context):
+        rows = self.files.files(knowledge['index_name'], actor, fields=FILE_LINK_FIELDS, context=context)
+        return LegacyVectorFileLinks(rows, knowledge, actor)
+
+    def scan(self, knowledge_id, actor, emit, *, page_size=100, resolve_files=False, context):
         if type(knowledge_id) is not int or knowledge_id <= 0: raise InvalidInput()
         PageRequest(limit=page_size)
         with self.resources(actor.tenant_id, actor.user_id, context=context) as resources:
@@ -86,6 +95,8 @@ class LegacyVectorInspector:
             if knowledge['knowledge_sources'] != 'elasticsearch': raise ScopeDenied()
             revision = knowledge_search_revision(knowledge)
             count, issues, cursor = 0, 0, None
+            links = self._file_links(knowledge, actor, context) if resolve_files else None
+            resolutions = Counter()
             with self.vectors(actor, knowledge_id, knowledge['index_name'], context=context, cancellation_scope=self.cancellation_scope) as records:
                 _scope(records, actor)
                 metadata = records.get(LEGACY_VECTOR_METADATA, knowledge['index_name'], context=context)
@@ -98,7 +109,14 @@ class LegacyVectorInspector:
                     for row in page.items:
                         context.remaining()
                         if row['tenant_id'] != actor.tenant_id: raise ScopeDenied()
-                        documents.append(_finding(row, metadata, actor))
+                        item = _finding(row, metadata, actor)
+                        if links is not None:
+                            if item.standalone_candidate:
+                                resolutions['standalone_candidate'] += 1
+                            else:
+                                item.file_link = links.find(row['properties'], actor.tenant_id)
+                                resolutions[item.file_link.status] += 1
+                        documents.append(item)
                     if authorize.resolve_knowledge(knowledge_id, edit=True, context=context) != knowledge: raise Conflict()
                     context.remaining()
                     emit(LegacyVectorPage(knowledge_id=knowledge_id, index_name=knowledge['index_name'], tenant_id=actor.tenant_id,
@@ -108,7 +126,10 @@ class LegacyVectorInspector:
                     cursor = page.next_cursor
                     if cursor is None: break
                 if count != total: raise Conflict()
+            if links is not None and self._file_links(knowledge, actor, context).rows != links.rows:
+                raise Conflict()
             if authorize.resolve_knowledge(knowledge_id, edit=True, context=context) != knowledge: raise Conflict()
             context.remaining()
             return {'documents': count, 'documents_with_issues': issues, 'knowledge_revision': revision,
-                    'collection_revision': metadata['revision']}
+                    'collection_revision': metadata['revision'],
+                    **({'file_resolution_counts': dict(resolutions)} if links is not None else {})}

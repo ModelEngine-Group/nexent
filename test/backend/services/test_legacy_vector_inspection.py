@@ -147,6 +147,67 @@ def test_snapshot_flags_standalone_without_printing_raw_body(standalone):
     assert item.standalone_candidate and 'old manual text' not in item.model_dump_json()
 
 
+def legacy_file(file_id='b'*32, **changes):
+    return {
+        'file_id': file_id, 'public_file_id': 'legacy-file', 'tenant_id': 'tenant-a',
+        'knowledge_id': 1, 'index_name': 'kb-one', 'bucket_name': 'files', 'source_key': 'docs/old.txt',
+        'object_name': 's3://files/docs/old.txt', 'local_source_path': '/approved/old.txt',
+        'delete_flag': 'N', 'deletion_request': None, 'status': 'COMPLETED', 'source_generation': 1, 'version': 7,
+    } | changes
+
+
+@pytest.mark.parametrize('properties,other,expected,via', [
+    ({'path_or_url': 's3://files/docs/old.txt'}, None, 'matched', 'source_address'),
+    ({'path_or_url': '/approved/old.txt'}, None, 'matched', 'source_address'),
+    ({'path_or_url': '/files/docs/old.txt'}, None, 'matched', 'source_address'),
+    ({'path_or_url': 'docs/old.txt', 'file_id': 'legacy-file'}, None, 'matched', 'file_id'),
+    ({'path_or_url': 's3://foreign/docs/old.txt'}, None, 'unresolved', None),
+    ({'path_or_url': 'docs/old.txt', 'file_id': 'unbound'}, None, 'conflict', None),
+    ({'path_or_url': [], 'file_id': 'legacy-file'}, None, 'conflict', None),
+    ({'path_or_url': 'docs/old.txt', 'metadata': {'tenant_id': 'foreign'}}, None, 'conflict', None),
+    ({'path_or_url': 'docs/old.txt'}, legacy_file('c'*32, delete_flag='Y'), 'ambiguous', None),
+    ({'path_or_url': 'docs/old.txt'}, legacy_file('c'*32, source_key='other', object_name='docs/old.txt'), 'ambiguous', None),
+])
+def test_parsed_inventory_compares_exact_ids_and_source_addresses(inspection, properties, other, expected, via):
+    s = inspection
+    s.row['properties'] = {'index': 0, 'embedding': [1., 0.], 'process_source': 'Unstructured'} | properties
+    rows = [legacy_file()] + ([other] if other is not None else [])
+    s.service.files = Mock()
+    s.service.files.files.return_value = rows
+    result = s.service.scan(1, s.actor, s.frames.append, resolve_files=True, context=context())
+    assert result['file_resolution_counts'] == {expected: 1}
+    page, = s.frames
+    link = page.documents[0].file_link
+    assert link.status == expected and link.via == via
+    if expected == 'matched':
+        assert (link.file_id, link.lifecycle_revision, link.source_generation) == ('b'*32, 7, 1)
+    else:
+        assert link.file_id is None
+    assert 'docs/old.txt' not in page.model_dump_json()
+    assert s.service.files.files.call_count == 2
+
+
+def test_file_row_with_disagreeing_object_namespace_is_not_attributed(inspection):
+    s = inspection
+    s.row['properties'].update(file_id='legacy-file', path_or_url='docs/old.txt')
+    s.service.files = Mock()
+    s.service.files.files.return_value = [legacy_file(object_name='s3://foreign/docs/old.txt')]
+    s.service.scan(1, s.actor, s.frames.append, resolve_files=True, context=context())
+    assert s.frames[0].documents[0].file_link.status == 'conflict'
+
+
+@pytest.mark.parametrize('rows,error', [
+    ([legacy_file(tenant_id='foreign')], ScopeDenied),
+    ([legacy_file(version=8)], Conflict),
+])
+def test_file_inventory_never_completes_with_invalid_or_changed_lifecycle(inspection, rows, error):
+    s = inspection
+    s.service.files = Mock()
+    s.service.files.files.side_effect = [rows, rows] if error is ScopeDenied else [[legacy_file()], rows]
+    with pytest.raises(error):
+        s.service.scan(1, s.actor, s.frames.append, resolve_files=True, context=context())
+
+
 async def test_copy_exact_standalone_with_original_vector_and_no_file_or_model(standalone):
     s, client, migration = standalone
     result = await migration.migrate(1, s.row['document_id'], 'a'*64, '1:1', s.actor,

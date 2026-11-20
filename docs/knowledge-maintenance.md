@@ -265,6 +265,20 @@ documents, changed source revisions, images and chunks with file processing
 markers are rejected. After an uncertain write, inspect the Runtime key before
 attempting the operation again.
 
+## Relate parsed chunks to historical files
+
+Run `inspect-vectors --resolve-files` with the same tenant, operator and
+knowledge base as the source migration. The report uses exact stored object
+keys and recorded aliases. It identifies a file only when the supplied file ID
+and source address agree, when present, and at most one lifecycle row matches.
+A deleted row also counts when detecting a reused source address.
+
+For a matched result, use `file_link.file_id` to select the file in the existing
+migration command. Use `--map-legacy-file-id` for a noncanonical ID. Check the
+reported file generation and lifecycle revision when preparing the migration
+plan. Resolve ambiguous or conflicting references before using them as
+evidence. The report does not open source objects or verify Runtime publication.
+
 ## Private legacy task archive
 
 After stopping and draining old admission and workers, export one authorized KB:

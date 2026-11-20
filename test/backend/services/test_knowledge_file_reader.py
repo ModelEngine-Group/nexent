@@ -34,6 +34,7 @@ def reader(resources, monkeypatch):  # noqa: F811
                 original.c[f.name].type,
                 primary_key=original.c[f.name].primary_key,
                 nullable=original.c[f.name].nullable,
+                server_default=sa.text("0") if f.name in {"source_generation", "version"} else None,
             )
             for f in definition.fields
         ),

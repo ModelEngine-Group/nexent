@@ -113,9 +113,10 @@ class KnowledgeFileReader:
         with self._records(index_name, actor, context=context, knowledge_id=knowledge_id, edit=edit) as (_, row):
             return row
 
-    def files(self, index_name, actor, *, context):
+    def files(self, index_name, actor, *, context, fields=()):
         with self._records(index_name, actor, context=context) as (records, knowledge):
             query = RecordQuery(
+                fields=fields,
                 where=Junction("and", (
                     Comparison("knowledge_id", "eq", knowledge["knowledge_id"]),
                     Comparison("index_name", "eq", index_name),

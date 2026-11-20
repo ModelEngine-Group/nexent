@@ -9,7 +9,7 @@ from contracts.agentos_knowledge import (
     ModelVersion,
     ObjectReference,
 )
-from pydantic import Field
+from pydantic import Field, model_serializer
 
 INSPECTION_FILES = 'knowledge_source_inspection'
 INSPECTION_LEDGER = 'knowledge_source_ledger_inspection'
@@ -53,6 +53,14 @@ class SourceInspectionPage(Contract):
 VECTOR_PENDING_CHECKS = ('source_mapping', 'legacy_tasks', 'runtime_visibility', 'model_dimensions')
 
 
+class LegacyVectorFileLink(Contract):
+    status: Literal['matched', 'unresolved', 'ambiguous', 'conflict']
+    file_id: str | None = Field(default=None, min_length=1, max_length=64)
+    via: Literal['file_id', 'source_address'] | None = None
+    source_generation: int | None = Field(default=None, ge=0)
+    lifecycle_revision: int | None = Field(default=None, ge=0)
+
+
 class LegacyVectorFinding(Contract):
     document_id_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
     revision: str = Field(min_length=1, max_length=128)
@@ -61,7 +69,15 @@ class LegacyVectorFinding(Contract):
     chunk_index: int | None = Field(default=None, ge=0)
     dimensions: int | None = Field(default=None, ge=0)
     standalone_candidate: bool = False
+    file_link: LegacyVectorFileLink | None = None
     issues: list[Issue] = Field(default_factory=list, max_length=32)
+
+    @model_serializer(mode='wrap')
+    def serialize_finding(self, handler):
+        result = handler(self)
+        if self.file_link is None:
+            result.pop('file_link', None)
+        return result
 
 
 class LegacyVectorPage(Contract):

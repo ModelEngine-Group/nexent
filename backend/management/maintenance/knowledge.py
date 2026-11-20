@@ -63,8 +63,10 @@ def _scan_vectors(args, scope, context, emit):
     from management.services.knowledge_base.legacy_vectors import LegacyVectorInspector
 
     inspector = LegacyVectorInspector(cancellation_scope=scope)
+    options = {'resolve_files': True} if getattr(args, 'resolve_files', False) else {}
     return inspector.scan(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
-        lambda page: emit({'kind': 'legacy_vector_page', **page.model_dump(mode='json')}), page_size=args.page_size, context=context)
+        lambda page: emit({'kind': 'legacy_vector_page', **page.model_dump(mode='json')}),
+        page_size=args.page_size, context=context, **options)
 
 
 async def _inspect(args, scanner, kind, pending, *, inventory=True):
@@ -175,6 +177,9 @@ def main(argv=None):
         if command == 'inspect-runtime':
             inspect.add_argument('--include-vector-media', action='store_true',
                 help='Count stored text, image, and unclassified vectors without reading documents')
+        if command == 'inspect-vectors':
+            inspect.add_argument('--resolve-files', action='store_true',
+                help='Relate old vectors to exact Management lifecycle rows without opening sources')
         if command == 'archive-tasks':
             inspect.add_argument('--legacy-quiesced', action='store_true', required=True,
                 help='Operator confirms old admission and workers are stopped and drained; export includes private contents')

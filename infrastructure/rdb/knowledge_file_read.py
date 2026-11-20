@@ -76,6 +76,10 @@ def file_read_catalog():
         "index_name",
         "object_name",
         "local_source_path",
+        "bucket_name",
+        "source_key",
+        "source_generation",
+        "version",
         "original_filename",
         "file_size",
         "status",
@@ -98,7 +102,7 @@ def file_read_catalog():
         "updated_by",
         'deletion_request',
     )
-    integers = {"knowledge_id", "file_size", "processed_chunks", "total_chunks"}
+    integers = {"knowledge_id", "file_size", "processed_chunks", "total_chunks", "source_generation", "version"}
     definition = DatasetDefinition(
         FILES,
         "file_id",
