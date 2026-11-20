@@ -13,7 +13,7 @@ change:
   coverage_gap:
     type: missing_assertion
     description: Current-run actions were covered, but cross-turn canonical action restoration was not. Jiuwen SSE
-      proof did not require TOOL spans.
+      proof did not require TOOL spans or full IDs for the actual default-formatted Skill call and cross-turn restore.
   feature_contract_changed: true
   affected_features:
     existing:
@@ -27,10 +27,10 @@ change:
   affected_cases:
     existing:
     - CMSR-D3-001
-    - JIUWEN-OUTPUT-D3-001
     - CHAT-TRAJECTORY-REAL-MODEL-D3-001
     modified:
     - AGENT-HISTORY-D3-001
+    - JIUWEN-OUTPUT-D3-001
     - CONTEXT-POST-RESPONSE-D3-001
     added: []
     retired: []
@@ -48,9 +48,12 @@ change:
       use actual rendered capacity feedback within the existing three summary subrequests and transactional checks.
     - Carry a freshly measured local rendered-history goal in every existing history-only recovery generation,
       including the first and ordinary later iterations, and retain it for format/fact correction without another claim.
+    - Match only actual registered LocalFunction schema defaults after the existing exact path; preserve original
+      provider IDs, group metadata and raw arguments through persisted native history and authorized tool sources.
     reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
       required. No duplicate D1.
     test_selectors:
+    - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
     - test/sdk/core/agents/test_persisted_codeagent_actions.py
     - test/backend/services/test_agent_execution_history_stream.py
     - test/backend/database/test_conversation_history_stopped.py
@@ -102,4 +105,9 @@ change:
     from provider completion-token allowances. Normal maintenance/main prompts and all call/claim limits remain.
     The missing hint does not prove the full cause of provider behavior or guarantee a future fitting response.
     Original full failed frame/live revision and claim were not captured; readonly delta bounds and static
-    control-flow inference stay labeled as such. New real-container/two-runtime/Phoenix acceptance remains pending.'
+    control-flow inference stay labeled as such. New real-container/two-runtime/Phoenix acceptance remains pending.
+    v17 actual LocalFunction formatting injects omitted optional None; exact-only matching loses provider/group
+    metadata, degrading next-turn native history and original source registration. Recognize only declared schema
+    defaults when no old exact candidate exists; keep ambiguity, MCP, nested, raw arguments and execution unchanged.
+    Strengthen the existing JIUWEN-OUTPUT-D3-001 native resource-chain HTTP/SSE/SDK/PostgreSQL assertion; no new Case.
+    Old null-ID history remains readonly. New container/model/Phoenix acceptance requires new conversations.'

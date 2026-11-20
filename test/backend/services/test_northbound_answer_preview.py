@@ -3,10 +3,14 @@
 """Complete-mode previews are wire-only projections of canonical root answers."""
 
 
+import json
+
 import pytest
 
-from .test_agent_run_final_answers import stream_capture
+from .test_agent_run_final_answers import stream_capture as _stream_capture
 from .test_northbound_final_answer_stream import answer, answers
+
+stream_capture = _stream_capture
 
 
 def previews(events):
@@ -103,7 +107,7 @@ async def test_persistence_error_leaves_preview_unconfirmed(stream_capture):
 
 
 @pytest.mark.asyncio
-async def test_jiuwen_keeps_native_output_and_its_complete_answer(stream_capture):
+async def test_jiuwen_maps_native_output_and_confirms_one_complete_answer(stream_capture):
     native = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
               "turn_id": "turn"}
     events, batch = await stream_capture([
@@ -115,3 +119,10 @@ async def test_jiuwen_keeps_native_output_and_its_complete_answer(stream_capture
     assert previews(events) == []
     assert [event["content"] for event in answers(events)] == ["Native answer"]
     assert batch["message_content"] == "Native answer"
+
+    assert not {"model_output", "tool_result", "step_observation", "run_terminal"} & {e["type"] for e in events}
+    assert all("runtime_mode" not in event for event in events)
+    assert any(event["type"] == "model_output_thinking" and event["content"] == "Native answer" for event in events)
+    raw = [json.loads(unit["unit_content"]) for unit in batch["message_units"]
+           if unit["type"] in {"model_output", "run_terminal"}]
+    assert len(raw) == 2 and all(event["runtime_mode"] == "native_agent" for event in raw)

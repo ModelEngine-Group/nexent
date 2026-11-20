@@ -12,6 +12,41 @@ from nexent.core.agents.output.answer import AnswerBoundaryError, PublicTextFilt
 from nexent.core.utils.observer import ProcessType
 
 
+def _matches_schema_defaults(provided, executed, schema=None, *, allow_defaults=True):
+    """Compare without coercion, allowing only declared LocalFunction defaults.
+
+    Jiuwen's SchemaUtils materializes non-required fields as None when their
+    schema has no explicit default. Nested object/array payloads are not
+    materialized by its tool-card formatter and must retain exact values.
+    This comparison never changes execution inputs or original arguments.
+    """
+    if type(provided) is not type(executed):
+        return False
+    schema = schema if isinstance(schema, dict) else {}
+    if isinstance(provided, dict):
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            return False
+        if any(key not in provided for key in required) or not provided.keys() <= executed.keys():
+            return False
+        for key, value in provided.items():
+            if not _matches_schema_defaults(value, executed[key], properties.get(key), allow_defaults=False):
+                return False
+        for key in executed.keys() - provided.keys():
+            declaration = properties.get(key)
+            if not allow_defaults or key in required or not isinstance(declaration, dict):
+                return False
+            if not _matches_schema_defaults(declaration.get("default"), executed[key]):
+                return False
+        return True
+    if isinstance(provided, list):
+        return len(provided) == len(executed) and all(
+            _matches_schema_defaults(left, right, schema.get("items"), allow_defaults=False)
+            for left, right in zip(provided, executed))
+    return provided == executed
+
+
 class JiuwenEventAdapter:
     def __init__(self, observer, agent_name, turn_id=None, *, capacity_provider=None):
         self.observer, self.agent_name = observer, agent_name
@@ -22,6 +57,7 @@ class JiuwenEventAdapter:
         self.resource_error = None
         self.blocks = []
         self.calls = []
+        self.local_tool_schemas = {}
         self._call_history = {}
         self.sequence = 0
         self.step_number = 0
@@ -119,6 +155,10 @@ class JiuwenEventAdapter:
         with self._lock:
             matches = [index for index, call in enumerate(self.calls) if parent_call_id is None
                        and call.name == name and call.parsed_arguments == arguments]
+            if not matches and parent_call_id is None and name in self.local_tool_schemas:
+                matches = [index for index, call in enumerate(self.calls) if call.name == name
+                           and _matches_schema_defaults(call.parsed_arguments, arguments,
+                                                        self.local_tool_schemas[name])]
             if len(matches) == 1:
                 provider_id = self.calls.pop(matches[0]).provider_call_id
                 metadata = self._call_history.pop(provider_id, {})

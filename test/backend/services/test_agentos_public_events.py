@@ -34,8 +34,9 @@ async def test_public_resume_adapts_only_prepared_frames_and_retains_the_cursor(
     legacy = b"event: stream_status\ndata: old\n\n"
     event = observer(2, {"type": "final_answer", "content": "answer"})
     terminal = f'id: {CURSOR.run_id}:3\nevent: agentos_terminal\ndata: {{"status":"completed"}}\n\n'.encode()
-    source = response(legacy + event[:7], event[7:] + b": keep-alive\n\n" + terminal)
-    resume = AsyncMock(return_value=source)
+    prefix = observer(1, {"type": "thought", "content": "Acknowledged prefix"})
+    source = response(prefix + legacy + event[:7], event[7:] + b": keep-alive\n\n" + terminal)
+    resume = AsyncMock(side_effect=[response(), source])
     mocker.patch.object(runtime_client, "_agentos_client").return_value.resume = resume
 
     output = await runtime_client.forward_conversation_resume(CURSOR, "actor", "tenant")
@@ -44,7 +45,8 @@ async def test_public_resume_adapts_only_prepared_frames_and_retains_the_cursor(
     assert b"".join([chunk async for chunk in output.body_iterator]) == (
         legacy + event.replace(b"event: agentos_observer\n", b"") + b": keep-alive\n\n" + terminal
     )
-    resume.assert_awaited_once_with(CURSOR, "actor", "tenant")
+    assert [call.args for call in resume.await_args_list] == [
+        (CURSOR, "actor", "tenant"), (CURSOR.model_copy(update={"after_event_id": None}), "actor", "tenant")]
 
 
 @pytest.mark.asyncio
@@ -120,7 +122,8 @@ async def test_failed_prepared_turn_presents_an_error_before_the_terminal_frame(
 @pytest.mark.asyncio
 async def test_ephemeral_frames_preserve_observers_and_only_sign_run_owned_files(mocker):
     scoped = f"workspace/actor/{CURSOR.run_id}/outputs/result.txt"
-    frame = lambda event: ("data: " + json.dumps(event) + "\n\n").encode()
+    def frame(event):
+        return ("data: " + json.dumps(event) + "\n\n").encode()
     observer_frame = frame({"type": "final_answer", "content": "answer"})
     artifact = frame({"type": "file_artifact", "content": {"artifacts": [
         {"object_name": scoped, "name": "result.txt", "absolute_path": "/runtime/path"},

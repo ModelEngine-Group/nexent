@@ -13,6 +13,7 @@ from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESS
 from contracts.constants.environment import NEXENT_AGENT_CORE
 from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
 from management.services.agent.stream import AssistantMessageProjection
+from management.services.conversation.nexent_output import NexentOutputAdapter
 from nexent.core.concurrency import run_blocking
 
 _OBSERVER_LINE = b"event: agentos_observer"
@@ -136,6 +137,7 @@ def present_ephemeral_stream(
 
     async def events():
         outputs = {}
+        native_output = NexentOutputAdapter()
         prefix = iter(opening_events)
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
@@ -154,8 +156,11 @@ def present_ephemeral_stream(
                         continue
                 except (TypeError, ValueError):
                     continue
-                yield frame + b"\n\n"
+                for projected in native_output.push(event):
+                    yield frame + b"\n\n" if projected is event else _public_sse(projected)
 
+        for projected in native_output.close():
+            yield _public_sse(projected)
         for event in prefix:
             yield _public_sse(event)
         if outputs:
@@ -183,6 +188,8 @@ def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: 
 
     async def events():
         opening = True
+        native_output = NexentOutputAdapter()
+        error_presented = False
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
                 if opening:
@@ -202,11 +209,26 @@ def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: 
                     except (ValueError, AttributeError):
                         break
                     if status in ("completed", "failed", "stopped"):
-                        yield status_event(status)
+                        for projected in native_output.close(status):
+                            yield _public_sse(projected)
+                        yield status_event(native_output.status or status)
                         return
                     break
-                yield body + b"\n\n"
-        yield _PUBLIC_ERROR + b"\n\n"
+                if body.startswith(_OBSERVER_LINE + b"\n"):
+                    try:
+                        projected = _project_observer(body[len(_OBSERVER_LINE) + 1:], native_output)
+                    except (TypeError, ValueError):
+                        break
+                    for data, event in projected:
+                        error_presented |= event.get("type") == "error"
+                        yield body + b"\n\n" if data == body[len(_OBSERVER_LINE) + 1:] else data + b"\n\n"
+                else:
+                    yield body + b"\n\n"
+        for projected in native_output.close("failed"):
+            error_presented |= projected.get("type") == "error"
+            yield _public_sse(projected)
+        if not error_presented:
+            yield _PUBLIC_ERROR + b"\n\n"
         yield status_event("failed")
 
     internal = {"content-length", "x-agentos-run-id", REPLAY_COUNT_HEADER.lower()}
@@ -262,9 +284,27 @@ class _CompleteAnswer:
         })
 
 
+def _project_observer(data, native_output):
+    """Reuse the existing mapper while retaining untouched legacy JSON bytes."""
+    if not data.startswith(b"data: "):
+        raise ValueError("Missing AgentOS observer data")
+    payload = json.loads(data[6:])
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid AgentOS observer data")
+    return [(data if event is payload else _public_sse(event)[:-2], event)
+            for event in native_output.push(payload)]
+
+
+def _public_group(data, cursor=None):
+    """A raw cursor acknowledges the complete conversion, including fan-out."""
+    return b"".join((cursor + b"\n" if cursor and index == len(data) - 1 else b"") + item + b"\n\n"
+                    for index, item in enumerate(data))
+
+
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
     on_terminal=None, created=False, include_journal_controls=True, opening_events=(), complete_answer=False,
+    replay_from_start=False,
 ) -> StreamingResponse:
     if response.status_code != 200:
         return response
@@ -274,34 +314,89 @@ def present_public_resume(
         announce_creation = created
         initial_events = iter(opening_events)
         answer = _CompleteAnswer() if complete_answer and NEXENT_AGENT_CORE == "smolagents" else None
+        native_output = NexentOutputAdapter()
+        warming = replay_from_start and request.after_event_id is not None
+        terminal_seen = False
+        prefix_index = 1
+
+        def prefix_error():
+            if include_journal_controls:
+                return b'event: agentos_error\ndata: {"code":"AGENTOS_CURSOR_UNAVAILABLE"}\n\n'
+            return _PUBLIC_ERROR + b"\n\n"
+
+        async def render(projected):
+            nonlocal error_presented
+            rendered = []
+            for data, _ in projected:
+                try:
+                    data, is_error = await _present_observer(data, request, user_id)
+                except (TypeError, ValueError):
+                    data, is_error = _PUBLIC_ERROR, True
+                error_presented |= is_error
+                if data is not None:
+                    # Native finality already belongs to the explicit run result.
+                    if answer and native_output.root is None:
+                        data = answer.observer(data)
+                    if data is not None:
+                        rendered.append(data)
+            return rendered
+
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
                 if announce_creation:
-                    # Yield only after entering the upstream iterator so disconnect can close it.
-                    payload = {"type": "conversation_created", "content": {"conversation_id": request.conversation_id}}
-                    yield b"data: " + json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n\n"
+                    yield _public_sse({"type": "conversation_created", "content": {
+                        "conversation_id": request.conversation_id}})
                     announce_creation = False
                 for opening_event in initial_events:
-                    encoded = json.dumps(opening_event, ensure_ascii=False, separators=(",", ":")).encode()
-                    yield b"data: " + encoded + b"\n\n"
+                    yield _public_sse(opening_event)
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
+                if warming and cursor == b"event: agentos_error":
+                    yield frame + b"\n\n" if include_journal_controls else _PUBLIC_ERROR + b"\n\n"
+                    return
+                if warming and cursor.startswith(b"id: "):
+                    if cursor != f"id: {request.run_id}:{prefix_index}".encode():
+                        yield prefix_error()
+                        return
+                    prefix_index += 1
+                suppressed = warming
+                if warming and cursor == f"id: {request.after_event_id}".encode():
+                    warming = False
                 if kind in {b"event: agentos_execution_fact", b"event: agentos_execution_summary"}:
                     continue
                 if kind != _OBSERVER_LINE:
                     if kind == b"event: agentos_terminal" and cursor.startswith(f"id: {request.run_id}:".encode()):
-                        if on_terminal is not None:
-                            confirmed = await on_terminal()
+                        try:
                             status = json.loads(data.removeprefix(b"data: ")).get("status")
+                        except (TypeError, ValueError, AttributeError):
+                            status = None
+                        if warming:
+                            yield prefix_error()
+                            return
+                        confirmed = await on_terminal() if on_terminal is not None and not suppressed else None
+                        terminal_seen = status in {"completed", "failed", "stopped"}
+                        close_status = status if terminal_seen and (on_terminal is None or confirmed is True) else "failed"
+                        projected = [(_public_sse(event)[:-2], event) for event in native_output.close(close_status)]
+                        if suppressed:
+                            continue
+                        rendered = await render(projected)
+                        if rendered:
+                            # The terminal control is the last event in this raw group.
+                            yield _public_group(rendered)
+                        if on_terminal is not None:
                             if not error_presented and (status == "failed" or (answer and confirmed is False)):
+                                error_presented = True
                                 yield _PUBLIC_ERROR + b"\n\n"
-                            if answer and confirmed is True and status == "completed":
+                            if answer and native_output.root is None and confirmed is True and status == "completed":
                                 final_frame = answer.final_frame()
                                 if final_frame is not None:
                                     yield final_frame
                         if not include_journal_controls:
                             continue
+                    if suppressed:
+                        continue
                     if not include_journal_controls and cursor == b"event: agentos_error":
+                        error_presented = True
                         yield _PUBLIC_ERROR + b"\n\n"
                     else:
                         yield frame + b"\n\n"
@@ -309,20 +404,26 @@ def present_public_resume(
                 cursor_id = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
                 if (not cursor.startswith(b"id: ") or not re.fullmatch(EVENT_ID_PATTERN, cursor_id)
                         or not cursor_id.startswith(f"{request.run_id}:")):
-                    # Do not give the client a cursor it cannot safely resume.
                     return
                 try:
-                    data, is_error = await _present_observer(data, request, user_id)
+                    projected = _project_observer(data, native_output)
                 except (TypeError, ValueError):
-                    data, is_error = _PUBLIC_ERROR, True
-                error_presented |= is_error
-                if data is None:
+                    projected = [(_PUBLIC_ERROR, {"type": "error"})]
+                if suppressed:
+                    error_presented |= any(event.get("type") == "error" for _, event in projected)
                     continue
-                if answer:
-                    data = answer.observer(data)
-                    if data is None:
-                        continue
-                yield (cursor + b"\n" if include_journal_controls else b"") + data + b"\n\n"
+                rendered = await render(projected)
+                if rendered:
+                    yield _public_group(rendered, cursor if include_journal_controls else None)
+        if warming:
+            yield prefix_error()
+            return
+        if not terminal_seen and native_output.root is not None:
+            projected = [(_public_sse(event)[:-2], event) for event in native_output.close("failed")]
+            if not error_presented:
+                rendered = await render(projected)
+                if rendered:
+                    yield _public_group(rendered)
 
     excluded_headers = {"content-length", REPLAY_COUNT_HEADER.lower()}
     if not include_journal_controls:
