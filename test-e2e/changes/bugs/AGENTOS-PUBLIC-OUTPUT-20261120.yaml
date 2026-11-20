@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: AGENTOS-PUBLIC-OUTPUT-20261120
+  change_type: bugfix
+  bug_id: AGENTOS-PUBLIC-OUTPUT-20261120
+  title: Restore established live answer events on prepared AgentOS streams
+  description: Apply the existing public output adapter before publishing prepared conversation events.
+  observed_behavior: The prepared public run forwards each Jiuwen model_output fragment as a standalone text event, so the chat renders each fragment as a Markdown block.
+  expected_behavior: The public stream emits the established reasoning and final_answer events. Clarification remains a single interactive card. The transport retains the event cursor, heartbeats and the same run on reconnect.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: The real clarification journey checked the final result and persistence without asserting that raw model_output fragments never become public text parts.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT, JIUWEN-MODEL-BRIDGE]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [AOS-TRANSPORT-D3-001]
+    modified: [JIUWEN-CLARIFICATION-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Convert raw native chunks to step-scoped thinking and emit one confirmed final answer at completion.
+    - Preserve clarification identity, stable cursors, heartbeat, scoped replay, and failure behavior.
+    reason: Public stream presenter tests exercise the event conversion and cursor boundaries. Real Playwright confirms the browser does not render the raw fragments, and signed AgentOS transport cases retain the protocol checks.
+    test_selectors:
+    - test/backend/services/test_agentos_public_events.py::test_prepared_native_stream_restores_public_answer_projection
+    - test/backend/services/test_agentos_public_events.py::test_prepared_native_clarification_keeps_the_persisted_unit_identity
+    - test/backend/services/test_agentos_public_events.py::test_native_cursor_resume_restores_tool_pairing_without_republishing_prefix
+    - test/backend/services/test_agentos_public_events.py::test_unavailable_native_resume_prefix_stops_without_publishing_unpaired_events
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/design.md.
+    The existing D4 owns its assistant clone, conversations and temporary authentication, with no shared families. The existing D3 retains signed runtime transport coverage. No additional D1 case is needed.

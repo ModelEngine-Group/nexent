@@ -37,7 +37,8 @@ case:
   - order: 3
     action: Fill required birth information using the actual form controls and submit once.
     expected: The request includes structured answers and source unit identity; backend atomically saves the answer
-      and the real model produces a successful continuation without re-asking supplied facts.
+      and the real model produces a successful continuation without re-asking supplied facts. The public stream emits
+      one confirmed answer without raw engine text fragments, and the page renders the answer as continuous Markdown.
   - order: 4
     action: Open the persisted conversation through its canonical history route, refresh and reopen it, then ask
       a simple history follow-up.

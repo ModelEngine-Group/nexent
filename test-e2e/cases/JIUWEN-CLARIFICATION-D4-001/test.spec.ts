@@ -125,20 +125,16 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
       .filter((line) => line.startsWith("data:"))
       .map((line) => JSON.parse(line.slice(5).trim()));
     expect(result.filter((event) => event.type === "error")).toEqual([]);
-    const terminal = result.filter(
-      (event) => event.type === "run_terminal" && !event.invocation_id,
-    );
-    if (expectedCore === "jiuwen") {
-      expect(terminal).toHaveLength(1);
-      expect(terminal[0].status, terminal[0].error?.category).toBe("completed");
-      expect(terminal[0].agent_core).toBe(expectedCore);
-    } else {
-      const completed = body
-        .split(/\r?\n\r?\n/)
-        .filter((frame) => frame.includes("event: agentos_terminal\n"))
-        .map((frame) => JSON.parse(frame.split("\ndata: ")[1]).status);
-      expect(completed).toEqual(["completed"]);
-    }
+    const completed = body
+      .split(/\r?\n\r?\n/)
+      .filter((frame) => frame.includes("event: agentos_terminal\n"))
+      .map((frame) => JSON.parse(frame.split("\ndata: ")[1]).status);
+    expect(completed).toEqual(["completed"]);
+    expect(
+      result.filter((event) =>
+        ["model_output", "run_terminal"].includes(event.type),
+      ),
+    ).toEqual([]);
     return result;
   };
   const send = async (query: string) => {
@@ -275,9 +271,11 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
   });
   await contract.step(steps[1], async () => {
     await page.goto(`${base}/zh/newchat?agent_id=${state.agent_id}`);
-    const response = await send("我的感情运势如何？");
-    await expect(card()).toBeVisible({ timeout: 180000 });
+    const response = await send(
+      "我的感情运势如何？如果需要我补资料，请用一个文本框让我一次填写。",
+    );
     const wire = await events(response);
+    await expect(card()).toBeVisible({ timeout: 180000 });
     const forms = wire.filter(
       (event) => event.type === "human_interaction" && !event.invocation_id,
     );
@@ -386,7 +384,10 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     const continuation = secondWire.filter(
       (event) => event.type === "final_answer" && !event.invocation_id,
     );
-    if (expectedCore === "jiuwen") expect(continuation).toHaveLength(1);
+    if (expectedCore === "jiuwen") {
+      expect(continuation).toHaveLength(1);
+      expect(continuation[0].answer_phase).toBe("complete");
+    }
     expect(
       continuation
         .map((event) => event.content)
@@ -402,6 +403,9 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     expect(continued.responses[0].unit_index).toBe(first.forms[0].unit_index);
     await savedCard();
     await expect(answers().last()).not.toBeEmpty();
+    await expect(
+      answers().last().locator("[data-citation-index-map] > .aui-md"),
+    ).toHaveCount(1);
     outcomes.push({
       submitted_once: true,
       answer_persisted: true,
@@ -433,17 +437,10 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
         ["human_interaction", "tool"].includes(event.type),
       ),
     ).toHaveLength(0);
-    const answer =
-      expectedCore === "jiuwen"
-        ? thirdWire.find(
-            (event) => event.type === "run_terminal" && !event.invocation_id,
-          ).final_content
-        : thirdWire
-            .filter(
-              (event) => event.type === "final_answer" && !event.invocation_id,
-            )
-            .map((event) => event.content)
-            .join("");
+    const answer = thirdWire
+      .filter((event) => event.type === "final_answer" && !event.invocation_id)
+      .map((event) => event.content)
+      .join("");
     expect(answer).toContain("1998");
     expect(answer).toMatch(/6[月\/-]15|六月十五/);
     if (submittedTimeOption) {

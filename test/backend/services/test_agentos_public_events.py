@@ -3,7 +3,7 @@
 import json
 from contextlib import aclosing
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 from fastapi import HTTPException
@@ -29,8 +29,114 @@ def response(*chunks, status_code=200):
     return StreamingResponse(body(), status_code=status_code, headers={"X-AgentOS-Run-ID": CURSOR.run_id})
 
 
+def native(kind, sequence, **fields):
+    return {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+            "turn_id": "turn", "type": kind, "sequence": sequence, **fields}
+
+
+def terminal(index, status="completed"):
+    return f"id: {CURSOR.run_id}:{index}\nevent: agentos_terminal\ndata: {json.dumps({'status': status})}\n\n".encode()
+
+
+@pytest.mark.asyncio
+async def test_prepared_native_stream_restores_public_answer_projection():
+    request = CURSOR.model_copy(update={"after_event_id": None})
+    upstream = response(
+        observer(1, native("step_count", 1, content="Step 1", step_id="step")),
+        observer(2, native("model_output", 2, content="你好，", step_id="step", block_id="body")),
+        b": keep-alive\n\n",
+        observer(3, native("model_output", 3, content="世界", step_id="step", block_id="body")),
+        observer(4, {"type": "final_answer", "content": "你好，世界"}),
+        observer(5, native("run_terminal", 4, content="", status="completed", end_reason="runner_answer",
+                           final_content="你好，世界", final_block_ids=["body"], error=None)),
+        terminal(6),
+    )
+    on_terminal = AsyncMock(return_value=True)
+    output = public_events.present_public_resume(upstream, request, "actor", on_terminal=on_terminal)
+    frames = [frame async for frame in output.body_iterator]
+    messages = [json.loads(line.removeprefix(b"data: ")) for frame in frames[:-1] for line in frame.splitlines()
+                if line.startswith(b"data: ")]
+
+    assert [item["type"] for item in messages] == [
+        "step_count", "model_output_thinking", "model_output_thinking", "final_answer",
+    ]
+    assert messages[-1]["content"] == "你好，世界"
+    assert messages[-1]["answer_phase"] == "complete" and messages[-1]["reclassify_step"] is True
+    assert frames[1].startswith(f"id: {CURSOR.run_id}:2\n".encode())
+    assert frames[2] == b": keep-alive\n\n"
+    assert frames[-1] == terminal(6)
+    on_terminal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_prepared_native_clarification_keeps_the_persisted_unit_identity():
+    request = CURSOR.model_copy(update={"after_event_id": None})
+    form = {"schema_version": 1, "questions": [{"id": "date", "type": "text", "title": "When?"}]}
+    source = response(
+        observer(1, native("human_interaction", 1, content=json.dumps(form), unit_index=7)),
+        observer(2, native("run_terminal", 2, content="", status="completed", end_reason="awaiting_input",
+                           final_content="", final_block_ids=[], error=None)),
+        terminal(3),
+    )
+    result = public_events.present_public_resume(source, request, "actor")
+    frames = [frame async for frame in result.body_iterator]
+
+    assert len(frames) == 2 and frames[-1] == terminal(3)
+    public = json.loads(frames[0].split(b"data: ", 1)[1])
+    assert public["type"] == "human_interaction"
+    assert public["unit_index"] == 7 and json.loads(public["content"]) == form
+
+
+@pytest.mark.asyncio
+async def test_native_cursor_resume_restores_tool_pairing_without_republishing_prefix(mocker):
+    mocker.patch.object(runtime_client, "NEXENT_AGENT_CORE", "jiuwen")
+    source = response(
+        observer(2, native("tool_result", 2, content="", local_call_id="call", result="found")),
+        observer(3, native("run_terminal", 3, content="", status="completed", end_reason="runner_answer",
+                           final_content="answer", final_block_ids=[], error=None)),
+        terminal(4),
+    )
+    closed = []
+
+    async def prefix():
+        try:
+            yield observer(1, native("tool", 1, content="{}", local_call_id="call"))
+            pytest.fail("Projection prefix read past the acknowledged cursor")
+        finally:
+            closed.append(True)
+
+    resume = AsyncMock(side_effect=[source, StreamingResponse(prefix())])
+    mocker.patch.object(runtime_client, "_agentos_client").return_value.resume = resume
+    output = await runtime_client.forward_conversation_resume(CURSOR, "actor", "tenant")
+    frames = [frame async for frame in output.body_iterator]
+
+    assert frames[0].startswith(f"id: {CURSOR.run_id}:2\n".encode())
+    result = json.loads(frames[0].split(b"data: ", 1)[1])
+    assert result["type"] == "execution_logs" and result["content"] == "found"
+    assert json.loads(result["tool_call_id"]) == ["turn", "", "call"]
+    assert json.loads(frames[1].removeprefix(b"data: "))["type"] == "final_answer"
+    assert frames[2:] == [terminal(4)] and closed == [True]
+    assert resume.await_args_list == [
+        call(CURSOR, "actor", "tenant"),
+        call(CURSOR.model_copy(update={"after_event_id": None}), "actor", "tenant"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unavailable_native_resume_prefix_stops_without_publishing_unpaired_events():
+    replay = AsyncMock(return_value=response(status_code=410))
+    upstream = response(observer(2, native("model_output", 2, content="unpaired")))
+    output = public_events.present_public_resume(upstream, CURSOR, "actor", replay_from_start=replay)
+    frames = [frame async for frame in output.body_iterator]
+
+    assert len(frames) == 1
+    assert json.loads(frames[0].removeprefix(b"data: "))["type"] == "error"
+    replay.assert_awaited_once_with()
+
+
 @pytest.mark.asyncio
 async def test_public_resume_adapts_only_prepared_frames_and_retains_the_cursor(mocker):
+    mocker.patch.object(runtime_client, "NEXENT_AGENT_CORE", "smolagents")
     legacy = b"event: stream_status\ndata: old\n\n"
     event = observer(2, {"type": "final_answer", "content": "answer"})
     terminal = f'id: {CURSOR.run_id}:3\nevent: agentos_terminal\ndata: {{"status":"completed"}}\n\n'.encode()
