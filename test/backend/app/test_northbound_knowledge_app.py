@@ -40,6 +40,7 @@ class NorthboundContext:
 
 northbound_service_module = types.ModuleType("management.services.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
+northbound_service_module.search_hybrid_for_northbound = AsyncMock()
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
 northbound_service_module.start_streaming_chat = MagicMock()
@@ -183,6 +184,9 @@ consts_model_module.HybridSearchRequest = HybridSearchRequest
 install_business_contract_stubs(consts_model_module)
 
 consts_const_module = types.ModuleType("contracts.constants.environment")
+from contracts.constants import environment as real_environment
+
+consts_const_module.__dict__.update(vars(real_environment))
 consts_const_module.MINIO_ENDPOINT = "http://minio:9000"
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 
@@ -507,7 +511,7 @@ class TestHybridSearch:
     def test_success_for_asset_owner(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.search_hybrid_for_northbound",
         ) as mock_search:
             mock_search.return_value = {
                 "results": [{"title": "Doc1", "score": 0.9}],
@@ -524,18 +528,18 @@ class TestHybridSearch:
             )
         assert response.status_code == 200
         assert response.json()["total"] == 1
-        mock_search.assert_called_once()
-        call_kwargs = mock_search.call_args.kwargs
-        assert call_kwargs["index_names"] == ["resolved_kb1"]
-        assert call_kwargs["query"] == "test query"
-        assert call_kwargs["tenant_id"] == ASSET_OWNER_TENANT_ID
-        assert call_kwargs["top_k"] == 5
-        assert call_kwargs["weight_accurate"] == 0.3
+        mock_search.assert_awaited_once()
+        context, payload = mock_search.await_args.args
+        assert context is ASSET_CTX
+        assert payload.index_names == ["kb1"]
+        assert payload.query == "test query"
+        assert payload.top_k == 5
+        assert payload.weight_accurate == 0.3
 
     def test_model_config_conflict_returns_409(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.search_hybrid_for_northbound",
             side_effect=KnowledgeBaseNeedsModelConfigError("kb1", "needs model"),
         ):
             response = client.post(
@@ -553,7 +557,7 @@ class TestHybridSearch:
     def test_rate_limit_returns_429(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.search_hybrid_for_northbound",
             side_effect=LimitExceededError("too many"),
         ):
             response = client.post(
@@ -565,29 +569,10 @@ class TestHybridSearch:
             )
         assert response.status_code == 429
 
-    def test_unresolved_index_name_falls_back_to_requested(self, client, mock_northbound_context):
-        mock_northbound_context.return_value = ASSET_CTX
-        with patch(
-            "management.api.northbound.get_index_name_by_knowledge_name",
-            side_effect=RuntimeError("not mapped"),
-        ), patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
-        ) as mock_search:
-            mock_search.return_value = {"results": [], "total": 0}
-            response = client.post(
-                "/nb/v1/knowledge/indices/search/hybrid",
-                json={
-                    "query": "test",
-                    "index_names": ["raw_kb"],
-                },
-            )
-        assert response.status_code == 200
-        assert mock_search.call_args.kwargs["index_names"] == ["raw_kb"]
-
     def test_value_error_returns_400(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.search_hybrid_for_northbound",
             side_effect=ValueError("invalid query"),
         ):
             response = client.post(
@@ -603,7 +588,7 @@ class TestHybridSearch:
     def test_unauthorized_returns_401(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.search_hybrid_for_northbound",
             side_effect=UnauthorizedError("bad token"),
         ):
             response = client.post(
@@ -619,7 +604,7 @@ class TestHybridSearch:
     def test_generic_error_returns_500(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "management.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.search_hybrid_for_northbound",
             side_effect=RuntimeError("search failed"),
         ):
             response = client.post(

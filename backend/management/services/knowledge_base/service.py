@@ -12,7 +12,6 @@ Main features include:
 4. Health check interface
 """
 
-import time
 from typing import Any, List, Optional
 
 from fastapi import Depends
@@ -98,101 +97,3 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             error_msg = f"Error retrieving chunks from index {index_name}: {str(e)}"
             logger.error(error_msg)
             raise Exception(error_msg)
-
-
-
-
-    @staticmethod
-    def search_hybrid(
-        *,
-        index_names: List[str],
-        query: str,
-        tenant_id: str,
-        top_k: int = 10,
-        weight_accurate: Optional[float] = None,
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-    ):
-        """
-        Execute a hybrid search that blends accurate and semantic scoring.
-        """
-        try:
-            if not tenant_id:
-                raise ValueError("Tenant ID is required for hybrid search")
-            if not query or not query.strip():
-                raise ValueError("Query text is required for hybrid search")
-            if not index_names:
-                raise ValueError("At least one index name is required")
-            if top_k <= 0:
-                raise ValueError("top_k must be greater than 0")
-            if weight_accurate and (weight_accurate < 0 or weight_accurate > 1):
-                raise ValueError("weight_accurate must be between 0 and 1")
-
-            # Preserve the REST API's historical 0.5 default for ordinary
-            # queries. When the caller has not supplied a preference, give
-            # digit-containing identifiers more accurate-search influence.
-            effective_weight_accurate = weight_accurate
-            if effective_weight_accurate is None:
-                effective_weight_accurate = (
-                    0.7 if any(char.isdigit() for char in query) else 0.5
-                )
-
-            # Get embedding model from the first index's knowledge base record
-            if not index_names:
-                raise ValueError("At least one index name is required")
-
-            embedding_model, model_id, meta = get_embedding_model_by_index_name(
-                tenant_id, index_names[0]
-            )
-
-            if not embedding_model:
-                if meta.get("status") == "needs_config":
-                    # Return a clear error indicating model needs to be configured
-                    raise KnowledgeBaseNeedsModelConfigError(
-                        index_name=index_names[0],
-                        message=f"Knowledge base '{index_names[0]}' does not have an embedding model configured. Please select a model in the knowledge base settings.",
-                    )
-                else:
-                    raise ValueError(
-                        f"No embedding model found for index '{index_names[0]}'. "
-                        f"Please configure an embedding model for this knowledge base."
-                    )
-
-            start_time = time.perf_counter()
-            raw_results = vdb_core.hybrid_search(
-                index_names=index_names,
-                query_text=query,
-                embedding_model=embedding_model,
-                top_k=top_k,
-                weight_accurate=effective_weight_accurate,
-            )
-            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-
-            formatted_results = []
-            for item in raw_results:
-                document = dict(item.get("document", {}))
-                document["score"] = item.get("score")
-                document["index"] = item.get("index")
-                score_details = dict(document.get("score_details") or {})
-                if "scores" in item:
-                    score_details.update(item["scores"])
-                if item.get("highlight_terms"):
-                    score_details["retrieval_highlight_terms"] = item["highlight_terms"]
-                if score_details:
-                    document["score_details"] = score_details
-                formatted_results.append(document)
-
-            return {
-                "results": formatted_results,
-                "total": len(formatted_results),
-                "query_time_ms": elapsed_ms,
-            }
-        except KnowledgeBaseNeedsModelConfigError:
-            raise
-        except ValueError:
-            raise
-        except Exception as exc:
-            logger.error(
-                f"Hybrid search failed for indices {index_names}: {exc}",
-                exc_info=True,
-            )
-            raise Exception(f"Error executing hybrid search: {str(exc)}")

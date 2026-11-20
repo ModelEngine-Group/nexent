@@ -103,11 +103,11 @@ def invoke_chat_prompt_in_worker(
 
 
 async def embed_query(
-    *, model_id: int, query: str, user_id: str, tenant_id: str, revision: str | None = None,
+    *, model_id: int, query: str, user_id: str, tenant_id: str, revision: str | None = None, client=None,
 ) -> list[float]:
     """Obtain one query vector using the tenant's Runtime model binding."""
     payload = EmbeddingInvocation(model_id=model_id, input=[query], expected_revision=revision)
-    output = (await _model_client().invoke_model(payload, user_id, tenant_id)).output
+    output = (await (client or _model_client()).invoke_model(payload, user_id, tenant_id)).output
     if not isinstance(output, list) or len(output) != 1 or not isinstance(output[0], list):
         raise RuntimeServiceUnavailableError("Invalid AgentOS query embedding response")
     vector = output[0]

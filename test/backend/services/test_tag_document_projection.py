@@ -447,29 +447,6 @@ def test_retry_pending_projections_attempts_due_rows(monkeypatch):
     assert result == {"attempted": 2, "synced": 1, "failed": 1, "unsupported": 0}
 
 
-def test_hybrid_search_without_predicates_keeps_all_results(monkeypatch):
-    from management.services.knowledge_base.service import ElasticSearchService
-
-    monkeypatch.setattr(
-        "management.services.knowledge_base.service.get_embedding_model_by_index_name",
-        lambda *args, **kwargs: (object(), 1, {"status": "ok"}),
-    )
-
-    class FakeVdb:
-        def hybrid_search(self, **kwargs):
-            return [
-                {"document": {"path_or_url": "docs/a.pdf"}, "score": 1.0, "index": "kb-1"},
-                {"document": {"path_or_url": "docs/b.pdf"}, "score": 0.9, "index": "kb-1"},
-            ]
-
-    result = ElasticSearchService.search_hybrid(
-        index_names=["kb-1"],
-        query="query",
-        tenant_id="t1",
-        vdb_core=FakeVdb(),
-    )
-
-    assert result["total"] == 2
 
 
 def _document_resource():

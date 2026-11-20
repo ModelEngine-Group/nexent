@@ -468,7 +468,7 @@ for module_name, functions in {
 # Apply patches AFTER loading the module (so patch targets resolve)
 with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
-    from management.services.knowledge_base.service import ElasticSearchService, KnowledgeBaseNeedsModelConfigError
+    from management.services.knowledge_base.service import ElasticSearchService
 
 
 def _accurate_search_impl(request, vdb_core):
@@ -759,232 +759,14 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="test query", top_k=10
         )
 
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_success(self, mock_get_embedding_by_index):
-        """
-        Test hybrid search (combining semantic and accurate search).
 
-        This test verifies that:
-        1. The search_hybrid method correctly calls the core search implementation
-        2. The weight parameter for balancing semantic and accurate search is passed correctly
-        3. Search results include individual scores for both semantic and accurate searches
-        4. The response contains the expected structure with results, total, and timing information
-        """
-        # Setup
-        self.mock_vdb_core.hybrid_search.return_value = [
-            {
-                "document": {"title": "Doc1", "content": "Content1"},
-                "score": 0.90,
-                "index": "test_index",
-                "scores": {"accurate": 0.85, "semantic": 0.95},
-                "highlight_terms": ["Content1"],
-            }
-        ]
-        mock_get_embedding_by_index.return_value = (self.mock_embedding, 1, {"status": "ok", "message": "OK"})
 
-        # Execute
-        result = ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="test query",
-            tenant_id=identity_constants.DEFAULT_TENANT_ID,
-            top_k=10,
-            weight_accurate=0.5,
-            vdb_core=self.mock_vdb_core
-        )
 
-        # Assert
-        self.assertEqual(len(result["results"]), 1)
-        self.assertEqual(result["total"], 1)
-        self.assertTrue("query_time_ms" in result)
-        self.assertEqual(result["results"][0]["score"], 0.90)
-        self.assertEqual(result["results"][0]["index"], "test_index")
-        self.assertEqual(result["results"][0]
-                         ["score_details"]["accurate"], 0.85)
-        self.assertEqual(result["results"][0]
-                         ["score_details"]["semantic"], 0.95)
-        self.assertEqual(
-            result["results"][0]["score_details"]["retrieval_highlight_terms"],
-            ["Content1"],
-        )
-        self.mock_vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["test_index"],
-            query_text="test query",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=0.5
-        )
-        mock_get_embedding_by_index.assert_called_once_with(identity_constants.DEFAULT_TENANT_ID, "test_index")
 
-    def test_search_hybrid_missing_tenant_id(self):
-        """Test search_hybrid raises ValueError when tenant_id is missing."""
-        with self.assertRaises(ValueError) as context:
-            ElasticSearchService.search_hybrid(
-                index_names=["test_index"],
-                query="test query",
-                tenant_id="",
-                top_k=10,
-                weight_accurate=0.5,
-                vdb_core=self.mock_vdb_core
-            )
-        self.assertIn("Tenant ID is required", str(context.exception))
 
-    def test_search_hybrid_empty_query(self):
-        """Test search_hybrid raises ValueError when query is empty."""
-        with self.assertRaises(ValueError) as context:
-            ElasticSearchService.search_hybrid(
-                index_names=["test_index"],
-                query="   ",
-                tenant_id="test_tenant",
-                top_k=10,
-                weight_accurate=0.5,
-                vdb_core=self.mock_vdb_core
-            )
-        self.assertIn("Query text is required", str(context.exception))
 
-    def test_search_hybrid_no_indices(self):
-        """Test search_hybrid raises ValueError when no indices provided."""
-        with self.assertRaises(ValueError) as context:
-            ElasticSearchService.search_hybrid(
-                index_names=[],
-                query="test query",
-                tenant_id="test_tenant",
-                top_k=10,
-                weight_accurate=0.5,
-                vdb_core=self.mock_vdb_core
-            )
-        self.assertIn("At least one index name is required",
-                      str(context.exception))
 
-    def test_search_hybrid_invalid_top_k(self):
-        """Test search_hybrid raises ValueError when top_k is invalid."""
-        with self.assertRaises(ValueError) as context:
-            ElasticSearchService.search_hybrid(
-                index_names=["test_index"],
-                query="test query",
-                tenant_id="test_tenant",
-                top_k=0,
-                weight_accurate=0.5,
-                vdb_core=self.mock_vdb_core
-            )
-        self.assertIn("top_k must be greater than 0", str(context.exception))
 
-    def test_search_hybrid_invalid_weight(self):
-        """Test search_hybrid raises ValueError when weight_accurate is invalid."""
-        with self.assertRaises(ValueError) as context:
-            ElasticSearchService.search_hybrid(
-                index_names=["test_index"],
-                query="test query",
-                tenant_id="test_tenant",
-                top_k=10,
-                weight_accurate=1.5,
-                vdb_core=self.mock_vdb_core
-            )
-        self.assertIn("weight_accurate must be between 0 and 1",
-                      str(context.exception))
-
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_no_embedding_model(self, mock_get_embedding_by_index):
-        """Test search_hybrid raises model-config error when embedding model is not configured."""
-        mock_get_embedding_by_index.return_value = (
-            None,
-            None,
-            {"status": "needs_config", "message": "needs config"},
-        )
-        with self.assertRaises(KnowledgeBaseNeedsModelConfigError):
-            ElasticSearchService.search_hybrid(
-                index_names=["test_index"],
-                query="test query",
-                tenant_id=identity_constants.DEFAULT_TENANT_ID,
-                top_k=10,
-                weight_accurate=0.5,
-                vdb_core=self.mock_vdb_core
-            )
-
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_exception(self, mock_get_embedding_by_index):
-        """Test search_hybrid handles exceptions from vdb_core."""
-        # Mock get_embedding_model_by_index_name
-        mock_get_embedding_by_index.return_value = (self.mock_embedding, 1, {"status": "ok", "message": "OK"})
-
-        self.mock_vdb_core.hybrid_search.side_effect = Exception(
-            "Search failed")
-
-        with self.assertRaises(Exception) as context:
-            ElasticSearchService.search_hybrid(
-                index_names=["test_index"],
-                query="test query",
-                tenant_id="test_tenant",
-                top_k=10,
-                weight_accurate=0.5,
-                vdb_core=self.mock_vdb_core
-            )
-        self.assertIn("Error executing hybrid search", str(context.exception))
-
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_weight_accurate_boundary_values(self, mock_get_embedding_by_index):
-
-        # Test with weight_accurate = 0.0 (semantic only)
-        self.mock_vdb_core.hybrid_search.return_value = [
-            {
-                "document": {"title": "Doc1", "content": "Content1"},
-                "score": 0.90,
-                "index": "test_index",
-            }
-        ]
-        mock_get_embedding_by_index.return_value = (self.mock_embedding, 1, {"status": "ok", "message": "OK"})
-
-        result = ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="test query",
-            tenant_id=identity_constants.DEFAULT_TENANT_ID,
-            top_k=10,
-            weight_accurate=0.0,
-            vdb_core=self.mock_vdb_core
-        )
-        self.assertEqual(len(result["results"]), 1)
-        self.mock_vdb_core.hybrid_search.assert_called_with(
-            index_names=["test_index"],
-            query_text="test query",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=0.0
-        )
-
-        # Test with weight_accurate = 1.0 (accurate only)
-        self.mock_vdb_core.hybrid_search.reset_mock()
-        result = ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="test query",
-            tenant_id=identity_constants.DEFAULT_TENANT_ID,
-            top_k=10,
-            weight_accurate=1.0,
-            vdb_core=self.mock_vdb_core
-        )
-        self.mock_vdb_core.hybrid_search.assert_called_with(
-            index_names=["test_index"],
-            query_text="test query",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=1.0
-        )
-
-        # Test with weight_accurate = 0.3 (more semantic)
-        self.mock_vdb_core.hybrid_search.reset_mock()
-        result = ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="test query",
-            tenant_id=identity_constants.DEFAULT_TENANT_ID,
-            top_k=10,
-            weight_accurate=0.3,
-            vdb_core=self.mock_vdb_core
-        )
-        self.mock_vdb_core.hybrid_search.assert_called_with(
-            index_names=["test_index"],
-            query_text="test query",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=0.3
-        )
 
 
 
@@ -2578,56 +2360,10 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for delete_chunk exception (lines 1923-1926)
 
     # Tests for search_hybrid - KnowledgeBaseNeedsModelConfigError (line 1955, 1962)
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_needs_model_config_error(self, mock_get_model):
-        """Test search_hybrid raises KnowledgeBaseNeedsModelConfigError (lines 1955, 1962)."""
-        from management.services.knowledge_base.service import (
-            KnowledgeBaseNeedsModelConfigError
-        )
-        mock_get_model.return_value = (None, None, {"status": "needs_config"})
-        with self.assertRaises(KnowledgeBaseNeedsModelConfigError) as ctx:
-            ElasticSearchService.search_hybrid(
-                index_names=["test-index"],
-                query="test query",
-                tenant_id="tenant-1",
-                top_k=10,
-                vdb_core=self.mock_vdb_core,
-            )
-        self.assertEqual(ctx.exception.index_name, "test-index")
 
     # Tests for search_hybrid - generic ValueError from get_embedding_model_by_index_name (line 1996)
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_model_error_status(self, mock_get_model):
-        """Test search_hybrid handles error status from get_embedding_model_by_index_name (line 1996)."""
-        # Note: When status is "error", it doesn't raise ValueError.
-        # It raises the generic Exception from the else branch.
-        mock_get_model.return_value = (None, None, {"status": "error", "message": "KB not found"})
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.search_hybrid(
-                index_names=["nonexistent-index"],
-                query="test query",
-                tenant_id="tenant-1",
-                top_k=10,
-                vdb_core=self.mock_vdb_core,
-            )
-        self.assertIn("embedding model", str(ctx.exception).lower())
 
     # Tests for search_hybrid - exception (line 1996)
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_vdb_exception(self, mock_get_model):
-        """Test search_hybrid handles exception from vdb_core (line 1996)."""
-        mock_model = MagicMock()
-        mock_get_model.return_value = (mock_model, 1, {"status": "ok"})
-        self.mock_vdb_core.hybrid_search.side_effect = Exception("Hybrid search failed")
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.search_hybrid(
-                index_names=["test-index"],
-                query="test query",
-                tenant_id="tenant-1",
-                top_k=10,
-                vdb_core=self.mock_vdb_core,
-            )
-        self.assertIn("Hybrid search failed", str(ctx.exception))
 
 
     # Tests for create_index - no model_id provided (line 572)
@@ -2754,38 +2490,8 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for list_files - outer exception (lines 1497-1498)
 
     # Tests for search_hybrid - outer exception (lines 2038-2043)
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_outer_exception(self, mock_get_model):
-        """Test search_hybrid handles unexpected exceptions (lines 2038-2043)."""
-        mock_model = MagicMock()
-        mock_get_model.return_value = (mock_model, 1, {"status": "ok"})
-        self.mock_vdb_core.hybrid_search.side_effect = RuntimeError("Unexpected error")
-
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.search_hybrid(
-                index_names=["test-index"],
-                query="test query",
-                tenant_id="tenant-1",
-                top_k=10,
-                vdb_core=self.mock_vdb_core,
-            )
-        self.assertIn("Error executing hybrid search", str(ctx.exception))
 
     # Tests for search_hybrid - KnowledgeBaseNeedsModelConfigError (lines 1998-2004)
-    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
-    def test_search_hybrid_needs_config_raises(self, mock_get_model):
-        """Test search_hybrid raises KnowledgeBaseNeedsModelConfigError when model not configured."""
-        mock_get_model.return_value = (None, None, {"status": "needs_config"})
-        with self.assertRaises(Exception) as ctx:
-            ElasticSearchService.search_hybrid(
-                index_names=["unconfigured-kb"],
-                query="test",
-                tenant_id="tenant-1",
-                top_k=10,
-                vdb_core=self.mock_vdb_core,
-            )
-        # Should be wrapped as a generic Exception by search_hybrid's outer handler
-        self.assertIn("embedding model", str(ctx.exception).lower())
 
 
 from management.services.knowledge_base import permission as kb_permission

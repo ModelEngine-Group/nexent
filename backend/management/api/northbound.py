@@ -14,7 +14,6 @@ from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, RATE_LIMIT_EXCEEDED_DETAIL, CONFIG_SERVICE_NAME
-from contracts.knowledge import VectorDatabaseType, HybridSearchRequest
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
@@ -50,10 +49,9 @@ from contracts.constants.constants import ASSET_OWNER_TENANT_ID, NORTHBOUND_SERV
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
-from contracts.knowledge import HybridSearchRequest, VectorDatabaseType
+from contracts.knowledge import HybridSearchRequest
 from contracts.tool import ToolParamsRequest
 from management.db.identity.user_tenant import get_user_role_by_tenant
-from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.agent.a2a.service import (
     A2AServerServiceError,
     AgentNotEnabledError,
@@ -68,9 +66,7 @@ from management.services.file.service import (
     upload_files_impl,
 )
 from management.services.knowledge_base.service import (
-    ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
-    get_vector_db_core,
 )
 from management.services.monitor.audit import record_security_event
 from management.services.permission.api_keys import (
@@ -94,6 +90,7 @@ from management.services.northbound import (
     get_conversation_history,
     list_configured_models,
     list_conversations,
+    search_hybrid_for_northbound,
     start_streaming_chat,
     stop_chat,
     update_conversation_title,
@@ -904,24 +901,7 @@ async def hybrid_search(
     """
     try:
         ctx = await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
-
-        resolved_index_names: List[str] = []
-        for requested_name in payload.index_names:
-            try:
-                resolved_name = get_index_name_by_knowledge_name(requested_name, ctx.tenant_id)
-            except Exception:
-                resolved_name = requested_name
-            resolved_index_names.append(resolved_name)
-
-        return ElasticSearchService.search_hybrid(
-            index_names=resolved_index_names,
-            query=payload.query,
-            tenant_id=ctx.tenant_id,
-            top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate,
-            vdb_core=vdb_core,
-        )
+        return await search_hybrid_for_northbound(ctx, payload)
     except KnowledgeBaseNeedsModelConfigError as exc:
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,

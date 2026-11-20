@@ -80,6 +80,28 @@ from infrastructure.redis.run_state import runtime_state_service
 logger = logging.getLogger("northbound_service")
 
 
+async def search_hybrid_for_northbound(ctx, payload):
+    from contracts.knowledge import VectorDatabaseType
+    from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
+    from management.services.knowledge_base.common import get_vector_db_core
+    from management.services.knowledge_base.hybrid import search_public_hybrid
+
+    from infrastructure.agentos_identity import ServicePrincipal
+
+    resolved = []
+    for requested in payload.index_names:
+        try:
+            index = get_index_name_by_knowledge_name(requested, ctx.tenant_id)
+        except Exception:  # noqa: BLE001 - Existing Northbound lookup accepts raw index names.
+            index = requested
+        resolved.append(index)
+    return await search_public_hybrid(
+        resolved, payload.query, ServicePrincipal(ctx.user_id, ctx.tenant_id),
+        top_k=payload.top_k, weight_accurate=payload.weight_accurate,
+        vdb_core=get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH),
+    )
+
+
 # Runtime metadata validation reason -> northbound API error code.
 # MCP header passthrough failures (Phase 1) map to their dedicated codes so
 # callers can distinguish "bad reserved field" from generic metadata errors.

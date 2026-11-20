@@ -956,15 +956,13 @@ async def hybrid_search(
                 tenant_id=tenant_id,
             )
             resolved_index_names.append(resolved_name)
-        search_kwargs = {
-            "index_names": resolved_index_names,
-            "query": payload.query,
-            "tenant_id": tenant_id,
-            "top_k": payload.top_k,
-            "weight_accurate": payload.weight_accurate,
-            "vdb_core": vdb_core,
-        }
-        result = ElasticSearchService.search_hybrid(**search_kwargs)
+        from management.services.knowledge_base.hybrid import search_public_hybrid
+
+        actor = ServicePrincipal(user_id, tenant_id)
+        result = await search_public_hybrid(
+            resolved_index_names, payload.query, actor, top_k=payload.top_k,
+            weight_accurate=payload.weight_accurate, vdb_core=vdb_core,
+        )
         if payload.tag_predicates:
             from management.services.knowledge_base.hybrid_tags import (
                 filter_hybrid_tags,
@@ -973,7 +971,7 @@ async def hybrid_search(
             result["results"] = await run_blocking(
                 "filter-hybrid-document-tags", filter_hybrid_tags,
                 result["results"], resolved_index_names, payload.tag_predicates,
-                ServicePrincipal(user_id, tenant_id), lane="control-io", owner=__name__,
+                actor, lane="control-io", owner=__name__,
             )
             result["total"] = len(result["results"])
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
