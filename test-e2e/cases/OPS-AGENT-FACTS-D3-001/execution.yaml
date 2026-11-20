@@ -18,6 +18,7 @@ acceptance_bindings:
   AC-10: [test_real_parent_and_child_facts_publish_and_replay, test_real_root_agent_capture_survives_sse_reconnect, test_agent_daily_publication_switches_only_after_success]
   AC-11: [test_complete_main_timing_matches_raw_trajectory_and_published_queries]
   AC-12: [test_real_parent_and_child_facts_publish_and_replay, test_child_complete_timing_outcomes_publish_and_replay]
+  AC-13: [test_actual_jiuwen_agent_monitoring_pipeline]
 preparation:
   families: []
   anchors: false

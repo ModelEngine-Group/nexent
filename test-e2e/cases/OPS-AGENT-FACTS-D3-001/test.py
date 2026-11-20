@@ -1372,6 +1372,221 @@ async def test_complete_main_timing_matches_raw_trajectory_and_published_queries
         assert threads.snapshot().active_count == 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["normal_traced", "normal_untraced", "root_failed", "child_failed", "cancelled"])
+async def test_actual_jiuwen_agent_monitoring_pipeline(
+    isolated_monitoring, monkeypatch, tmp_path, record_property, first_answer_clock, mode,
+):
+    """Keep Jiuwen Runner, model service and the monitoring pipeline real."""
+    import importlib.metadata
+    import importlib.util
+    from pathlib import Path
+    from management.services.permission.identity import session as auth
+    from nexent.core.agents.factory import AgentCoreFactory
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+    from permissions import rbac
+
+    specification = importlib.util.spec_from_file_location("ops_jiuwen_peer", Path(__file__).with_name("jiuwen_peer.py"))
+    peer = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(peer)
+    model_config, provider = peer.model_config, peer.provider
+    assert importlib.metadata.version("openjiuwen") == "0.1.19"
+    service, tenant = isolated_monitoring
+    selected, native = [], []
+    create, prepare = AgentCoreFactory.create, JiuwenAdapter.prepare
+
+    def observed_create(info, **kwargs):
+        adapter = create(info, **kwargs)
+        assert isinstance(adapter, JiuwenAdapter)
+        selected.append(adapter)
+        return adapter
+
+    def observed_prepare(adapter):
+        prepare(adapter)
+        assert type(adapter.native_agent).__module__.startswith("openjiuwen.")
+        native.append(type(adapter.native_agent).__qualname__)
+
+    monkeypatch.setattr(AgentCoreFactory, "create", observed_create)
+    monkeypatch.setattr(JiuwenAdapter, "prepare", observed_prepare)
+    with provider(mode) as (base, requests, child_started, release):
+        child = AgentConfig(agent_core="jiuwen", name="child", agent_id=22, version_no=4,
+                            description="Controlled child", model_name="child", tools=[], max_steps=3)
+        info = AgentRunInfo(
+            query="Delegate twice and then answer", observer=MessageObserver(), stop_event=Event(),
+            agent_config=AgentConfig(agent_core="jiuwen", name="root", agent_id=21, version_no=3,
+                                     description="Controlled root", model_name="root", tools=[],
+                                     worker_agents=[child], max_steps=3),
+            model_config_list=[model_config(base, tenant, role, number) for role, number in
+                               (("root", 7), ("child", 8))],
+            tenant_id=tenant, user_id="owner", conversation_id=126, workspace_run_id=uuid4().hex, history=[],
+        )
+        metadata = AgentRunMetadata(tenant_id=tenant, user_id="owner", conversation_id=126, agent_id=21,
+                                    monitoring_group_ids=(12, 13))
+        threads = ThreadManager("jiuwen-monitoring", {
+            lane: LanePolicy(lane, 4, 4)
+            for lane in ("agent-run", "model-tool-io", "sandbox", "control-io", "background-service", "mcp-session")
+        })
+        threads.start()
+        trajectory = _child_trajectory(threads, get_monitoring_manager(), monkeypatch, tmp_path,
+                                       enabled=mode != "normal_untraced")
+        agents, models = [], []
+        try:
+            async with runtime.producer_lifespan():
+                sink = get_fact_sink()
+
+                def capture(event):
+                    (agents if event["fact_kind"] == "agent" else models).append(dict(event))
+                    sink(event)
+
+                set_fact_sink(capture)
+
+                async def consume():
+                    with agent_monitoring_context(metadata):
+                        async for _ in agent_run(info, thread_manager=threads):
+                            pass
+
+                execution = asyncio.create_task(consume())
+                try:
+                    if mode == "cancelled":
+                        async with asyncio.timeout(20):
+                            while not child_started.is_set():
+                                assert not execution.done(), "Jiuwen exited before calling the child model"
+                                await asyncio.sleep(0.02)
+                        info.cancellation_scope.cancel()
+                        release.set()
+                    async with asyncio.timeout(30):
+                        await asyncio.gather(execution, return_exceptions=True)
+                        await asyncio.gather(asyncio.wrap_future(info.thread_future), return_exceptions=True)
+                finally:
+                    release.set()
+                    if not execution.done():
+                        info.cancellation_scope.cancel()
+                        await asyncio.gather(execution, return_exceptions=True)
+                normal = mode.startswith("normal")
+                root_completed = normal or mode == "child_failed"
+                assert info.attempt_outcome == (
+                    "completed" if root_completed else "stopped" if mode == "cancelled" else "failed"
+                )
+                if root_completed:
+                    assert info.run_result.final_content == "root-ready"
+                starts = {item["fact_id"]: item for item in agents if item["record_revision"] == 1}
+                terminals = {item["fact_id"]: item for item in agents if item["record_revision"] == 2}
+                assert starts.keys() == terminals.keys() and len(agents) == 2 * len(terminals)
+                root = terminals[info.workspace_run_id]
+                root_timing = info.run_timing.finish()
+                assert root["started_at"] == root_timing.started_at.isoformat()
+                assert root["ended_at"] == root_timing.ended_at.isoformat()
+                assert root["duration_ms"] == root_timing.duration_ms
+                assert root["outcome"] == (
+                    "succeeded" if root_completed else "cancelled" if mode == "cancelled" else "failed"
+                )
+                children = [item for item in terminals.values() if not item["is_root"]]
+                assert root["agent_id"] == 21 and len(selected) == len(native) == len(terminals)
+                if normal:
+                    assert len(children) == 2
+                    assert [item["role"] for item in requests].count("root") == 2
+                    assert [item["role"] for item in requests].count("child") == 2
+                elif mode == "root_failed":
+                    assert children == [] and len(requests) == 1 and root["outcome"] == "failed"
+                else:
+                    assert children and all(item["outcome"] == ("cancelled" if mode == "cancelled" else "failed")
+                                            for item in children)
+                    if mode == "child_failed":
+                        assert len(children) == 2 and len(requests) == 4
+                for key, terminal in terminals.items():
+                    assert terminal["started_at"] == starts[key]["started_at"]
+                    assert terminal["execution_started_at"] == starts[key]["execution_started_at"]
+                    assert terminal["duration_ms"] >= 0
+                    if normal:
+                        assert terminal["outcome"] == "succeeded"
+                        _assert_first_answer_clock(first_answer_clock, terminal)
+                    elif terminal["is_root"] and root_completed:
+                        _assert_first_answer_clock(first_answer_clock, terminal)
+                    else:
+                        assert terminal.get("ttft_ms") is None
+                    if not terminal["is_root"]:
+                        assert terminal["parent_run_id"] == terminal["root_run_id"] == info.workspace_run_id
+                        assert terminal["agent_id"] == 22
+                raw = trajectory.verify(terminals)
+                async with asyncio.timeout(15):
+                    while True:
+                        service.apply_batch(tenant, "agent")
+                        hits = service.es.search(index=f"{FACTS}-*", query=filters(
+                            tenant_id=tenant, fact_kind="agent"), size=100)["hits"]["hits"]
+                        if len(hits) == len(terminals) and all(hit["_source"]["record_revision"] == 2 for hit in hits):
+                            break
+                        await asyncio.sleep(0.05)
+                for hit in hits:
+                    fact = terminals[hit["_source"]["fact_id"]]
+                    assert all(hit["_source"].get(field) == fact.get(field) for field in
+                               ("duration_ms", "ttft_ms", "outcome", "agent_run_id", "parent_run_id"))
+                service.publish(tenant, "agent")
+                day = datetime.fromisoformat(root["execution_started_at"]).date()
+                from management.db.agent.models import AgentInfo
+
+                with service.store.engine.begin() as connection:
+                    for number, outlet in ((21, 7), (22, 8)):
+                        connection.execute(insert(AgentInfo).values(
+                            tenant_id=tenant, agent_id=number, version_no=0, delete_flag="N",
+                            name=f"jiuwen-{number}", model_ids=[outlet], group_ids="12,13",
+                        ))
+                monkeypatch.setattr(auth, "get_current_user_context", lambda _: ("operator", tenant, "OPS"))
+                monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}})
+                monkeypatch.setattr(rbac, "_INITIALIZED", True)
+                from ops.api import application
+
+                monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+                app = application.create_app()
+                app.state.monitoring = service
+                params = {"start_date": day.isoformat(), "end_date": day.isoformat(), "group_ids": [12, 13]}
+                metrics = {}
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops",
+                                             headers={"Authorization": "Bearer ops"}) as client:
+                    for number in {item["agent_id"] for item in terminals.values()}:
+                        response = await client.get("/ops/v1/monitoring/agents/summary",
+                                                    params=dict(params, agent_id=number))
+                        assert response.status_code == 200
+                        values = response.json()["data"]
+                        facts = [item for item in terminals.values() if item["agent_id"] == number]
+                        assert values["execution_count"] == values["duration_sample_count"] == len(facts)
+                        assert values["avg_duration_ms"] == sum(item["duration_ms"] for item in facts) / len(facts)
+                        successes = sum(item["outcome"] == "succeeded" for item in facts)
+                        failures = sum(item["outcome"] == "failed" for item in facts)
+                        assert (values["succeeded_count"], values["failed_count"]) == (successes, failures)
+                        assert values["success_rate"] == (successes / (successes + failures)
+                                                          if successes + failures else None)
+                        answers = [item["ttft_ms"] for item in facts if item.get("ttft_ms") is not None]
+                        assert values["avg_ttft_ms"] == (sum(answers) / len(answers) if answers else None)
+                        metrics[number] = values
+                    states = service.store.states(tenant, "agent", day, day)
+                    for terminal in terminals.values():
+                        emit_fact(terminal)
+                    await _wait_for_agent_batch(service, tenant)
+                    service.publish(tenant, "agent")
+                    assert service.store.states(tenant, "agent", day, day) == states
+                    for number, values in metrics.items():
+                        replay = await client.get("/ops/v1/monitoring/agents/summary",
+                                                  params=dict(params, agent_id=number))
+                        assert replay.status_code == 200 and replay.json()["data"] == values
+                    actual_model_facts = [dict(item) for item in models if item["record_revision"] == 2]
+                    token_evidence = await _verify_real_agent_tokens(
+                        client, service, tenant, day, terminals, models) if normal else None
+                record_property("jiuwen_pipeline", json.dumps({
+                    "mode": mode, "core": "jiuwen", "version": "0.1.19", "native_agents": native,
+                    "requests": [{"role": item["role"], "stream": item["stream"]} for item in requests],
+                    "metrics": metrics, "raw": raw,
+                    "agent_facts": list(terminals.values()), "model_facts": actual_model_facts,
+                    "root_timing": {"run_id": root_timing.run_id, "duration_ms": root_timing.duration_ms,
+                                    "started_at": root["started_at"], "ended_at": root["ended_at"]},
+                    "tokens": token_evidence["published"]["tokens"] if token_evidence else None,
+                }))
+                set_fact_sink(sink)
+        finally:
+            trajectory.close()
+            await threads.shutdown(timeout=8)
+            assert threads.snapshot().active_count == 0
+
+
 def _child_trajectory(threads, manager, monkeypatch, directory, *, enabled):
     """Own real local OTLP capture and verify each child against its exact frozen clock."""
     from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
@@ -1406,7 +1621,7 @@ def _child_trajectory(threads, manager, monkeypatch, directory, *, enabled):
         assert processor.force_flush(5000)
         raw = [span for path in directory.rglob("*.otlp.jsonl") for line in path.read_text().splitlines()
                for resource in json.loads(line)["resourceSpans"] for scope in resource["scopeSpans"]
-               for span in scope["spans"] if span["name"].startswith("agent.subagent.")]
+               for span in scope["spans"] if span["name"].startswith("agent.subagent.") or span["name"] == "agent.run"]
         children = {key: value for key, value in terminals.items() if not value["is_root"]}
         assert len(clocks) == len({id(item) for item in clocks}) == len(children)
         assert {item.run_id for item in clocks} == set(children)
@@ -1414,7 +1629,18 @@ def _child_trajectory(threads, manager, monkeypatch, directory, *, enabled):
         for span in raw:
             attributes = {item["key"]: next(iter(item["value"].values())) for item in span["attributes"]}
             by_id[attributes["nexent.agent_run_id"]] = (span, attributes)
-        assert set(by_id) == (set(children) if enabled else set())
+        child_spans = {key for key, (span, _) in by_id.items() if span["name"].startswith("agent.subagent.")}
+        assert child_spans == (set(children) if enabled else set())
+        assert len([span for span in raw if span["name"].startswith("agent.subagent.")]) == len(child_spans)
+        for key, fact in terminals.items():
+            if not fact["is_root"] or not enabled:
+                continue
+            span, attributes = by_id[key]
+            for field, wire in (("started_at", "startTimeUnixNano"), ("ended_at", "endTimeUnixNano")):
+                delta = datetime.fromisoformat(fact[field]) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+                expected = ((delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds) * 1000
+                assert int(span[wire]) == expected
+            assert int(attributes["nexent.duration_ms"]) == fact["duration_ms"]
         for timing in clocks:
             result = timing.finish()
             fact = children[result.run_id]

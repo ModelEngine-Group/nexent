@@ -96,6 +96,12 @@ case:
   - order: 26
     action: Replay child terminal events and compare ES, published rows and HTTP metrics; inspect parent, sibling and nested identities and actual-execution dates.
     expected: Replay does not change counts, dates, outcomes, Tokens or first-answer samples, and no invocation inherits another clock.
+  - order: 27
+    action: Execute actual Jiuwen main and child Cores through a controlled HTTP/SSE model, including repeated child requests, failures, cancellation and disabled trajectory.
+    expected: Actual Runner and model requests produce independently attributed execution and usage facts, with matching complete duration and first-answer observations.
+  - order: 28
+    action: Apply Jiuwen facts to real ES, publish daily rows and reconcile authorized HTTP metrics, independent model Token publication and terminal replay.
+    expected: Main and child counts, confirmed outcomes, actual Token ownership, nullable usage coverage and measured durations match the actual execution, without replay inflation.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -114,6 +120,7 @@ case:
   - First-answer timing is independently measured and published per actual execution, with null missing answers, known zero and weighted cross-day averages.
   - Main monitoring and raw trajectory share one complete execution measurement without changing counting, actual execution dates or other metric contracts.
   - Complete child invocation timing agrees exactly between raw trajectory, source facts, daily publication and queries, with independent invocation clocks and original execution dates.
+  - Real Jiuwen main and child execution reconciles through source facts, published daily metrics and Ops queries with trajectory capture on or off.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -127,6 +134,7 @@ case:
   - A TTFT sample from tools, reasoning, fallback text, another Agent execution or replay, or an average of daily averages.
   - A second main clock or terminal report, a span/monitoring timestamp mismatch, a count from preparation-only failure, a shifted statistic date or a changed main duration boundary.
   - Mixed parent or sibling clocks, duplicate child reports, changed execution dates or eligibility, or a changed success, Token or TTFT contract.
+  - Replacing Jiuwen Runner or model transport with a fake, mixed main/child usage, lost execution context or metrics gated by trajectory configuration.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -188,3 +196,8 @@ case:
     steps: [25, 26]
     expected_results: [17]
     forbidden_side_effects: [12]
+  - id: AC-13
+    description: Actual Jiuwen main and child execution reconciles all confirmed Agent metrics through the real monitoring pipeline, independently of trajectory capture.
+    steps: [27, 28]
+    expected_results: [18]
+    forbidden_side_effects: [13]
