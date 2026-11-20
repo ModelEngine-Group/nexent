@@ -170,3 +170,17 @@ async def test_task_scope_cannot_borrow_a_different_actor(archived):
     with pytest.raises(ScopeDenied):
         await a.service.plan(1, a.s.value.file_id, a.s.actor, legacy_quiesced=True, task_archive=a.path, context=context())
     a.port.get.assert_not_called()
+
+
+
+async def test_conflicting_legacy_file_id_cannot_authorize_a_previously_planned_rebuild(archived):
+    a = archived
+    a.frames[1]['tasks'][0]['file_id'] = None
+    a.live['file_id'] = None
+    a.write()
+    plan = await a.service.plan(1, a.s.value.file_id, a.s.actor, legacy_quiesced=True, task_archive=a.path, context=context())
+    a.live['legacy_file_id_hash'] = hashlib.sha256(b'different-historical-file').hexdigest()
+
+    with pytest.raises(Conflict):
+        await a.service.admit(plan, a.s.actor, task_archive=a.path, context=context())
+    assert a.s.row()['ingestion_request'] is None

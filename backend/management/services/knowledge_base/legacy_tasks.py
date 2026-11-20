@@ -54,7 +54,12 @@ def _finding(row, file_ids):
     if row['status'] not in {'SUCCESS', 'FAILURE', 'REVOKED'}: item.issues.append('LEGACY_TASK_NOT_TERMINAL')
     if not file_ids: item.issues.append('REDIS_ONLY_TASK')
     elif len(file_ids) > 1: item.issues.append('LEGACY_TASK_FILE_AMBIGUOUS')
-    elif row['file_id'] is not None and row['file_id'] not in file_ids: item.issues.append('LEGACY_TASK_FILE_CONFLICT')
+    elif row['file_id'] is not None and row['file_id'] not in file_ids:
+        item.issues.append('LEGACY_TASK_FILE_CONFLICT')
+    elif row.get('legacy_file_id_hash') is not None:
+        expected_file_id = next(iter(file_ids))
+        if hashlib.sha256(expected_file_id.encode()).hexdigest() != row['legacy_file_id_hash']:
+            item.issues.append('LEGACY_TASK_FILE_CONFLICT')
     if 'archive' in row:
         return LegacyTaskArchiveFinding(**item.model_dump(), archive=row['archive'])
     return item

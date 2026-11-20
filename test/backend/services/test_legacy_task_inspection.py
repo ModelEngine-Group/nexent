@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """LT-03/05: current DAC, lifecycle references and redacted task evidence."""
 
+import hashlib
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -128,3 +129,19 @@ def test_archive_permission_revocation_does_not_read_any_task_values(inspection)
         s.service.scan(1, s.source.actor, s.frames.append, archive=True, context=context())
     s.records.get.assert_not_called()
     s.records.query.assert_not_called()
+
+
+
+@pytest.mark.parametrize('reported', ['old-file-id', 'different-file-id'])
+def test_task_inspection_compares_noncanonical_payload_with_current_pg_reference(inspection, reported):
+    s = inspection
+    s.source.update(file_id='old-file-id')
+    s.row.update(status='SUCCESS', file_id=None, legacy_file_id_hash=hashlib.sha256(reported.encode()).hexdigest())
+    s.records.query.return_value = Page(())
+
+    result = scan(s)
+
+    finding = s.frames[0].tasks[0]
+    assert (finding.issues == ['LEGACY_TASK_FILE_CONFLICT']) == (reported != 'old-file-id')
+    assert result['tasks_with_issues'] == int(reported != 'old-file-id')
+    assert reported not in finding.model_dump_json()

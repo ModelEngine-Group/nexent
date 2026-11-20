@@ -103,6 +103,10 @@ class LegacyTaskRecords:
                 payload, result = {}, {}
         index, tenant = result.get('index_name'), result.get('tenant_id')
         file_id = result.get('file_id')
+        if file_id is not None and (
+            not isinstance(file_id, str) or not file_id.strip() or len(file_id) > 64 or not file_id.isprintable()
+        ):
+            valid, file_id = False, None
         index_matches = None if index is None else index == self._index
         tenant_matches = None if tenant is None else tenant == self.scope.tenant_id
         in_scope = index_matches is not False and tenant_matches is not False
@@ -119,6 +123,9 @@ class LegacyTaskRecords:
             'file_id': file_id if in_scope and isinstance(file_id, str) and re.fullmatch(r'[0-9a-f]{32}', file_id) else None,
             'origin': 'pg_reference' if known else 'index_metadata',
         }
+        if in_scope and file_id is not None and row['file_id'] is None:
+            # Match historical identifiers without exposing them or using them as Redis keys.
+            row['legacy_file_id_hash'] = hashlib.sha256(file_id.encode()).hexdigest()
         if archive and known and not in_scope:
             raise ScopeDenied()
         if archive and in_scope and (known or index_matches is True):

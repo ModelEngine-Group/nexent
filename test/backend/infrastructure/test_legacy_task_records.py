@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """LT-01/02: finite, redacted legacy task reads never mutate or infer ownership."""
 
+import hashlib
 import json
 from dataclasses import replace
 from unittest.mock import MagicMock, Mock
@@ -178,3 +179,32 @@ def test_closed_port_rejects_further_reads_without_opening_client(store):
     port, _, _, factory = store; port.close(); port.close()
     with pytest.raises(ScopeDenied): port.get(LEGACY_TASKS, 'known', context=context())
     factory.assert_not_called()
+
+
+
+@pytest.mark.parametrize('tenant', ['tenant-a', 'tenant-b'])
+def test_legacy_identifier_can_be_compared_without_exposing_it(store, tenant):
+    port, backend, _, _ = store
+    file_id = 'old-file-Ä'
+    backend.get.return_value = json.dumps({'status': 'SUCCESS', 'result': {
+        'index_name': 'old-kb', 'tenant_id': tenant, 'file_id': file_id,
+    }}).encode()
+    row = port.get(LEGACY_TASKS, 'known', context=context())
+    assert row['file_id'] is None
+    if tenant == 'tenant-a':
+        assert row['legacy_file_id_hash'] == hashlib.sha256(file_id.encode()).hexdigest()
+        assert row['metadata_valid'] is True
+    else:
+        assert 'legacy_file_id_hash' not in row
+    assert file_id not in str(row)
+
+
+@pytest.mark.parametrize('file_id', ['', '   ', 'x' * 65, 'a\x00b', 123])
+def test_malformed_reported_file_identity_invalidates_terminal_result(store, file_id):
+    port, backend, _, _ = store
+    backend.get.return_value = json.dumps({'status': 'SUCCESS', 'result': {
+        'index_name': 'old-kb', 'file_id': file_id,
+    }}).encode()
+    row = port.get(LEGACY_TASKS, 'known', context=context())
+    assert row['status'] == 'UNKNOWN' and row['metadata_valid'] is False
+    assert row['file_id'] is None and 'legacy_file_id_hash' not in row
