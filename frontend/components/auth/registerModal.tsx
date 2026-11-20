@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -493,7 +495,7 @@ export function RegisterModal() {
       centered
       forceRender
     >
-      <div className="relative bg-white p-4 rounded-2xl">
+      <div className="relative bg-white p-4 rounded-lg">
         <Form
           id="register-form"
           form={form}

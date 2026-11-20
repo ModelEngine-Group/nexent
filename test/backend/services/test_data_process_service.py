@@ -25,20 +25,21 @@ sys.modules['data_process.app'] = MagicMock()
 sys.modules['data_process.app'].app = MagicMock()
 sys.modules['data_process.tasks'] = MagicMock()
 sys.modules['management.db.file.attachment'] = MagicMock()
-sys.modules['management.db.client'] = MagicMock()
+sys.modules['infrastructure.rdb.client'] = MagicMock()
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'].minio_client = MagicMock()
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'].minio_client = MagicMock()
 sys.modules['transformers'] = MagicMock()
 sys.modules['transformers'].CLIPProcessor = MagicMock()
 sys.modules['transformers'].CLIPModel = MagicMock()
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = MagicMock()
 
 # Add missing nexent.data_process module mock
 sys.modules['nexent.data_process'] = MagicMock()

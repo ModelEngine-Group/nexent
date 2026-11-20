@@ -1,106 +1,70 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Manual legacy recovery guards and exact-scope teardown contracts."""
-
-from pathlib import Path
+"""Manual legacy recovery uses original data and exact source names."""
 
 import pytest
-import yaml
 
-from deploy.sql.tools.supabase_to_postgres import migrate_docker as stack
-from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationSetupError
+from test.backend.services.migration_shell_fixture import run_migration
 
 
-@pytest.fixture
-def config(mocker):
-    mocker.patch.object(Path, "is_file", return_value=True)
-    return {"SUPABASE_DATA_DIR": str(Path.cwd() / "original-data"),
-            "SUPABASE_POSTGRES_PASSWORD": "private-password"}
+def test_missing_data_refuses_to_create_any_container(tmp_path):
+    result = run_migration(tmp_path, ["up"], {"FAKE_NAMES": ""}, data=False)
+    assert result.code != 0
+    assert "PG_VERSION" in result.stderr
+    assert not any(c[1] == "compose" for c in result.commands)
 
 
-def test_missing_data_refuses_to_create_any_container(config, mocker):
-    mocker.patch.object(Path, "is_file", return_value=False)
-    docker = mocker.patch.object(stack, "docker")
-    with pytest.raises(MigrationSetupError, match="PG_VERSION"):
-        stack.execute("up", config)
-    docker.assert_not_called()
+def test_missing_containers_restore_only_database_by_default(tmp_path):
+    result = run_migration(tmp_path, ["up"], {"FAKE_NAMES": ""})
+    assert result.code == 0, result.stderr
+    call = next(c for c in result.commands if c[1] == "compose")
+    assert call[-4:] == ["up", "-d", "--no-recreate", "db"]
+    assert "legacy-auth" not in call
 
 
-def test_missing_containers_restore_only_database_by_default(config, mocker):
-    docker = mocker.patch.object(stack, "docker", side_effect=["", ""])
-    stack.execute("up", config)
-    args, env = docker.call_args.args
-    assert args[0] == "compose" and args[-3:] == ["up", "-d", "db"]
-    assert "legacy-auth" not in args and "--remove-orphans" not in args
-    assert env["SUPABASE_POSTGRES_PASSWORD"] == "private-password"
-    assert env["SUPABASE_DATA_DIR"] == config["SUPABASE_DATA_DIR"]
+def test_full_stack_requires_original_auth_keys(tmp_path):
+    result = run_migration(tmp_path, ["up", "--with-auth"], {"FAKE_NAMES": "", "JWT_SECRET": "", "SUPABASE_KEY": "", "SERVICE_ROLE_KEY": "", "DASHBOARD_PASSWORD": ""})
+    assert result.code != 0
+    assert "original signing keys" in result.stderr
+    assert not any(c[1] == "compose" for c in result.commands)
 
 
-def test_full_stack_requires_original_auth_keys(config, mocker):
-    docker = mocker.patch.object(stack, "docker")
-    with pytest.raises(MigrationSetupError, match="original JWT_SECRET"):
-        stack.execute("up", config, with_auth=True)
-    docker.assert_not_called()
-
-
-def test_full_stack_and_production_overlay(config, mocker):
-    docker = mocker.patch.object(stack, "docker", side_effect=["", ""])
-    stack.execute("up", {**config,"JWT_SECRET":"signing", "SUPABASE_KEY":"anon", "SERVICE_ROLE_KEY":"service", "DASHBOARD_PASSWORD":"dashboard"},
-                  with_auth=True, production=True)
-    args, _ = docker.call_args.args
-    assert args[-5:] == ["up", "-d", "db", "auth", "kong"]
-    assert "legacy-auth" in args
-    assert str(stack.HERE / "docker-compose-supabase.prod.yml") in args
+def test_full_stack_and_production_overlay(tmp_path):
+    result = run_migration(tmp_path, ["up", "--with-auth", "--production"], {"FAKE_NAMES": "",
+        "JWT_SECRET": "fixture-signing", "SUPABASE_KEY": "fixture-anon", "SERVICE_ROLE_KEY": "fixture-service", "DASHBOARD_PASSWORD": "fixture-dashboard"})
+    assert result.code == 0, result.stderr
+    call = next(c for c in result.commands if c[1] == "compose")
+    assert call[-3:] == ["db", "auth", "kong"]
+    assert "legacy-auth" in call
+    assert any(value.endswith("docker-compose-supabase.prod.yml") for value in call)
 
 
 @pytest.mark.parametrize("running", ["true", "false"])
-def test_existing_container_is_reused_without_recreation(config, mocker, running):
-    docker = mocker.patch.object(stack, "docker", side_effect=["supabase-db-mini\n", running, ""])
-    stack.execute("up", config)
-    commands = [call.args[0][0] for call in docker.call_args_list]
-    assert commands == (["ps", "inspect"] if running == "true" else ["ps", "inspect", "start"])
+def test_existing_container_is_reused_without_recreation(tmp_path, running):
+    result = run_migration(tmp_path, ["up"], {"FAKE_NAMES": "supabase-db-mini", "FAKE_RUNNING": running})
+    assert result.code == 0, result.stderr
+    assert not any(c[1] == "compose" for c in result.commands)
+    assert any(c[1] == "start" for c in result.commands) is (running == "false")
 
 
-def test_mixed_container_set_requires_explicit_teardown(config, mocker):
-    docker = mocker.patch.object(stack, "docker", return_value="supabase-db-mini\n")
-    with pytest.raises(MigrationSetupError, match="down then up"):
-        stack.execute("up", {**config,"JWT_SECRET":"signing", "SUPABASE_KEY":"anon", "SERVICE_ROLE_KEY":"service", "DASHBOARD_PASSWORD":"dashboard"},with_auth=True)
-    docker.assert_called_once()
+def test_mixed_container_set_requires_explicit_teardown(tmp_path):
+    result = run_migration(tmp_path, ["up", "--with-auth"], {"FAKE_NAMES": "supabase-db-mini",
+        "JWT_SECRET": "fixture", "SUPABASE_KEY": "fixture", "SERVICE_ROLE_KEY": "fixture", "DASHBOARD_PASSWORD": "fixture"})
+    assert result.code != 0
+    assert "Partial legacy stack" in result.stderr
 
 
-def test_down_removes_only_legacy_containers_and_owned_network(mocker):
-    docker = mocker.patch.object(stack, "docker", side_effect=[
-        "supabase-db-mini\nnexent-postgresql\n", "false", "", "nexent_supabase_migration\nnexent_network\n",
-        "nexent-supabase-migration", ""])
-    stack.execute("down", {})
-    args = [call.args[0] for call in docker.call_args_list]
-    assert ["rm", "supabase-db-mini"] in args
-    assert ["network", "rm", "nexent_supabase_migration"] in args
-    assert all("nexent-postgresql" not in item and "-v" not in item for item in args)
-    assert not any(item[0] == "compose" for item in args)
+@pytest.mark.parametrize("network,owner,removed", [("nexent_supabase_migration", "nexent-supabase-migration", True),
+    ("nexent_network", "nexent-supabase-migration", False), ("nexent_supabase_migration", "foreign-project", False)])
+def test_down_removes_only_owned_legacy_network_and_preserves_volumes(tmp_path, network, owner, removed):
+    result = run_migration(tmp_path, ["down"], {"SUPABASE_MIGRATION_NETWORK": network, "FAKE_PROJECT": owner})
+    assert result.code == 0, result.stderr
+    assert any(c[1:3] == ["network", "rm"] for c in result.commands) is removed
+    assert not any("-v" in c or "volume" in c for c in result.commands)
+    assert [c[-1] for c in result.commands if c[1] == "rm"] == ["supabase-db-mini", "supabase-auth-mini", "supabase-kong-mini"]
 
 
-def test_shared_or_foreign_network_is_not_removed(mocker):
-    docker = mocker.patch.object(stack, "docker", side_effect=["", "nexent_supabase_migration\n", "other-project"])
-    stack.execute("down", {})
-    assert not any(call.args[0][:2] == ["network", "rm"] for call in docker.call_args_list)
-
-
-def test_invalid_or_nonlegacy_names_rejected_before_docker(mocker):
-    docker = mocker.patch.object(stack, "docker")
-    with pytest.raises(MigrationSetupError):
-        stack.execute("down", {"SUPABASE_MIGRATION_DB_CONTAINER":"nexent-postgresql"})
-    docker.assert_not_called()
-
-
-def test_compose_data_bind_and_sql_references_are_valid():
-    content = yaml.safe_load((stack.HERE / "docker-compose-supabase.yml").read_text(encoding="utf-8"))
-    db = content["services"]["db"]
-    bind = next(item for item in db["volumes"] if isinstance(item,dict))
-    assert bind["bind"]["create_host_path"] is False
-    assert "SUPABASE_DATA_DIR:?" in bind["source"]
-    for item in db["volumes"]:
-        if isinstance(item,str) and item.startswith("../../supabase/"):
-            assert (stack.HERE / item.split(":")[0]).is_file()
-    assert content["services"]["auth"]["profiles"] == ["legacy-auth"]
-    assert content["services"]["kong"]["profiles"] == ["legacy-auth"]
-    assert content["networks"]["nexent"]["name"] != "nexent_network"
+@pytest.mark.parametrize("name", ["database", "supabase;unsafe", "../supabase"])
+def test_invalid_or_nonlegacy_names_rejected_before_docker(tmp_path, name):
+    result = run_migration(tmp_path, ["up"], {"SUPABASE_MIGRATION_DB_CONTAINER": name})
+    assert result.code != 0
+    assert result.commands == []

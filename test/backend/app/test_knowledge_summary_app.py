@@ -35,7 +35,7 @@ nexent_core_agents = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents'] = nexent_core_agents
 
 
-nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.agent_model')
+nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.contracts.config')
 
 
 class MockToolConfig:
@@ -52,7 +52,7 @@ class MockAgentVerificationConfig:
 
 nexent_core_agents_agent_model.ToolConfig = MockToolConfig
 nexent_core_agents_agent_model.AgentVerificationConfig = MockAgentVerificationConfig
-sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
+sys.modules['nexent.core.agents.contracts.config'] = nexent_core_agents_agent_model
 nexent_nexent_vector_database = types.ModuleType('nexent.vector_database')
 sys.modules['nexent.vector_database'] = nexent_nexent_vector_database
 nexent_nexent_vector_database = types.ModuleType('nexent.vector_database.base')
@@ -102,10 +102,12 @@ consts_model_mock.ChangeSummaryRequest = ChangeSummaryRequest
 install_business_contract_stubs(consts_model_mock)
 
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
-utils_auth_utils_mock = types.ModuleType('gateway.authentication.auth')
+utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.session')
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+utils_auth_utils_mock.authenticate = lambda: None
+utils_auth_utils_mock.get_current_user_context = MagicMock(return_value=("test_user_id", "test_tenant_id", ("DEV",)))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("test_user_id", "test_tenant_id", "en"))
-sys.modules['gateway.authentication.auth'] = utils_auth_utils_mock
+sys.modules['management.services.permission.identity.session'] = utils_auth_utils_mock
 
 utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 mock_tenant_config_manager = MagicMock()

@@ -8,7 +8,6 @@ import asyncio
 import json
 import re
 import time
-from urllib.parse import quote
 
 import httpx
 import pytest
@@ -328,7 +327,7 @@ _REL06_WORKER_LOG_RE = re.compile(
 
 
 def _rel06_expected_topology() -> tuple[dict[str, tuple[str, int]], list[str]]:
-    """Recompute backend/data_process_service.py::_build_worker_configs from const.py defaults."""
+    """Recompute backend/http/data_process_service.py::_build_worker_configs from const.py defaults."""
     text = (repo_root() / "backend" / 'contracts' / 'constants' / 'environment.py').read_text(encoding="utf-8")
     dp = int(re.search(r'DP_PART_PROCESSOR_COUNT = int\(os\.getenv\("DP_PART_PROCESSOR_COUNT", "(\d+)"\)\)', text).group(1))
     actor_cpus = int(re.search(r'RAY_ACTOR_NUM_CPUS = int\(os\.getenv\("RAY_ACTOR_NUM_CPUS", "(\d+)"\)\)', text).group(1))
@@ -532,7 +531,10 @@ async def _forward_queue_isolation(identity) -> None:
             _rel06_assert_no_secrets(explicit_failure)
             if failed_names:
                 async with client("config", token=token) as api:
-                    error_info = await api.get(f"/indices/{index}/documents/{quote(next(iter(failed_names)), safe='')}/error-info")
+                    error_info = await api.get(
+                        f"/indices/{index}/documents/error-info",
+                        params={"path_or_url": next(iter(failed_names))},
+                    )
                 assert_status(error_info, 200)
                 _rel06_assert_no_secrets(redacted_response_body(error_info))
                 retry_files = [uploaded for uploaded in fault_files if uploaded["object_name"] in failed_names]

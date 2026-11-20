@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """ACON QA benchmark tools for nexent agent.
 
 Provides WikipediaSearchTool as a smolagents.Tool subclass, plus a helper
@@ -7,7 +8,7 @@ so that NexentAgent.create_local_tool() can find them via globals().
 import requests
 from smolagents.tools import Tool
 
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 
 
 class WikipediaSearchTool(Tool):
@@ -76,7 +77,7 @@ def register_acon_tools():
     already-executed `globals()`, we must inject into BOTH modules.
     """
     import nexent.core.tools as _tools_mod
-    import nexent.core.agents.nexent_agent as _agent_mod
+    import nexent.core.agents.cores.smolagents.agent as _agent_mod
     for cls in (WikipediaSearchTool,):
         setattr(_tools_mod, cls.__name__, cls)
         setattr(_agent_mod, cls.__name__, cls)

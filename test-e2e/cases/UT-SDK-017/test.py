@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 SDK unit contracts. All I/O clients are fakes owned by the test."""
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ class _FakeStorage:
 @STAGE
 @pytest.mark.case_id("UT-SDK-017")
 def test_gateway_rejects_cross_modality_fields_and_unconfigured_runtime() -> None:
-    from nexent.core.context_runtime.contracts import UnconfiguredContextRuntime
+    from nexent.core.agents.cores.smolagents.context_contracts import UnconfiguredContextRuntime
     from nexent.core.gateway.model_context import EmbeddingContext
 
     with pytest.raises(TypeError):

@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal, validate_sampling_parameters
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+from nexent.core.models.sampling import without_unset_sampling
 from nexent.core.models.capacity_budget import (
     CallerMaxTokensOverrideForbidden,
     ContextBudgetSnapshot,
@@ -28,7 +29,11 @@ class LegacyInvocationOptions:
     custom_overrides: Mapping[str, object] | None = None
 
     def resolve(self, profile: ResolvedModelProfile) -> ResolvedModelProfile:
-        submitted = dict(self.parameters)
+        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+
+        profile = ensure_outlet_parameter_rules(profile)
+        submitted = without_unset_sampling(self.parameters)
+        validate_sampling_parameters(submitted)
         for key, value in (("stop", self.stop_sequences), ("response_format", self.response_format)):
             if value is None:
                 continue

@@ -7,10 +7,10 @@ import {
   samplingComplete,
 } from "../../lib/modelSamplingParameters";
 
-it("UI-SAMPLING-10 exposes both required controls without a provider or known capability", () => {
+it("UI-SAMPLING-10 exposes both optional controls without a provider or known capability", () => {
   const rules = outletSamplingRules([]);
   expect(rules.map((rule) => rule.key)).toEqual(["temperature", "top_p"]);
-  expect(rules.every((rule) => rule.visible && rule.required)).toBe(true);
+  expect(rules.every((rule) => rule.visible && !rule.required)).toBe(true);
 });
 
 it("UI-SAMPLING-10 preserves an existing fixed parameter domain", () => {
@@ -22,7 +22,7 @@ it("UI-SAMPLING-10 preserves an existing fixed parameter domain", () => {
   };
   expect(outletSamplingRules([original])[0]).toMatchObject({
     visible: true,
-    required: true,
+    required: false,
     editable: false,
     schema: original.schema,
   });
@@ -33,13 +33,23 @@ it("UI-SAMPLING-10 preserves explicit zero and experience values above initial d
   expect(
     outletSamplingValues({ temperature: 0 }, { temperature: 0.8, top_p: 0.9 })
   ).toEqual({ temperature: 0, top_p: 0.9 });
-  expect(outletSamplingValues({})).toEqual({ temperature: 0.7, top_p: 1 });
+  expect(outletSamplingValues({})).toEqual({});
+  expect(
+    outletSamplingValues({ temperature: null }, { temperature: 0.8 })
+  ).toEqual({ temperature: null });
 });
 
-it.each([null, undefined, "0.7", Number.NaN, Number.POSITIVE_INFINITY])(
-  "UI-SAMPLING-10 rejects missing or nonnumeric required values (%s)",
+it.each(["0.7", Number.NaN, Number.POSITIVE_INFINITY])(
+  "UI-SAMPLING-10 rejects missing or nonnumeric sampling values (%s)",
   (value) => {
     expect(samplingComplete({ temperature: value, top_p: 1 })).toBe(false);
     expect(samplingComplete({ temperature: 0.7, top_p: value })).toBe(false);
+  }
+);
+
+it.each([null, undefined])(
+  "AC-002 accepts empty sampling values (%s)",
+  (value) => {
+    expect(samplingComplete({ temperature: value, top_p: value })).toBe(true);
   }
 );

@@ -10,8 +10,8 @@ from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionC
 from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.agent import workbench as workbench_service
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from threading import local
 from types import SimpleNamespace
 
@@ -296,7 +296,7 @@ def test_ut_be_wb_007_concurrent_mounts_are_request_isolated():
 
 def test_system_root_knowledge_mount_uses_the_executable_contract(mocker):
     """UT-BE-WB-023: external callers resolve knowledge without persisted Agent IDs."""
-    from nexent.core.agents.agent_model import ToolConfig
+    from nexent.core.agents.contracts.config import ToolConfig
 
     identity = workbench_service.RuntimeAgentIdentity("system:root", None, None, "system_root", "Root", "SYSTEM")
     config = AgentConfig(name="root", description="test", model_name="model", tools=[
@@ -525,7 +525,7 @@ def test_ut_be_wb_015_dependency_unavailability_fails_before_snapshot(mocker, de
 def test_ut_be_wb_012_shared_tool_parameter_conflicts_fail_before_snapshot(mocker):
     """UT-BE-WB-012: conflicting Tool parameters fail without a partial result."""
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
-    mocker.patch.object(workbench_service.skill_db, "get_skill_by_id", return_value={"name": "Skill", "tool_ids": [4], "config_schemas": [{"name": "region", "type": "string"}]})
+    mocker.patch.object(workbench_service.skill_db, "get_skill_by_id", side_effect=lambda skill_id, _tenant: {"name": f"Skill {skill_id}", "tool_ids": [4], "config_schemas": [{"name": "region", "type": "string"}]})
     mocker.patch.object(workbench_service, "query_tools_by_ids", return_value=[{"tool_id": 4, "author": "tenant", "is_available": True, "params": [{"name": "region"}]}])
     with pytest.raises(workbench_service.WorkbenchError) as error:
         workbench_service.resolve_workbench_config(_config(3, [{"skill_id": 11, "config_values": {"region": "CN"}}, {"skill_id": 12, "config_values": {"region": "US"}}]), tenant_id="tenant")

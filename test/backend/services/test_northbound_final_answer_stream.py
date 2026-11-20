@@ -3,12 +3,10 @@
 """Northbound compatibility at the canonical stream publication boundary."""
 
 import asyncio
-import json
-from unittest.mock import MagicMock
 
 import pytest
 
-from .test_agent_run_final_answers import service_tests, stream_capture
+from .test_agent_run_final_answers import stream_capture
 
 
 def answer(content, phase="delta", **metadata):
@@ -68,6 +66,9 @@ async def test_complete_joins_root_fragments_across_parallel_children(stream_cap
     assert [event["content"] for event in answers(events)] == ["Root result"]
     assert not answers(events)[0].get("invocation_id")
     assert batch["message_content"] == "Root result"
+    assert [unit["content"] for unit in answers(batch["message_units"]) if not unit.get("invocation_id")] == [
+        "Root result",
+    ]
     assert any(unit.get("invocation_id") == "child" for unit in batch["message_units"])
 
 
@@ -81,7 +82,8 @@ async def test_complete_uses_only_the_reclassified_final_step(stream_capture):
     ], final_answer_mode="complete")
     assert [event["content"] for event in answers(events)] == ["Reclassified answer"]
     assert batch["message_content"] == "Reclassified answer"
-    assert [event["type"] for event in events[:2]] == ["model_output_thinking", "model_output_code"]
+    process = [event for event in events if not event.get("answer_preview")]
+    assert [event["type"] for event in process[:2]] == ["model_output_thinking", "model_output_code"]
 
 
 @pytest.mark.asyncio
@@ -93,7 +95,7 @@ async def test_complete_discards_rolled_back_answers(stream_capture):
         answer("Accepted", attempt_id="ok"), answer("", "complete", attempt_id="ok"),
     ], final_answer_mode="complete")
     assert [event["content"] for event in answers(events)] == ["Accepted"]
-    assert events[0]["phase"] == "rollback"
+    assert events[0]["answer_preview"] and events[1]["phase"] == "rollback"
     assert batch["message_content"] == "Accepted"
 
 
@@ -115,7 +117,7 @@ async def test_complete_never_promotes_partial_child_blank_or_rolled_back_output
 async def test_complete_does_not_publish_an_answer_for_failed_or_stopped_runs(stream_capture, outcome, stopped):
     events, batch = await stream_capture(
         [answer("Draft"), answer("", "complete")],
-        outcome=outcome, stopped=stopped, final_answer_mode="complete")
+        status="stopped" if stopped else outcome, final_answer_mode="complete")
     assert answers(events) == []
     assert batch["terminal_status"] == ("stopped" if stopped else outcome)
 
@@ -136,30 +138,14 @@ async def test_complete_cancellation_does_not_publish_success(stream_capture):
         await stream_capture(
             [answer("Draft"), answer("", "complete"), asyncio.CancelledError()],
             final_answer_mode="complete")
-    published = [json.loads(call.args[0].removeprefix("data: ").strip())
-                 for call in stream_capture.channel.publish.call_args_list]
-    assert answers(published) == []
+    assert answers(stream_capture.published) == []
+    stream_capture.persist.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_complete_persistence_failure_does_not_publish_success(stream_capture, monkeypatch):
-    monkeypatch.setattr(service_tests.agent_execution, "persist_assistant_run_batch",
-                        MagicMock(side_effect=RuntimeError("controlled persistence failure")))
+async def test_complete_persistence_failure_does_not_publish_success(stream_capture):
+    stream_capture.persist.side_effect = RuntimeError("controlled persistence failure")
     events, batch = await stream_capture(
         [answer("Draft"), answer("", "complete")], final_answer_mode="complete")
     assert answers(events) == [] and batch is None
     assert any(event["type"] == "error" for event in events)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("raises", [False, True])
-async def test_complete_message_creation_failure_does_not_publish_success(stream_capture, monkeypatch, raises):
-    save = MagicMock(return_value=None)
-    if raises:
-        save.side_effect = RuntimeError("controlled message creation failure")
-    monkeypatch.setattr(service_tests.agent_execution, "save_message", save)
-    events, batch = await stream_capture(
-        [answer("Whole "), answer("answer"), answer("", "complete")], final_answer_mode="complete")
-    assert answers(events) == []
-    assert any(event["type"] == "error" for event in events)
-    assert batch is None

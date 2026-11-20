@@ -3,10 +3,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Alert, Input, InputNumber, Select, Switch } from "antd";
+import { Alert, Input, InputNumber, Select, Switch, Button } from "antd";
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
 
 type Kind = "string" | "number" | "boolean" | "object" | "array" | "null";
 interface Row {
@@ -267,7 +266,7 @@ function Rows({
                 {t(`modelProfile.valueType.${item.kind}`)}
               </span>
             )}
-            <StandardButton
+            <Button
               aria-label={`${t("common.delete")} ${index + 1}`}
               disabled={disabled}
               className="!w-8 !px-0"
@@ -287,13 +286,13 @@ function Rows({
           )}
         </div>
       ))}
-      <StandardButton
+      <Button
         icon={<Plus size={14} />}
         disabled={disabled}
         onClick={() => onChange([...rows, row("")])}
       >
         {t("modelProfile.addParameter")}
-      </StandardButton>
+      </Button>
     </div>
   );
 }

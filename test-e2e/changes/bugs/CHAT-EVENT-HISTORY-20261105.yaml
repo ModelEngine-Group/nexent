@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-EVENT-HISTORY-20261105
+  change_type: bugfix
+  bug_id: CHAT-EVENT-HISTORY-20261105
+  title: Refresh Workbench history on confirmed operations and foreground return
+  description: Remove idle list polling and coordinate bounded runtime reloads without replacing visible rows.
+  observed_behavior: A visible idle Workbench reads history every five seconds; changed metadata triggers a second list reload and replaces existing rows with loading skeletons.
+  expected_behavior: Idle pages issue no periodic history reads; confirmed first persistence, generated titles and run completion refresh history, and foreground return reconciles the loaded range while retaining the active runtime and rows.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing activity tests require polling and do not assert idle request counts or late title and overlapping event delivery without timers.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-ACTIVITY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Real runtime and hook tests prove event scheduling, request counts, lifecycle and error boundaries; the existing D4 proves visible list/composer continuity. No backend or Python product behavior changes.
+    behaviors:
+    - No duplicate initial history fetch or periodic request during sixty seconds of idle time.
+    - First server identity, late generated title and terminal run events trigger bounded refreshes.
+    - Coalesce foreground events and retain one trailing operation refresh while another load is active.
+    - Preserve hidden/offline pending changes, isolate identities and cancel queued work on unmount.
+    - Failed loads preserve state and retry only on another event; active streams and composer state remain intact.
+    test_selectors:
+    - frontend/tests/workbench/ConversationActivitySync.test.tsx
+    - frontend/tests/workbench/ThreadListRefresh.test.tsx
+    - frontend/tests/workbench/ConversationActivityRuntime.test.tsx
+    - frontend/tests/workbench/ConversationActivityAdapter.test.ts
+  notes: >-
+    Design and acceptance: ../nexent-doc/docs/Developing/chat-workbench-session-state/design.md,
+    Event-driven Workbench history section. Existing CHAT-SIDEBAR-RULE-004 and CHAT-ACTIVITY-D4-001
+    are updated to the user-approved event-only synchronization contract. The original referenced
+    agt-pr4058-test-delivery SPEC is unavailable; the readable session-state baseline is reused.
+    No server API, SQL, model behavior or Agent-chat grouped-history changes.
+    Existing rename/delete/pin operations retain their confirmed updates; the shared sidebar also
+    observes first persisted identity and generated-title changes rather than introducing a global event bus.
+    The self-contained D4 owns only controlled browser routes and releases its page/context; no real resources or model calls.

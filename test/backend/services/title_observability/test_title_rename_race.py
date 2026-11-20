@@ -18,7 +18,7 @@ async def test_delayed_generation_returns_preserved_manual_title(service, mocker
                        title_version=initial["title_version"] + 1)
         return "Automatic title"
 
-    mocker.patch.object(service, "run_blocking", new=AsyncMock(side_effect=generate))
+    mocker.patch.object(service, "call_llm_for_title", new=AsyncMock(side_effect=generate))
 
     def compare_and_set(_cid, title, _uid, *, expected_snapshot=None):
         if expected_snapshot and current != expected_snapshot:
@@ -37,7 +37,7 @@ async def test_delayed_generation_returns_preserved_manual_title(service, mocker
 async def test_unchanged_title_is_generated_with_an_owned_snapshot(service, mocker):
     snapshot = {"conversation_title": "New Conversation", "title_version": 0}
     read = mocker.patch.object(service, "get_conversation", return_value=snapshot)
-    mocker.patch.object(service, "run_blocking", new=AsyncMock(return_value="Automatic title"))
+    mocker.patch.object(service, "call_llm_for_title", new=AsyncMock(return_value="Automatic title"))
     save = mocker.patch.object(service, "rename_conversation", return_value=True)
     assert await service.generate_conversation_title_service(42, "Question", "user", "tenant", model_id=7) == "Automatic title"
     read.assert_called_once_with(42, user_id="user", tenant_id="tenant")
@@ -48,7 +48,7 @@ async def test_unchanged_title_is_generated_with_an_owned_snapshot(service, mock
 async def test_missing_owned_conversation_never_calls_model(service, mocker):
     mocker.patch.object(service, "get_conversation", return_value=None)
     mocker.patch.object(service, "rename_conversation", return_value=True)
-    run = mocker.patch.object(service, "run_blocking", new=AsyncMock())
+    run = mocker.patch.object(service, "call_llm_for_title", new=AsyncMock())
     with pytest.raises(service.ConversationNotFoundError):
         await service.generate_conversation_title_service(42, "Question", "user", "tenant")
     run.assert_not_awaited()
@@ -59,7 +59,7 @@ async def test_deleted_conversation_during_generation_is_not_success(service, mo
     mocker.patch.object(service, "get_conversation", side_effect=[
         {"conversation_title": "New Conversation", "title_version": 0}, None,
     ])
-    mocker.patch.object(service, "run_blocking", new=AsyncMock(return_value="Automatic title"))
+    mocker.patch.object(service, "call_llm_for_title", new=AsyncMock(return_value="Automatic title"))
     mocker.patch.object(service, "rename_conversation", return_value=False)
     with pytest.raises(service.ConversationNotFoundError):
         await service.generate_conversation_title_service(42, "Question", "user", "tenant")
@@ -135,7 +135,7 @@ async def test_activity_update_during_model_does_not_invalidate_title(service, m
         current.update(conversation_title=title, title_version=current["title_version"] + 1)
         return True
 
-    mocker.patch.object(service, "run_blocking", new=AsyncMock(side_effect=generate))
+    mocker.patch.object(service, "call_llm_for_title", new=AsyncMock(side_effect=generate))
     save = mocker.patch.object(service, "rename_conversation", side_effect=compare_and_set)
     result = await service.generate_conversation_title_service(42, "Question", "user", "tenant")
     assert result == "Automatic title"

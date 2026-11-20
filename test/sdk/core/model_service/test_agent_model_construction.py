@@ -5,8 +5,8 @@
 from threading import Event
 
 import pytest
-from nexent.core.agents.agent_model import ModelConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ModelConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_service.compatibility.invocation_options import (
     LegacyInvocationOptions,
@@ -69,3 +69,22 @@ def test_factory_captures_credentials_before_configuration_object_changes(openai
     prepared = model.service._registry.resolve(profile.bindings.adapter).prepare_http_request(request, profile)
     sender = model.service._sender_factory(model.profile).freeze_credentials(prepared)
     assert sender._headers(prepared)['authorization'] == 'Bearer controlled-key'
+
+
+def test_agent_factory_applies_logprobs_to_resolved_model_request(openai_profile):
+    agent = agent_for(openai_profile)
+    agent.model_config_list[0].extra_body = {"logprobs": True}
+
+    model = agent.create_model("chosen")
+    request, _ = model._request(
+        [{"role": "user", "content": "hello"}], LegacyInvocationOptions({}), None
+    )
+    prepared = model.service._registry.resolve(model.profile.bindings.adapter).prepare_http_request(
+        request, model.profile
+    )
+
+    assert prepared.json_body["logprobs"] is True
+    assert all(
+        extra["path"] != "/logprobs"
+        for extra in openai_profile.extra_api_parameters
+    )

@@ -1,0 +1,25 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-RECOVERY
+  name: Jiuwen bounded logical recovery
+  status: active
+  description: Separate bounded logical correction from ModelService physical attempts
+    without replaying effects.
+  business_rules:
+  - rule_id: JIUWEN-RECOVERY-RULE-001
+    description: Correct invalid arguments once per model step and three times per
+      turn; recover empty/reasoning-only/length completion once per turn. Preserve
+      deadline, cancellation and explicit request identities.
+  - rule_id: JIUWEN-RECOVERY-RULE-002
+    description: Never retry unknown control, authorization, transport partial or
+      tool execution failures; no tool replay, model switch or multiplied transport
+      retries.
+  required_test_stages:
+  - D5
+  source:
+    requirement_ids:
+    - JIUWEN-M6-20261016
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

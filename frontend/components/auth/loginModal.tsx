@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useState, useEffect } from "react";
@@ -286,7 +288,7 @@ export function LoginModal() {
       forceRender
       closable={true}
     >
-      <div className="relative bg-white p-4 rounded-2xl">
+      <div className="relative bg-white p-4 rounded-lg">
         <Form
           id="login-form"
           form={form}

@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-MODEL-BODY-20261116
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-MODEL-BODY-20261116
+  title: 模型正文展示实际收发数据
+  description: 模型输入保存适配后的真实请求，输出独立保存服务端原字段响应，Ops使用该字段生成预览与正文引用。
+  observed_behavior: 部分模型input为内部ModelRequest，output为AssistantMessage及采集complete包装。
+  expected_behavior: 新采集模型输入等于实际发送的请求JSON，输出等于按服务端字段合并的最终响应；内部content_parts/provider_metadata/complete/local_call_id等不混入展示正文。预览与分块读取来自同一字段，失败部分、脱敏、实际指标及调用次数保持。
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: 现有UT与D3核验归一化消息，未核验展示正文与真实协议字段相等。
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 实际wire输入优先，非流式响应原结构，流式文本及工具参数按index合并。
+    - 取消/错误/预算及脱敏保持，内部DTO不作为页面正文。
+    - Ops仅对模型选择原生响应，缺失时不回退内部消息，旧数据与其他节点保持。
+    reason: 新增针对收发正文的隔离UT并强化既有真实协议D3，无需新增D1。
+    test_selectors:
+    - test/sdk/core/model_service/test_model_wire_capture.py
+    - test/backend/services/trajectory/test_model_bodies.py
+  notes: SPEC model-body-fix.md与AC-MODEL-BODY-01。D3沿用runtime责任域、私有资源和清理，无共享准备依赖。完整PG/部署验收继续暂缓。

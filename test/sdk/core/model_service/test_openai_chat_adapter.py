@@ -467,3 +467,31 @@ def test_sampling_config_is_preserved_but_explicitly_unsupported_values_are_not_
         assert body[key] == value
     assert current.model_dump(mode="json") == before
     assert current.parameter_values[key] == value
+
+
+@pytest.mark.parametrize("values", [{"temperature": None}, {"top_p": None},
+                                    {"temperature": None, "top_p": None},
+                                    {"temperature": 0, "top_p": None}])
+def test_ac003_legacy_empty_sampling_is_not_sent_as_json_null(profile, values):
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+
+    data = profile.model_dump(mode="json")
+    data["parameter_values"].update(values)
+    rules = {rule["key"]: rule for rule in data["parameter_rules"]}
+    for key in values:
+        if key not in rules:
+            data["parameter_rules"].append({
+                "key": key, "schema": {"type": ["number", "null"]}, "visible": True,
+                "editable": True, "required": False, "allowed_scopes": ["outlet"],
+                "ui_group": "sampling", "owner": "provider", "source": {"ref": "test", "version": 1},
+                "api_binding": {"path": "/" + key, "transform_ref": "identity_v1", "transform_version": 1}})
+        else:
+            rules[key]["schema"] = {"type": ["number", "null"]}
+    changed = ResolvedModelProfile.model_validate(data)
+    body = OpenAIChatAdapter().prepare_http_request(request(changed), changed).json_body
+    for key, value in values.items():
+        if value is None:
+            assert key not in body
+        else:
+            assert body[key] == value
+    assert changed.parameter_values.items() >= values.items()

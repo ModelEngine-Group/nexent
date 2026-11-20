@@ -47,7 +47,7 @@ def database(monkeypatch):
     # Keep actual ORM metadata and exceptions; isolate only the DB session boundary.
     from contracts.errors import exceptions
 
-    client = ModuleType("management.db.client")
+    client = ModuleType("infrastructure.rdb.client")
     client.sessions = []
 
     @contextmanager
@@ -59,7 +59,7 @@ def database(monkeypatch):
     monkeypatch.setitem(sys.modules, client.__name__, client)
     database = load(
         "_outlet_unit_db.model_outlet_db",
-        "backend/management/db/model/outlets.py",
+        "infrastructure/rdb/outlets.py",
         monkeypatch,
     )
     return database, client, exceptions
@@ -175,5 +175,3 @@ def update(database, profile, session, **kwargs):
         db_session=session,
         **kwargs,
     )
-
-

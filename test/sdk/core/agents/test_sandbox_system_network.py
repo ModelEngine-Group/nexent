@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Native system endpoints and cancellation ownership regressions."""
 
 import logging
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents import sandbox as sb
+from nexent.core.agents.sandbox import execution as sb
 
 
 @pytest.fixture

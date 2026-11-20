@@ -6,6 +6,7 @@ import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
 import type {
+  ApiMessageAnnotation,
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
@@ -345,6 +346,41 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
+  // Branch a conversation into a new one up to and including the given turn
+  // (1-based). Returns the new conversation payload.
+  async branch(
+    conversationId: number,
+    turnIndex: number,
+    assistantMessageId?: string,
+    answerIndex?: number
+  ) {
+    // Restored messages carry database IDs; live messages carry runtime UUIDs.
+    const sourceMessageId =
+      assistantMessageId && /^[1-9]\d*$/.test(assistantMessageId)
+        ? Number(assistantMessageId)
+        : undefined;
+    const response = await fetch(API_ENDPOINTS.conversation.branch, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        turn_index: turnIndex,
+        source_message_id: Number.isSafeInteger(sourceMessageId)
+          ? sourceMessageId
+          : undefined,
+        answer_index: answerIndex,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data;
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
   // Get conversation details
   async getDetail(
     conversationId: number,
@@ -475,11 +511,15 @@ export const conversationService = {
   },
 
   // Stop conversation agent
-  async stop(runId: string | number) {
-    const response = await fetch(API_ENDPOINTS.agent.stop(runId), {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
+  async stop(runId: string | number, generation?: string) {
+    const url = API_ENDPOINTS.agent.stop(runId);
+    const response = await fetch(
+      generation ? `${url}?generation=${encodeURIComponent(generation)}` : url,
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
 
     const data = await response.json();
 
@@ -1186,6 +1226,7 @@ export const conversationService = {
     params: {
       query: string;
       clarification_response?: ClarificationResponse;
+      annotations?: ApiMessageAnnotation[];
       conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
@@ -1214,6 +1255,7 @@ export const conversationService = {
       expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
       persist_history?: boolean;
+      request_id?: string;
       retry_message_index?: number;
       retry_user_message_id?: number;
       workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
@@ -1224,7 +1266,8 @@ export const conversationService = {
     onConversationId?: (id: string) => void,
     onRuntimeMetadataVersion?: (version: number) => void,
     onRunId?: (id: string) => void,
-    onWorkbenchConfigVersion?: (version: number) => void
+    onWorkbenchConfigVersion?: (version: number) => void,
+    onUserMessage?: (id: number, index: number) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -1245,21 +1288,29 @@ export const conversationService = {
       ) {
         requestParams.clarification_response = params.clarification_response;
       }
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.annotations?.length
+      ) {
+        requestParams.annotations = params.annotations;
+      }
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.language = params.language;
       }
       if (params.runtime_mode) {
+        if (!params.is_resume && params.request_id)
+          requestParams.request_id = params.request_id;
         requestParams.persist_history = true;
         requestParams.workbench_config = params.workbench_config;
-        if (params.retry_message_index !== undefined) {
-          requestParams.retry_message_index = params.retry_message_index;
-        }
-        if (params.retry_user_message_id !== undefined) {
-          requestParams.retry_user_message_id = params.retry_user_message_id;
-        }
       }
-
+      if (params.retry_message_index !== undefined) {
+        requestParams.retry_message_index = params.retry_message_index;
+      }
+      if (params.retry_user_message_id !== undefined) {
+        requestParams.retry_user_message_id = params.retry_user_message_id;
+      }
       // Only include conversation_id if it has a value
       if (
         params.conversation_id !== undefined &&
@@ -1337,6 +1388,20 @@ export const conversationService = {
         onConversationId(conversationId);
       }
       const runId = response.headers.get("run_id");
+      const userId = response.headers.get("X-User-Message-Id");
+      const userIndex = response.headers.get("X-User-Message-Index");
+      if (response.ok && userId !== null && userIndex !== null) {
+        const id = Number(userId),
+          index = Number(userIndex);
+        if (
+          Number.isSafeInteger(id) &&
+          id > 0 &&
+          Number.isSafeInteger(index) &&
+          index >= 0
+        ) {
+          onUserMessage?.(id, index);
+        }
+      }
       if (runId && onRunId) {
         onRunId(runId);
       }

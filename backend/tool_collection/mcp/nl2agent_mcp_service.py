@@ -1,6 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from fastmcp import FastMCP
 
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from management.services.agent.nl2agent_tools import (
     NL2AGENT_MCP_TOOL_META,
     NL2A_MCP_SERVICE_NAME,
     NL2A_WRAPPER_DESCRIPTION,

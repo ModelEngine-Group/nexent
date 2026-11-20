@@ -32,9 +32,9 @@ minio_mock.client = MagicMock()
 patch("nexent.storage.storage_client_factory.create_storage_client_from_config",
       return_value=storage_client_mock).start()
 patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None).start()
-patch("management.db.client.MinioClient", return_value=minio_mock).start()
-patch("management.db.client.MinioClient", return_value=minio_mock).start()
-patch("management.db.client.minio_client", minio_mock).start()
+patch("infrastructure.object_storage.client.MinioClient", return_value=minio_mock).start()
+patch("infrastructure.object_storage.client.MinioClient", return_value=minio_mock).start()
+patch("infrastructure.object_storage.client.minio_client", minio_mock).start()
 patch("elasticsearch.Elasticsearch", return_value=MagicMock()).start()
 
 from http import HTTPStatus  # noqa: E402
@@ -132,7 +132,10 @@ def test_logout_success_records_audit_entry(caplog, mocker):
 def test_account_revoke_success_records_audit_entry(caplog, mocker):
     """Successful account revocation records the revoked account owner."""
     user = MagicMock()
-    user.user_metadata = {"role": "user"}
+    mocker.patch(
+        "management.api.identity.user_management.get_current_user_context",
+        return_value=("user123", "tenant456", ("USER", "OPS")),
+    )
     mocker.patch("management.api.identity.user_management.delete_user_and_cleanup", new_callable=AsyncMock)
     mocker.patch("management.api.identity.user_management.validate_token", return_value=(True, user))
     mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("user123", "tenant456"))

@@ -108,7 +108,7 @@ export interface ModelProfileDraftResponse {
 }
 
 export interface ModelOutletCreateRequest extends ModelProfileDraftRequest {
-  check_receipt?: string;
+  connect_status?: "available" | "unavailable" | null;
   api_key?: string | null;
 }
 
@@ -136,7 +136,10 @@ export interface ModelOutletProfile {
     concurrency_limit: number | null;
   };
   capabilities: {
-    reasoning?: { status: "supported" | "unsupported" | "unknown" };
+    reasoning?: {
+      status: "supported" | "unsupported" | "unknown";
+      can_disable?: boolean | null;
+    };
     sampling?: {
       top_p?: { status: "supported" | "unsupported" | "unknown" };
     };
@@ -176,7 +179,7 @@ export interface ModelOutletPatchRequest {
     provider_profile: ModelProfileSelection | null;
   };
   request_model_id?: string;
-  check_receipt?: string;
+  connect_status?: "available" | "unavailable" | null;
   thinking_control?: ThinkingControlFormat;
   thinking_mode?: ThinkingDegreeMode;
   expected_revision: number;
@@ -205,7 +208,6 @@ export type ModelOutletValidationRequest =
     };
 
 export interface ModelOutletValidationResponse {
-  check_receipt?: string;
   ok: boolean;
   error: {
     category: string;
@@ -225,6 +227,7 @@ export interface ModelOutletValidationResponse {
 
 export interface ConversationModelPreferenceView {
   reasoning_status?: "supported" | "unsupported" | "unknown";
+  reasoning_can_disable?: boolean | null;
   output_limit?: number | null;
   config_revision: number;
   parameter_values: Record<string, unknown>;

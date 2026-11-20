@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-RULE-STORAGE-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-RULE-STORAGE-20261013
+  title: Restore saved parameter rules without duplicated domains
+  description: Replace exact duplicate schema domains and saved fixed values with strict same-row references.
+  affected_features:
+    existing: [SDK-MODEL-OUTLET-STORAGE]
+    added: []
+    modified: [SDK-MODEL-OUTLET-STORAGE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Exact enum and numeric domain references restore the original schema while extra restrictions remain unchanged.
+    - Fixed false, zero and null use saved key presence; inactive rules retain their independent constraints without defaults applied.
+    - Missing, malformed, duplicate or inconsistent references and oversized/non-JSON data fail without changing declarations or exposing values.
+    reason: Existing rule tests validate effective policies, not storage reference syntax or lossless reconstruction. Pure codec proof stays in UT; no duplicate D1 is needed.
+    test_selectors: [test/sdk/core/model_service/test_outlet_rules.py]
+  no_case_change_reason: Database and runtime are not connected by this codec. Full-row and database transaction verification remain required separately; historical formal Cases are preserved.
+  notes: Reference syntax was documented before implementation. The change is not a complete outlet storage or migration acceptance claim.

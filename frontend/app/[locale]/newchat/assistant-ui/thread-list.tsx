@@ -4,10 +4,9 @@
 import { HistoryThreadTrigger } from "./history-thread-trigger";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  ConversationHistoryLabel,
+  OverflowTooltipText,
+} from "@/components/common/ConversationHistoryLabel";
 import { Checkbox, message } from "antd";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
@@ -29,7 +28,6 @@ import {
   XIcon,
   ChevronRight,
   LayoutGrid,
-  Loader2Icon,
   CircleAlertIcon,
   LoaderCircle,
   ListChecks,
@@ -72,6 +70,11 @@ import { getVisibleThreadIds } from "./visible-thread-ids";
 import { getVisibleAgentThreads } from "./thread-list-visibility";
 import { hoistPinnedThreads, usePinnedThreads } from "./thread-pins";
 import { AgentHistoryList, AgentHistoryViewport } from "./agent-history-list";
+import { ConversationRunIndicator } from "@/components/common/ConversationRunIndicator";
+import {
+  ConversationRunIndicatorsContext,
+  useConversationRunIndicators,
+} from "@/hooks/chat/useConversationRunIndicators";
 export { PinnedThreadsProvider } from "./thread-pins";
 
 // Conversation status indicator component
@@ -79,27 +82,9 @@ const ConversationStatusIndicator: FC<{
   isStreaming: boolean;
   isCompleted: boolean;
 }> = ({ isStreaming, isCompleted }) => {
-  const { t } = useTranslation();
-
-  if (isStreaming) {
-    return (
-      <div
-        className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"
-        title={t("chat.threadList.running")}
-      />
-    );
-  }
-
-  if (isCompleted) {
-    return (
-      <div
-        className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full mr-2"
-        title={t("chat.threadList.completed")}
-      />
-    );
-  }
-
-  return null;
+  return (
+    <ConversationRunIndicator running={isStreaming} completed={isCompleted} />
+  );
 };
 
 interface BatchSelectionValue {
@@ -630,32 +615,14 @@ export const ThreadList: FC<ThreadListProps> = ({
 }) => {
   const { t } = useTranslation();
   const batchSelection = useBatchSelection();
-  const [completedConversations, setCompletedConversations] = useState(
-    () => new Set<string>()
-  );
-  const isThreadRunning = useAuiState((s) => s.thread.isRunning);
-  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
-  const runningThreadId = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (isThreadRunning) {
-      runningThreadId.current = mainThreadId;
-      return;
-    }
-
-    if (runningThreadId.current) {
-      const completedThreadId = runningThreadId.current;
-      setCompletedConversations((previous) => {
-        const next = new Set(previous);
-        next.add(completedThreadId);
-        return next;
-      });
-      runningThreadId.current = undefined;
-    }
-  }, [isThreadRunning, mainThreadId]);
+  const indicators = useConversationRunIndicators(serverConversationIds);
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const [settledHasMore, setSettledHasMore] = useState(hasMore);
+  if (!isLoading && settledHasMore !== hasMore) setSettledHasMore(hasMore);
+  // A same-adapter reload retains rows but temporarily clears its page cursor.
+  const showLoadMore = isLoading ? settledHasMore : hasMore;
   const threadIds = useAuiState((state) => state.threads.threadIds);
   const threadItems = useAuiState((state) => state.threads.threadItems);
   const visibleThreadIds = getVisibleThreadIds(
@@ -676,87 +643,95 @@ export const ThreadList: FC<ThreadListProps> = ({
   }, []);
 
   return (
-    <div className={cn("flex flex-col p-2", newChatDesign && "min-h-0 flex-1")}>
+    <ConversationRunIndicatorsContext.Provider value={indicators}>
       <div
         className={cn(
-          "mb-1 flex h-8 items-center justify-between py-1",
-          newChatDesign && "shrink-0",
-          newChatDesign ? "px-1" : "px-3"
+          "flex flex-col p-2",
+          !newChatDesign && "[overflow-anchor:none]",
+          newChatDesign && "min-h-0 flex-1"
         )}
       >
-        <p
+        <div
           className={cn(
-            "text-muted-foreground",
-            newChatDesign ? "text-xs" : "text-sm"
+            "mb-1 flex h-8 items-center justify-between py-1",
+            newChatDesign && "shrink-0",
+            newChatDesign ? "px-1" : "px-3"
           )}
         >
-          {t(
-            newChatDesign && selectedAgentId === undefined
-              ? "chat.threadList.recentlyUsed"
-              : "chat.threadList.recentConversations"
-          )}
-        </p>
-        <BatchManageButton newChatDesign={newChatDesign} />
-      </div>
-      {newChatDesign ? (
-        <AgentHistoryViewport enabled={selectedAgentId === undefined}>
-          <AgentHistoryList
-            searchQuery={searchQuery}
-            selectedAgentId={selectedAgentId}
-            generatedTitles={generatedTitles}
-            onHistoryAgentSelected={onHistoryAgentSelected}
-            onRenameSuccess={onRenameSuccess}
-            onNewConversation={onNewConversation}
-            batch={batchSelection}
-          />
-        </AgentHistoryViewport>
-      ) : (
-        <>
-          <AuiIf condition={(s) => s.threads.isLoading}>
-            <ThreadListSkeleton />
-          </AuiIf>
-          <AuiIf
-            condition={(s) =>
-              !s.threads.isLoading && visibleThreadIds.length === 0
-            }
+          <p
+            className={cn(
+              "text-muted-foreground",
+              newChatDesign ? "text-xs" : "text-sm"
+            )}
           >
-            <ThreadListEmpty />
-          </AuiIf>
-          <AuiIf
-            condition={(s) =>
-              !s.threads.isLoading && visibleThreadIds.length > 0
-            }
-          >
-            <ThreadListItems
-              activeThreadId={activeThreadId}
-              visibleThreadIds={visibleThreadIds}
-              completedConversations={completedConversations}
+            {t(
+              newChatDesign && selectedAgentId === undefined
+                ? "chat.threadList.recentlyUsed"
+                : "chat.threadList.recentConversations"
+            )}
+          </p>
+          <BatchManageButton newChatDesign={newChatDesign} />
+        </div>
+        {newChatDesign ? (
+          <AgentHistoryViewport enabled={selectedAgentId === undefined}>
+            <AgentHistoryList
+              searchQuery={searchQuery}
+              serverConversationIds={serverConversationIds}
+              selectedAgentId={selectedAgentId}
               generatedTitles={generatedTitles}
               onHistoryAgentSelected={onHistoryAgentSelected}
               onRenameSuccess={onRenameSuccess}
-              searchQuery={searchQuery}
-              newChatDesign={newChatDesign}
-              selectedAgentId={selectedAgentId}
-              expandedAgentKeys={expandedAgentKeys}
-              onToggleAgentExpanded={toggleAgentExpanded}
+              onNewConversation={onNewConversation}
+              batch={batchSelection}
             />
-          </AuiIf>
-          {hasMore && !isLoading && (
-            <ThreadListPrimitive.LoadMore
-              disabled={isLoadingMore}
-              className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+          </AgentHistoryViewport>
+        ) : (
+          <>
+            <AuiIf
+              condition={(s) =>
+                s.threads.isLoading && visibleThreadIds.length === 0
+              }
             >
-              {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
-              <span>
-                {isLoadingMore
-                  ? t("chat.threadList.loadingMore")
-                  : t("chat.threadList.loadMore")}
-              </span>
-            </ThreadListPrimitive.LoadMore>
-          )}
-        </>
-      )}
-    </div>
+              <ThreadListSkeleton />
+            </AuiIf>
+            <AuiIf
+              condition={(s) =>
+                !s.threads.isLoading && visibleThreadIds.length === 0
+              }
+            >
+              <ThreadListEmpty />
+            </AuiIf>
+            <AuiIf condition={() => visibleThreadIds.length > 0}>
+              <ThreadListItems
+                activeThreadId={activeThreadId}
+                visibleThreadIds={visibleThreadIds}
+                generatedTitles={generatedTitles}
+                onHistoryAgentSelected={onHistoryAgentSelected}
+                onRenameSuccess={onRenameSuccess}
+                searchQuery={searchQuery}
+                newChatDesign={newChatDesign}
+                selectedAgentId={selectedAgentId}
+                expandedAgentKeys={expandedAgentKeys}
+                onToggleAgentExpanded={toggleAgentExpanded}
+              />
+            </AuiIf>
+            {showLoadMore && visibleThreadIds.length > 0 && (
+              <ThreadListPrimitive.LoadMore
+                disabled={isLoading || isLoadingMore}
+                className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
+                <span>
+                  {isLoadingMore
+                    ? t("chat.threadList.loadingMore")
+                    : t("chat.threadList.loadMore")}
+                </span>
+              </ThreadListPrimitive.LoadMore>
+            )}
+          </>
+        )}
+      </div>
+    </ConversationRunIndicatorsContext.Provider>
   );
 };
 
@@ -775,7 +750,6 @@ const ThreadListEmpty: FC = () => {
 interface ThreadListItemsProps {
   visibleThreadIds: string[];
   activeThreadId?: string;
-  completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
   onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
@@ -786,55 +760,9 @@ interface ThreadListItemsProps {
   onToggleAgentExpanded: (key: string) => void;
 }
 
-const OverflowTooltipText: FC<{
-  children: ReactNode;
-  className: string;
-}> = ({ children, className }) => {
-  const textRef = useRef<HTMLSpanElement>(null);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
-
-  useEffect(() => {
-    const textElement = textRef.current;
-    if (!textElement) return;
-
-    const updateOverflow = () => {
-      const nextIsOverflowing =
-        textElement.scrollWidth > textElement.clientWidth;
-      setIsOverflowing(nextIsOverflowing);
-      if (!nextIsOverflowing) setIsTooltipOpen(false);
-    };
-
-    updateOverflow();
-    if (typeof ResizeObserver === "undefined") return;
-    const resizeObserver = new ResizeObserver(updateOverflow);
-    resizeObserver.observe(textElement);
-    return () => resizeObserver.disconnect();
-  }, [children]);
-
-  return (
-    <Tooltip
-      open={isOverflowing && isTooltipOpen}
-      onOpenChange={(open) => {
-        if (isOverflowing) setIsTooltipOpen(open);
-      }}
-    >
-      <TooltipTrigger asChild>
-        <span ref={textRef} className={className}>
-          {children}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-80 break-words">
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  );
-};
-
 const ThreadListItems: FC<ThreadListItemsProps> = ({
   activeThreadId,
   visibleThreadIds,
-  completedConversations,
   generatedTitles,
   onHistoryAgentSelected,
   onRenameSuccess,
@@ -878,7 +806,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
       function GroupedThreadListItem() {
         return (
           <ThreadListItem
-            completedConversations={completedConversations}
             generatedTitles={generatedTitles}
             onHistoryAgentSelected={onHistoryAgentSelected}
             onRenameSuccess={onRenameSuccess}
@@ -886,13 +813,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           />
         );
       },
-    [
-      completedConversations,
-      generatedTitles,
-      newChatDesign,
-      onRenameSuccess,
-      onHistoryAgentSelected,
-    ]
+    [generatedTitles, newChatDesign, onRenameSuccess, onHistoryAgentSelected]
   );
 
   const TimeGroupThreadListItem = useMemo<FC>(
@@ -900,7 +821,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
       function TimeGroupThreadListItem() {
         return (
           <ThreadListItem
-            completedConversations={completedConversations}
             generatedTitles={generatedTitles}
             onHistoryAgentSelected={onHistoryAgentSelected}
             onRenameSuccess={onRenameSuccess}
@@ -908,12 +828,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           />
         );
       },
-    [
-      completedConversations,
-      generatedTitles,
-      onRenameSuccess,
-      onHistoryAgentSelected,
-    ]
+    [generatedTitles, onRenameSuccess, onHistoryAgentSelected]
   );
 
   // Workbench (and legacy) sidebar: recency buckets (Today / Last 7 Days /
@@ -924,7 +839,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         <ThreadListPrimitive.Items>
           {() => (
             <ThreadListItem
-              completedConversations={completedConversations}
               generatedTitles={generatedTitles}
               onHistoryAgentSelected={onHistoryAgentSelected}
               onRenameSuccess={onRenameSuccess}
@@ -978,7 +892,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         <ThreadListPrimitive.Items>
           {() => (
             <ThreadListItem
-              completedConversations={completedConversations}
               generatedTitles={generatedTitles}
               onHistoryAgentSelected={onHistoryAgentSelected}
               onRenameSuccess={onRenameSuccess}
@@ -1463,7 +1376,6 @@ const ThreadListSkeleton: FC = () => {
 };
 
 interface ThreadListItemProps {
-  completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
   onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
@@ -1492,7 +1404,6 @@ const formatRelativeTime = (
 const ThreadListItem: FC<
   ThreadListItemProps & { variant?: "agent" | "time" }
 > = ({
-  completedConversations,
   generatedTitles,
   onHistoryAgentSelected,
   onRenameSuccess,
@@ -1502,20 +1413,25 @@ const ThreadListItem: FC<
   const thread = useAuiState((s) => s.threadListItem);
   const pinned = usePinnedThreads();
   const isPinned = pinned?.isPinned(thread) ?? false;
+  const indicators = useContext(ConversationRunIndicatorsContext);
+  const batch = useBatchSelection();
 
   return (
     <ThreadListItemPrimitive.Root
       data-pinned={isPinned || undefined}
+      data-conversation-id={
+        batch?.resolveRemoteId(thread.id) ?? thread.remoteId ?? thread.id
+      }
+      onClickCapture={() => indicators.acknowledge(thread.id)}
       className={
         variant === "time"
           ? "group/item relative flex h-10 items-center rounded-lg px-3 hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
           : cn(
-              "group/item flex h-10 items-center rounded-lg hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
+              "group/item relative flex h-10 items-center rounded-lg hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
             )
       }
     >
       <ThreadListItemContent
-        completedConversations={completedConversations}
         generatedTitles={generatedTitles}
         onHistoryAgentSelected={onHistoryAgentSelected}
         onRenameSuccess={onRenameSuccess}
@@ -1527,7 +1443,6 @@ const ThreadListItem: FC<
 };
 
 interface ThreadListItemContentProps {
-  completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
   onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
@@ -1536,7 +1451,6 @@ interface ThreadListItemContentProps {
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
-  completedConversations,
   generatedTitles,
   onHistoryAgentSelected,
   onRenameSuccess,
@@ -1685,10 +1599,11 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             className="!m-0 shrink-0"
             checked={isSelected?.(thread.id) ?? false}
           />
-          <span className="min-w-0 flex-1 truncate text-left">{title}</span>
-          <span className="shrink-0 whitespace-nowrap text-xs text-[#8c8c8c]">
-            {formatRelativeTime(lastMessageAt, t)}
-          </span>
+          <ConversationHistoryLabel
+            title={title}
+            time={formatRelativeTime(lastMessageAt, t)}
+            showActions={false}
+          />
         </button>
       );
     }
@@ -1713,38 +1628,31 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             aria-label={t("chat.threadList.pinned")}
           />
         )}
-        <div className="flex min-w-0 flex-1 items-center text-left">
-          <OverflowTooltipText className="min-w-0 flex-1 truncate text-left">
-            {title}
-          </OverflowTooltipText>
-          {!newChatDesign &&
-            (variant === "time" ? (
-              <ThreadRowEndStatus
-                completedConversations={completedConversations}
-              />
-            ) : (
-              <ConversationStatusIndicatorWrapper
-                completedConversations={completedConversations}
-              />
-            ))}
-        </div>
-        {newChatDesign && isRunning ? (
-          <LoaderCircle
-            role="status"
-            aria-label={t("chat.threadList.running")}
-            className="size-3 shrink-0 animate-spin text-[#808080]"
-          />
-        ) : (
-          <span
-            className={
-              variant === "time"
-                ? "shrink-0 whitespace-nowrap text-xs text-muted-foreground group-hover/item:hidden"
-                : "shrink-0 text-[14px] leading-[22px] text-[#808080]"
-            }
-          >
-            {formatRelativeTime(lastMessageAt, t)}
-          </span>
-        )}
+        <ConversationHistoryLabel
+          title={title}
+          status={
+            <>
+              {!newChatDesign &&
+                (variant === "time" ? (
+                  <ThreadRowEndStatus />
+                ) : (
+                  <ConversationStatusIndicatorWrapper />
+                ))}
+              {newChatDesign && isRunning && (
+                <LoaderCircle
+                  role="status"
+                  aria-label={t("chat.threadList.running")}
+                  className="size-3 shrink-0 animate-spin text-[#808080]"
+                />
+              )}
+            </>
+          }
+          time={
+            newChatDesign && isRunning
+              ? undefined
+              : formatRelativeTime(lastMessageAt, t)
+          }
+        />
       </HistoryThreadTrigger>
     );
   };
@@ -1757,8 +1665,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           <ThreadListItemMorePrimitive.Trigger
             aria-label={t("chat.threadList.moreActions", { title })}
             className={cn(
-              "size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100",
-              variant === "time" && "absolute right-2 top-1/2 -translate-y-1/2"
+              "absolute right-3 top-1/2 size-7 -translate-y-1/2 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
             )}
           >
             <MoreHorizontalIcon className="size-4" />
@@ -1810,59 +1717,51 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
 };
 
 // Wrapper to get thread status from adapter and pass to status indicator
-const ConversationStatusIndicatorWrapper: FC<{
-  completedConversations: Set<string>;
-}> = ({ completedConversations }) => {
+const ConversationStatusIndicatorWrapper: FC = () => {
   const aui = useAui();
   const threadId = aui.threadListItem().getState().id;
+  const indicators = useContext(ConversationRunIndicatorsContext);
   const isRunning = useAuiState(
     (state) => state.thread.isRunning && state.threads.mainThreadId === threadId
   );
 
   return (
     <ConversationStatusIndicator
-      isStreaming={isRunning}
-      isCompleted={!isRunning && completedConversations.has(threadId)}
+      isStreaming={isRunning || indicators.running.has(threadId)}
+      isCompleted={!isRunning && indicators.completed.has(threadId)}
     />
   );
 };
 
 // End-of-row status icon for the workbench time-group list: running shows an
 // inline spinner; an error status (when surfaced) shows an orange alert.
-const ThreadRowEndStatus: FC<{ completedConversations: Set<string> }> = ({
-  completedConversations,
-}) => {
+const ThreadRowEndStatus: FC = () => {
   const aui = useAui();
-  const { t } = useTranslation();
+  const indicators = useContext(ConversationRunIndicatorsContext);
   const item = aui.threadListItem().getState();
   const status = item.status as string;
   const runtimeRunning = useAuiState(
     (state) => state.thread.isRunning && state.threads.mainThreadId === item.id
   );
   const isRunning =
-    runtimeRunning || status === "running" || status === "streaming";
+    runtimeRunning ||
+    status === "running" ||
+    status === "streaming" ||
+    indicators.running.has(item.id);
   const isError = status === "error";
 
-  if (isRunning) {
+  if (isError && !isRunning) {
     return (
-      <Loader2Icon
-        className="size-4 shrink-0 animate-spin text-muted-foreground"
+      <CircleAlertIcon
+        className="size-4 shrink-0 text-amber-500 group-hover/item:invisible group-focus-within/item:invisible"
         aria-hidden
       />
     );
   }
-  if (isError) {
-    return (
-      <CircleAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
-    );
-  }
-  if (completedConversations.has(item.id)) {
-    return (
-      <span
-        className="size-2 shrink-0 rounded-full bg-blue-500"
-        title={t("chat.threadList.completed")}
-      />
-    );
-  }
-  return null;
+  return (
+    <ConversationRunIndicator
+      running={isRunning}
+      completed={indicators.completed.has(item.id)}
+    />
+  );
 };

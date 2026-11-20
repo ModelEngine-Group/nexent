@@ -1,6 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { hasRole } from "@/lib/roles";
 import { useMemo } from "react";
 
-import { USER_ROLES } from "@/const/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { usePermission } from "@/hooks/permission/usePermission";
@@ -14,7 +15,7 @@ export const useAidpGroupOptions = () => {
   const { user } = useAuthorizationContext();
   const { can, isReady } = usePermission();
   const canReadGroups = can("group:read");
-  const isUser = user?.role === USER_ROLES.USER;
+  const isUser = hasRole(user, "USER");
   const canConfigureGroupPermissions = Boolean(user) && !isUser;
   const tenantId = user?.tenantId ?? null;
   const groupQuery = useGroupList(canReadGroups ? tenantId : null);

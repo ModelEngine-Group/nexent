@@ -11,7 +11,7 @@ import tempfile
 import types
 import importlib.machinery
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock, call
 from unittest.mock import patch as _patch
 
 import pytest
@@ -25,17 +25,25 @@ _optional_sdk_stubs: dict = {}
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
 _test_root = os.path.dirname(os.path.abspath(__file__))
+_repo_dir = os.path.dirname(_test_root)
 _backend_dir = os.path.abspath(os.path.join(_test_root, "..", "backend"))
 _sdk_dir = os.path.abspath(os.path.join(_test_root, "..", "sdk"))
 
+if _repo_dir not in sys.path:
+    sys.path.insert(0, _repo_dir)
 if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
-_canonical_backend_packages = {}
+_canonical_backend_packages = {
+    "backend": _backend_dir,
+    "backend.http": os.path.join(_backend_dir, "http"),
+    "backend.http.server": os.path.join(_backend_dir, "http", "server"),
+    "backend.mcp": os.path.join(_backend_dir, "mcp"),
+}
 for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process", "gateway"):
-    _namespace_path = Path(_backend_dir) / _namespace
+    _namespace_path = Path(_repo_dir if _namespace == "infrastructure" else _backend_dir) / _namespace
     _canonical_backend_packages[_namespace] = str(_namespace_path)
     for _initializer in _namespace_path.rglob("__init__.py"):
         _relative = _initializer.parent.relative_to(_namespace_path)
@@ -144,7 +152,9 @@ class _XlrdProxy(types.ModuleType):
 if "xlrd" not in sys.modules or not hasattr(sys.modules["xlrd"], "open_workbook"):
     sys.modules["xlrd"] = _XlrdProxy()
 
-_tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))
+_tmp_root = os.path.abspath(
+    os.environ.get("NEXENT_PYTEST_TMPDIR") or os.path.join(_test_root, "..", ".pytest-tmp")
+)
 os.makedirs(_tmp_root, exist_ok=True)
 os.environ.setdefault("TMP", _tmp_root)
 os.environ.setdefault("TEMP", _tmp_root)
@@ -186,6 +196,9 @@ class _PatchProxy:
 
 
 class _MiniMocker:
+    Mock = Mock
+    call = call
+
     def __init__(self):
         self._patchers = []
         self.patch = _PatchProxy(self)
@@ -222,7 +235,7 @@ def tmp_path():
 def install_supabase_mock():
     """Install a structured supabase package mock into ``sys.modules``.
 
-    ``gateway.authentication.auth`` imports ``from supabase.lib.client_options
+    ``management.services.permission.identity.session`` imports ``from supabase.lib.client_options
     import SyncClientOptions`` at module load time. Test files that simply
     replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
     import to fail (the mock has no ``.lib.client_options`` attribute),
@@ -266,7 +279,7 @@ def _supabase_mock():
     Module-level ``sys.modules['supabase']`` overrides in test files
     (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
     structured attributes (``lib``, ``lib.client_options``,
-    ``SyncClientOptions``) that ``gateway.authentication.auth`` resolves at
+    ``SyncClientOptions``) that ``management.services.permission.identity.session`` resolves at
     import time. The module-level install below covers collection, but
     any test that re-mocks ``supabase`` after collection needs the
     structured attributes re-installed before its test body runs.
@@ -276,7 +289,7 @@ def _supabase_mock():
 
 
 # Install a sane supabase mock at collection time so test modules that
-# import ``gateway.authentication.auth`` (directly or transitively) succeed
+# import ``management.services.permission.identity.session`` (directly or transitively) succeed
 # during pytest's collection phase, before any test fixture has had a
 # chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
 # install before each test body in case individual test modules

@@ -31,13 +31,13 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 
 def _make_client(mocker, role: str, granted_permissions: set) -> TestClient:
     """Build a TestClient whose user has the given role and permissions."""
     mocker.patch('boto3.client')
-    mocker.patch('management.db.client.MinioClient')
+    mocker.patch('infrastructure.object_storage.client.MinioClient')
 
     import types
     import sys as _sys
@@ -51,7 +51,7 @@ def _make_client(mocker, role: str, granted_permissions: set) -> TestClient:
         _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
 
     from management.api.model.model_managment import router
-    from gateway.authentication.auth import authenticate
+    from management.services.permission.identity.session import authenticate
     from permissions.models import CurrentUser
 
     mocker.patch(
@@ -296,14 +296,11 @@ async def test_su_can_access_manage_endpoints(su_client, mocker):
 
 
 @pytest.mark.asyncio
-async def test_speed_role_bypasses_permission_checks(mocker):
-    """SPEED passes require() without seeds, matching permissions.depends."""
-    mocker.patch('permissions.depends.IS_SPEED_MODE', True)
-
+async def test_retired_speed_role_cannot_access_models(mocker):
     client = _make_client(mocker, "SPEED", set())
-    mocker.patch(
-        'management.api.model.model_managment.list_models_for_tenant',
-        return_value=[],
-    )
+    list_models = mocker.patch("management.api.model.model_managment.list_models_for_tenant")
+
     response = client.get("/model/list", headers=auth_header)
-    assert response.status_code == HTTPStatus.OK
+
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    list_models.assert_not_called()

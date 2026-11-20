@@ -5,22 +5,26 @@ case:
   case_id: CHAT-MODEL-CONTROLS-D4-002
   feature_id: CHAT-MODEL-CONTROLS
   requirement_ids:
+  - SESSION-MODEL-UNIFY-20261020
   - CHAT-MODEL-CONTROLS-20261014
   - CHAT-WORKBENCH-REFINEMENTS-20261015
   - WB-CREATION-TOGGLE-EXIT-20261015
+  - CHAT-SAMPLING-DISPLAY-20261019
   business_rule_ids:
   - CHAT-MODEL-CONTROLS-RULE-001
   - CHAT-MODEL-CONTROLS-RULE-002
   - CHAT-MODEL-CONTROLS-RULE-005
+  - CHAT-MODEL-CONTROLS-RULE-006
+  - CHAT-MODEL-CONTROLS-RULE-007
   title: 六入口候选范围、会话隔离、运行锁和失效选择恢复
   type: E2E
   priority: P1
   status: active
   automation: automated
   objective: Verify shared controls preserve entry-specific candidate scopes and session lifecycle while guarding running
-    or invalid state in complete browser journeys.
+    or invalid state in complete browser journeys, and remain readable and operable in a narrow Workbench window.
   preconditions:
-  - real frontend with isolated mock identities, authorized model directory, historical Workbench snapshots and controlled
+  - real frontend with isolated mock identities, authorized model directory, historical shared conversation preference snapshots and controlled
     slow/error streams.
   - Agent chat is configured for a strict subset of tenant models; independent creator sessions can be reset through existing
     Agent session or modal lifecycle.
@@ -46,7 +50,7 @@ case:
   steps:
   - order: 1
     action: Inspect candidates on all six surfaces; verify ordinary Agent chat excludes tenant-B when not configured, then
-      select distinct permitted models in two sessions or modes and switch back.
+      select distinct permitted models in two threads and switch back; entering a creation mode opens a separate thread.
     expected: Agent chat preserves configured scope, other entries preserve tenant LLM scope; returning restores each session's
       own selection and retains messages, input, uploaded attachment and valid draft. Clicking the currently active Agent/Skill
       creation mode exits to ordinary conversation; clicking the other mode switches creation mode without altering input
@@ -54,8 +58,8 @@ case:
   - order: 2
     action: Load an existing Workbench creation snapshot, reset an independent Agent creation session, close/reopen a fresh
       Skill creation modal and resolve an asynchronously delayed default after a user has selected a model.
-    expected: Workbench restores and validates saved controls; new independent sessions follow existing reset rules; delayed
-      default does not overwrite explicit user choice. No new standalone cross-refresh persistence is introduced.
+    expected: Workbench restores and validates controls from the shared conversation API; new independent sessions follow existing reset rules; delayed
+      default does not overwrite explicit user choice. Both chat modes restore model selection and per-model preferences from the common conversation API after refresh; independent ephemeral creators remain draft-only.
   - order: 3
     action: Start a delayed run on each applicable entry, attempt to change model, reasoning and advanced settings, cancel,
       then select another model and explicitly send again.
@@ -67,15 +71,23 @@ case:
     expected: Invalid selection shows the required reselection state through the model selector and blocks sending until reselection
       without discarding input/draft; no silent fallback. Missing permissions follow existing visibility/read-only rules and
       never permit a creator run; tenant changes do not retain another tenant's controls.
+  - order: 5
+    action: At 908 by 608 CSS pixels in Chinese and English, select and reset a long effort label on an outlet with
+      no effort or sampling defaults. Open Advanced settings, restore sampling defaults and dismiss with Escape.
+    expected: The choice and reset labels are readable, the effort selector is at most 128 CSS pixels wide, and its
+      value agrees with the summary. The sampling panel, readable range placeholders and reset button fit inside
+      the viewport. After Escape the parent menu still allows effort selection.
   expected_results:
   - Candidate scope, thread isolation and existing reset/restore behavior remain correct across all entries.
   - Running/invalid states guard changes and recover after permitted cancel/reselection with original input and valid drafts
     preserved.
+  - Reasoning and sampling controls remain readable and operable in the narrow Workbench window.
   forbidden_side_effects:
   - No cross-session/tenant state leakage, unauthorized creation, duplicate generation or default-model fallback for an invalid
     explicit selection.
   - No forced runtime reconstruction that deletes chat messages, attachment state or committed draft data when merely changing
     a model.
+  - Adjusting draft controls in the narrow window does not start a run or persist preferences.
   actor: Isolated authenticated users with controlled role/tenant variants
   journey:
   - Inspect six entry scopes
@@ -85,6 +97,7 @@ case:
   - Start and cancel generation
   - Recover invalid model
   - Check permissions and tenant isolation
+  - Adjust and reset controls in a narrow Workbench window
   final_business_result:
   - Unified controls preserve original entry scopes and session behavior and safely recover from locks and invalid selection
   failure_evidence:
@@ -113,3 +126,8 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-03
+    description: Narrow Workbench model controls support readable reasoning selection and reset and allow sampling panel dismissal.
+    steps: [5]
+    expected_results: [3]
+    forbidden_side_effects: [3]

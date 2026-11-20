@@ -44,10 +44,7 @@ export function useConversationModelControls(
   });
   const save = useMutation({
     mutationFn: (modelId: string) =>
-      patchConversationModelSelection(
-        conversationId!,
-        Number(modelId)
-      ),
+      patchConversationModelSelection(conversationId!, Number(modelId)),
     onSuccess: async (result) => {
       client.setQueryData(queryKey, result);
       await client.invalidateQueries({

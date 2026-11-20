@@ -50,10 +50,9 @@ def test_context_budget_v2_migration_preserves_trigger_and_derives_target():
 
 
 def test_orm_uses_only_canonical_physical_columns():
-    model_source = (ROOT / "backend/management/db/monitoring/models.py").read_text(encoding="utf-8")
-    model_contract = model_source.split("class ModelMonitoringRecord", 1)[1].split(
-        "class ToolInfo", 1
-    )[0]
+    from infrastructure.rdb.model_monitoring import ModelMonitoringRecord
+
+    columns = ModelMonitoringRecord.__table__.columns.keys()
 
     for canonical in (
         "effective_input_limit_tokens",
@@ -62,7 +61,7 @@ def test_orm_uses_only_canonical_physical_columns():
         "budget_compaction_target_tokens",
         "budget_schema_version",
     ):
-        assert canonical in model_contract
+        assert canonical in columns
 
     for legacy in (
         "budget_provider_input_limit_tokens",
@@ -70,4 +69,4 @@ def test_orm_uses_only_canonical_physical_columns():
         "budget_soft_input_budget_tokens",
         "budget_hard_input_budget_tokens",
     ):
-        assert legacy not in model_contract
+        assert legacy not in columns

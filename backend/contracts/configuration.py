@@ -4,6 +4,15 @@
 import math
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
+
+
+def validate_deployment_version(value: str) -> str:
+    """Reject retired authentication modes instead of silently enabling a bypass."""
+    if value.strip().lower() == "speed":
+        raise ValueError("The speed deployment mode has been retired; configure standard authentication")
+    return value
+
 
 def parse_positive_int(raw_value: object, name: str, default: int) -> int:
     """Parse a positive integer, falling back to ``default`` when unset."""
@@ -103,9 +112,28 @@ def _resolve_app_version(default: str = "v2.2.1", *, version_file=None) -> str:
     return default
 
 
+class SystemConfigurationChangesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    changes: dict[str, object] = Field(min_length=1, max_length=19)
+
+
+class SystemConfigurationRecommendationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=100)
+
+
 def _require_positive(value, message):
     """Keep the established environment validation and error message."""
     if value <= 0:
+        raise ValueError(message)
+    return value
+
+
+def _require_choice(value, choices, message):
+    """Validate a fixed configuration vocabulary without reading the environment."""
+    if value not in choices:
         raise ValueError(message)
     return value
 
@@ -125,3 +153,11 @@ def _build_otlp_headers(headers_str, authorization, x_api_key, langsmith_api_key
 
 
     return OTLP_HEADERS
+
+
+def parse_agent_core(value: str) -> str:
+    """Validate the deployment Core without reading process configuration."""
+    core = value.strip().lower()
+    if core not in {"smolagents", "jiuwen"}:
+        raise ValueError("NEXENT_AGENT_CORE must be smolagents or jiuwen")
+    return core

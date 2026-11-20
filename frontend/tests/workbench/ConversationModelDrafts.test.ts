@@ -123,7 +123,6 @@ it.each([false, true])(
         : {}),
     });
     expect(api.patchConversationModelPreferences).toHaveBeenCalledWith(31, 42, {
-
       parameter_values: { temperature: 0.41 },
       delete_parameters: [],
     });

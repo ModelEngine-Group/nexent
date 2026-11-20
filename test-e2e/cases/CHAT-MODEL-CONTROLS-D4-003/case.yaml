@@ -5,6 +5,7 @@ case:
   case_id: CHAT-MODEL-CONTROLS-D4-003
   feature_id: CHAT-MODEL-CONTROLS
   requirement_ids:
+  - SESSION-MODEL-UNIFY-20261020
   - CHAT-MODEL-CONTROLS-20261014
   - WB-CREATION-TOGGLE-EXIT-20261015
   - CHAT-SAMPLING-20261016
@@ -17,7 +18,7 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Prove creator advanced controls synchronize decimal sliders/inputs, isolate session/model state and serialize
+  objective: Prove creator advanced controls support decimal stepper inputs, isolate session/model state and serialize
     explicit sampling into actual run/history snapshots without global configuration writes.
   preconditions:
   - actual frontend creator surfaces with isolated mock model directory, authorized identity and deterministic run endpoints.
@@ -41,27 +42,26 @@ case:
     invalid_inputs:
     - negative
     - above-maximum
-    - empty-invalid-draft
+    - invalid-draft
     defaults:
-      temperature: configured-or-sdk-1.0
-      top_p: configured-or-sdk-1.0
+      temperature: effective-outlet-default
+      top_p: effective-outlet-default
   steps:
   - order: 1
-    action: Open model controls on each creator, hover/click/focus Advanced settings below reasoning effort; change both slider
-      and numeric input across minimum, middle and maximum values; exercise invalid/empty input and restore defaults.
-    expected: Shared panel is reachable by pointer and keyboard; numeric values and sliders stay synchronized at temperature
-      0-2 and Top P 0-1 with step 0.1, invalid committed values do not persist and restore clears both overrides and shows
-      the effective numeric defaults with matching sliders. Unconfigured models display SDK metadata defaults 1.0/1.0;
+    action: Open model controls on each creator, hover/click/focus Advanced settings below reasoning effort; edit both stepper inputs,
+      exercise keyboard stepping, try invalid values and restore defaults.
+    expected: Shared panel is reachable by pointer and keyboard; Temperature accepts 0 through 2 with step 0.1. Top P accepts
+      values greater than 0 through 1 with step 0.01. Invalid values do not persist, and restore clears both overrides
+      and shows the effective numeric defaults. Fixture models display their declared outlet defaults 1.0/1.0;
       opening/focusing unchanged defaults does not create an override.
   - order: 2
-    action: Set model-A sampling overrides, switch to B and back, switch to another creation session and return; transition
-      NL2Agent from welcome to subsequent composer.
-    expected: Values remain scoped to the current session and model during its lifetime, new scopes inherit defaults, and
-      NL2Agent composer transition retains that session's local settings.
+    action: Set model-A sampling overrides, switch to B and back, send the first message, then enter a fresh creation scope.
+    expected: Switching models preserves each model's draft in the current composer. The first request includes its explicit
+      sampling values. Workbench retains the overrides in the saved conversation, and fresh creation scopes inherit defaults.
   - order: 3
     action: Explicitly send valid creation requests after editing controls, then inspect all run bodies, Workbench creation
-      snapshots, model-context-derived payloads and captured configuration API writes.
-    expected: Explicit temperature/top_p reach generation_config and matching Workbench snapshots; untouched/reset fields
+      snapshots, canonical preference payloads and captured configuration API writes.
+    expected: Explicit temperature/top_p reach the canonical first-turn preference map or existing-conversation preference PATCH, never generation_config or Workbench resource config; untouched/reset fields
       are absent or null for inheritance. No global model save occurs; actual model/thinking requests remain functional.
   expected_results:
   - Creator advanced panels match the existing shared control behavior, defaults and session/model isolation.
@@ -73,7 +73,7 @@ case:
   actor: Isolated authorized Agent and Skill creator
   journey:
   - Open creator model controls
-  - Edit slider and numeric values
+  - Edit sampling values with steppers
   - Restore defaults
   - Switch models and sessions
   - Transition composer
@@ -89,7 +89,7 @@ case:
       required_services: []
   acceptance:
   - id: AC-01
-    description: Creator controls display configured or SDK defaults accurately, synchronize numeric sliders, and preserve scoped state.
+    description: Creator controls display configured or SDK defaults accurately, support numeric steppers, and preserve scoped state.
     steps:
     - 1
     - 2

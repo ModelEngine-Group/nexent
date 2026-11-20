@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Provision and verify original static fixtures without changing their bytes."""
 from __future__ import annotations
 
@@ -76,11 +78,14 @@ def media_error(path: Path) -> str | None:
 
 
 def check(path: Path, item: dict) -> str:
-    if not path.is_file():
-        return "MISSING"
-    if path.stat().st_size != item["bytes"] or sha256(path) != item["sha256"]:
-        return "DIFFERENT"
-    return media_error(path) or "READY"
+    try:
+        if not path.is_file():
+            return "MISSING"
+        if path.stat().st_size != item["bytes"] or sha256(path) != item["sha256"]:
+            return "DIFFERENT"
+        return media_error(path) or "READY"
+    except OSError:
+        return "UNREADABLE"
 
 
 def inventory(home: Path, selected: set[str] | None = None, source: Path | None = None,
@@ -103,27 +108,37 @@ def inventory(home: Path, selected: set[str] | None = None, source: Path | None 
     return rows
 
 
-def apply(home: Path, source: Path, catalog: Path = CATALOG) -> list[dict]:
+def apply(home: Path, source: Path, catalog: Path = CATALOG, *, allow_unready=False) -> list[dict]:
     rows = inventory(home, source=source, catalog=catalog)
     receipt = home / "state/static-asset-provision.json"
     previous = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
     managed = {row["path"]: row.get("sha256") for row in previous.get("assets", [])}
-    replaceable = {row["path"] for row in rows if row["destination"] == "DIFFERENT" and
-                   managed.get(row["path"]) and sha256(safe_file(home / "assets", row["path"])) == managed[row["path"]]}
+    replaceable = set()
+    for row in rows:
+        if row["destination"] == "DIFFERENT" and managed.get(row["path"]):
+            try:
+                if sha256(safe_file(home / "assets", row["path"])) == managed[row["path"]]:
+                    replaceable.add(row["path"])
+            except OSError:
+                if not allow_unready:
+                    raise
+                row["destination"] = "UNREADABLE"
     errors = [row for row in rows if row["source"] != "READY" or
               (row["destination"] not in {"READY", "MISSING"} and row["path"] not in replaceable)]
-    if errors:
+    if errors and not allow_unready:
         raise ValueError("Static assets differ or source is incomplete; inspect plan before applying")
+    unavailable = {row["path"] for row in errors}
     catalog_items = {entry["asset_id"]: entry for entry in entries(catalog)}
     for row in rows:
-        if row["destination"] == "READY":
+        if row["destination"] == "READY" or row["path"] in unavailable:
             continue
         item = catalog_items[row["asset_id"]]
         origin = safe_file(source, item["path"])
         destination = safe_file(home / "assets", item["path"])
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(prefix=".nexent-asset-", dir=destination.parent)
+        temporary = None
         try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(prefix=".nexent-asset-", dir=destination.parent)
             with os.fdopen(descriptor, "wb") as output, origin.open("rb") as input_file:
                 shutil.copyfileobj(input_file, output)
                 output.flush()
@@ -143,11 +158,20 @@ def apply(home: Path, source: Path, catalog: Path = CATALOG) -> list[dict]:
             else:
                 os.link(temporary, destination)  # Fails if another process created it.
             row["destination"] = check(destination, item)
+        except OSError as exc:
+            if not allow_unready:
+                raise
+            row.update(destination="PROVISION_FAILED", provision_error_type=type(exc).__name__)
         finally:
-            Path(temporary).unlink(missing_ok=True)
+            if temporary is not None:
+                Path(temporary).unlink(missing_ok=True)
+    # A failed update must not replace the last verified ownership hash. That
+    # hash is needed to safely back up and retry a managed fixture later.
+    receipt_rows = {row["path"]: row for row in previous.get("assets", [])}
+    receipt_rows.update({row["path"]: row for row in rows if row["destination"] == "READY"})
     receipt.parent.mkdir(parents=True, exist_ok=True)
     temporary_receipt = receipt.with_suffix(".json.next")
-    temporary_receipt.write_text(json.dumps({"schema_version": 1, "assets": rows}, indent=2) + "\n", encoding="utf-8")
+    temporary_receipt.write_text(json.dumps({"schema_version": 1, "assets": list(receipt_rows.values())}, indent=2) + "\n", encoding="utf-8")
     temporary_receipt.replace(receipt)
     return rows
 

@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-K8S-MANAGEMENT-START-20261120
+  change_type: bugfix
+  bug_id: AOS-K8S-MANAGEMENT-START-20261120
+  title: Start Kubernetes Management as a Python module
+  description: Make the Helm Management launcher match the existing Compose launcher.
+  observed_behavior: Running the entry script by path shadows the standard library logging package and prevents Management readiness.
+  expected_behavior: The Management container starts the application as a module after its normal SQL startup, so Runtime can proceed after Management is ready.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: The existing Helm rendering regression checks SQL startup ownership and readiness dependencies without asserting the Management launcher.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-173]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - The rendered Management deployment invokes the Python module through start-backend.sh while preserving SQL startup ownership and readiness dependencies.
+    reason: Check launcher parity with both Compose modes in the traditional deploy suite and verify actual startup in an isolated Kubernetes deployment.
+    test_selectors:
+    - test/backend/deploy/test_service_image_sources.py::test_helm_management_launcher_matches_compose_module_entrypoint
+  notes: The independent-service-deployment section of the Management AgentOS service-boundary SPEC remains the deployment baseline. The local smoke uses a dedicated namespace, independent infrastructure and readiness checks.

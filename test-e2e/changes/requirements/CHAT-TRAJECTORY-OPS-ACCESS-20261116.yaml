@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-OPS-ACCESS-20261116
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-OPS-ACCESS-20261116
+  title: 轨迹入口改为OPS与SU并适配develop多角色
+  description: 菜单页面与轨迹接口一致使用OPS/SU，OPS限本租户；保留develop与轨迹行为。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-CHECKPOINT-D3-001
+    - CHAT-TRAJECTORY-DEPLOYMENT-D5-001
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    - CHAT-TRAJECTORY-LOAD-D5-001
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    - CHAT-TRAJECTORY-RESUME-SAFETY-D5-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    - CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 导航页面及接口覆盖OPS、SU、多角色、非运维、空角色与撤权
+    - 目录校验按有效成员角色数组，OPS不扩大租户范围
+    - 原生组件迁移及刷新、正文加载、清理交互保持
+    reason: 复用轨迹UT及QUERY/JOURNEY，强化角色与合并兼容；其他Case仅同步先决条件。
+    test_selectors:
+    - test/backend/ops/test_trajectory_migration.py
+    - test/backend/services/trajectory/test_catalog.py
+    - test/backend/services/trajectory/test_cleanup_schedule.py
+    - frontend/tests/component/sidebarHover.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+  notes: SPEC changes/chat-trajectory-ops-access；runtime责任域；复用独占临时文件/客户端/线程及浏览器清理，families为空；完整PG/部署/浏览器验收暂缓。

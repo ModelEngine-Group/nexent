@@ -1,20 +1,7 @@
 -- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 -- Upgrade only historical Workbench declarations. New preferences win per field.
--- Never assign historical choices to an arbitrary model when its identity is missing.
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM nexent.conversation_record_t
-        WHERE jsonb_typeof(workbench_config->'generation_config') = 'object'
-          AND COALESCE(workbench_config->>'model_parameters_source', 'legacy_generation') = 'legacy_generation'
-          AND COALESCE(workbench_config->>'model_id', selected_model_id::text) IS NULL
-          AND (workbench_config->'generation_config') - 'requested_output_tokens' <> '{}'::jsonb
-    ) THEN
-        RAISE EXCEPTION 'Workbench model parameter migration requires a model_id; no historical settings were discarded';
-    END IF;
-END $$;
-
+-- Discard unassigned historical preferences rather than blocking the upgrade.
 WITH historical AS (
     SELECT conversation_id, workbench_config AS config,
            workbench_config->'generation_config' AS generation,
@@ -43,7 +30,8 @@ WITH historical AS (
 )
 UPDATE nexent.conversation_record_t AS target
 SET selected_model_id = COALESCE(target.selected_model_id, converted.model_key::integer),
-    model_parameter_preferences = CASE WHEN converted.preferences <> '{}'::jsonb
+    model_parameter_preferences = CASE WHEN converted.model_key IS NULL THEN '{}'::jsonb
+        WHEN converted.preferences <> '{}'::jsonb
         THEN target.model_parameter_preferences || jsonb_build_object(converted.model_key,
             (CASE WHEN target.model_parameter_preferences->converted.model_key ?| ARRAY['reasoning_effort', 'reasoning_budget_tokens']
                     OR target.model_parameter_preferences->converted.model_key->>'enable_thinking' = 'false'

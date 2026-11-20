@@ -132,7 +132,7 @@ def test_patch_maps_domain_errors(client, mocker, exception, status):
 
 
 def test_probe_returns_unavailable_as_result_and_passes_owner(client, mocker):
-    invoke = mocker.patch("management.services.model.profiles.validate_model_outlet", new=AsyncMock(
+    invoke = mocker.patch("management.api.model.model_managment.validate_model_outlet", new=AsyncMock(
         return_value={"ok": False, "error": {"category": "AUTHENTICATION_ERROR"},
                       "check_scope": "connection_only", "model_id": 42, "config_revision": 1}))
     response = client.post("/model/outlet_validations", json={"outlet_id": 42, "expected_revision": 1})
@@ -215,7 +215,7 @@ def test_validation_distinguishes_selection_version_and_configuration_errors(cli
 
     errors = {'missing': LookupError(), 'stale': ModelOutletConflictError(),
               'invalid': ModelOutletValidationError('PROFILE_STORAGE_INVALID')}
-    invoke = mocker.patch('management.services.model.profiles.validate_model_outlet', new=AsyncMock(side_effect=errors[kind]))
+    invoke = mocker.patch('management.api.model.model_managment.validate_model_outlet', new=AsyncMock(side_effect=errors[kind]))
     response = client.post('/model/outlet_validations', json={'outlet_id': 42, 'expected_revision': 1})
     assert response.status_code == status
     assert invoke.call_args.args[1] == 'test_tenant'
@@ -232,3 +232,42 @@ def test_duplicate_create_has_distinct_business_code_without_success_audit(clien
     assert response.json()['detail']['code'] == 'MODEL_DISPLAY_NAME_CONFLICT'
     assert response.json()['detail']['details'] == {'field': 'display_name'}
     audit.assert_not_called()
+
+
+def test_aeu_saved_preview_uses_trusted_tenant_and_never_writes(client, mocker):
+    from management.api.model import model_managment as app
+    result = {"field_specs": [], "parameter_values": {"temperature": 0.4}}
+    run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value=result))
+    response = client.post("/model/outlets/42/profile_previews", json={"expected_revision": 7,
+        "parameter_values": {"temperature": 0.4}})
+    assert response.status_code == 200 and response.json()["data"] == result
+    assert run.call_args.args[0] == "model-outlet-preview"
+    assert run.call_args.args[2] == 42
+    assert run.call_args.args[3].expected_revision == 7
+    assert run.call_args.args[4] == "test_tenant"
+    mocker.patch("permissions.depends.has_permission", return_value=False)
+    assert client.post("/model/outlets/42/profile_previews", json={"expected_revision": 7}).status_code == 403
+
+
+@pytest.mark.parametrize("error,status", [(LookupError("MODEL_OUTLET_NOT_FOUND"), 404)])
+def test_aeu_saved_preview_does_not_expose_missing_or_foreign_rows(client, mocker, error, status):
+    from management.api.model import model_managment as app
+    mocker.patch.object(app, "run_blocking", new=AsyncMock(side_effect=error))
+    response = client.post("/model/outlets/42/profile_previews", json={"expected_revision": 7})
+    assert response.status_code == status
+
+
+def test_aeu_catalog_only_preview_does_not_weaken_creation_validation(client, mocker):
+    from management.api.model import model_managment as app
+    from management.services.model.profiles import get_model_profile_catalog
+    async def run(_name, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    mocker.patch.object(app, "run_blocking", new=run)
+    catalog = get_model_profile_catalog()
+    key = "alibaba/qwen3.7-plus"
+    body = {"provider_info": {"base_url": ""}, "request_model_id": "", "display_name": "",
+            "model_profile": {"key": key, "revision": catalog.models[key].revision}}
+    response = client.post("/model/profile_previews", json=body)
+    assert response.status_code == 200
+    assert response.json()["data"]["selected"]["model"] == key
+    assert client.post("/model/outlets", json=body).status_code == 422

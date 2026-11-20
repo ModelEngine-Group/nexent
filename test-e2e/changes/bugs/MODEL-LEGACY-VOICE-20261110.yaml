@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-LEGACY-VOICE-20261110
+  change_type: bugfix
+  bug_id: MODEL-LEGACY-VOICE-20261110
+  title: Retire legacy built-in voice models during database upgrade
+  description: Clean up obsolete historical model rows and default selections, and remove four unused deployment settings.
+  observed_behavior: Old bootstrap or administrator registration can leave active legacy seed rows in the model list after upgrade.
+  expected_behavior: Upgrades retire identifiable legacy seeds and their direct default references. Tenant-managed models, ambiguous rows and tenant-wide STT metadata are preserved. Internal MCP authentication uses its own environment key.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_case
+    description: Model CRUD and outlet schema cases do not exercise historical seed cleanup or preservation of related defaults.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Reuse configured voice adapter tests and strengthen MCP router coverage for the dedicated token. PostgreSQL D5 exercises the SQL selection, isolation and reapplication.
+    behaviors:
+    - Configured Volcano STT and TTS continue to use the supplied connection settings.
+    - The MCP router accepts a matching dedicated token and rejects missing or incorrect credentials.
+    test_selectors:
+    - test/backend/services/test_voice_service.py
+    - test/backend/services/test_mcp_service.py::TestTenantMCPRouter
+  affected_features:
+    existing: []
+    modified: [F-032]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: []
+    added: [MODEL-LEGACY-VOICE-D5-001]
+    retired: []
+  notes: See nexent-doc/docs/Developing/model-legacy-voice-cleanup/design.md. The D5 case owns and drops its scratch database. No provider calls or live model records are needed.

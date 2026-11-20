@@ -84,7 +84,10 @@ def test_provider_dispatch_has_one_system_text_block():
 
 
 def test_trace_records_merged_system_input(mocker):
+    from nexent.core.models.retry import DEFAULT_MODEL_RETRY
+
     model = make_model()
+    model.retry_config = DEFAULT_MODEL_RETRY
     model.temperature = 0.2
     model.top_p = 0.9
     model.display_name = None
