@@ -20,7 +20,7 @@ def test_backend_dockerfile_does_not_declare_exposed_ports():
 @pytest.mark.parametrize("service,peer", [("management", "runtime"), ("runtime", "management")])
 def test_independent_target_installs_deployment_plugins_without_peer_sources(service, peer):
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
-    section = dockerfile.split("FROM backend-common AS " + service + "\n", 1)[1].split("\nFROM ", 1)[0]
+    section = dockerfile.split(f" AS {service}\n", 1)[1].split("\nFROM ", 1)[0]
     copies = [line.split() for line in section.splitlines() if line.startswith("COPY ")]
     assert any(parts[1:] == ["backend/tool_collection/langchain", "/opt/backend/tool_collection/langchain"]
                for parts in copies)
@@ -31,7 +31,7 @@ def test_independent_target_installs_deployment_plugins_without_peer_sources(ser
 
 def test_independent_images_do_not_package_other_service_implementations():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
-    common_and_services = dockerfile.split("FROM backend-common AS final", 1)[0]
+    common_and_services = dockerfile.split(" AS final\n", 1)[0]
     copies = [line.split() for line in common_and_services.splitlines() if line.startswith("COPY ")]
     for parts in copies:
         assert all(

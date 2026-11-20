@@ -28,16 +28,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     fi && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl \
-        vim \
-        procps \
-        wget \
-        less \
-        tzdata \
-        postgresql-client \
-        fontconfig \
-        fonts-noto-cjk && \
-    fc-cache -f
+        curl tzdata
 
 FROM base AS litellm-models
 ARG MODELS_DEV_CATALOG_URL=https://models.dev/catalog.json
@@ -63,13 +54,20 @@ WORKDIR /opt/backend
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
 COPY sdk/pyproject.toml /opt/sdk/pyproject.toml
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
-    uv sync --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR")
+    uv sync --no-default-groups --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR") && \
+    uv export --locked --only-group management --no-emit-project --no-hashes \
+        -o /opt/backend/management-requirements.txt
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
     /opt/backend/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 # Layer 1: reinstall the sdk with its performance extra (non-editable)
 COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
+
+FROM builder AS full-builder
+RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    uv pip install --link-mode copy -r /opt/backend/management-requirements.txt \
+        $(test -n "$MIRROR" && echo "-i $MIRROR")
 
 FROM base AS backend-common
 
@@ -79,14 +77,13 @@ ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 WORKDIR /opt/backend
 
 COPY --from=builder /opt/backend/.venv /opt/backend/.venv
-COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
-RUN /opt/backend/.venv/bin/python -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
+RUN /opt/backend/.venv/bin/python -B -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
 COPY deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/start-backend.sh
 
@@ -96,7 +93,22 @@ VOLUME ["/opt/ssh-keys"]
 
 WORKDIR /opt
 
-FROM backend-common AS management
+FROM backend-common AS management-base
+ARG TARGETARCH
+ARG MIRROR
+RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        postgresql-client fontconfig fonts-noto-cjk && \
+    fc-cache -f
+RUN --mount=type=bind,from=builder,source=/usr/local/bin/uv,target=/tmp/uv \
+    --mount=type=bind,from=builder,source=/opt/backend/management-requirements.txt,target=/tmp/management-requirements.txt \
+    --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    /tmp/uv pip install --link-mode copy -r /tmp/management-requirements.txt \
+        $(test -n "$MIRROR" && echo "-i $MIRROR")
+
+FROM management-base AS management
 
 ENV NEXENT_SQL_STARTUP_MODE=migrate
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
@@ -152,7 +164,7 @@ ENV PYTHON_DOTENV_DISABLED=1
 ENV TZ=Asia/Shanghai
 WORKDIR /opt
 
-COPY --from=builder /opt/backend/.venv /opt/backend/.venv
+COPY --from=full-builder /opt/backend/.venv /opt/backend/.venv
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/start-backend.sh
@@ -180,7 +192,12 @@ COPY --from=ops-sources /ops /opt
 ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service"]
 
 # Keep the existing full backend as the default build target.
-FROM backend-common AS final
+FROM management-base AS final
+RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends vim procps wget less
+COPY --from=builder /opt/sdk /opt/sdk
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
 COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
 COPY deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql

@@ -19,7 +19,7 @@ def test_gateway_image_delegates_the_application_command_like_main():
         source = (ROOT / "deploy/images/dockerfiles" / image / "Dockerfile").read_text(encoding="utf-8")
         if image == "main":
             shared, services_and_final = source.split("FROM python:3.11-slim AS standalone-service", 1)
-            final = services_and_final.split("FROM backend-common AS final", 1)[1]
+            final = services_and_final.split(" AS final\n", 1)[1]
             source = shared + final
         instructions = [line.strip().split(maxsplit=1)[0].upper() for line in source.splitlines()
                         if line.strip() and not line.lstrip().startswith("#")]
