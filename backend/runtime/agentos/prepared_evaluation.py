@@ -40,6 +40,7 @@ from infrastructure.agent_tool_config import (
 )
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.object_storage.read_access import require_s3_read_access
+from infrastructure.object_storage.run_files import RunFileStorage
 from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
 from infrastructure.rdb.agent_model_overrides import read_agent_model_overrides
 from infrastructure.rdb.model_records import get_model_by_model_id
@@ -81,11 +82,9 @@ def _materialize_file_tools(bindings, actor, workspace_path, workspace_run_id):
     if not bindings:
         return []
 
-    from infrastructure.object_storage.client import minio_client
-
     metadata = {
         "workspace_path": workspace_path,
-        "minio_client": minio_client,
+        "minio_client": RunFileStorage(actor, workspace_run_id),
         "user_id": actor.user_id,
         "tenant_id": actor.tenant_id,
         "run_id": workspace_run_id,
@@ -226,7 +225,7 @@ def _materialize_agent(
     local_tools.update(materialize_local_tools(
         resource, actor, language, allow_scoped_aidp=allow_scoped_aidp or native_knowledge,
         require_scoped_aidp_instance=native_knowledge,
-        workbench_tools=mounted_tools, workbench_lookup=workbench_lookup,
+        workbench_tools=mounted_tools, workbench_lookup=workbench_lookup, workspace_run_id=workspace_run_id,
     ))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],

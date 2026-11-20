@@ -22,6 +22,7 @@ from infrastructure.local_tool_execution import (
     local_tool_binding_name, local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.local_tool_overrides import PREFIX, open_tool_overrides
+from infrastructure.object_storage.run_files import RunFileStorage
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
 from infrastructure.shared_aidp_tool import restrict_aidp_access, scoped_shared_aidp_revision
 from nexent.core.agents.contracts.config import ToolConfig
@@ -73,6 +74,7 @@ def materialize_local_tools(
     resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
     require_scoped_aidp_instance: bool = False, workbench_tools=(),
     workbench_lookup: WorkbenchSkillLookup | WorkbenchDebugSkillLookup | None = None,
+    workspace_run_id: str | None = None,
 ) -> dict[str, ToolConfig]:
     references = {}
     schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding, "4": SkillDerivedLocalToolBinding}
@@ -183,9 +185,12 @@ def materialize_local_tools(
         elif tool.class_name == "AidpSearchTool":
             _bind_shared_aidp_access(tool, actor)
         elif tool.class_name in {"DownloadFromS3Tool", "UploadToS3Tool"}:
-            from infrastructure.object_storage.client import minio_client
-
-            tool.metadata = {"minio_client": minio_client, "user_id": actor.user_id, "tenant_id": actor.tenant_id}
+            tool.metadata = {
+                "minio_client": RunFileStorage(actor, workspace_run_id),
+                "user_id": actor.user_id, "tenant_id": actor.tenant_id,
+            }
+            if workspace_run_id is not None:
+                tool.metadata["run_id"] = workspace_run_id
         elif tool.class_name in {"ExaSearchTool", "TavilySearchTool", "LinkupSearchTool"}:
             from runtime.images import web_image_filter
 
