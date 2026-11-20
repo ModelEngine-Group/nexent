@@ -241,6 +241,30 @@ Use `publication_verified` for the corresponding Runtime publication evidence.
 sources, noncanonical IDs and full deployment/rollback acceptance remain pending.
 
 
+## Migrate a standalone legacy chunk
+
+After stopping and draining legacy writers, run `inspect-vectors` for the
+affected knowledge base. Match the SHA-256 of the exact Elasticsearch document
+ID with `document_id_hash` in the report and select a `standalone_candidate`.
+Copy its document revision and the page's collection revision.
+
+```sh
+python -m management.maintenance.knowledge migrate-chunk \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --legacy-quiesced --document-id EXACT_LEGACY_DOCUMENT_ID \
+  --collection-revision INVENTORY_COLLECTION_REVISION \
+  --document-revision INVENTORY_DOCUMENT_REVISION \
+  --output /maintenance/chunk-migration.jsonl
+```
+
+The command requires current edit permission and a unique legacy index owner.
+It copies the original body, display fields and any existing vector through the
+standard Runtime chunk API. A successful receipt contains `chunk_migrated`.
+The original document remains available in the legacy index. Existing Runtime
+documents, changed source revisions, images and chunks with file processing
+markers are rejected. After an uncertain write, inspect the Runtime key before
+attempting the operation again.
+
 ## Private legacy task archive
 
 After stopping and draining old admission and workers, export one authorized KB:

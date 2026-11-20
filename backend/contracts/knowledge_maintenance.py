@@ -15,6 +15,7 @@ INSPECTION_FILES = 'knowledge_source_inspection'
 INSPECTION_LEDGER = 'knowledge_source_ledger_inspection'
 LEGACY_DOCUMENTS = 'legacy_knowledge_documents'
 LEGACY_VECTOR_METADATA = 'legacy_knowledge_vector_metadata'
+LEGACY_FILE_CHUNK_FIELDS = ('file_id', 'file_version', 'index', 'chunk_index', 'process_source', 'source_type', 'multi_embedding')
 LEGACY_INDEX_OWNER = 'legacy_knowledge_index_owner'
 LEGACY_TASKS = 'legacy_knowledge_tasks'
 BROKER_INVENTORY = 'legacy_broker_inventory'
@@ -59,6 +60,7 @@ class LegacyVectorFinding(Contract):
     file_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     chunk_index: int | None = Field(default=None, ge=0)
     dimensions: int | None = Field(default=None, ge=0)
+    standalone_candidate: bool = False
     issues: list[Issue] = Field(default_factory=list, max_length=32)
 
 

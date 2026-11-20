@@ -8,6 +8,7 @@ import sys
 
 from contracts.knowledge_maintenance import (
     LEGACY_DOCUMENTS,
+    LEGACY_FILE_CHUNK_FIELDS,
     LEGACY_VECTOR_METADATA,
     LegacyVectorFinding,
     LegacyVectorPage,
@@ -28,9 +29,22 @@ def _scope(port, actor):
         or port.scope.tenant_id != actor.tenant_id): raise ScopeDenied()
 
 
+def standalone_candidate(source, tenant_id):
+    creator = source.get('created_by')
+    metadata = source.get('metadata')
+    if not isinstance(creator, str) or not creator.strip() or (metadata is not None and not isinstance(metadata, dict)):
+        return False
+    return all(
+        fields.get('tenant_id') in (None, tenant_id)
+        and all(fields.get(name) is None for name in LEGACY_FILE_CHUNK_FIELDS)
+        for fields in (source, metadata or {})
+    )
+
+
 def _finding(row, metadata, actor):
     properties = row['properties']
     item = LegacyVectorFinding(document_id_hash=hashlib.sha256(row['document_id'].encode()).hexdigest(), revision=row['revision'])
+    item.standalone_candidate = standalone_candidate(properties, actor.tenant_id)
     reference = properties.get('path_or_url')
     if isinstance(reference, str) and reference:
         item.source_reference_hash = hashlib.sha256(reference.encode()).hexdigest()

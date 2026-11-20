@@ -12,6 +12,7 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.knowledge_maintenance import LEGACY_DOCUMENTS as DOCS
+from contracts.knowledge_maintenance import LEGACY_FILE_CHUNK_FIELDS
 from contracts.knowledge_maintenance import LEGACY_VECTOR_METADATA as META
 from elastic_transport import TransportError
 from elasticsearch import ApiError
@@ -38,7 +39,8 @@ from infrastructure.storage.catalog import (
     FieldDefinition,
 )
 
-SOURCE_FIELDS = ('path_or_url', 'file_id', 'index', 'embedding', 'tenant_id')
+SOURCE_FIELDS = ('path_or_url', 'embedding', 'tenant_id', 'created_by', *LEGACY_FILE_CHUNK_FIELDS)
+PIT_FIELDS = (*SOURCE_FIELDS, *(f'metadata.{field}' for field in (*LEGACY_FILE_CHUNK_FIELDS, 'tenant_id')))
 
 
 class LegacyVectorRecords:
@@ -135,11 +137,45 @@ class LegacyVectorRecords:
 
     def get(self, dataset, key, *, fields=(), consistency=ReadConsistency.AUTHORITATIVE, context):
         fields = self._query(dataset, RecordQuery(fields=fields))
-        if dataset != META or consistency != ReadConsistency.AUTHORITATIVE:
+        if consistency != ReadConsistency.AUTHORITATIVE:
             raise CapabilityUnsupported()
+        if dataset == DOCS:
+            return self._document(key, fields, context)
         if key != self._collection:
             return None
         return {name: self._metadata(context)[name] for name in fields}
+
+    def _check_index(self, context):
+        current = self._read('indices.get_settings', context, index=self._collection, name='index.uuid')
+        if set(current) != {self._collection}:
+            raise ScopeDenied()
+        try:
+            identity = current[self._collection]['settings']['index']['uuid']
+        except (KeyError, TypeError):
+            raise Unavailable() from None
+        if identity != self._index_uuid:
+            raise Conflict()
+
+    def _document(self, key, fields, context):
+        if not isinstance(key, str) or not key or len(key.encode('utf-8')) > 512:
+            raise InvalidInput()
+        self._metadata(context)
+        try:
+            hit = self._read('get', context, index=self._collection, id=key)
+        except NotFound:
+            self._check_index(context)
+            return None
+        if hit.get('_index') != self._collection or hit.get('_id') != key:
+            raise ScopeDenied()
+        self._check_index(context)
+        context.remaining()
+        seq, term, source = hit.get('_seq_no'), hit.get('_primary_term'), hit.get('_source')
+        if (hit.get('found') is not True or not isinstance(source, dict)
+            or type(seq) is not int or seq < 0 or type(term) is not int or term < 1):
+            raise Unavailable()
+        row = {'document_id': key, 'tenant_id': self.scope.tenant_id, 'revision': f'{seq}:{term}',
+               'properties': source}
+        return {name: row[name] for name in fields}
 
     def _search(self, size, context, *, after=None):
         self._metadata(context)
@@ -148,14 +184,10 @@ class LegacyVectorRecords:
             if not isinstance(opened.get('id'), str) or not opened['id']: raise Unavailable()
             self._pit = opened['id']
             # Opening a PIT must not silently follow a deleted/recreated index or a replacement alias.
-            current = self._read('indices.get_settings', context, index=self._collection, name='index.uuid')
-            if set(current) != {self._collection}: raise ScopeDenied()
-            try: identity = current[self._collection]['settings']['index']['uuid']
-            except (KeyError, TypeError): raise Unavailable() from None
-            if identity != self._index_uuid: raise Conflict()
+            self._check_index(context)
         context.remaining()
         body = {'pit': {'id': self._pit, 'keep_alive': '1m'}, 'size': size, 'query': {'match_all': {}},
-                'sort': [{'_shard_doc': 'asc'}], '_source': list(SOURCE_FIELDS), 'track_total_hits': True,
+                'sort': [{'_shard_doc': 'asc'}], '_source': list(PIT_FIELDS), 'track_total_hits': True,
                 'seq_no_primary_term': True}
         if after is not None: body['search_after'] = [after]
         result = self._read('search', context, body=body, allow_partial_search_results=False)
@@ -205,7 +237,7 @@ class LegacyVectorRecords:
                 previous = position[0]
                 row = {'document_id': hit['_id'], 'tenant_id': self.scope.tenant_id,
                        'revision': f"{hit['_seq_no']}:{hit['_primary_term']}",
-                       'properties': {name: hit['_source'][name] for name in SOURCE_FIELDS if name in hit['_source']}}
+                       'properties': {name: hit['_source'][name] for name in (*SOURCE_FIELDS, 'metadata') if name in hit['_source']}}
                 rows.append({name: row[name] for name in fields})
             except (KeyError, ValueError, TypeError):
                 raise Unavailable() from None

@@ -9,6 +9,7 @@ from contracts.knowledge_maintenance import LEGACY_DOCUMENTS, LEGACY_VECTOR_META
 from nexent.core.concurrency import RunCancellationScope
 from nexent.storage.errors import (
     CapabilityUnsupported,
+    Conflict,
     InvalidInput,
     OperationCancelled,
     ScopeDenied,
@@ -145,3 +146,18 @@ def test_index_recreated_between_metadata_and_pit_never_reads_documents(store):
         client.search.assert_not_called()
     finally: port.close()
     client.close_point_in_time.assert_called_once()
+
+
+def test_exact_document_read_is_bound_to_the_physical_index_and_revision(store):
+    port, client = store
+    document = {'id': 'display-alias', 'content': 'original text', 'embedding': [1.0, 0.0]}
+    client.get.return_value = {'_index': 'old-kb', '_id': 'native-key', '_source': document,
+                               '_seq_no': 3, '_primary_term': 2, 'found': True}
+    assert port.get(LEGACY_DOCUMENTS, 'native-key', context=context()) == {
+        'document_id': 'native-key', 'tenant_id': 'tenant-a', 'revision': '3:2', 'properties': document,
+    }
+    client.get.assert_called_once_with(index='old-kb', id='native-key')
+    client.search.assert_not_called()
+    client.indices.get_settings.return_value = {'old-kb': {'settings': {'index': {'uuid': 'replacement'}}}}
+    with pytest.raises(Conflict):
+        port.get(LEGACY_DOCUMENTS, 'native-key', context=context())

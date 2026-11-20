@@ -4,10 +4,15 @@
 import hashlib
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from management.services.knowledge_base.legacy_vectors import LegacyVectorInspector
+from management.services.knowledge_base.legacy_chunk_migration import LegacyChunkMigration
+from contracts.agentos_knowledge import KnowledgeChunk
+from contracts.knowledge_chunk_mutation import ChunkMutationState, ChunkMutationTarget
+from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+from contracts.knowledge_maintenance import LEGACY_VECTOR_METADATA
 from nexent.storage.errors import Conflict, ScopeDenied, Unavailable
 from nexent.storage.models import Page, StorageScope
 
@@ -17,10 +22,13 @@ from test.backend.services.test_cleanse_authorization import (
     resources as resources,  # noqa: PLC0414
 )
 from test.backend.services.test_cleanse_jobs import context
+from test.backend.services.test_knowledge_ingestion_coordinator import (
+    sqlite_threads as sqlite_threads,  # noqa: PLC0414
+)
 
 
 @pytest.fixture
-def inspection(resources):
+def inspection(sqlite_threads, resources):
     _, update, engine, _ = resources
     update('cleanse_knowledge', created_by='owner')
     actor = ServicePrincipal('user-a', 'tenant-a')
@@ -103,3 +111,82 @@ def test_storage_failure_is_not_a_missing_or_empty_collection(inspection):
     s = inspection; s.records.query.side_effect = Unavailable()
     with pytest.raises(Unavailable): scan(s)
     assert s.frames == [] and s.closed == ['vectors', 'resources']
+
+
+@pytest.fixture
+def standalone(inspection):
+    s = inspection
+    s.row['properties'] = {'created_by': 'historical-author', 'content': 'old manual text', 'id': 'display-alias',
+                           'filename': 'manual.txt', 'embedding': [1.0, 0.0], 'metadata': {'custom': {'one': 1}}}
+    collection = s.records.get.return_value
+    s.records.get.side_effect = lambda dataset, *args, **kwargs: collection if dataset == LEGACY_VECTOR_METADATA else s.row
+
+    async def target(lookup, *_):
+        observed = client.mutate_knowledge_chunk.await_count > 0
+        values = dict(lookup.model_dump(), change_epoch=4 if observed else 3)
+        if observed:
+            intent = client.mutate_knowledge_chunk.await_args.args[0]
+            values.update(generation='a'*64, chunk=KnowledgeChunk(knowledge_id=1, chunk_id=lookup.chunk_id,
+                content=intent.changes['content'], location=intent.changes['location']))
+        return ChunkMutationTarget(**values)
+
+    async def mutate(intent, *_):
+        return ChunkMutationState(knowledge_id=intent.knowledge_id, chunk_id=intent.chunk_id,
+            operation='create', mutation_id='a'*64, status='completed', writer_ended=True, count_delta=1, commit_epoch=4)
+
+    client = SimpleNamespace(inspect_knowledge_chunk=AsyncMock(side_effect=target),
+                             mutate_knowledge_chunk=AsyncMock(side_effect=mutate))
+    migration = LegacyChunkMigration(resources=s.service.resources, vectors=s.service.vectors, client=client)
+    return s, client, migration
+
+
+def test_snapshot_flags_standalone_without_printing_raw_body(standalone):
+    s, _, _ = standalone
+    assert scan(s)['documents'] == 1
+    item, = s.frames[0].documents
+    assert item.standalone_candidate and 'old manual text' not in item.model_dump_json()
+
+
+async def test_copy_exact_standalone_with_original_vector_and_no_file_or_model(standalone):
+    s, client, migration = standalone
+    result = await migration.migrate(1, s.row['document_id'], 'a'*64, '1:1', s.actor,
+                                     legacy_quiesced=True, context=context())
+    intent, actor, tenant = client.mutate_knowledge_chunk.await_args.args
+    assert (actor, tenant) == (s.actor.user_id, s.actor.tenant_id)
+    assert intent.chunk_id == s.row['document_id'] and intent.expected_change_epoch == 3 and intent.file_ref is None
+    assert intent.changes['supplied_embedding'] == [1.0, 0.0] and 'embedding_model' not in intent.changes
+    assert intent.changes['location'][PUBLIC_CHUNK_SOURCE_KEY] == {
+        'created_by': 'historical-author', 'filename': 'manual.txt', 'id': 'display-alias',
+        'metadata': {'custom': {'one': 1}},
+    }
+    assert result['chunk_migrated'] and result['commit_epoch'] == 4
+    assert result['document_id_hash'] == hashlib.sha256(s.row['document_id'].encode()).hexdigest()
+    assert client.inspect_knowledge_chunk.await_count == 2
+
+
+@pytest.mark.parametrize('properties,revision', [
+    ({'file_id': 'b'*32}, '1:1'), ({'metadata': {'process_source': 'UniversalImageExtractor'}}, '1:1'),
+    ({'tenant_id': 'foreign'}, '1:1'), ({'index': 0}, '1:1'), ({'embedding': [1.0]}, '1:1'), ({}, '2:1'),
+])
+async def test_unproven_or_changed_chunks_never_reach_runtime(standalone, properties, revision):
+    s, client, migration = standalone
+    s.row['properties'].update(properties)
+    with pytest.raises(Conflict):
+        await migration.migrate(1, s.row['document_id'], 'a'*64, revision, s.actor,
+                                legacy_quiesced=True, context=context())
+    client.inspect_knowledge_chunk.assert_not_awaited()
+    client.mutate_knowledge_chunk.assert_not_awaited()
+
+
+async def test_occupied_runtime_key_is_never_overwritten(standalone):
+    s, client, migration = standalone
+
+    async def occupied(lookup, *_):
+        return ChunkMutationTarget(**lookup.model_dump(), change_epoch=3, generation='b'*64,
+            chunk=KnowledgeChunk(knowledge_id=1, chunk_id=lookup.chunk_id, content='newer Runtime chunk'))
+
+    client.inspect_knowledge_chunk.side_effect = occupied
+    with pytest.raises(Conflict):
+        await migration.migrate(1, s.row['document_id'], 'a'*64, '1:1', s.actor,
+                                legacy_quiesced=True, context=context())
+    client.mutate_knowledge_chunk.assert_not_awaited()

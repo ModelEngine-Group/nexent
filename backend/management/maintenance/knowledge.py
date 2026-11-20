@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Selected read-only KB inventories; no migration execution mode."""
+"""Selected KB inventories and explicit migration of standalone legacy chunks."""
 
 import argparse
 import asyncio
@@ -28,7 +28,7 @@ from nexent.core.concurrency import (
     run_blocking,
     set_default_thread_manager,
 )
-from nexent.storage.errors import Conflict, DeadlineExceeded
+from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput
 from nexent.storage.models import OperationContext
 
 from infrastructure.agentos_identity import ServicePrincipal
@@ -67,7 +67,7 @@ def _scan_vectors(args, scope, context, emit):
         lambda page: emit({'kind': 'legacy_vector_page', **page.model_dump(mode='json')}), page_size=args.page_size, context=context)
 
 
-async def _inspect(args, scanner, kind, pending):
+async def _inspect(args, scanner, kind, pending, *, inventory=True):
     actor = ServicePrincipal(args.user_id, args.tenant_id)
     scope = RunCancellationScope()
     context = OperationContext('knowledge-' + kind + '-inspection-' + uuid4().hex, monotonic() + args.timeout, cancelled=scope.stop_event)
@@ -77,7 +77,8 @@ async def _inspect(args, scanner, kind, pending):
     manager.start(); set_default_thread_manager(manager)
     try:
         with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w', encoding='utf-8', newline='\n') as stream:
-            _emit(stream, {'kind': kind + '_inventory_start', 'operation_id': context.operation_id,
+            report_kind = kind + '_inventory' if inventory else kind
+            _emit(stream, {'kind': report_kind + '_start', 'operation_id': context.operation_id,
                 'knowledge_id': args.knowledge_id, 'tenant_id': actor.tenant_id, 'actor_id': actor.user_id,
                 'pending_checks': list(pending), 'migration_ready': False,
                 **({'legacy_quiesced': getattr(args, 'legacy_quiesced', False)} if kind == 'legacy_task_archive' else {})})
@@ -88,7 +89,8 @@ async def _inspect(args, scanner, kind, pending):
                 else:
                     result = await run_blocking('knowledge-' + kind + '-inspection', scanner, args, scope, context,
                         emit, lane='control-io', owner='management.knowledge.maintenance')
-            result = {'kind': kind + '_inventory_finished', 'operation_id': context.operation_id, 'scan_complete': True,
+            result = {'kind': report_kind + '_finished', 'operation_id': context.operation_id,
+                **({'scan_complete': True} if inventory else {}),
                 **result, 'pending_checks': list(pending), 'migration_ready': False}
             _emit(stream, result)
             return result
@@ -121,7 +123,6 @@ def _archive_tasks(args, scope, context, emit):
     from management.services.knowledge_base.legacy_tasks import LegacyTaskInspector
 
     if getattr(args, 'legacy_quiesced', False) is not True:
-        from nexent.storage.errors import InvalidInput
         raise InvalidInput()
     return LegacyTaskInspector(cancellation_scope=scope).scan(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
         lambda page: emit({'kind': 'legacy_task_archive_page', **page.model_dump(mode='json')}),
@@ -150,13 +151,26 @@ async def inspect_runtime(args):
     return await _inspect(args, _scan_runtime, 'runtime', RUNTIME_PENDING_CHECKS)
 
 
+async def _migrate_chunk(args, scope, context, emit):
+    from management.services.knowledge_base.legacy_chunk_migration import LegacyChunkMigration
+
+    return await LegacyChunkMigration(cancellation_scope=scope).migrate(
+        args.knowledge_id, args.document_id, args.collection_revision, args.document_revision,
+        ServicePrincipal(args.user_id, args.tenant_id), legacy_quiesced=args.legacy_quiesced, context=context,
+    )
+
+
+async def migrate_chunk(args):
+    return await _inspect(args, _migrate_chunk, 'legacy_chunk_migration', VECTOR_PENDING_CHECKS, inventory=False)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     actions = {'inspect': inspect_sources, 'inspect-vectors': inspect_vectors, 'inspect-tasks': inspect_tasks,
-        'inspect-runtime': inspect_runtime, 'archive-tasks': archive_tasks}
+        'inspect-runtime': inspect_runtime, 'archive-tasks': archive_tasks, 'migrate-chunk': migrate_chunk}
     for command in actions:
-        description = 'Read-only knowledge inventory'
+        description = 'Migrate one standalone legacy chunk' if command == 'migrate-chunk' else 'Read-only knowledge inventory'
         inspect = commands.add_parser(command, help=description)
         if command == 'inspect-runtime':
             inspect.add_argument('--include-vector-media', action='store_true',
@@ -164,6 +178,12 @@ def main(argv=None):
         if command == 'archive-tasks':
             inspect.add_argument('--legacy-quiesced', action='store_true', required=True,
                 help='Operator confirms old admission and workers are stopped and drained; export includes private contents')
+        if command == 'migrate-chunk':
+            inspect.add_argument('--legacy-quiesced', action='store_true', required=True,
+                help='Operator confirms legacy writers are stopped and drained')
+            inspect.add_argument('--document-id', required=True, help='Exact historical Elasticsearch document ID')
+            inspect.add_argument('--collection-revision', required=True, help='Collection revision from inspect-vectors')
+            inspect.add_argument('--document-revision', required=True, help='Document revision from inspect-vectors')
         inspect.add_argument('--tenant-id', required=True)
         inspect.add_argument('--user-id', required=True, help='Actual operator; current membership and edit DAC are required')
         inspect.add_argument('--knowledge-id', type=int, required=True)
