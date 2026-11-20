@@ -2,6 +2,7 @@
 """Regression guards for canonical ownership and relocation-sensitive resources."""
 
 import ast
+import subprocess
 from pathlib import Path
 
 
@@ -17,20 +18,25 @@ def test_flat_service_exclusions_match_remaining_scope():
         "nl2agent_retrieval_progress.py",
         "nl2agent_semantic_retrieval.py",
         "nl2agent_state_service.py",
-        "__init__.py", "nl2skill_service.py", "skill_repository_service.py",
-        "nl2agent_service.py", "workspace_cleanup_service.py",
+        "__init__.py", "skill_repository_service.py",
+
     }
     assert not list((BACKEND / "utils").glob("*.py"))
-    assert not (BACKEND / "gateway/api").exists()
+    assert (BACKEND / "runtime/api/application.py").is_file()
     assert (BACKEND / "gateway/application.py").is_file()
+    assert not (BACKEND / "gateway/api").exists()
     assert (BACKEND / "management/api/northbound.py").is_file()
     assert (BACKEND / "runtime/api/__init__.py").is_file()
 
 
 def test_production_imports_use_canonical_owners():
     unexpected = []
-    for path in BACKEND.rglob("*.py"):
-        if ".venv" in path.parts or "__pycache__" in path.parts:
+    paths = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "backend"], cwd=ROOT, text=True,
+    ).splitlines()
+    for relative in paths:
+        path = ROOT / relative
+        if path.suffix != ".py" or not path.is_file():
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
             if isinstance(node, ast.ImportFrom):
@@ -50,9 +56,9 @@ def test_production_imports_use_canonical_owners():
                         "services.nl2agent_retrieval_progress",
                         "services.nl2agent_semantic_retrieval",
                         "services.nl2agent_state_service",
-                        "services.nl2skill_service", "services.skill_repository_service",
-                        "services.nl2agent_service",
-                        "services.workspace_cleanup_service",
+                        "services.skill_repository_service",
+
+
                     }
                 ):
                     unexpected.append((path.relative_to(ROOT).as_posix(), name))

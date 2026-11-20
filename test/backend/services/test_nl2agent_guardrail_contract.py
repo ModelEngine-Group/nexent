@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from contracts.nl2agent_configuration import GuardrailPatch
 from contracts.tag import AuthenticatedCaller
 from services import nl2agent_configuration as service
-from tool_collection.mcp.nl2agent_mcp_tools import SAVE_CONFIGURATION_DESCRIPTION
+from management.services.agent.nl2agent_tools import SAVE_CONFIGURATION_DESCRIPTION
 
 
 @pytest.mark.parametrize("severity", ["block", "mask", "pass"])

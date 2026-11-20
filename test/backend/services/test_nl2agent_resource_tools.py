@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from contracts.errors.exceptions import AgentDraftEditError, UnauthorizedError
-from services.nl2agent_service import Nl2AgentResourceError
+from management.services.agent.nl2agent import Nl2AgentResourceError
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
 from tool_collection.mcp import nl2agent_resource_tools as tools
 

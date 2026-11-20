@@ -10,7 +10,7 @@ import pytest
 from contracts.nl2agent_resources import VerificationCheck
 from services import nl2agent_resource_flow as flow
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
-from tool_collection.mcp.nl2agent_mcp_tools import ResourceCandidate
+from management.services.agent.nl2agent_tools import ResourceCandidate
 
 
 @pytest.fixture

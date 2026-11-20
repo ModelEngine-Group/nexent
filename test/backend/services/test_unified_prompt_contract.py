@@ -8,15 +8,15 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from management.services.agent.creation import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from contracts.agent import AgentImportRequest, AgentInfoRequest, ExportAndImportAgentInfo
 from infrastructure.rdb.orm import as_dict, filter_property
 from management.db.agent.models import AgentInfo
 from contracts.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
 from management.services.repository.agent.listing import _extract_root_agent_from_snapshot
 from nexent.core.utils.observer import MessageObserver
-from services import nl2agent_service as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent as service
+from management.services.agent import nl2agent_tools as tools
 
 
 def test_request_and_tool_accept_only_canonical_prompt():
@@ -91,7 +91,7 @@ async def test_partial_prompt_save_proposes_confirmation_without_overwriting_fie
         "Authorization": "Bearer test", tools.NL2AGENT_AGENT_ID_HEADER: "170",
         tools.NL2AGENT_CONVERSATION_ID_HEADER: "9", tools.NL2AGENT_RUN_ID_HEADER: "run",
     }))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("owner", "tenant"))
+    mocker.patch.object(tools, "_tool_actor", return_value=("owner", "tenant"))
     update = mocker.patch.object(service, "update_agent_draft_fields")
     card = {"subtype": "prompt_generation", "agent_id": 170, "proposed_prompt": merged}
     propose = mocker.patch.object(nl2agent_prompt_service, "propose", return_value=card)

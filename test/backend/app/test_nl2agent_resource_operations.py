@@ -16,7 +16,7 @@ from contracts.nl2agent_resources import (
 from management.services.agent import authorization
 from runtime.api.agent import execution
 from services import nl2agent_resource_flow as flow
-from services.nl2agent_service import Nl2AgentResourceError
+from management.services.agent.nl2agent import Nl2AgentResourceError
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
 
 

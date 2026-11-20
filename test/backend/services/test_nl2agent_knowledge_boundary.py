@@ -8,7 +8,7 @@ import pytest
 
 from contracts.nl2agent_resources import VerificationCheck
 from services import nl2agent_resource_flow as flow
-from services import nl2agent_service as legacy
+from management.services.agent import nl2agent as legacy
 from services.nl2agent_state_service import ResourceScope
 
 
@@ -64,7 +64,7 @@ async def test_recall_verification_and_binding_card_do_not_query_knowledge(monke
 @pytest.mark.parametrize("name,field", [("knowledge_base_search", "index_names"), ("aidp_search", "kds_list")])
 @pytest.mark.parametrize("configured,selected,ready", [(True, True, True), (False, True, False), (True, False, False)])
 async def test_binding_summary_uses_saved_configuration_without_provider(monkeypatch, name, field, configured, selected, ready):
-    from tool_collection.mcp.nl2agent_mcp_tools import ResourceCandidate
+    from management.services.agent.nl2agent_tools import ResourceCandidate
 
     resource = {
         "candidate_ref": "tool:2", "resource_type": "tool", "source": "LOCAL_TOOL", "name": name,

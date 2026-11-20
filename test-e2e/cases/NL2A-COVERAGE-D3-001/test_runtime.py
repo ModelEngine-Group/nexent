@@ -21,11 +21,11 @@ from management.db.models import AgentInfo
 from management.db.tool.models import ToolInstance
 from management.services.mcp import service as mcp_service
 from model_controls.runtime import runtime_fixture
-from services import nl2agent_service, nl2agent_state_service
+from management.services.agent import nl2agent as nl2agent_service, nl2agent_state_service
 from services.nl2agent_state_service import ResourceScope
 from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from management.services.conversation import nl2agent_resource_index as storage
-from tool_collection.mcp.nl2agent_mcp_tools import ResourceInstallationOption
+from management.services.agent.nl2agent_tools import ResourceInstallationOption
 
 pytestmark = [pytest.mark.case_id("NL2A-COVERAGE-D3-001"), pytest.mark.stage("D3")]
 PATH = "/api/agent/nl2agent/run"

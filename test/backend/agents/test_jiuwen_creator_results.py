@@ -13,7 +13,7 @@ import pytest
 
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
-from services.nl2agent_service import _Nl2AgentBoundaryObserver
+from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def setup_adapter(mode="python_workflow"):
 
 
 def publish_card(observer):
-    from services.nl2agent_service import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
+    from infrastructure.nl2agent_tool_config import NL2AGENT_RECEIPT_KEY, NL2A_WRAPPER_NAME
 
     observer.on_mcp_tool_result(NL2A_WRAPPER_NAME, {NL2AGENT_RECEIPT_KEY: {
         "event_id": "card-event", "run_id": "run", "conversation_id": "9",
@@ -114,30 +114,30 @@ async def test_card_blocks_next_model_prepare_and_tool_dispatch():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["run_terminal", "error"])
-async def test_creator_stream_preserves_terminal_or_real_failure_after_card(monkeypatch, ending):
-    from contracts.agent import NL2AgentRunRequest
-    from contracts.authentication import AuthenticatedIdentity
-    from services import nl2agent_service as service
+async def test_creator_stream_hides_output_after_first_card_and_drains_worker(monkeypatch, ending):
+    from runtime.agentos import ephemeral
 
     adapter, _observer, _stop = setup_adapter()
-    adapter.run_info.agent_config.agent_id = None
-    monkeypatch.setattr(service, "build_nl2agent_run_info", AsyncMock(return_value=adapter.run_info))
     events = [{"type": "nl2a", "content": "card"}, {"type": "execution_logs", "content": "hidden"},
               {"type": "tool_result", "content": "already admitted call finished"},
               {"type": "execution_logs", "content": "still hidden after the result"},
               {"type": "nl2a", "content": "duplicate card must stay hidden"},
               {"type": ending, "content": "actual outcome"}, {"type": "done", "content": ""}]
+    closed = Mock()
 
     async def run(*args, **kwargs):
-        for event in events:
-            yield json.dumps(event)
+        try:
+            for event in events:
+                yield json.dumps(event)
+        finally:
+            closed()
 
-    monkeypatch.setattr(service, "agent_run", run)
-    stream = await service.create_nl2agent_stream(
-        NL2AgentRunRequest(query="create", agent_id=42), "tenant", "en",
-        identity=AuthenticatedIdentity("owner", "tenant"))
-    output = [json.loads(item.removeprefix("data: ")) async for item in stream]
-    assert [item["type"] for item in output] == ["nl2a", "tool_result", ending, "done"]
+    monkeypatch.setattr(ephemeral, "agent_run", run)
+    stream = ephemeral._observer_stream(adapter.run_info, Mock(), Mock(), creator_mode="nl2agent")
+    output = [item async for item in stream]
+    assert [json.loads(item.removeprefix("data: ")) for item in output if item.startswith("data: ")] == [events[0]]
+    assert output[-1] == "event: agentos_execution_complete\ndata: {}\n\n"
+    closed.assert_called_once_with()
 
 
 @pytest.mark.asyncio

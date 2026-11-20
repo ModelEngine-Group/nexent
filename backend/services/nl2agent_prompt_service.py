@@ -47,7 +47,7 @@ def binding_revision(facts, tools, skills):
 
 
 async def snapshot(scope):
-    from services.nl2agent_service import read_generation_state
+    from management.services.agent.nl2agent import read_generation_state
 
     state = await read_generation_state(
         agent_id=scope.agent_id, tenant_id=scope.tenant_id, user_id=scope.user_id,

@@ -166,12 +166,12 @@ const COOKIE_NAMES = {
   OAUTH_PENDING: "nexent_oauth_pending",
 };
 
-const isProduction = process.env.NODE_ENV === "production";
+const authCookieSecure = process.env.NEXENT_AUTH_COOKIE_SECURE !== "false";
 
 function buildCookieOptions(httpOnly) {
   return {
     httpOnly,
-    secure: false, // cookie can be send through http
+    secure: authCookieSecure,
     sameSite: "lax",
     path: BASE_PATH || "/",
   };
@@ -232,7 +232,7 @@ function setAuthCookies(res, session) {
 }
 
 function clearAuthCookies(res) {
-  const expired = { maxAge: 0, path: "/" };
+  const expired = { ...buildCookieOptions(false), maxAge: 0 };
   res.setHeader("Set-Cookie", [
     cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", {
       ...expired,
@@ -262,9 +262,8 @@ function setPendingOAuthCookie(res, pendingToken) {
 function clearPendingOAuthCookie(res) {
   appendSetCookies(res, [
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
+      ...buildCookieOptions(true),
       maxAge: 0,
-      path: "/",
-      httpOnly: true,
     }),
   ]);
 }
@@ -566,6 +565,7 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 
           // Copy response headers, but override content-length and set cookies
           const responseHeaders = { ...proxyRes.headers };
+          delete responseHeaders["transfer-encoding"];
           responseHeaders["content-length"] = String(finalBody.length);
           // Merge Set-Cookie: proxyRes cookies + our auth cookies
           const existingSetCookie = res.getHeader("Set-Cookie") || [];
@@ -822,13 +822,11 @@ function handleAllApiProxy(pathname, req, res) {
   }
 
   // 2. 判断是否为 runtime 运行时接口
+  const isConversationRun = /^\/api\/agent\/run\/?$/.test(pathname);
   const runtimePathPrefixes = [
-    "/api/agent/run",
-    "/api/agent/nl2agent/",
+    "/api/agent/nl2agent/run",
     "/api/agent/human-interactions",
     "/api/skills/nl2skill/run",
-    "/api/agent/stop",
-    "/api/agent/automations",
     "/api/conversation/",
     "/api/share/",
     "/api/file/preprocess",
@@ -843,18 +841,18 @@ function handleAllApiProxy(pathname, req, res) {
   // 分发代理目标
   if (isRuntime) {
     const runtimeProxyTimeout =
-      pathname.startsWith("/api/agent/run") ||
       pathname.startsWith("/api/agent/nl2agent/run") ||
       pathname.startsWith("/api/skills/nl2skill/run")
         ? SSE_PROXY_TIMEOUT_MS
         : PROXY_TIMEOUT_MS;
     proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
   } else {
+    const timeout = isConversationRun ? SSE_PROXY_TIMEOUT_MS : PROXY_TIMEOUT_MS;
     proxy.web(req, res, {
       target: HTTP_BACKEND,
       changeOrigin: true,
-      proxyTimeout: PROXY_TIMEOUT_MS,
-      timeout: PROXY_TIMEOUT_MS,
+      proxyTimeout: timeout,
+      timeout,
     });
   }
 

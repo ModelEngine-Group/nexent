@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from services import nl2agent_prompt_service as prompts
-from services import nl2agent_service as service
+from management.services.agent import nl2agent as service
 from services.nl2agent_state_service import ResourceStateError
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def context(mocker):
     headers = {tools.NL2AGENT_AGENT_ID_HEADER: "42", tools.NL2AGENT_RUN_ID_HEADER: "run",
                tools.NL2AGENT_CONVERSATION_ID_HEADER: "7"}
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers=headers))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("user", "tenant"))
+    mocker.patch.object(tools, "_tool_actor", return_value=("user", "tenant"))
     return headers
 
 
@@ -97,5 +97,5 @@ async def test_pending_resources_block_completion_before_prompt_read(mocker, con
 
 @pytest.mark.asyncio
 async def test_unauthorized_completion_never_emits_success(mocker, context):
-    mocker.patch.object(tools, "get_current_user_id", side_effect=PermissionError())
+    mocker.patch.object(tools, "_tool_actor", side_effect=PermissionError())
     assert json.loads(await tools.validate_agent_generation_complete())["code"] == "unauthorized"

@@ -433,10 +433,11 @@ export const API_ENDPOINTS = {
     upload: `${API_BASE_URL}/file/upload`,
     process: `${API_BASE_URL}/file/process`,
     // Error info service
-    getErrorInfo: (indexName: string, pathOrUrl: string) =>
-      `${API_BASE_URL}/indices/${indexName}/documents/${encodeURIComponent(
-        pathOrUrl
-      )}/error-info`,
+    getErrorInfo: (indexName: string, pathOrUrl: string, fileId?: string) => {
+      const query = new URLSearchParams({ path_or_url: pathOrUrl });
+      if (fileId) query.set("file_id", fileId);
+      return `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/documents/error-info?${query}`;
+    },
     // Embedding model status and configuration
     embeddingModelStatus: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/embedding-model-status`,

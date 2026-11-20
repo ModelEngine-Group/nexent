@@ -124,9 +124,9 @@ def test_run_loop_reaps_and_cleans_up(mocker):
 
 def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
     dispatcher = MagicMock()
-    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
+    runtime_proxy = types.ModuleType("management.services.evaluation.dispatch")
     runtime_proxy.dispatch_agent_evaluation_run = dispatcher
-    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.evaluation.dispatch", runtime_proxy)
 
     em._dispatch_pending_runs(
         [
@@ -146,18 +146,18 @@ def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
 
 
 def test_dispatch_pending_runs_returns_immediately_when_empty(monkeypatch):
-    monkeypatch.delitem(sys.modules, "management.services.agent.runtime_client", raising=False)
+    monkeypatch.delitem(sys.modules, "management.services.evaluation.dispatch", raising=False)
 
     em._dispatch_pending_runs([])
 
-    assert "management.services.agent.runtime_client" not in sys.modules
+    assert "management.services.evaluation.dispatch" not in sys.modules
 
 
 def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
     dispatcher = MagicMock()
-    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
+    runtime_proxy = types.ModuleType("management.services.evaluation.dispatch")
     runtime_proxy.dispatch_agent_evaluation_run = dispatcher
-    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.evaluation.dispatch", runtime_proxy)
     warning = mocker.patch.object(em.logger, "warning")
 
     em._dispatch_pending_runs(
@@ -179,9 +179,9 @@ def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
 
 def test_dispatch_pending_runs_keeps_failed_dispatch_pending(mocker, monkeypatch):
     dispatcher = MagicMock(side_effect=RuntimeError("runtime unavailable"))
-    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
+    runtime_proxy = types.ModuleType("management.services.evaluation.dispatch")
     runtime_proxy.dispatch_agent_evaluation_run = dispatcher
-    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.evaluation.dispatch", runtime_proxy)
     warning = mocker.patch.object(em.logger, "warning")
 
     em._dispatch_pending_runs(

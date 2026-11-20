@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for model provider base module.
 
 Tests cover error classification utilities and abstract base class.
@@ -7,7 +9,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from pytest_mock import MockFixture
 
-from management.services.model.providers.base import (
+from runtime.model.providers.base import (
     _create_error_response,
     _classify_provider_error,
     AbstractModelProvider,

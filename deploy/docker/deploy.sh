@@ -1257,6 +1257,17 @@ publish_shared_workbench() {
   fi
 }
 
+migrate_legacy_index_gateway() {
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application ||
+      ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" data-process; then
+    return 0
+  fi
+
+  if [ "$(deployment_get_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE)" = "http://nexent-config:5010/api" ]; then
+    deployment_update_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE "http://nexent-gateway:5013/api"
+  fi
+}
+
 deploy_core_services() {
   # Function to deploy core services
   local core_services=()
@@ -2007,6 +2018,9 @@ main_deploy() {
     fi
     exit 1
   }
+
+  # Migrate the previous full-stack indexing endpoint before starting the worker.
+  migrate_legacy_index_gateway || exit 1
 
   # Start core services
   deploy_core_services || {

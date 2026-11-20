@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 from tool_collection.mcp import nl2agent_resource_tools as resource_tools
 
 
@@ -27,12 +27,12 @@ async def test_discovery_rejects_invalid_short_search_query(mocker, search_query
 )
 async def test_resource_search_preserves_batch_boundary(mocker, search, count, expected):
     service = mocker.patch(
-        f"services.nl2agent_service.{search.__name__}_impl",
+        f"management.services.agent.nl2agent.{search.__name__}_impl",
         return_value=tools.ResourceSearchOutput(candidates=[], uncovered_requirement_ids=[]),
     )
     resolve_agent = mocker.patch.object(tools, "_resolve_agent_context_id", return_value=42)
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={}))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("user-a", "tenant-a"))
+    mocker.patch.object(tools, "_tool_actor", return_value=("user-a", "tenant-a"))
     mocker.patch("management.services.agent.authorization.require_agent_draft_edit")
     requirements = [{"requirement_id": f"req-{i}", "query": f"Capability {i}"} for i in range(count)]
     original = [item.copy() for item in requirements]

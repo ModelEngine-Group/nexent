@@ -6,15 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 from contracts.errors.exceptions import AgentDraftEditError
-from services import nl2agent_service as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent as service
+from management.services.agent import nl2agent_tools as tools
 
 
 @pytest.fixture
 def authorized_context(mocker):
     headers = {tools.NL2AGENT_AGENT_ID_HEADER: "42", "Authorization": "Bearer fixture"}
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers=headers))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("user", "tenant"))
+    mocker.patch.object(tools, "_tool_actor", return_value=("user", "tenant"))
     return headers
 
 
@@ -60,7 +60,7 @@ async def test_explicit_check_rejects_missing_or_invalid_run_target(mocker, auth
     assert json.loads(await tools.validate_agent_generation_complete()) == {
         "status": "error", "code": "agent_context_mismatch", "retryable": False,
     }
-    tools.get_current_user_id.assert_not_called()
+    tools._tool_actor.assert_not_called()
     check.assert_not_awaited()
 
 

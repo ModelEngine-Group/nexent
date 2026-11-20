@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from contracts.nl2agent_resources import VerificationCheck
-from services import nl2agent_service as legacy
+from management.services.agent import nl2agent as legacy
 from services import nl2agent_resource_flow as flow
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
 
@@ -62,7 +62,7 @@ def test_equal_scores_use_stable_reference_order(setup_policy):
 
 
 def test_native_bonus_is_small_and_uses_resource_identity(setup_policy, monkeypatch):
-    from tool_collection.mcp.nl2agent_mcp_tools import ResourceRequirement
+    from management.services.agent.nl2agent_tools import ResourceRequirement
 
     requirement = ResourceRequirement(requirement_id="r", query="retrieve documents")
     monkeypatch.setattr(legacy, "_resource_similarity",

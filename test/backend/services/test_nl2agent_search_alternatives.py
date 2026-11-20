@@ -111,7 +111,7 @@ def test_legacy_inflight_batches_remain_compatible():
 
 
 def test_coverage_and_binding_defaults_preserve_all_positive_candidates():
-    from tool_collection.mcp.nl2agent_mcp_tools import ResourceCandidate
+    from management.services.agent.nl2agent_tools import ResourceCandidate
 
     catalog = [{**resource(index, name, "Search public web information"), "config": []}
                for index, name in enumerate(["exa_search", "linkup_search", "tavily_search", "deepseek_search"])]
@@ -210,7 +210,7 @@ async def test_all_alternatives_survive_pages_and_binding_defaults(mocker, mode)
 
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_model_prompt_demands_independent_assessments(language):
-    from management.services.agent.creation import build_nl2agent_system_prompt
+    from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 
     prompt = build_nl2agent_system_prompt(language)
     assert '"assessments"' in prompt and '"satisfies"' in prompt and '"reason"' in prompt

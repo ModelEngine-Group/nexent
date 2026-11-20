@@ -4,7 +4,7 @@
 
 import pytest
 
-from services import nl2agent_service
+from management.services.agent import nl2agent as nl2agent_service
 
 
 @pytest.fixture

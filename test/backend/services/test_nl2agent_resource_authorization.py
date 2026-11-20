@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from services import nl2agent_service as service
+from management.services.agent import nl2agent as service
 from services import nl2agent_resource_flow as flow
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
 

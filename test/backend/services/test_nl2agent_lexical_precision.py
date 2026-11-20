@@ -3,10 +3,10 @@
 
 import pytest
 
-from management.services.agent.creation import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from services import nl2agent_resource_flow as flow
-from services import nl2agent_service as service
-from tool_collection.mcp.nl2agent_mcp_tools import ResourceRequirement
+from management.services.agent import nl2agent as service
+from management.services.agent.nl2agent_tools import ResourceRequirement
 
 
 def resource(name, description, **extra):

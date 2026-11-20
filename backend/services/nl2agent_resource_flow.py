@@ -24,7 +24,7 @@ from contracts.nl2agent_resources import (
     ResourcePurpose,
     VerificationCheck,
 )
-from services import nl2agent_service as legacy
+from management.services.agent import nl2agent as legacy
 from services import nl2agent_semantic_retrieval as semantic
 from services.nl2agent_retrieval_progress import ProgressPublisher
 from services.nl2agent_state_service import (
@@ -37,7 +37,7 @@ from services.nl2agent_state_service import (
     require_current_run,
     update_resource_state,
 )
-from tool_collection.mcp.nl2agent_mcp_tools import ResourceCandidate, ResourceRequirement
+from management.services.agent.nl2agent_tools import ResourceCandidate, ResourceRequirement
 
 logger = logging.getLogger(__name__)
 

@@ -10,10 +10,7 @@ from contracts.constants.environment import APP_VERSION, RUNTIME_RUN_TTL_SECONDS
 from contracts.conversation import ConversationTarget, HistoryItem, MessageRequest
 from infrastructure.redis.run_state import runtime_state_service
 from management.db.conversation.repository import get_conversation_history
-from management.services.agent.lifecycle import (
-    AgentRunAlreadyActiveError,
-    agent_run_manager,
-)
+from contracts.errors.exceptions import AgentRunAlreadyActiveError
 from management.services.agent.system import system_agent_provider
 from management.services.conversation.creation_history import (
     prepare_creation_history,
@@ -23,6 +20,7 @@ from management.services.conversation.creator_checkpoints import (
 )
 from management.services.conversation.creator_runtime import (
     CreatorControl,
+    agent_run_manager,
     claim_creator,
     claim_request,
     launch_creator,
@@ -289,6 +287,7 @@ async def start_creation_turn(
             user_id=user_id,
             tenant_id=tenant_id,
             status="streaming",
+            streaming_owner="management",
         )
         extra_metadata = {"app_version": APP_VERSION, "core_type": "smolagents"}
         source_id = message_receipt.get("message_id")

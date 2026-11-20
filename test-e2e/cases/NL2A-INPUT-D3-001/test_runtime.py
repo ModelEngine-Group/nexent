@@ -13,7 +13,7 @@ from sqlalchemy import inspect, select
 
 from management.db.models import AgentInfo
 from model_controls.runtime import runtime_fixture
-from services import nl2agent_service
+from management.services.agent import nl2agent as nl2agent_service
 
 pytestmark = [pytest.mark.case_id("NL2A-INPUT-D3-001"), pytest.mark.stage("D3")]
 

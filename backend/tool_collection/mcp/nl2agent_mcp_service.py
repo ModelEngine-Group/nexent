@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.tools.tool import ToolResult
 
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from management.services.agent.nl2agent_tools import (
     DISCOVER_REQUIREMENTS_DESCRIPTION,
     DISCOVER_REQUIREMENTS_LOCAL_NAME,
     READ_CONFIGURATION_DESCRIPTION,
@@ -19,6 +19,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SAVE_CONFIGURATION_LOCAL_NAME,
     NL2AGENT_CONVERSATION_ID_HEADER,
     NL2AGENT_MCP_TOOL_META,
+    tool_headers, _tool_scope,
     NL2AGENT_RECEIPT_KEY,
     NL2AGENT_RUN_ID_HEADER,
     NL2A_MCP_SERVICE_NAME,
@@ -57,40 +58,13 @@ from tool_collection.mcp.nl2agent_resource_tools import (
 from tool_collection.mcp.nl2agent_configuration_tools import read_agent_configuration, save_agent_configuration
 
 
-def _attach_receipt(tool, *, card: bool = False):
-    """Keep legacy tool functions compatible while publishing trusted MCP metadata."""
+from management.services.agent.nl2agent_receipts import attach_receipt
 
-    @wraps(tool)
-    async def wrapped(*args, **kwargs):
-        output = await tool(*args, **kwargs)
-        if isinstance(output, ToolResult):
-            return output
-        try:
-            headers = get_http_request().headers
-        except RuntimeError:
-            return output
-        run_id = headers.get(NL2AGENT_RUN_ID_HEADER)
-        if not run_id:
-            return output
-        if card:
-            if not output.startswith("<nl2a>\n"):
-                return output
-            payload, _, content = output.removeprefix("<nl2a>\n").partition("\n</nl2a>\n")
-        else:
-            content, delimiter, payload = output.partition("\n<nl2a_state>")
-            if not delimiter:
-                return output
-            payload = payload.removesuffix("</nl2a_state>")
-        return ToolResult(content=content, meta={
-            NL2AGENT_RECEIPT_KEY: {
-                "event_id": uuid4().hex,
-                "run_id": run_id,
-                "conversation_id": headers.get(NL2AGENT_CONVERSATION_ID_HEADER, ""),
-                "payload": json.loads(payload),
-            },
-        })
 
-    return wrapped
+def _attach_receipt(tool, *, card=False):
+    return attach_receipt(tool, card=card, headers_provider=lambda: (
+        tool_headers() if _tool_scope.get() is not None else get_http_request().headers
+    ))
 
 
 nl2agent_mcp_service = FastMCP(NL2A_MCP_SERVICE_NAME)

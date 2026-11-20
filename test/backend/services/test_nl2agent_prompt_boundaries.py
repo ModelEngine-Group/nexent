@@ -158,7 +158,7 @@ async def test_save_optimistic_conflict_is_not_reported_as_success(mocker):
 
 @pytest.mark.asyncio
 async def test_snapshot_retains_prompt_and_only_digest_of_private_bindings(mocker):
-    from services import nl2agent_service as legacy
+    from management.services.agent import nl2agent as legacy
 
     scope = ResourceScope("tenant", "user", 42, "7", "run")
     read = mocker.patch.object(legacy, "read_generation_state", new=AsyncMock(return_value={

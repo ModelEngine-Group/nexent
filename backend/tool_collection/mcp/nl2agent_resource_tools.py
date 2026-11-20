@@ -24,9 +24,10 @@ from contracts.nl2agent_resources import (
 from management.services.permission.identity.session import get_current_user_id
 from management.services.agent.authorization import require_agent_draft_edit
 from services import nl2agent_resource_flow as flow
-from services.nl2agent_service import Nl2AgentResourceError, read_generation_state
+from management.services.agent.nl2agent import Nl2AgentResourceError, read_generation_state
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from management.services.agent.nl2agent_tools import (
+    tool_headers, _tool_scope, _tool_actor,
     NL2AGENT_AGENT_ID_HEADER,
     NL2AGENT_CONVERSATION_ID_HEADER,
     NL2AGENT_RECEIPT_KEY,
@@ -40,7 +41,7 @@ _search_queries = TypeAdapter(dict[Identifier, BilingualSearchQueries])
 
 
 def _scope() -> ResourceScope:
-    headers = get_http_request().headers
+    headers = tool_headers() if _tool_scope.get() is not None else get_http_request().headers
     run_id = headers.get(NL2AGENT_RUN_ID_HEADER)
     conversation_id = headers.get(NL2AGENT_CONVERSATION_ID_HEADER)
     try:
@@ -49,7 +50,7 @@ def _scope() -> ResourceScope:
         raise ResourceStateError("invalid_resource_context") from exc
     if not run_id or not conversation_id or agent_id <= 0:
         raise ResourceStateError("invalid_resource_context")
-    user_id, tenant_id = get_current_user_id(headers.get("Authorization"))
+    user_id, tenant_id = _tool_actor() if _tool_scope.get() is not None else get_current_user_id(headers.get("Authorization"))
     require_agent_draft_edit(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
     return ResourceScope(tenant_id, user_id, agent_id, conversation_id, run_id)
 

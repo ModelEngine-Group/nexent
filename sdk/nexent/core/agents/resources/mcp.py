@@ -126,6 +126,7 @@ class ManagedMCPToolCollection:
             for parameters in self.server_parameters:
                 transport_parameters = dict(parameters)
                 on_tool_result = transport_parameters.pop("on_tool_result", None)
+                allowed_tools = transport_parameters.pop("allowed_tools", None)
                 try:
                     connection = await asyncio.wait_for(
                         stack.enter_async_context(
@@ -149,11 +150,14 @@ class ManagedMCPToolCollection:
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
                     ) from exc
-                connections.append((*connection, on_tool_result))
+                connections.append((*connection, on_tool_result, allowed_tools))
 
             tools = []
-            for session, mcp_tools, on_tool_result in connections:
+            for session, mcp_tools, on_tool_result, allowed_tools in connections:
+                matched = set()
                 for mcp_tool in mcp_tools:
+                    if allowed_tools is not None and mcp_tool.name not in allowed_tools:
+                        continue
 
                     def call_tool(
                         arguments=None,
@@ -171,7 +175,14 @@ class ManagedMCPToolCollection:
                             __on_tool_result(__name, result.meta)
                         return result
 
-                    tools.append(adapter.adapt(call_tool, mcp_tool))
+                    tool = adapter.adapt(call_tool, mcp_tool)
+                    if allowed_tools is not None:
+                        if mcp_tool.name in matched or tool.name != allowed_tools[mcp_tool.name]:
+                            raise ValueError("MCP tool discovery does not match the authorized binding")
+                        matched.add(mcp_tool.name)
+                    tools.append(tool)
+                if allowed_tools is not None and matched != allowed_tools.keys():
+                    raise ValueError("Authorized MCP tool is missing from discovery")
 
             close_event = asyncio.Event()
             with self._lock:
@@ -440,6 +451,8 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
         if callable(mcp_host_item.get("on_tool_result")):
             result["on_tool_result"] = mcp_host_item["on_tool_result"]
+        if "allowed_tools" in mcp_host_item:
+            result["allowed_tools"] = mcp_host_item["allowed_tools"]
 
         if "httpx_client_factory" in mcp_host_item:
             httpx_client_factory = mcp_host_item["httpx_client_factory"]

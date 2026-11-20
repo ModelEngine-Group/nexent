@@ -17,7 +17,7 @@ from management.db.tag.models import (
     ResourceTagAssignment, TagBucket, TagBucketResourceType, TagDefinition, TagValue,
 )
 from model_controls.runtime import runtime_fixture
-from services import nl2agent_service
+from management.services.agent import nl2agent as nl2agent_service
 
 pytestmark = [pytest.mark.case_id("NL2A-CONFIG-D3-001"), pytest.mark.stage("D3")]
 PATH = "/api/agent/nl2agent/run"

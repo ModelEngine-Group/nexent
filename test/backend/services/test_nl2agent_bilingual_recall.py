@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from contracts.nl2agent_resources import RequirementDiscoveryInput, RequirementEdit, VerificationCheck
-from management.services.agent.creation import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from services import nl2agent_resource_flow as flow
 from services.nl2agent_state_service import ResourceScope, ResourceStateError
 from tool_collection.mcp import nl2agent_resource_tools as tools
