@@ -250,6 +250,7 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     search_mode: Literal["accurate", "semantic", "hybrid"] = "semantic"
     weight_accurate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     global_hybrid_candidates: bool = False
+    include_public_document: bool = False
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
@@ -279,6 +280,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
         result = handler(self)
         if not self.global_hybrid_candidates:
             result.pop("global_hybrid_candidates", None)
+        if not self.include_public_document:
+            result.pop("include_public_document", None)
         return result
 
     @field_validator("file_ids")
@@ -304,6 +307,14 @@ class KnowledgeSearchHit(Contract):
     location: dict[str, JsonValue] = Field(default_factory=dict)
     score_details: dict[str, JsonValue] = Field(default_factory=dict)
     image_ref: ObjectReference | None = None
+    public_document: dict[str, JsonValue] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_hit(self, handler):
+        result = handler(self)
+        if self.public_document is None:
+            result.pop("public_document", None)
+        return result
 
     @model_validator(mode="after")
     def complete_file_reference(self):

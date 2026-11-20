@@ -4,7 +4,8 @@
 from dataclasses import replace
 
 import pytest
-from contracts.agentos_knowledge import KnowledgeSearch
+from contracts.agentos_knowledge import KnowledgeSearch, KnowledgeSearchResult
+from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from nexent.storage.models import Revision, SearchHit, VectorKey
 from pydantic import ValidationError
 from runtime.knowledge_base.search import rank_candidates
@@ -76,3 +77,43 @@ async def test_actual_search_service_uses_explicit_weight_without_extra_inferenc
     assert result.hits[0].chunk_id == winner
     assert s.models.invoke.await_count == 1 and s.vectors.search.call_count == 2
     assert s.client.authorize_knowledge_search.await_count == 2
+
+
+async def test_public_document_uses_explicit_source_only_for_visible_candidates(search):
+    s, request, _, hit, service = search
+    source = {"id": "display-id", "content": "superseded", "metadata": {"page": 3},
+              "custom": [1, "record"], "embedding": [1], "multi_embedding": [2]}
+    hit = replace(hit, payload={**hit.payload, "location": {
+        PUBLIC_CHUNK_SOURCE_KEY: source, "internal_location": "private",
+    }})
+    stale = replace(hit, key=VectorKey("kb", "old"), generation=Revision("stale"))
+    s.vectors.search.return_value = (stale, hit)
+
+    assert "include_public_document" not in request.model_dump()
+    default = await service.search(request, s.actor)
+    assert "public_document" not in default.model_dump()["hits"][0]
+    requested = KnowledgeSearch.model_validate_json(request.model_copy(
+        update={"include_public_document": True}).model_dump_json())
+    result = await service.search(requested, s.actor)
+    round_trip = KnowledgeSearchResult.model_validate_json(result.model_dump_json())
+
+    assert len(round_trip.hits) == 1
+    assert round_trip.hits[0].public_document == {
+        "id": "display-id", "content": "worker content", "metadata": {"page": 3}, "custom": [1, "record"],
+    }
+    assert source["embedding"] == [1]
+
+
+@pytest.mark.parametrize("is_image", [False, True])
+async def test_ingested_document_projection_keeps_internal_location_private(search, is_image):
+    s, request, _, hit, service = search
+    location = {"path_or_url": "source.txt", "file_size": 42, "internal_location": "private"}
+    if is_image:
+        location["kind"] = "image"
+    s.vectors.search.return_value = (replace(hit, payload={**hit.payload, "location": location}),)
+    result = await service.search(request.model_copy(update={"include_public_document": True}), s.actor)
+
+    assert result.hits[0].public_document == (None if is_image else {
+        "id": "one", "content": "worker content", "filename": "source.txt",
+        "path_or_url": "source.txt", "file_size": 42,
+    })

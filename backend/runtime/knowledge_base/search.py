@@ -17,7 +17,7 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchResult,
 )
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from contracts.knowledge_chunk_projection import public_chunk_value
+from contracts.knowledge_chunk_projection import public_chunk_source, public_chunk_value
 from nexent.core.concurrency import run_blocking
 from nexent.core.utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from nexent.storage.errors import (
@@ -41,6 +41,28 @@ logger = logging.getLogger(__name__)
 
 def _identity(hit):
     return hit.key.collection, hit.key.key, hit.generation.value if hit.generation else ""
+
+
+def _public_document(hit):
+    payload = hit.payload
+    location = payload.get("location", {})
+    content = payload["content"]
+    if location.get("kind") == "image":
+        # The stored body contains a pinned object reference. Public images need
+        # an authorized URL in the existing response format.
+        return None
+    document = public_chunk_source(content, location)
+    if document is not None:
+        document.setdefault("id", hit.key.key)
+        for field in ("embedding", "multi_embedding"):
+            document.pop(field, None)
+        return document
+    document = {"id": hit.key.key, "content": content, "filename": payload.get("filename", "")}
+    document.update({field: location[field] for field in (
+        "path_or_url", "source_type", "file_size", "create_time",
+        "title", "language", "author", "date", "process_source",
+    ) if field in location})
+    return document
 
 
 def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None):
@@ -120,7 +142,7 @@ class KnowledgeSearchService:
         return result.output
 
     @staticmethod
-    def _dto(hit):
+    def _dto(hit, *, include_public_document=False):
         details = dict(hit.scores)
         if hit.highlights:
             details["retrieval_highlight_terms"] = list(hit.highlights)
@@ -131,6 +153,7 @@ class KnowledgeSearchService:
             score_details=details,
             image_ref=hit.payload.get("location", {}).get("image_ref")
             if hit.payload.get("location", {}).get("kind") == "image" else None,
+            public_document=_public_document(hit) if include_public_document else None,
         )
 
     def _visible(self, records, grant, request, hits, views, require_embedding, *, context):
@@ -267,9 +290,10 @@ class KnowledgeSearchService:
                     candidates = await self._blocking(self._visible, records, grant, request, candidates, views, False, context=context)
                     if await self._blocking(self._data_revisions, records, grant, context=context) != revisions:
                         raise Conflict()
-                    return KnowledgeSearchResult(hits=[self._dto(h) for h in candidates[:request.top_k]],
-                                                 data_revisions=revisions, embedding_model=request.embedding_model,
-                                                 rerank_model=request.rerank_model)
+                    hits = [self._dto(hit, include_public_document=request.include_public_document)
+                            for hit in candidates[:request.top_k]]
+                    return KnowledgeSearchResult(hits=hits, data_revisions=revisions,
+                                                 embedding_model=request.embedding_model, rerank_model=request.rerank_model)
         except (TimeoutError, DeadlineExceeded) as error:
             logger.warning("knowledge_search_timeout operation_id=%s phase=query timeout_seconds=%s exception_type=%s",
                            context.operation_id, threshold, type(error).__name__)
