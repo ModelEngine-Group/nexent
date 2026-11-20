@@ -13,6 +13,7 @@ from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
 from management.services.knowledge_base.file_selection import parse_file_selections
+from management.services.knowledge_base.source_deletion import SourceDeletion
 from nexent.storage.errors import Conflict, ScopeDenied, Unavailable
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery, Sort
 from pydantic import ValidationError
@@ -69,7 +70,7 @@ def _verified_source(row):
             raise Unavailable()
         return None
     try:
-        source = DeletionJournal._published_source(row)
+        source = DeletionJournal._published_source(row, historical_intent=ingestion)
     except Conflict:
         raise Unavailable() from None
     if (not source.version.startswith(('etag:', 'version:')) or not row['bucket_name']
@@ -159,4 +160,14 @@ def prepare_deletion(records, resources, index_name, path, scope, actor, *, file
         )
     except ValidationError:
         raise Unavailable() from None
+    if source is not None and (
+        row['source_upload_sha256'] != source.sha256 or not row['upload_owner_service']
+    ):
+        # Without the old publisher receipt, prove current accounting before any delete is admitted.
+        try:
+            ledger = SourceDeletion._ledger(records, row, intent, context)
+        except Conflict:
+            raise Unavailable() from None
+        if ledger is None or ledger['status'] != 'COMMITTED':
+            raise Unavailable()
     return row, intent, True

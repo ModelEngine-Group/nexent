@@ -6,9 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 from contracts.knowledge_deletion import DELETION_DATASET, KnowledgeDeletionIntent
-from contracts.knowledge_ingestion import ACTIVE_LEGACY_FILE_IDS
+from contracts.knowledge_ingestion import (
+    ACTIVE_LEGACY_FILE_IDS,
+    LegacyIngestionSnapshot,
+)
 from management.services.knowledge_base.deletion_selection import prepare_deletion
-from nexent.storage.errors import ScopeDenied, Unavailable
+from management.services.knowledge_base.source_deletion import SourceDeletion
+from nexent.storage.errors import Conflict, ScopeDenied, Unavailable
 from nexent.storage.models import StorageScope
 
 from infrastructure.rdb import knowledge_ingestion
@@ -191,3 +195,33 @@ def test_active_legacy_id_and_northbound_path_choose_the_same_deletion_intent(se
     s.update('cleanse_memberships', delete_flag='Y')
     with pytest.raises(ScopeDenied):
         s.select(file_id=original_id)
+
+
+
+@pytest.mark.parametrize("evidence", ["valid", "unversioned", "wrong-hash", "wrong-tenant", "missing-ledger", "wrong-ledger", "deleted-ledger"])
+def test_legacy_delete_needs_versioned_source_and_committed_history(selection, mocker, evidence):
+    s = selection
+    revision = "etag:one" if evidence == "unversioned" else "version:one"
+    source = {"space": "files", "key": "source.txt", "version": revision, "sha256": "a" * 64}
+    snapshot = LegacyIngestionSnapshot(tenant_id="other" if evidence == "wrong-tenant" else "tenant-a", resource_revision="b" * 64,
+        lifecycle_revision=1, legacy_quiesced=True, previous={"status": "COMPLETED", "processing_attempt": 0})
+    saved = ingestion_intent(source=source).model_copy(update={"legacy_snapshot": snapshot})
+    with s.s.engine.begin() as conn:
+        conn.execute(s.s.table.update().values(source_revision=revision, upload_owner_service=None,
+            source_upload_sha256="c" * 64 if evidence == "wrong-hash" else None,
+            storage_object_id=17, file_size=11, ingestion_request=saved.model_dump(mode="json")))
+    ledger = mocker.patch.object(SourceDeletion, "_ledger", return_value={
+        "status": "DELETED" if evidence == "deleted-ledger" else "COMMITTED",
+    } if evidence != "missing-ledger" else None)
+    if evidence == "wrong-ledger":
+        ledger.side_effect = Conflict()
+    if evidence == "valid":
+        row, result, _ = s.select()
+        assert result.source == saved.source and result.file_id == row["file_id"]
+        ledger.assert_called_once()
+    else:
+        with pytest.raises(Unavailable):
+            s.select()
+    if evidence in {"unversioned", "wrong-hash", "wrong-tenant"}:
+        ledger.assert_not_called()
+    assert s.s.row()["deletion_request"] is None

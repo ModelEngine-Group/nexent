@@ -1,11 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Delete one fenced source once, then commit its charge, file and KB metadata together."""
 
+import hashlib
 from datetime import UTC, datetime
 
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
 from contracts.knowledge_deletion import DELETION_KNOWLEDGE_DATASET
+from contracts.knowledge_ingestion import KnowledgeIngestionIntent
 from management.services.file.source_publish import validate_scope
 from management.services.knowledge_base.deletion_journal import (
     DeletionJournal,
@@ -23,6 +25,7 @@ from nexent.storage.models import (
     Revision,
     WriteOutcome,
 )
+from pydantic import ValidationError
 
 
 class SourceDeletion:
@@ -104,6 +107,31 @@ class SourceDeletion:
         except NotFound:
             return None
 
+    def _matches_digest(self, row, source, metadata, context):
+        if metadata.sha256 is not None:
+            return metadata.sha256 == source.sha256
+        if not source.version.startswith('version:') or row['ingestion_request'] is None:
+            return False
+        try:
+            ingestion = KnowledgeIngestionIntent.model_validate(row['ingestion_request'])
+        except ValidationError:
+            return False
+        if not self.journal._verified_historical_version(row, source, ingestion):
+            return False
+        size, digest = 0, hashlib.sha256()
+        # Old uploads may lack SHA metadata. Read only the immutable version selected for deletion.
+        with self.objects.open_read(metadata.ref, context=context) as stream:
+            while True:
+                context.remaining()
+                block = stream.read(min(64 * 1024, metadata.size - size + 1))
+                if not block:
+                    break
+                size += len(block)
+                if size > metadata.size:
+                    return False
+                digest.update(block)
+        return size == metadata.size and digest.hexdigest() == source.sha256
+
     def advance(self, row, *, context):
         context.remaining()
         intent = self.journal.request(row)
@@ -120,7 +148,7 @@ class SourceDeletion:
             source = intent.source
             if (source is None or source.key != row['object_name'] or metadata.ref.space != source.space
                     or metadata.ref.key != source.key or metadata.ref.version != Revision(source.version)
-                    or metadata.sha256 != source.sha256 or metadata.size != row['file_size']):
+                    or metadata.size != row['file_size'] or not self._matches_digest(row, source, metadata, context)):
                 raise Conflict()
             if not source.version.startswith('version:') and (
                 not source.version.startswith('etag:') or row['source_upload_sha256'] != source.sha256

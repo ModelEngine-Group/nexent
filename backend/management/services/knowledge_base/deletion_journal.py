@@ -62,16 +62,32 @@ class DeletionJournal:
         )
 
     @staticmethod
-    def _published_source(row):
+    def _published_source(row, *, historical_intent=None):
         try:
             source = ObjectReference(space=row['source_space'], key=row['source_key'],
                                      version=row['source_revision'], sha256=row['source_sha256'])
         except ValueError:
             raise Conflict() from None
-        if (source.space != 'files' or source.key != row['object_name']
-                or source.sha256 != row['source_upload_sha256'] or not row['upload_owner_service']):
+        if source.space != 'files' or source.key != row['object_name']:
+            raise Conflict()
+        upload_hash = row['source_upload_sha256']
+        if upload_hash == source.sha256 and row['upload_owner_service']:
+            return source
+        if not DeletionJournal._verified_historical_version(row, source, historical_intent):
             raise Conflict()
         return source
+
+    @staticmethod
+    def _verified_historical_version(row, source, ingestion):
+        return (
+            ingestion is not None and ingestion.legacy_snapshot is not None
+            and ingestion.legacy_snapshot.tenant_id == row['tenant_id']
+            and ingestion.source == source and source.version.startswith('version:')
+            and ingestion.knowledge_id == row['knowledge_id'] and ingestion.file_id == row['file_id']
+            and ingestion.file_version == row['source_generation']
+            and row['source_upload_sha256'] in {None, source.sha256}
+            and row['storage_object_id'] is not None and row['file_size'] is not None
+        )
 
     def request(self, row):
         intent = KnowledgeDeletionIntent.model_validate(row["deletion_request"])

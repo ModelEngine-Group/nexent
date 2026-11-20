@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-BE-DPR-DELETE-SOURCE-01/02: exact source deletion precedes atomic charge release."""
 
+import hashlib
 from datetime import UTC, datetime
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -10,6 +12,7 @@ import sqlalchemy as sa
 from contracts.knowledge import STORAGE_LEDGER_DATASET as LEDGER
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
 from contracts.knowledge_deletion import DELETION_DATASET, DELETION_KNOWLEDGE_DATASET
+from contracts.knowledge_ingestion import LegacyIngestionSnapshot
 from management.services.knowledge_base.deletion_journal import DeletionJournal
 from management.services.knowledge_base.source_deletion import SourceDeletion
 from nexent.storage.errors import Conflict, NotFound, OutcomeUnknown, ScopeDenied
@@ -28,6 +31,9 @@ from test.backend.services.test_cleanse_jobs import context
 from test.backend.services.test_knowledge_deletion_contract import intent
 from test.backend.services.test_knowledge_deletion_journal import (
     setup as journal_setup,  # noqa: F401
+)
+from test.backend.services.test_knowledge_ingestion_contract import (
+    intent as ingestion_intent,
 )
 
 
@@ -221,3 +227,32 @@ def test_unstarted_upload_without_any_object_or_charge_can_finish(setup):
                                            source_revision=None, source_sha256=None, deletion_request=value.model_dump(mode='json')))
     assert SourceDeletion(s.records, None).advance(s.row(), context=context())['status'] == 'DELETED'
     s.objects.delete.assert_not_called()
+
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_historical_version_without_metadata_is_read_exactly_before_deletion(setup, valid):
+    s = setup
+    data = b"legacy text"
+    source = {"space": "files", "key": "source.txt", "version": "version:one",
+        "sha256": hashlib.sha256(data).hexdigest()}
+    snapshot = LegacyIngestionSnapshot(tenant_id="tenant-a", resource_revision="b" * 64,
+        lifecycle_revision=1, legacy_quiesced=True, previous={"status": "COMPLETED", "processing_attempt": 0})
+    ingestion = ingestion_intent(source=source).model_copy(update={"legacy_snapshot": snapshot})
+    deletion = intent(source=source)
+    with s.s.engine.begin() as conn:
+        conn.execute(s.s.table.update().values(source_revision=source["version"], source_sha256=source["sha256"],
+            upload_owner_service=None, source_upload_sha256=None, deletion_request=deletion.model_dump(mode="json"),
+            ingestion_request=ingestion.model_dump(mode="json")))
+    target = ObjectRef("files", "source.txt", Revision(source["version"]))
+    s.objects.stat.side_effect = [ObjectMetadata(target, 11, "text/plain", "one", None), NotFound()]
+    s.objects.open_read.return_value = BytesIO(data if valid else b"wrong bytes")
+    if valid:
+        assert s.deletion.advance(s.row(), context=context())["status"] == "DELETED"
+        assert s.objects.delete.call_args.args == (target,)
+    else:
+        with pytest.raises(Conflict):
+            s.deletion.advance(s.row(), context=context())
+        s.objects.delete.assert_not_called()
+    assert s.objects.open_read.call_args.args == (target,)
+    assert s.objects.open_read.return_value.closed
