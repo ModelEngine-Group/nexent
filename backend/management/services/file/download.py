@@ -39,11 +39,11 @@ async def read_download(object_name, request):
     return await _while_connected(request, read())
 
 
-async def open_preview(object_name, request, start=None, end=None):
+async def open_preview(object_name, request, start=None, end=None, **stream_options):
     stream = None
     async def open_read():
         nonlocal stream
-        stream = await open_object_stream(object_name, start, end)
+        stream = await open_object_stream(object_name, start, end, **stream_options)
         return stream
     try:
         return await _while_connected(request, open_read())

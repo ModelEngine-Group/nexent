@@ -16,7 +16,8 @@ from contracts.constants.constants import (
     ASSET_OWNER_TENANT_ID,
     MODEL_CONFIG_MAPPING,
 )
-from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.constants.environment import JWT_SECRET, MAX_KNOWLEDGE_FILE_SIZE_BYTES, NORTHBOUND_EXTERNAL_URL, UPLOAD_FOLDER
+from contracts.object_tickets import InvalidObjectTicket, issue_object_ticket, object_ticket_url
 from contracts.errors.ingestion import ingestion_error_fields
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
@@ -637,11 +638,12 @@ async def upload_to_minio(
 
 
 async def get_file_url_impl(object_name: str, expires: int):
-    result = get_file_url(object_name=object_name, expires=expires)
-    if not result["success"]:
-        raise Exception(
-            f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}")
-    return result
+    try:
+        ticket = issue_object_ticket(object_name, expires, secret=JWT_SECRET)
+    except InvalidObjectTicket:
+        raise RuntimeError("File does not exist or cannot be accessed: Download link unavailable") from None
+    return {"success": True, "object_name": object_name, "expires_in": expires,
+            "url": object_ticket_url(NORTHBOUND_EXTERNAL_URL, ticket)}
 
 
 def _list_attachment_files(prefix: str, limit: int | None) -> list[dict]:

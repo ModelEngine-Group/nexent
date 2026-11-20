@@ -943,8 +943,7 @@ async def test_get_storage_file_batch_urls_validation_error():
 
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_mixed(monkeypatch):
-    def fake_get(object_name, expires):
-        # Synchronous stub to match non-awaited usage in implementation
+    async def fake_get(object_name, expires):
         if object_name == "knowledge_base/ok.txt":
             return {"success": True, "url": "http://u"}
         raise RuntimeError("bad")
@@ -964,7 +963,7 @@ async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
     def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         return False  # Deny all access
 
-    def fake_get(object_name, expires):
+    async def fake_get(object_name, expires):
         return {"success": True, "url": "http://u"}
 
     monkeypatch.setattr(file_management_app, "check_file_access", fake_check_access)
@@ -987,7 +986,7 @@ async def test_get_storage_file_batch_urls_error(monkeypatch):
     def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         return True
 
-    def fake_get(object_name, expires):
+    async def fake_get(object_name, expires):
         raise RuntimeError("Internal error")
 
     monkeypatch.setattr(file_management_app, "check_file_access", fake_check_access)

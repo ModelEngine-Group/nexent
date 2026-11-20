@@ -1,12 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from types import SimpleNamespace
-from urllib.parse import quote
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi import HTTPException
 
 from contracts.agentos import RunInput
+from contracts.object_tickets import InvalidObjectTicket, open_object_ticket
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 from runtime.agentos import prepared_attachments
@@ -19,10 +20,9 @@ from test.backend.services.model_profile_helpers import canonical_record, legacy
 def storage_boundary(mocker):
     mocker.patch("infrastructure.agent_attachments.MINIO_DEFAULT_BUCKET", "nexent")
     mocker.patch.object(prepared_attachments, "NORTHBOUND_EXTERNAL_URL", "https://gateway.invalid")
-    return mocker.patch(
-        "infrastructure.object_storage.client.minio_client.get_file_url",
-        return_value=(True, "https://storage.invalid/new-signed-link"),
-    )
+    mocker.patch.object(prepared_attachments, "JWT_SECRET", "synthetic")
+    return mocker.patch.object(prepared_attachments, "issue_object_ticket",
+                               wraps=prepared_attachments.issue_object_ticket)
 
 
 def test_history_attachment_preserves_turn_and_uses_fresh_link_once(storage_boundary):
@@ -40,15 +40,17 @@ def test_history_attachment_preserves_turn_and_uses_fresh_link_once(storage_boun
     query, restored, files = prepared_attachments.materialize_evaluation_input(
         RunInput.model_validate_json(encoded), ACTOR, "en",
     )
-    fresh = "https://gateway.invalid/nb/v1/file/fetch?presigned_url=" + quote(
-        "https://storage.invalid/new-signed-link", safe="",
-    )
+    fresh = files[0]["presigned_url"]
+    link = urlsplit(fresh)
+    assert link.netloc == "gateway.invalid" and link.path == "/nb/v1/file/fetch"
+    ticket, = parse_qs(link.query)["presigned_url"]
+    assert open_object_ticket(ticket, secret="synthetic") == "attachments/actor/report.txt"
     assert query.count("s3://nexent/attachments/actor/report.txt") == 1
     assert fresh in query and "latest" in query
     assert restored[0].content.startswith("earlier") and fresh in restored[0].content
     assert restored[1].content == "response"
     assert files == [{"name": "report.txt", "url": "s3://nexent/attachments/actor/report.txt", "presigned_url": fresh}]
-    storage_boundary.assert_called_once_with("attachments/actor/report.txt", "nexent")
+    storage_boundary.assert_called_once_with("attachments/actor/report.txt", 86400, secret="synthetic")
 
 
 def test_non_dialogue_history_retains_attachment_order_without_its_text():
@@ -102,7 +104,7 @@ def test_all_attachment_references_are_checked_before_any_signing(storage_bounda
 
 @pytest.mark.parametrize("presign", [False, True])
 def test_runtime_only_requests_links_when_needed(storage_boundary, presign):
-    storage_boundary.return_value = (False, "sensitive infrastructure details")
+    storage_boundary.side_effect = InvalidObjectTicket()
     request = RunInput.model_validate({
         "query": "query",
         "attachment_refs": [{"name": "report", "url": "s3://nexent/attachments/actor/report.txt", "presign": presign}],

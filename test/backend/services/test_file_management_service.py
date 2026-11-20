@@ -1096,52 +1096,27 @@ class TestUploadToMinio:
 
 
 class TestGetFileUrlImpl:
-    """Test cases for get_file_url_impl function"""
+    @pytest.mark.asyncio
+    async def test_get_file_url_signs_a_nexent_link_without_storage(self, mocker):
+        from urllib.parse import parse_qs, urlsplit
+
+        from contracts.object_tickets import open_object_ticket
+
+        mocker.patch.object(file_management_service, "JWT_SECRET", "synthetic")
+        mocker.patch.object(file_management_service, "NORTHBOUND_EXTERNAL_URL", "https://gateway.invalid/api")
+        native = mocker.patch.object(file_management_service, "get_file_url")
+        result = await get_file_url_impl(object_name="test/file.txt", expires=3600)
+        assert result["success"] and result["expires_in"] == 3600 and result["object_name"] == "test/file.txt"
+        link = urlsplit(result["url"])
+        assert (link.netloc, link.path) == ("gateway.invalid", "/api/nb/v1/file/fetch")
+        assert open_object_ticket(parse_qs(link.query)["presigned_url"][0], secret="synthetic") == "test/file.txt"
+        native.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_file_url_impl_success(self):
-        """Test successful file URL retrieval"""
-        # Mock successful result
-        mock_result = {
-            "success": True,
-            "url": "https://example.com/file.txt",
-            "expires": 3600
-        }
-
-        with patch_import_context('management.services.file.service.get_file_url', MagicMock(return_value=mock_result)) as mock_get_url:
-            # Execute
-            result = await get_file_url_impl(object_name="test/file.txt", expires=3600)
-
-            # Assertions
-            assert result == mock_result
-            assert result["success"] is True
-            assert result["url"] == "https://example.com/file.txt"
-            mock_get_url.assert_called_once_with(
-                object_name="test/file.txt", expires=3600)
-
-    @pytest.mark.asyncio
-    async def test_get_file_url_impl_failure(self):
-        """Test file URL retrieval failure"""
-        # Mock failed result
-        mock_result = {
-            "success": False,
-            "error": "File not found"
-        }
-
-        with patch_import_context('management.services.file.service.get_file_url', MagicMock(return_value=mock_result)) as mock_get_url:
-            # Execute and assert exception
-            with pytest.raises(Exception) as exc_info:
-                await get_file_url_impl(object_name="nonexistent/file.txt", expires=3600)
-
-            # Assertions
-            assert "File does not exist or cannot be accessed: File not found" in str(
-                exc_info.value)
-            mock_get_url.assert_called_once_with(
-                object_name="nonexistent/file.txt", expires=3600)
-
-
-
-
+    async def test_get_file_url_fails_closed_without_signing_key(self, mocker):
+        mocker.patch.object(file_management_service, "JWT_SECRET", "")
+        with pytest.raises(RuntimeError, match="Download link unavailable"):
+            await get_file_url_impl(object_name="test/file.txt", expires=3600)
 
 
 class TestListFilesImpl:

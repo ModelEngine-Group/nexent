@@ -495,7 +495,7 @@ async def get_storage_file_batch_urls(
                 continue
 
             try:
-                result = get_file_url_impl(object_name=object_name, expires=expires)
+                result = await get_file_url_impl(object_name=object_name, expires=expires)
                 results.append(
                     {
                         "object_name": object_name,

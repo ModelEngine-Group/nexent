@@ -4,15 +4,21 @@
 from functools import cache
 from types import SimpleNamespace
 
-from fastapi import HTTPException
-
-from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
-from infrastructure.agent_attachments import (
-    _collect_run_minio_files, _convert_history_with_minio_files,
-    render_query_with_attachments, validate_attachment_references,
+from contracts.constants.environment import JWT_SECRET, NORTHBOUND_EXTERNAL_URL
+from contracts.object_tickets import (
+    InvalidObjectTicket,
+    issue_object_ticket,
+    object_ticket_url,
 )
-from infrastructure.object_storage.read_access import build_attachment_proxy_url
+from fastapi import HTTPException
 from nexent.multi_modal.utils import parse_s3_url
+
+from infrastructure.agent_attachments import (
+    _collect_run_minio_files,
+    _convert_history_with_minio_files,
+    render_query_with_attachments,
+    validate_attachment_references,
+)
 
 
 def materialize_evaluation_input(run_input, actor, language, *, include_history_in_query=True):
@@ -24,13 +30,12 @@ def materialize_evaluation_input(run_input, actor, language, *, include_history_
 
     @cache
     def sign(url):
-        from infrastructure.object_storage.client import minio_client
-
-        bucket, key = parse_s3_url(url)
-        success, presigned_url = minio_client.get_file_url(key, bucket)
-        if not success or not presigned_url:
-            raise HTTPException(status_code=503, detail={"code": "AGENTOS_ATTACHMENT_LINK_UNAVAILABLE"})
-        return build_attachment_proxy_url(presigned_url, NORTHBOUND_EXTERNAL_URL)
+        _, key = parse_s3_url(url)
+        try:
+            ticket = issue_object_ticket(key, 86400, secret=JWT_SECRET)
+        except InvalidObjectTicket:
+            raise HTTPException(status_code=503, detail={"code": "AGENTOS_ATTACHMENT_LINK_UNAVAILABLE"}) from None
+        return object_ticket_url(NORTHBOUND_EXTERNAL_URL, ticket)
 
     def rebuild(files):
         return [

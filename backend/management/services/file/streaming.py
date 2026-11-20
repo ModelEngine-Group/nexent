@@ -37,8 +37,9 @@ CHUNK_SIZE = 64 * 1024
 
 
 class ObjectStream:
-    def __init__(self, name, byte_range, manager, ports, timeout):
+    def __init__(self, name, byte_range, manager, ports, timeout, version=None):
         self.name, self.byte_range, self.manager, self.ports = name, byte_range, manager, ports
+        self.version = version
         self.timeout = timeout
         self.scope = RunCancellationScope()
         self.context = OperationContext('file-stream-' + uuid4().hex, monotonic()+timeout, cancelled=self.scope.stop_event)
@@ -84,7 +85,8 @@ class ObjectStream:
         try:
             with (
                 self.ports(self.name, context=self.context) as store,
-                store.open_read(ObjectRef('files', self.name), byte_range=self.byte_range, context=self.context) as reader,
+                store.open_read(ObjectRef('files', self.name, self.version), byte_range=self.byte_range,
+                                context=self.context) as reader,
             ):
                 token = self.scope.register_closer(reader.close)
                 try:
@@ -206,7 +208,7 @@ class ObjectStream:
                 return
 
 
-async def open_object_stream(name, start=None, end=None, *, manager=None, ports=file_read_ports, timeout=None):
+async def open_object_stream(name, start=None, end=None, *, manager=None, ports=file_read_ports, timeout=None, version=None):
     if (start is None) != (end is None):
         raise ValueError('start and end must be provided together')
     manager = manager or get_current_thread_manager() or get_default_thread_manager()
@@ -214,4 +216,4 @@ async def open_object_stream(name, start=None, end=None, *, manager=None, ports=
         raise RuntimeError('File reads require a service-owned ThreadManager')
     byte_range = None if start is None else ByteRange(start, end+1)
     return await ObjectStream(name, byte_range, manager, ports,
-        MANAGEMENT_FILE_STREAM_TIMEOUT_SECONDS if timeout is None else timeout).start()
+        MANAGEMENT_FILE_STREAM_TIMEOUT_SECONDS if timeout is None else timeout, version=version).start()

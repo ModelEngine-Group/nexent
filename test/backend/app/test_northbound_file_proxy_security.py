@@ -3,12 +3,17 @@
 """File-proxy HTTP boundary regression with real HTTPX request construction."""
 
 import sys
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from contracts.object_tickets import issue_object_ticket
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nexent.storage.models import ObjectMetadata, ObjectRef, Revision
+
+from test.common.file_streams import object_stream
 
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
@@ -83,3 +88,62 @@ def test_transport_error_does_not_expose_signed_url(proxy, monkeypatch):
     assert result.status_code == 502
     assert result.json() == {"detail": "Failed to fetch file from storage"}
     assert "private-signature" not in result.text
+
+
+@pytest.fixture
+def ticket_reads(monkeypatch):
+    from management.api.file import ticket as file_ticket
+
+    key = "attachments/account/report.txt"
+    version = Revision('etag:"expected"')
+    metadata = ObjectMetadata(ObjectRef('files', key, version), 6, "text/plain")
+    owner = object_stream(b"signed")
+    monkeypatch.setattr(file_ticket, "environment", SimpleNamespace(JWT_SECRET="synthetic"))
+    stat = AsyncMock(return_value=metadata)
+    opening = AsyncMock(return_value=owner)
+    monkeypatch.setattr(file_ticket, "run_blocking", stat)
+    monkeypatch.setattr(file_ticket, "open_preview", opening)
+    outbound = MagicMock(side_effect=AssertionError("A ticket is not a provider HTTP URL"))
+    monkeypatch.setattr(northbound.httpx, "AsyncClient", outbound)
+    return key, version, stat, opening, owner, outbound
+
+
+@pytest.mark.parametrize("mode", ["full", "partial", "invalid"])
+def test_ticket_reads_si_with_pinned_version_and_existing_filename(proxy, ticket_reads, mode):
+    key, version, stat, opening, owner, outbound = ticket_reads
+    token = issue_object_ticket(key, 60, secret="synthetic")
+    headers = {}
+    if mode == "partial":
+        headers["Range"] = "bytes=0-5"
+    if mode == "invalid":
+        headers["Range"] = "bytes=8-10"
+    result = proxy.get("/nb/v1/file/fetch", params={"presigned_url": token}, headers=headers)
+    stat.assert_awaited_once()
+    assert stat.await_args.args[2] == key
+    if mode == "invalid":
+        assert result.status_code == 416
+        assert result.headers["content-range"] == "bytes */6"
+        opening.assert_not_awaited()
+    else:
+        assert result.status_code == (206 if mode == "partial" else 200)
+        assert result.content == b"signed"
+        assert result.headers["content-disposition"] == 'attachment; filename="report.txt"'
+        if mode == "partial":
+            assert result.headers["content-range"] == "bytes 0-5/6"
+        assert opening.await_args.args[2:] == ((0, 5) if mode == "partial" else (None, None))
+        assert opening.await_args.kwargs == {"version": version}
+        owner.aclose.assert_awaited_once()
+    outbound.assert_not_called()
+
+
+@pytest.mark.parametrize("invalid", ["tampered", "expired"])
+def test_bad_ticket_never_reaches_transport(proxy, ticket_reads, invalid):
+    key, _, stat, opening, _, outbound = ticket_reads
+    token = issue_object_ticket(key, 60, secret="synthetic", now=0 if invalid == "expired" else None)
+    if invalid == "tampered":
+        token += "X"
+    result = proxy.get("/nb/v1/file/fetch", params={"presigned_url": token})
+    assert result.status_code == 403
+    stat.assert_not_awaited()
+    opening.assert_not_awaited()
+    outbound.assert_not_called()

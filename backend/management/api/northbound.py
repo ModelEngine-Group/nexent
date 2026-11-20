@@ -678,10 +678,11 @@ async def update_convs_title(
 
 @router.get("/file/fetch")
 async def fetch_file_from_presigned_url(
-    presigned_url: str = Query(..., description="Presigned URL from MinIO storage"),
+    request: Request,
+    presigned_url: str = Query(..., description="Nexent download ticket or existing presigned URL"),
 ):
     """
-    Fetch file content from a MinIO presigned URL.
+    Fetch file content using an authorized download link.
 
     This endpoint acts as a proxy - it downloads the file from MinIO
     (which is only accessible from within the container network) and
@@ -689,11 +690,17 @@ async def fetch_file_from_presigned_url(
 
     The presigned_url parameter should be URL-encoded by the caller.
 
-    No separate login is required; MinIO verifies the signed URL. Only the
-    configured storage origin is permitted, and redirects are never followed.
+    Application tickets are verified by Management. Existing presigned URLs
+    use the configured storage origin, and redirects are never followed.
     """
     if not presigned_url:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="presigned_url is required")
+    from contracts.object_tickets import TICKET_PREFIX
+
+    if presigned_url.startswith(TICKET_PREFIX):
+        from management.api.file.ticket import download_ticket_response
+
+        return await download_ticket_response(presigned_url, request)
 
     storage_url = build_storage_proxy_url(presigned_url, MINIO_ENDPOINT)
 
