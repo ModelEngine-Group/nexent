@@ -742,7 +742,9 @@ def test_prepared_conversation_keeps_authorized_tool_records_across_runtime_boun
     prepared = evaluation_snapshot._prepare_conversation_history(history, "actor", "tenant")
     restored = prepared_evaluation._restore_conversation_history(prepared, ServicePrincipal("actor", "tenant"))
 
-    assert restored["conversation_turns"][0]["execution_records"] == records
+    assert restored["conversation_turns"][0]["execution_records"] == [
+        record | {"execution_event": None} for record in records
+    ]
 
 
 def test_prepared_conversation_rejects_foreign_history_attachment():

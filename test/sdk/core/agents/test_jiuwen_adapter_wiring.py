@@ -98,7 +98,8 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
                 "parallel_tool_calls"):
         assert settings[key] is False
     assert model.prefix == [] and model.prepare_messages == adapter._prepare_model_messages
-    context_type.assert_called_once_with(adapter.run_info, adapter.scope, adapter.manager, model, [])
+    context_type.assert_called_once_with(adapter.run_info, adapter.scope, adapter.manager, model, [],
+                                         message_format="openai_chat_completions")
     parallel.assert_called_once()
     executor.assert_called_once()
     remote = adapter.business_tools["remote"]
