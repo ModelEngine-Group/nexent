@@ -87,13 +87,17 @@ export const statusCode = (
   const aliases: Record<string, number> = {
     COMPLETED: 1,
     SUCCESS: 1,
+    INGESTED: 1,
     PROCESSING: 2,
     EXTRACTING: 2,
+    WAITING: 2,
     FAILED: 3,
     VECTOR_INGESTION_FAILED: 3,
     UPLOADING: 4,
     QUEUED: 4,
     GRAPH_INGESTION_FAILED: 5,
+    GRAPH_FAILED: 5,
+    GRAPHFAILED: 5,
   };
   return typeof status === "string"
     ? (aliases[status.toUpperCase()] ?? null)
@@ -236,8 +240,8 @@ const FOLDER_TREE_STATUS_META: Record<
   },
 };
 
-// Int 1–6 is the authoritative AIDP folder/file status. String aliases below
-// only keep older responses readable until AIDP finishes its status migration.
+// AIDP's string status is authoritative. Numeric 1–6 is retained only as a
+// fallback for deployments that still return the previous contract.
 const folderTreeStatusCode = (
   status: AidpDocumentItem["status"]
 ): number | null => {
@@ -253,6 +257,7 @@ const folderTreeStatusCode = (
     const aliases: Record<string, number> = {
       COMPLETED: 1,
       SUCCESS: 1,
+      INGESTED: 1,
       PROCESSING: 2,
       EXTRACTING: 2,
       WAITING: 2,
@@ -260,6 +265,7 @@ const folderTreeStatusCode = (
       VECTOR_INGESTION_FAILED: 3,
       GRAPH_INGESTION_FAILED: 4,
       GRAPH_FAILED: 4,
+      GRAPHFAILED: 4,
       REMOVING: 5,
       DELETING: 5,
       REMOVE_FAILED: 6,

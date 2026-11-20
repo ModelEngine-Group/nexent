@@ -519,14 +519,13 @@ def _normalize_folder_tree_file(raw: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_doc_status(value: Any) -> str | None:
     """Normalize an AIDP file status to its canonical upper-case token.
 
-    AIDP is migrating to the integer status contract ``1``-``6`` as the
-    authority; legacy ``COMPLETED`` / ``PROCESSING`` / ``FAILED`` tokens are
-    retained only so older deployments stay readable during the transition.
-    Normalizing here means the frontend can compare against one form regardless
-    of upstream spelling. ``None`` is returned for missing/blank values so
-    callers can tell "no status reported" apart from a real status. Plain
-    integers map to their decimal string so a numeric status is kept instead of
-    being dropped; other non-string values are ignored.
+    AIDP's string status is the authority; numeric ``1``-``6`` values are kept
+    as a fallback for deployments that still return the previous contract.
+    Normalizing strings here means the frontend can compare against one form
+    regardless of upstream spelling. ``None`` is returned for missing/blank
+    values so callers can tell "no status reported" apart from a real status.
+    Plain integers map to their decimal string so a numeric status is kept
+    instead of being dropped; other non-string values are ignored.
     """
     if isinstance(value, bool):
         return None
