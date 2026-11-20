@@ -68,7 +68,7 @@ class SummaryModel:
 class JiuwenContextBridge:
     """Own one run-local CM; persisted facts and checkpoints remain application-owned."""
 
-    def __init__(self, info, scope, manager, model, items):
+    def __init__(self, info, scope, manager, model, items, *, message_format="openai_chat_completions"):
         self.info, self.scope, self.manager = info, scope, manager
         config = copy(info.agent_config.context_manager_config or ContextManagerConfig())
         sink = config.history_summary_sink
@@ -87,7 +87,9 @@ class JiuwenContextBridge:
                                       json.dumps(payload, ensure_ascii=False))
 
         config.history_summary_status_sink = emit_status
-        self.context_manager = ContextManager(config, max_steps=info.agent_config.max_steps)
+        self.context_manager = ContextManager(config, max_steps=info.agent_config.max_steps,
+                                              message_format=message_format,
+                                              request_token_estimator=self._estimate_wire)
         self.summary_model = SummaryModel(model)
         self.context_timeout = 6 * model.profile.connection.timeout_seconds + info.mcp_close_timeout_seconds
         self.executions = []
@@ -185,7 +187,18 @@ class JiuwenContextBridge:
                 profile.identity.request_model_id)
 
     def _estimate(self, messages, tools):
-        return self.context_manager._message_tokens(messages) + self.context_manager._tools_tokens(tools)
+        return self.context_manager.estimate_request_tokens(messages, tools)
+
+    def _estimate_wire(self, messages, tools):
+        from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+
+        model = self.summary_model.model
+        definitions = [{"type": "function", "function": {
+            "name": tool["name"], "description": tool.get("description", ""),
+            "parameters": tool.get("input_schema", {})}} for tool in tools or []]
+        request = model.preview_request(messages, definitions)
+        body = OpenAIChatAdapter().prepare_http_request(request, model.profile).json_body
+        return self.context_manager._message_tokens(body["messages"]) + self.context_manager._tools_tokens(body.get("tools"))
 
     def accepted_response(self, message, native_message):
         """Remember accepted usage; wait for every matching native tool result."""

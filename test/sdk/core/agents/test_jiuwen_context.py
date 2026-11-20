@@ -28,7 +28,11 @@ def make_bridge(mode="passthrough", items=(), sink=None):
     scope = RunCancellationScope()
     model = Mock(scope=scope)
     model.profile.connection.timeout_seconds = 5
-    return JiuwenContextBridge(info, scope, Mock(), model, items), info
+    bridge = JiuwenContextBridge(info, scope, Mock(), model, items)
+    # This fixture isolates maintenance from the model encoder. Wire accounting
+    # is covered with a real JiuwenServiceModel in test_context_message_format.
+    bridge.context_manager._request_token_estimator = None
+    return bridge, info
 
 
 def turn():

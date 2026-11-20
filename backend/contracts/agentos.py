@@ -583,6 +583,7 @@ class PreparedHistoryExecutionRecord(RunSpecModel):
     content: str | None
     tool_call_id: str | None = None
     invocation_id: str | None = None
+    execution_event: dict[str, JsonValue] | None = None
 
 
 class PreparedHistoryTurn(RunSpecModel):

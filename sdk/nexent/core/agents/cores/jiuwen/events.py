@@ -22,6 +22,7 @@ class JiuwenEventAdapter:
         self.resource_error = None
         self.blocks = []
         self.calls = []
+        self._call_history = {}
         self.sequence = 0
         self.step_number = 0
         self._lock = threading.RLock()
@@ -77,7 +78,14 @@ class JiuwenEventAdapter:
                 if key not in block["received"] and text:
                     self._model_text(block, key, text, kind)
             block["observed"] = True
-            self.calls.extend(message.tool_calls)
+            self.calls = list(message.tool_calls)
+            self._call_history.clear()
+            for index, call in enumerate(message.tool_calls):
+                self._call_history[call.provider_call_id] = {
+                    "source_protocol": "model_native_fc", "call_group_id": block["id"],
+                    "call_index": index, "call_count": len(message.tool_calls),
+                    "raw_arguments": call.raw_arguments,
+                }
             observation = StepObservation(turn_id=self.turn_id, block_id=block["id"],
                 step_number=self.step_number, duration=max(0, time.monotonic() - block["started"]),
                 usage=message.usage, finish_reason=message.finish_reason, context_capacity=self._capacity())
@@ -103,16 +111,19 @@ class JiuwenEventAdapter:
                     phase="intermediate")
         self.last_error = None
 
-    def tool_call(self, name, arguments, call_id):
+    def tool_call(self, name, arguments, call_id, *, parent_call_id=None):
         provider_id = None
+        metadata = {}
         with self._lock:
-            for index, call in enumerate(self.calls):
-                if call.name == name and call.parsed_arguments == arguments:
-                    provider_id = self.calls.pop(index).provider_call_id
-                    break
+            matches = [index for index, call in enumerate(self.calls) if parent_call_id is None
+                       and call.name == name and call.parsed_arguments == arguments]
+            if len(matches) == 1:
+                provider_id = self.calls.pop(matches[0]).provider_call_id
+                metadata = self._call_history.pop(provider_id, {})
             self.output(ProcessType.TOOL, "", local_call_id=call_id, provider_call_id=provider_id,
                         tool_call_id=call_id, tool_name=name, tool_arguments=arguments,
-                        raw_arguments=json.dumps(arguments, ensure_ascii=False))
+                        parent_call_id=parent_call_id,
+                        **{"raw_arguments": json.dumps(arguments, ensure_ascii=False), **metadata})
         return provider_id
 
     def tool_result(self, call_id, provider_id, result, is_error=False, error=None):

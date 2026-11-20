@@ -93,13 +93,7 @@ class JiuwenServiceModel(Model):
                 raise JiuwenProtocolError("JIUWEN_RUNTIME_PARAMETER_OVERRIDE")
         if kwargs.get("model") not in (None, "", self.profile.identity.request_model_id):
             raise JiuwenProtocolError("JIUWEN_MODEL_IDENTITY_MISMATCH")
-        view = resource_view(messages, tools, prefix=self.prefix, text_protocol=self.text_protocol)
-        if self.delegation is not None:
-            terminal = [tool for tool in view.tool_definitions
-                        if self.clarification is not None and tool.name == self.clarification.name]
-            view = self.delegation.constrain(view)
-            if terminal and not any(tool.name == self.clarification.name for tool in view.tool_definitions):
-                view = view.model_copy(update={"tool_definitions": [*view.tool_definitions, *terminal]})
+        view = self._resource_view(messages, tools)
         if self.validate_input is not None:
             self.validate_input(view)
         self.logical_requests += 1
@@ -107,6 +101,21 @@ class JiuwenServiceModel(Model):
         if self.on_step is not None:
             self.on_step(request)
         return request
+
+    def _resource_view(self, messages, tools):
+        view = resource_view(messages, tools, prefix=self.prefix, text_protocol=self.text_protocol)
+        if self.delegation is not None:
+            terminal = [tool for tool in view.tool_definitions
+                        if self.clarification is not None and tool.name == self.clarification.name]
+            view = self.delegation.constrain(view)
+            if terminal and not any(tool.name == self.clarification.name for tool in view.tool_definitions):
+                view = view.model_copy(update={"tool_definitions": [*view.tool_definitions, *terminal]})
+        return view
+
+    def preview_request(self, messages, tools):
+        """Use the sending conversion without attempts, effects or network IO."""
+        return self.converter.convert(self._resource_view(messages, tools), self.profile,
+            request_id="context-preview", run_id=self.run_id).request
 
     def _fail(self, request, category):
         error = ModelError(

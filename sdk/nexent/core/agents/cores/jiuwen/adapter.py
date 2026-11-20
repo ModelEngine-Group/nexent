@@ -199,7 +199,8 @@ class JiuwenAdapter(AgentCoreAdapter):
         if getattr(self.run_info.observer, "boundary_reached", False) is True:
             raise asyncio.CancelledError()
         call_id = uuid.uuid4().hex
-        provider_id = self.events.tool_call(name, arguments, call_id)
+        parent = self._active_resource.get()
+        provider_id = self.events.tool_call(name, arguments, call_id, parent_call_id=parent[0] if parent else None)
         source = self._resource_source(name)
         token = self._active_resource.set((call_id, provider_id, name, source))
         try:
@@ -392,7 +393,8 @@ class JiuwenAdapter(AgentCoreAdapter):
         model = self._create_model()
         from nexent.core.agents.cores.jiuwen.context import JiuwenContextBridge
 
-        self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items)
+        self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items,
+                                                  message_format="openai_chat_completions")
         model.prepare_messages = self._prepare_model_messages
         model.prefix = []
         self.native_agent = create_deep_agent(
@@ -532,7 +534,6 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
         from nexent.core.model_service.registry import AuthenticationRegistry
         from nexent.core.model_service.service import ModelService
-        from nexent.core.utils.token_estimation import estimate_tokens_text
 
         info, config = self.run_info, self.model_config
         profile = config.resolved_profile
@@ -568,14 +569,9 @@ class JiuwenAdapter(AgentCoreAdapter):
                     self.context_bridge.accepted_response(event.message,
                         self.context_bridge.summary_model.model.last_native_message)
 
-        def validate_input(view):
-            budget = getattr(info.agent_config.context_manager_config, "effective_input_limit_tokens", 0)
-            if budget and estimate_tokens_text(view.model_dump_json()) > budget:
-                raise UnsupportedAgentCoreConfig("Jiuwen input exceeds the resolved Nexent context budget")
-
         return JiuwenServiceModel(service, profile, self.scope, prefix=self.prefix_messages,
                                   run_id=self.owner_id, deadline=info.model_deadline,
-                                  on_step=on_step, on_event=on_event, validate_input=validate_input,
+                                  on_step=on_step, on_event=on_event,
                                   on_error=self.events.record_error, on_recovery=self.events.recovery,
                                   delegation=self.delegation, artifact_output=self.artifact_output,
                                   clarification=self.clarification)

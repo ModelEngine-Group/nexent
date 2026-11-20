@@ -37,10 +37,10 @@ def history_db(monkeypatch):
             connection.execute(text("INSERT INTO nexent.conversation_message_t VALUES (:id, 1, :idx, :role, :body, :files, :status, :deleted)"),
                                {"id": mid, "idx": mid if index is None else index, "role": role, "body": content, "files": json.dumps(files) if files else None, "status": status, "deleted": deleted})
 
-    def unit(uid, mid, kind, content, status="completed", deleted="N"):
+    def unit(uid, mid, kind, content, status="completed", deleted="N", tool_call_id=None):
         with engine.begin() as connection:
-            connection.execute(text("INSERT INTO nexent.conversation_message_unit_t (unit_id, message_id, conversation_id, unit_index, unit_type, unit_content, unit_status, delete_flag) VALUES (:id, :mid, 1, :id, :kind, :body, :status, :deleted)"),
-                               {"id": uid, "mid": mid, "kind": kind, "body": content, "status": status, "deleted": deleted})
+            connection.execute(text("INSERT INTO nexent.conversation_message_unit_t (unit_id, message_id, conversation_id, unit_index, unit_type, unit_content, unit_status, delete_flag, tool_call_id) VALUES (:id, :mid, 1, :id, :kind, :body, :status, :deleted, :tool_call_id)"),
+                               {"id": uid, "mid": mid, "kind": kind, "body": content, "status": status, "deleted": deleted, "tool_call_id": tool_call_id})
 
     yield module, message, unit
     engine.dispose()
@@ -158,3 +158,34 @@ def test_history_returns_resolved_boundary_and_excludes_current_and_future_rows(
     assert [turn["user_message"] for turn in result["conversation_turns"]] == ["Prior task"]
     assert [turn["assistant_final_answer"] for turn in result["conversation_turns"]] == ["Prior answer"]
     assert module.get_historical_context(1, user_id="other-owner", tenant_id="tenant", **args) is None
+
+
+
+def test_native_history_facts_survive_authorized_database_and_prepared_roundtrip(history_db):
+    from contracts.agentos import PreparedHistoryTurn
+    from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
+
+    module, message, unit = history_db
+    message(1, "user", "old request")
+    message(2, "assistant", "finished")
+    message(3, "user", "current")
+    common = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+              "turn_id": "run-a", "local_call_id": "local", "tool_call_id": "local",
+              "provider_call_id": "provider", "invocation_id": None}
+    call = {**common, "type": "tool", "source_protocol": "model_native_fc", "call_group_id": "step-a",
+            "call_index": 0, "call_count": 1, "tool_name": "lookup", "tool_arguments": {"id": 1}}
+    result = {**common, "type": "tool_result", "result": "real error", "is_error": True}
+    unit(1, 2, "tool", json.dumps(call), tool_call_id="local")
+    unit(2, 2, "tool_result", json.dumps(result), tool_call_id="local")
+    # A lookalike business result cannot satisfy the row identity binding.
+    unit(3, 2, "tool_result", json.dumps(result), tool_call_id="another-local")
+    turn = module.get_historical_context(1, 3, "owner", "tenant")["conversation_turns"][0]
+    assert turn["execution_records"][0]["execution_event"]["name"] == "lookup"
+    assert "execution_event" not in turn["execution_records"][2]
+    prepared = PreparedHistoryTurn.model_validate({k: v for k, v in turn.items() if k != "attachments"})
+    item = ContextItem.from_input(ContextItemInput(id="turn:1:2", type="conversation_turn",
+                                                content=prepared.model_dump(exclude={"attachment_refs"})))
+    messages = ContextManager(message_format="openai_chat_completions").build_context_messages([item])
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "lookup"
+    assert messages[2] == {"role": "tool", "tool_call_id": "provider", "content": "real error"}
+    assert "read_only" in str(messages[3])

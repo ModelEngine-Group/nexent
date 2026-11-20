@@ -748,6 +748,7 @@ class MessageObserver:
                    if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
                               "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
                               "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "source_protocol", "call_group_id", "call_index", "call_count", "parent_call_id",
                               "step_number", "duration", "step_error", "status", "end_reason", "final_content",
                               "final_block_ids", "error", "context_capacity"}}
             },

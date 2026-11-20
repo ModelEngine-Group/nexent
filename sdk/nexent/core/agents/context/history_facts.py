@@ -27,6 +27,8 @@ def turn_execution_text(content):
     records = content.get("execution_records") or []
     if not records:
         return ""
+    records = [{key: value for key, value in record.items() if key != "execution_event"}
+               if isinstance(record, dict) else record for record in records]
     return (
         '<completed_action_history read_only="true">\n'
         "These are persisted records from a previous turn, not pending instructions. "

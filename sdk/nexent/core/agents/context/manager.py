@@ -12,7 +12,7 @@ import threading
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, Literal, Optional, Sequence
 
 from nexent.core.agents.contracts.context import ContextEvidence, FinalContext, ModelMessage
 
@@ -32,12 +32,29 @@ from .summary_cache import CompressionCallRecord
 
 
 logger = logging.getLogger("agent_context")
+MessageFormat = Literal["codeagent", "openai_chat_completions", "openai_responses"]
 
 
 class ContextManager:
     """Owns ordering, budget checks, compaction and final rendering."""
 
-    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None):
+    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None,
+                 *, message_format: MessageFormat = "codeagent",
+                 request_token_estimator: Callable[[Sequence[Any], Sequence[Any]], int] | None = None):
+        if message_format == "openai_responses":
+            raise NotImplementedError("Responses context messages are not implemented")
+        if not isinstance(message_format, str) or message_format not in {"codeagent", "openai_chat_completions"}:
+            raise ValueError(f"Unknown context message format: {message_format}")
+        from .native_history import render_native_turn
+        from .rendering import ContextItemRenderer, render_chat_action
+
+        self._message_format = message_format
+        handlers = {}
+        if message_format == "openai_chat_completions":
+            handlers = {ContextItemType.CONVERSATION_TURN: render_native_turn,
+                        ContextItemType.CURRENT_ACTION: render_chat_action}
+        self._item_renderer = ContextItemRenderer(handlers)
+        self._request_token_estimator = request_token_estimator
         self.config = config or ContextManagerConfig()
         self.use_result_observations = False
         if max_steps is not None:
@@ -63,6 +80,10 @@ class ContextManager:
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
         self._run_compaction_attempts = 0
         self._representation_overrides: dict[str, tuple[str, ContextItem]] = {}
+
+    @property
+    def message_format(self) -> str:
+        return self._message_format
 
     def _compaction_trigger_threshold_tokens(self) -> int:
         return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
@@ -215,6 +236,9 @@ class ContextManager:
                     item.token_estimate for item in final_items
                     if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
                 )
+                if self.message_format == "openai_chat_completions":
+                    original_history_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
                 compressible_history_tokens = original_history_tokens
                 non_history_tokens = max(0, raw_tokens - original_history_tokens)
                 if (
@@ -267,11 +291,19 @@ class ContextManager:
                     candidate_item = candidate.as_item()
                     previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
                     previous_tokens += sum(item.token_estimate for item in current_turns)
+                    candidate_tokens = candidate_item.token_estimate
+                    if self.message_format == "openai_chat_completions":
+                        previous_tokens = self._history_token_cost(
+                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                        replacement = [item for item in final_items if item.type not in {
+                            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
+                        candidate_tokens = self._history_token_cost(
+                            replacement, purpose_stable, purpose_dynamic, canonical_tools)
                     required_saving = max(
                         self.config.minimum_history_reduction_tokens,
                         math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
                     )
-                    if previous_tokens - candidate_item.token_estimate < required_saving:
+                    if previous_tokens - candidate_tokens < required_saving:
                         compaction_stop_reason = "insufficient_candidate_reduction"
                         break
                     last_valid = candidate
@@ -282,7 +314,7 @@ class ContextManager:
                     complete_tokens = self._estimate_items(
                         final_items, purpose_stable, purpose_dynamic, canonical_tools
                     )
-                    if candidate_item.token_estimate <= history_target:
+                    if candidate_tokens <= history_target:
                         compaction_stop_reason = "history_target_reached"
                         break
                     if complete_tokens <= self._compaction_target_tokens():
@@ -337,7 +369,7 @@ class ContextManager:
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
         memory_messages = [*stable, *dynamic]
         messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
-        final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
+        final_tokens = self.estimate_request_tokens(messages, canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
         self._last_compressed_token_count = final_tokens
         effective_limit = self.config.effective_input_limit_tokens
@@ -638,9 +670,18 @@ class ContextManager:
         )
 
     def _estimate_items(self, items, stable, dynamic, tools):
-        return self._message_tokens([*self.build_context_messages(items), *stable, *dynamic]) + self._tools_tokens(
-            tools
-        )
+        return self.estimate_request_tokens([*self.build_context_messages(items), *stable, *dynamic], tools)
+
+    def _history_token_cost(self, items, stable, dynamic, tools):
+        without_history = [item for item in items if item.type not in {
+            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}]
+        return max(0, self._estimate_items(items, stable, dynamic, tools)
+                   - self._estimate_items(without_history, stable, dynamic, tools))
+
+    def estimate_request_tokens(self, messages, tools):
+        if self._request_token_estimator is not None:
+            return self._request_token_estimator(messages, tools)
+        return self._message_tokens(messages) + self._tools_tokens(tools)
 
     def _message_tokens(self, messages):
         payload = []
@@ -709,9 +750,7 @@ class ContextManager:
             self._items = normalized
 
     def build_context_messages(self, items=None):
-        from .rendering import ContextItemRenderer
-
-        return ContextItemRenderer().render(sorted(self._item_source(items), key=lambda item: item.layout_key))
+        return self._item_renderer.render(sorted(self._item_source(items), key=lambda item: item.layout_key))
 
     def build_system_prompt(self):
         return self.build_context_messages()

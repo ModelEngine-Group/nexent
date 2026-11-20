@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from html import escape
 from typing import Any
 
@@ -167,6 +168,19 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
         parts.append("<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>")
     parts.extend(["</completed_action>", "</completed_action_history>"])
     return [_text_message("assistant", "\n".join(parts))]
+
+
+def render_chat_action(item: ContextItem) -> list[dict[str, Any]]:
+    """Keep real native messages; code actions stay explicit read-only evidence."""
+    if "messages" in item.content:
+        messages = deepcopy(item.content["messages"])
+        if any(message.get("role") not in {"system", "developer", "user", "assistant", "tool"}
+               or message.get("role") == "tool" and not message.get("tool_call_id") for message in messages):
+            raise ContextItemRenderingError("Invalid Chat Completions action messages")
+        return messages
+    return _render_current_action(item.model_copy(update={
+        "metadata": {**item.metadata, "use_result_observations": False},
+    }))
 
 
 def _render_result_observation(content: dict, calls: list, fields: dict) -> list[dict[str, Any]]:

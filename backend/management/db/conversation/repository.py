@@ -3519,11 +3519,17 @@ def get_historical_context(
                 ConversationMessageUnit.delete_flag == "N",
             ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
             by_message = {}
+            from nexent.core.agents.context.native_history import decode_history_event
+
             for record in records:
-                by_message.setdefault(record.message_id, []).append({
+                history_record = {
                     "record_type": record.unit_type, "content": record.unit_content,
                     "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
-                })
+                }
+                event = decode_history_event(history_record)
+                if event is not None:
+                    history_record["execution_event"] = event
+                by_message.setdefault(record.message_id, []).append(history_record)
             for turn in turns:
                 if turn["assistant_message_id"] in by_message:
                     turn["execution_records"] = by_message[turn["assistant_message_id"]]

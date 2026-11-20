@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: CM-MESSAGE-FORMAT-20261120
+  change_type: requirement
+  requirement_id: CM-MESSAGE-FORMAT-20261120
+  title: Fix the ContextManager message format at Runtime construction
+  description: Reuse shared context assembly for CodeAgent and complete Chat Completions messages, with faithful tool history and final request accounting.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-CONTEXT, F-171]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-CONTEXT-D3-001, CONTEXT-POST-RESPONSE-D3-001]
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Fixed constructor formats, explicit Runtime wiring and unsupported Responses rejection.
+    - Faithful ordered native history from authorized facts, real error results and incomplete or ambiguous read-only fallback.
+    - Same-name parallel, duplicate, cross-step and child scope isolation without replay.
+    - Final wire messages, tool definitions and request prompts agree with context accounting before and after maintenance.
+    reason: Extend existing unit and protocol proof without duplicating D1. Existing D3 boundaries remain required; their legacy fixtures and native history assertions need review before execution.
+    test_selectors:
+    - test/sdk/core/agents/test_context_message_format.py
+    - test/sdk/core/agents/test_jiuwen_context.py
+    - test/sdk/core/agents/test_jiuwen_output.py
+  notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/08 History Reconstruction Field Audit 20261120.md sections8-9; CMF-001 through CMF-004. User approved implementation. No new format selection field above Runtime, no Responses adapter, output cap, vendor fallback, new DB table or historical replay. Formal runs, real models and Phoenix remain paused by coordinator. Existing D3 mapping is not evidence of native wire acceptance or complete existing assertions.'
