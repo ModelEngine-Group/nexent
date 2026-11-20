@@ -26,6 +26,7 @@ def _table(name, primary, names):
         "definition_id",
         "value_id",
         "assignment_id",
+        "projection_id",
         "sort_order",
     }
     return sa.Table(

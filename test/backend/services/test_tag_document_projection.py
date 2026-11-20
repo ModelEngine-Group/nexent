@@ -11,7 +11,6 @@ from management.services.knowledge_base.tag_projection import (
     LocalElasticsearchDocumentProjectionProvider,
     clear_document_projection,
     decode_document_resource_id,
-    filter_document_ids_by_predicates,
     get_document_projection_status,
     get_projection_provider,
     project_document_assignments,
@@ -416,41 +415,6 @@ def test_status_not_projected_when_ledger_empty(monkeypatch):
     assert result["tag_count"] == 0
 
 
-def test_filter_merges_same_definition_groups_and_normalizes_provider(monkeypatch):
-    captured = {}
-
-    def fake_filter(tenant_id, provider, knowledge_base_id, predicates):
-        captured.update(
-            tenant_id=tenant_id,
-            provider=provider,
-            knowledge_base_id=knowledge_base_id,
-            predicates=predicates,
-        )
-        return ["rid-1"]
-
-    monkeypatch.setattr(
-        projection_module.document_tag_projection_db,
-        "filter_document_ids_by_predicates",
-        fake_filter,
-    )
-
-    result = filter_document_ids_by_predicates(
-        "t1",
-        "LOCAL",
-        "kb-1",
-        [
-            {"definition_id": 5, "value_ids": [1, 2]},
-            {"definition_id": 5, "value_ids": [3]},
-            {"definition_id": 9, "value_ids": []},
-        ],
-    )
-
-    assert result == ["rid-1"]
-    assert captured["tenant_id"] == "t1"
-    assert captured["provider"] == "local"
-    assert captured["predicates"] == [{"definition_id": 5, "value_ids": [1, 2, 3]}]
-
-
 def test_retry_pending_projections_attempts_due_rows(monkeypatch):
     monkeypatch.setattr(
         projection_module.document_tag_projection_db,
@@ -481,47 +445,6 @@ def test_retry_pending_projections_attempts_due_rows(monkeypatch):
     result = retry_pending_document_projections(tenant_id="t1")
 
     assert result == {"attempted": 2, "synced": 1, "failed": 1, "unsupported": 0}
-
-
-def test_hybrid_search_applies_document_tag_predicates(monkeypatch):
-    from management.services.knowledge_base.service import ElasticSearchService
-
-    def fake_predicates(tenant_id, provider, knowledge_base_id, predicates):
-        return [_encode_document_resource_id("local", knowledge_base_id, "docs/a.pdf")]
-
-    monkeypatch.setattr(
-        TagManagementService, "filter_document_ids_by_predicates", fake_predicates
-    )
-    monkeypatch.setattr(
-        "management.services.knowledge_base.service.get_embedding_model_by_index_name",
-        lambda *args, **kwargs: (object(), 1, {"status": "ok"}),
-    )
-
-    class FakeVdb:
-        def hybrid_search(self, **kwargs):
-            return [
-                {
-                    "document": {"path_or_url": "docs/a.pdf", "title": "A"},
-                    "score": 1.0,
-                    "index": "kb-1",
-                },
-                {
-                    "document": {"path_or_url": "docs/b.pdf", "title": "B"},
-                    "score": 0.9,
-                    "index": "kb-1",
-                },
-            ]
-
-    result = ElasticSearchService.search_hybrid(
-        index_names=["kb-1"],
-        query="query",
-        tenant_id="t1",
-        tag_predicates=[{"definition_id": 5, "value_ids": [1]}],
-        vdb_core=FakeVdb(),
-    )
-
-    assert result["total"] == 1
-    assert result["results"][0]["path_or_url"] == "docs/a.pdf"
 
 
 def test_hybrid_search_without_predicates_keeps_all_results(monkeypatch):

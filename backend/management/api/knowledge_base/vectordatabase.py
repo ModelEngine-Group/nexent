@@ -964,9 +964,18 @@ async def hybrid_search(
             "weight_accurate": payload.weight_accurate,
             "vdb_core": vdb_core,
         }
-        if payload.tag_predicates:
-            search_kwargs["tag_predicates"] = payload.tag_predicates
         result = ElasticSearchService.search_hybrid(**search_kwargs)
+        if payload.tag_predicates:
+            from management.services.knowledge_base.hybrid_tags import (
+                filter_hybrid_tags,
+            )
+
+            result["results"] = await run_blocking(
+                "filter-hybrid-document-tags", filter_hybrid_tags,
+                result["results"], resolved_index_names, payload.tag_predicates,
+                ServicePrincipal(user_id, tenant_id), lane="control-io", owner=__name__,
+            )
+            result["total"] = len(result["results"])
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog

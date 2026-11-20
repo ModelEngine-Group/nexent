@@ -398,26 +398,3 @@ def retry_pending_document_projections(
         status = result.get("status", STATUS_FAILED)
         outcomes[status] = outcomes.get(status, 0) + 1
     return outcomes
-
-
-def filter_document_ids_by_predicates(
-    tenant_id: str,
-    provider: str,
-    knowledge_base_id: str,
-    predicates: list[dict[str, Any]],
-) -> list[str]:
-    normalized = (provider or "").strip().lower()
-    merged: dict[int, set[int]] = {}
-    for predicate in predicates:
-        definition_id = int(predicate["definition_id"])
-        merged.setdefault(definition_id, set()).update(
-            int(value_id) for value_id in predicate.get("value_ids", [])
-        )
-    effective = [
-        {"definition_id": definition_id, "value_ids": sorted(values)}
-        for definition_id, values in merged.items()
-        if values
-    ]
-    return document_tag_projection_db.filter_document_ids_by_predicates(
-        tenant_id, normalized, knowledge_base_id, effective
-    )

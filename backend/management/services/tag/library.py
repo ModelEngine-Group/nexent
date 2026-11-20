@@ -785,20 +785,6 @@ class TagManagementService:
         }
 
     @classmethod
-    def filter_document_ids_by_predicates(
-        cls,
-        tenant_id: str,
-        provider: str,
-        knowledge_base_id: str,
-        predicates: list[dict],
-    ) -> list[str]:
-        from management.services.knowledge_base.tag_projection import filter_document_ids_by_predicates
-
-        return filter_document_ids_by_predicates(
-            tenant_id, provider, knowledge_base_id, predicates
-        )
-
-    @classmethod
     def retry_pending_document_projections(
         cls,
         tenant_id: str | None = None,

@@ -5,7 +5,6 @@
 from contextlib import nullcontext
 
 from management.db.tag import projection as projection_db
-from management.db.models import DocumentTagProjection
 
 
 class _Query:
@@ -312,76 +311,3 @@ def test_list_due_projection_states_without_tenant(monkeypatch):
     )
 
     assert projection_db.list_due_projection_states() == []
-
-
-def test_list_synced_document_ids_returns_resource_ids(monkeypatch):
-    query = _Query(all_rows=[("res-1",), ("res-2",)])
-    session = _Session(query)
-    monkeypatch.setattr(
-        "management.db.tag.projection.get_db_session",
-        lambda: nullcontext(session),
-    )
-
-    result = projection_db.list_synced_document_ids("tenant-a", "local", "kb-1")
-
-    assert result == ["res-1", "res-2"]
-
-
-def test_filter_document_ids_without_predicates_delegates_to_synced(monkeypatch):
-    query = _Query(all_rows=[("res-1",)])
-    session = _Session(query)
-    monkeypatch.setattr(
-        "management.db.tag.projection.get_db_session",
-        lambda: nullcontext(session),
-    )
-
-    result = projection_db.filter_document_ids_by_predicates(
-        "tenant-a", "local", "kb-1", [{"definition_id": 1, "value_ids": []}]
-    )
-
-    assert result == ["res-1"]
-
-
-def test_filter_document_ids_joins_and_groups_assignments(monkeypatch):
-    query = _Query(all_rows=[("res-1",)])
-    session = _Session(query)
-    monkeypatch.setattr(
-        "management.db.tag.projection.get_db_session",
-        lambda: nullcontext(session),
-    )
-
-    result = projection_db.filter_document_ids_by_predicates(
-        "tenant-a",
-        "local",
-        "kb-1",
-        [
-            {"definition_id": 5, "value_ids": [1, 2]},
-            {"definition_id": 9, "value_ids": [3]},
-        ],
-    )
-
-    assert result == ["res-1"]
-    assert query.joined is not None
-    assert query.joined[0] is DocumentTagProjection
-    assert query.grouped is not None
-    assert query.having_condition is not None
-    assert query.filters[0].right.value == "tenant-a"
-
-
-def test_filter_document_ids_skips_empty_predicates_in_group_count(monkeypatch):
-    query = _Query(all_rows=[])
-    session = _Session(query)
-    monkeypatch.setattr(
-        "management.db.tag.projection.get_db_session",
-        lambda: nullcontext(session),
-    )
-
-    result = projection_db.filter_document_ids_by_predicates(
-        "tenant-a",
-        "local",
-        "kb-1",
-        [{"definition_id": 5, "value_ids": [1]}, {"definition_id": 9, "value_ids": []}],
-    )
-
-    assert result == []
-    assert query.grouped is not None

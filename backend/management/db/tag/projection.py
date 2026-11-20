@@ -2,13 +2,12 @@
 
 """Tenant-scoped persistence for document tag retrieval projections."""
 
-from contracts.constants.constants import ACTIVE_DELETE_FLAG, KNOWLEDGE_DOCUMENT_TYPE, SYNCED_STATUS
 from datetime import datetime, timezone
 from typing import Any
 
 from infrastructure.rdb.client import get_db_session
-from management.db.models import DocumentTagProjection, ResourceTagAssignment
-from sqlalchemy import and_, func, or_
+from management.db.models import DocumentTagProjection
+from sqlalchemy import or_
 
 
 def _state_data(record: DocumentTagProjection) -> dict[str, Any]:
@@ -189,73 +188,3 @@ def list_due_projection_states(
             query = query.filter(DocumentTagProjection.tenant_id == tenant_id)
         query = query.order_by(DocumentTagProjection.update_time.asc()).limit(limit)
         return [_state_data(record) for record in query.all()]
-
-
-def list_synced_document_ids(
-    tenant_id: str,
-    provider: str,
-    knowledge_base_id: str,
-) -> list[str]:
-    with get_db_session() as session:
-        rows = (
-            session.query(DocumentTagProjection.resource_id)
-            .filter(
-                DocumentTagProjection.tenant_id == tenant_id,
-                DocumentTagProjection.provider == provider,
-                DocumentTagProjection.knowledge_base_id == knowledge_base_id,
-                DocumentTagProjection.status == SYNCED_STATUS,
-            )
-            .all()
-        )
-        return [row[0] for row in rows]
-
-
-def filter_document_ids_by_predicates(
-    tenant_id: str,
-    provider: str,
-    knowledge_base_id: str,
-    predicates: list[dict[str, Any]],
-) -> list[str]:
-    # predicates is a list of {"definition_id": int, "value_ids": [int]}.
-    # A document matches when, for every predicate group, it has an active
-    # assignment to one of that group's values (OR within a group), and groups
-    # combine with AND. Only projection-confirmed (synced) documents match, so
-    # retrieval never claims a tag filter succeeded while a provider
-    # projection is pending or failed.
-
-    effective = [predicate for predicate in predicates if predicate.get("value_ids")]
-    if not effective:
-        return list_synced_document_ids(tenant_id, provider, knowledge_base_id)
-
-    with get_db_session() as session:
-        group_clauses = [
-            and_(
-                ResourceTagAssignment.definition_id == predicate["definition_id"],
-                ResourceTagAssignment.value_id.in_(predicate["value_ids"]),
-            )
-            for predicate in effective
-        ]
-        rows = (
-            session.query(ResourceTagAssignment.resource_id)
-            .join(
-                DocumentTagProjection,
-                and_(
-                    DocumentTagProjection.tenant_id == ResourceTagAssignment.tenant_id,
-                    DocumentTagProjection.resource_id == ResourceTagAssignment.resource_id,
-                ),
-            )
-            .filter(
-                ResourceTagAssignment.tenant_id == tenant_id,
-                ResourceTagAssignment.resource_type == KNOWLEDGE_DOCUMENT_TYPE,
-                ResourceTagAssignment.delete_flag == ACTIVE_DELETE_FLAG,
-                DocumentTagProjection.tenant_id == tenant_id,
-                DocumentTagProjection.provider == provider,
-                DocumentTagProjection.knowledge_base_id == knowledge_base_id,
-                DocumentTagProjection.status == SYNCED_STATUS,
-                or_(*group_clauses),
-            )
-            .group_by(ResourceTagAssignment.resource_id)
-            .having(func.count(func.distinct(ResourceTagAssignment.definition_id)) == len(effective))
-            .all()
-        )
-        return [row[0] for row in rows]

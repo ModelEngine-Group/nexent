@@ -506,14 +506,7 @@ def test_document_projection_status_requires_provider_document(monkeypatch):
         )
 
 
-def test_projection_delegates_and_retry(monkeypatch):
-    monkeypatch.setattr(
-        "management.services.knowledge_base.tag_projection.filter_document_ids_by_predicates",
-        lambda *a, **k: ["doc-1"],
-    )
-    assert TagManagementService.filter_document_ids_by_predicates(
-        "tenant-a", "local", "kb-1", [{"definition_id": 1}]
-    ) == ["doc-1"]
+def test_projection_retry_delegates(monkeypatch):
     monkeypatch.setattr(
         "management.services.knowledge_base.tag_projection.retry_pending_document_projections",
         lambda tenant_id=None, limit=50: {"retried": limit, "tenant_id": tenant_id},

@@ -815,42 +815,6 @@ class TestElasticSearchService(unittest.TestCase):
         )
         mock_get_embedding_by_index.assert_called_once_with(identity_constants.DEFAULT_TENANT_ID, "test_index")
 
-    def test_apply_document_tag_predicates_keeps_only_matching_documents(self):
-        tag_projection_module = types.ModuleType('management.services.knowledge_base.tag_projection')
-        tag_projection_module.LOCAL_DOCUMENT_PROVIDER = 'local'
-        tag_projection_module.decode_document_resource_id = (
-            lambda resource_id: tuple(resource_id.split(':', 2))
-        )
-        tag_management_module = types.ModuleType('management.services.tag.library')
-        tag_management_module.TagManagementService = type(
-            'TagManagementService',
-            (),
-            {
-                'filter_document_ids_by_predicates': staticmethod(
-                    lambda *_args: ['local:test_index:matched.md']
-                )
-            },
-        )
-
-        with patch.dict(
-            sys.modules,
-            {
-                'management.services.knowledge_base.tag_projection': tag_projection_module,
-                'management.services.tag.library': tag_management_module,
-            },
-        ):
-            results = ElasticSearchService._apply_document_tag_predicates(
-                [
-                    {'index': 'test_index', 'path_or_url': 'matched.md'},
-                    {'index': 'test_index', 'path_or_url': 'other.md'},
-                ],
-                tenant_id='tenant-1',
-                index_names=['test_index'],
-                tag_predicates=[{'key': 'topic', 'values': ['marketing']}],
-            )
-
-        self.assertEqual(results, [{'index': 'test_index', 'path_or_url': 'matched.md'}])
-
     def test_search_hybrid_missing_tenant_id(self):
         """Test search_hybrid raises ValueError when tenant_id is missing."""
         with self.assertRaises(ValueError) as context:
