@@ -114,21 +114,16 @@ def list_hits_for_user(
     since: Optional[datetime] = None,
     limit: int = 5000,
 ) -> List[Dict[str, Any]]:
-    """Return hit rows for a user (used by Dreaming aggregation)."""
+    """Return hit rows for a user, propagating database read failures."""
     with get_db_session() as session:
-        try:
-            query = session.query(MemoryRetrievalHit).filter(
-                MemoryRetrievalHit.tenant_id == tenant_id,
-                MemoryRetrievalHit.user_id == user_id,
-            )
-            if since is not None:
-                query = query.filter(MemoryRetrievalHit.occurred_at >= since)
-            query = query.order_by(MemoryRetrievalHit.occurred_at.asc()).limit(limit)
-            return [_hit_to_dict(row) for row in query.all()]
-        except Exception:
-            session.rollback()
-            logger.exception("list_hits_for_user failed")
-            return []
+        query = session.query(MemoryRetrievalHit).filter(
+            MemoryRetrievalHit.tenant_id == tenant_id,
+            MemoryRetrievalHit.user_id == user_id,
+        )
+        if since is not None:
+            query = query.filter(MemoryRetrievalHit.occurred_at >= since)
+        query = query.order_by(MemoryRetrievalHit.occurred_at.asc()).limit(limit)
+        return [_hit_to_dict(row) for row in query.all()]
 
 
 def aggregate_memory_stats(

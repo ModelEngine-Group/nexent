@@ -711,16 +711,18 @@ def test_list_memory_records_with_status_filter(monkeypatch, mock_session_ctx):
     query.filter.assert_called()
 
 
-def test_list_memory_records_exception(monkeypatch, mock_session_ctx):
+def test_list_memory_records_propagates_read_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    session.query.return_value.outerjoin.side_effect = Exception("boom")
+    failure = RuntimeError("database unavailable")
+    session.query.return_value.outerjoin.side_effect = failure
     monkeypatch.setattr(
         "management.db.memory.record.get_db_session", lambda: ctx
     )
 
-    rows = memory_record_db.list_memory_records("t1")
-    assert rows == []
-    session.rollback.assert_called()
+    with pytest.raises(RuntimeError) as exc_info:
+        memory_record_db.list_memory_records("t1")
+    assert exc_info.value is failure
+    assert ctx.__exit__.call_args.args[1] is failure
 
 
 def test_list_active_memory_ids_by_layer(monkeypatch, mock_session_ctx):

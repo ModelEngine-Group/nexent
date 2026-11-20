@@ -328,15 +328,18 @@ def test_list_hits_for_user_with_since(monkeypatch, mock_session_ctx):
     query.limit.assert_called_once_with(20)
 
 
-def test_list_hits_for_user_rolls_back_on_error(monkeypatch, mock_session_ctx):
+def test_list_hits_for_user_propagates_read_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
-    session.query.side_effect = RuntimeError("database unavailable")
+    failure = RuntimeError("database unavailable")
+    session.query.side_effect = failure
     monkeypatch.setattr(
         "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
-    assert memory_retrieval_hit_db.list_hits_for_user("t1", "u1") == []
-    session.rollback.assert_called_once()
+    with pytest.raises(RuntimeError) as exc_info:
+        memory_retrieval_hit_db.list_hits_for_user("t1", "u1")
+    assert exc_info.value is failure
+    assert ctx.__exit__.call_args.args[1] is failure
 
 
 def test_aggregate_memory_stats_applies_scope_and_collects_dimensions(
