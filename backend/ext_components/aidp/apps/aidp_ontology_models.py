@@ -87,14 +87,14 @@ class OntologyEntityCreateRequest(BaseModel):
     @field_validator("api_name")
     @classmethod
     def validate_api_name(cls, value: str) -> str:
-        api_name = _clean_required(value, "API 名称不能为空")
+        api_name = _clean_required(value, "英文标识不能为空")
         if len(api_name) > _ENTITY_NAME_MAX_CHARS:
-            raise ValueError(f"API 名称不能超过 {_ENTITY_NAME_MAX_CHARS} 个字符")
+            raise ValueError(f"英文标识不能超过 {_ENTITY_NAME_MAX_CHARS} 个字符")
         # Confirmed AIDP rule: letter first, then letters/digits/underscores,
         # and the name must not end with an underscore.
         if not re.match(r"^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$", api_name):
             raise ValueError(
-                "API 名称需字母开头，只能包含字母、数字、下划线，且不能以下划线结尾"
+                "英文标识需字母开头，只能包含字母、数字、下划线，且不能以下划线结尾"
             )
         return api_name
 

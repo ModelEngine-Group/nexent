@@ -609,7 +609,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           <Input
             maxLength={ENTITY_API_NAME_MAX_CHARS}
             disabled={editing}
-            placeholder={t("aidpKnowledge.ontologyEntityApiNamePlaceholder")}
             onChange={() => setApiNameTouched(true)}
           />
         </Form.Item>
@@ -664,9 +663,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               filterOption={false}
               loading={typesQuery.isLoading}
               options={typeOptions}
-              placeholder={t(
-                "aidpKnowledge.ontologyEntityAssignedTypePlaceholder"
-              )}
               onSearch={setTypeSearch}
             />
           </Form.Item>
@@ -692,9 +688,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 allowClear
                 maxCount={RELATION_LIMIT.parent}
                 options={parentOptions}
-                placeholder={t(
-                  "aidpKnowledge.ontologyEntityRelationPlaceholder"
-                )}
                 filterOption={false}
                 onSearch={setRelationSearch}
               />
@@ -713,9 +706,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 allowClear
                 maxCount={RELATION_LIMIT.synonym}
                 options={synonymOptions}
-                placeholder={t(
-                  "aidpKnowledge.ontologyEntityRelationPlaceholder"
-                )}
                 filterOption={false}
                 onSearch={setRelationSearch}
               />
@@ -735,9 +725,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                 allowClear
                 maxCount={RELATION_LIMIT.child}
                 options={relationOptions}
-                placeholder={t(
-                  "aidpKnowledge.ontologyEntityRelationPlaceholder"
-                )}
                 filterOption={false}
                 onSearch={setRelationSearch}
               />
@@ -848,11 +835,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                       name={[field.name, "range"]}
                       className={styles.propertyDense}
                     >
-                      <Input
-                        placeholder={t(
-                          "aidpKnowledge.ontologyEntityPropertyRangePlaceholder"
-                        )}
-                      />
+                      <Input />
                     </Form.Item>
                     <Button
                       type="text"
@@ -893,14 +876,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               }
               className={styles.primaryProperties}
             >
-              <Select
-                mode="multiple"
-                allowClear
-                options={primaryOptions}
-                placeholder={t(
-                  "aidpKnowledge.ontologyEntityPrimaryPropertiesPlaceholder"
-                )}
-              />
+              <Select mode="multiple" allowClear options={primaryOptions} />
             </Form.Item>
           )}
         </section>
