@@ -328,18 +328,20 @@ COMPOSE_FILE_SUFFIX=.yml
 NEXENT_IMAGE=backend:test
 NEXENT_MANAGEMENT_IMAGE=management:test
 NEXENT_RUNTIME_IMAGE=runtime:test
+NEXENT_MCP_SERVICE_IMAGE=mcp-service:test
+NEXENT_OPS_IMAGE=ops:test
 docker() {
   if [ "$1" = image ]; then return 1; fi
   printf 'PULL:%s\n' "$2"
 }
 container_command() { printf 'COMPOSE:%s\n' "$*"; }
-prepare_core_service_deployment nexent-config nexent-runtime
+prepare_core_service_deployment nexent-config nexent-runtime nexent-mcp nexent-ops
 ''')
     assert result.returncode == 0, result.stderr
     assert [line for line in result.stdout.splitlines() if line.startswith("PULL:")] == [
-        "PULL:management:test", "PULL:runtime:test",
+        "PULL:management:test", "PULL:runtime:test", "PULL:mcp-service:test", "PULL:ops:test",
     ]
-    assert result.stdout.index("PULL:runtime:test") < result.stdout.index("run --rm")
+    assert result.stdout.index("PULL:ops:test") < result.stdout.index("run --rm")
 
 
 def test_web_only_deployment_does_not_stop_or_run_migration():

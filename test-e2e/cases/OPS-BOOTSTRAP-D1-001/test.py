@@ -41,13 +41,15 @@ ROOT_ENV_FILE=/controlled/env
 COMPOSE_DIR=/controlled/compose
 COMPOSE_FILE_SUFFIX="$4"
 fake_compose() {
+  if [ "${7:-}" = config ]; then return 0; fi
   printf 'ARG:%s\\n' "$@"
   return "$FAIL_COMPOSE"
 }
 docker_compose_command=fake_compose
     prepare_core_service_deployment() { return 0; }
-    stop_old_business_services() { return 0; }
+    stop_legacy_workbench_writers() { return 0; }
     publish_shared_workbench() { return 0; }
+    retire_legacy_northbound_container() { return 0; }
 '''
     harness += '\n' + function.group(0) + '\nFAIL_COMPOSE="$5"\ndeploy_core_services\n'
     for components, policy, suffix, failure in [
@@ -93,7 +95,7 @@ DEPLOYMENT_PORT_POLICY=production
 DEPLOYMENT_IMAGE_SOURCE=general
 DEPLOYMENT_APP_VERSION=latest
 deployment_apply_image_source
-NEXENT_IMAGE=example.invalid/shared/backend:ops-check
+NEXENT_OPS_IMAGE=example.invalid/custom/ops:ops-check
 OPS_PORT=15016
 LOG_LEVEL=DEBUG
 deployment_render_helm_chart_values
@@ -105,7 +107,7 @@ deployment_render_helm_chart_values
         )
         assert result.returncode == 0, result.stderr
         values = yaml.safe_load(result.stdout)
-        values['global'] = {'namespace': 'ops-proof', 'rolloutChecksums': {'backendImage': 'image-rev-1'}}
+        values['global'] = {'namespace': 'ops-proof', 'rolloutChecksums': {'opsImage': 'image-rev-1'}}
         values.setdefault('nexent-common', {}).setdefault('secrets', {})['jwtSecret'] = 'controlled-fixture'
         values_path.write_text(yaml.safe_dump(values), encoding='utf-8')
         rendered = subprocess.run(
@@ -131,30 +133,28 @@ deployment_render_helm_chart_values
         assert spec['volumes'] == [{'name': 'ops-logs', 'persistentVolumeClaim': {'claimName': 'nexent-logs'}}]
         assert len(spec['containers']) == 1
         container = spec['containers'][0]
-        assert container['image'] == 'example.invalid/shared/backend:ops-check'
-        assert container['command'] == ['/opt/nexent/scripts/start-backend.sh', 'python', 'backend/ops_service.py']
+        assert container['image'] == 'example.invalid/custom/ops:ops-check'
+        assert container['command'] == ['/opt/nexent/scripts/start-backend.sh', 'python', 'backend/http/ops_service.py']
         assert not container.get('envFrom')
         assert container['volumeMounts'] == [{'name': 'ops-logs', 'mountPath': '/mnt/nexent-data/logs'}]
         assert next(env for env in container['env'] if env['name'] == 'POD_NAME')['valueFrom']['fieldRef']['fieldPath'] == 'metadata.name'
         assert {env['name']: env['value'] for env in container['env'] if 'value' in env} == {
             'OPS_PORT': '15016',
             'LOG_DIR': '/mnt/nexent-data/logs/$(POD_NAME)',
-            'NEXENT_SQL_STARTUP_MODE': 'off', 'PYTHON_DOTENV_DISABLED': '1',
+            'NEXENT_SQL_STARTUP_MODE': 'off', 'PYTHON_DOTENV_DISABLED': '1', 'GATEWAY_AUTH_ENABLED': 'true',
         }
-        for name in ('LOG_LEVEL', 'IS_DEBUG', 'LOG_MAX_BYTES', 'LOG_ROTATION_INTERVAL', 'LOG_BACKUP_COUNT'):
+        for name in ('LOG_LEVEL', 'IS_DEBUG', 'LOG_MAX_BYTES', 'LOG_ROTATION_INTERVAL', 'LOG_BACKUP_COUNT', 'REDIS_URL'):
             assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
                 'name': 'nexent-env', 'key': name, 'optional': True,
             }
-        for name in (
-            'POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_DB', 'POSTGRES_PORT',
-            'NEXENT_POSTGRES_PASSWORD', 'REDIS_URL', 'JWT_SECRET',
-        ):
-            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
-                'name': 'nexent-env', 'key': name,
+        for name in ('POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_DB', 'POSTGRES_PORT', 'JWT_ISSUER'):
+            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['configMapKeyRef'] == {
+                'name': 'nexent-config', 'key': name,
             }
-        assert next(env for env in container['env'] if env['name'] == 'JWT_ISSUER')['valueFrom']['secretKeyRef'] == {
-            'name': 'nexent-env', 'key': 'JWT_ISSUER', 'optional': True,
-        }
+        for name in ('NEXENT_POSTGRES_PASSWORD', 'JWT_SECRET', 'GATEWAY_SIGNING_SECRET'):
+            secret = next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef']
+            assert secret['name'] == 'nexent-secrets' and secret['key'] == name
+            assert secret.get('optional', False) == (name == 'GATEWAY_SIGNING_SECRET')
         assert container['ports'] == [{'name': 'http', 'containerPort': 15016}]
         assert container['startupProbe']['httpGet'] == {'path': '/health/live', 'port': 'http'}
         assert container['livenessProbe']['httpGet'] == {'path': '/health/live', 'port': 'http'}

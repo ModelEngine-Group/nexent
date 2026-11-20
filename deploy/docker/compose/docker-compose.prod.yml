@@ -148,7 +148,7 @@ services:
     entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.runtime_service"]
 
   nexent-mcp:
-    image: ${NEXENT_IMAGE}
+    image: ${NEXENT_MCP_SERVICE_IMAGE:-nexent/nexent-mcp-service:latest}
     container_name: nexent-mcp
     restart: always
     volumes:

@@ -24,7 +24,7 @@ spec:
       labels:
         app: nexent-ops
       annotations:
-        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" $global | quote }}
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "opsImage" "" $global | quote }}
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" $global | quote }}
         checksum/ops-config: {{ dict "port" .Values.service.port "monitoring" $monitoring | toJson | sha256sum | quote }}
         {{- if $trajectory }}

@@ -15,6 +15,8 @@ env:
   NEXENT_IMAGE: nexent/nexent:latest
   NEXENT_MANAGEMENT_IMAGE: nexent/nexent-management:latest
   NEXENT_RUNTIME_IMAGE: nexent/nexent-runtime:latest
+  NEXENT_MCP_SERVICE_IMAGE: nexent/nexent-mcp-service:latest
+  NEXENT_OPS_IMAGE: nexent/nexent-ops:latest
   NEXENT_GATEWAY_IMAGE: nexent/nexent-gateway:latest
   NEXENT_WEB_IMAGE: nexent/nexent-web:latest
   NEXENT_DATA_PROCESS_IMAGE: nexent/nexent-data-process:latest
@@ -72,11 +74,11 @@ jobs:
             fi
           done
           
-      - name: Test pull Management and Runtime images
+      - name: Test pull independent backend images
         env:
           PULL_COUNT: ${{ steps.random-count.outputs.pull-count }}
         run: |
-          for image in "$NEXENT_MANAGEMENT_IMAGE" "$NEXENT_RUNTIME_IMAGE"; do
+          for image in "$NEXENT_MANAGEMENT_IMAGE" "$NEXENT_RUNTIME_IMAGE" "$NEXENT_MCP_SERVICE_IMAGE" "$NEXENT_OPS_IMAGE"; do
             docker rmi "$image" 2>/dev/null || true
             for ((attempt = 1; attempt <= PULL_COUNT; attempt++)); do
               echo "Pull attempt $attempt/$PULL_COUNT for $image"
@@ -199,6 +201,8 @@ jobs:
           echo "  - nexent/nexent:latest"
           echo "  - $NEXENT_MANAGEMENT_IMAGE"
           echo "  - $NEXENT_RUNTIME_IMAGE"
+          echo "  - $NEXENT_MCP_SERVICE_IMAGE"
+          echo "  - $NEXENT_OPS_IMAGE"
           echo "  - nexent/nexent-gateway:latest"
           echo "  - nexent/nexent-web:latest" 
           echo "  - nexent/nexent-data-process:latest"

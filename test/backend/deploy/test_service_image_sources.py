@@ -2,6 +2,7 @@
 """Independent service targets retain executable tool plugins without peer sources."""
 
 from pathlib import Path
+from runpy import run_path
 
 import pytest
 import yaml
@@ -42,7 +43,7 @@ def test_independent_images_do_not_package_other_service_implementations():
     assert "COPY deploy/sql/" not in runtime + common
 
 
-@pytest.mark.parametrize("service", ["management", "runtime"])
+@pytest.mark.parametrize("service", ["management", "runtime", "mcp-service", "ops"])
 @pytest.mark.parametrize("syntax", ["list", "flag"])
 def test_service_build_selection_uses_independent_target_and_latest(service, syntax):
     from test.backend.deploy.test_gateway_image import bash_run
@@ -67,13 +68,19 @@ def test_compose_uses_independent_service_images(filename):
     for name, service in (("nexent-config", "management"), ("nexent-runtime", "runtime")):
         assert services[name]["image"] == f"${{NEXENT_{service.upper()}_IMAGE:-nexent/nexent-{service}:latest}}"
         assert "NEXENT_IMAGE}" not in services[name]["image"]
+    assert services["nexent-mcp"]["image"] == "${NEXENT_MCP_SERVICE_IMAGE:-nexent/nexent-mcp-service:latest}"
+    assert services["nexent-ops"]["extends"]["service"] == "nexent-ops"
+    ops = ROOT / "deploy/docker/compose/docker-compose-ops.yml"
+    assert yaml.safe_load(ops.read_text(encoding="utf-8"))["services"]["nexent-ops"]["image"] == (
+        "${NEXENT_OPS_IMAGE:-nexent/nexent-ops:latest}"
+    )
 
 
 @pytest.mark.parametrize("mode,tag", [("general", "fixture"), ("local-latest", "latest")])
-def test_generated_helm_values_keep_management_and_runtime_separate(mode, tag):
+def test_generated_helm_values_use_independent_service_images(mode, tag):
     from test.backend.deploy.test_gateway_image import bash_run
     result = bash_run(f'''source deploy/common/common.sh
-unset NEXENT_MANAGEMENT_IMAGE NEXENT_RUNTIME_IMAGE
+unset NEXENT_MANAGEMENT_IMAGE NEXENT_RUNTIME_IMAGE NEXENT_MCP_SERVICE_IMAGE NEXENT_OPS_IMAGE
 DEPLOYMENT_APP_VERSION=fixture
 DEPLOYMENT_IMAGE_SOURCE={mode}
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX=
@@ -82,20 +89,65 @@ deployment_apply_image_source
 deployment_render_image_values
 ''')
     values = yaml.safe_load(result)
-    for name, service in (("nexent-config", "management"), ("nexent-runtime", "runtime")):
+    for name, service, checksum in (
+        ("nexent-config", "management", "managementImage"),
+        ("nexent-runtime", "runtime", "runtimeImage"),
+        ("nexent-mcp", "mcp-service", "mcpServiceImage"),
+        ("nexent-ops", "ops", "opsImage"),
+    ):
         image = values[name]["images"]["backend"]
         assert image["repository"] == f"nexent/nexent-{service}"
         assert image["tag"] == tag
         chart = ROOT / "deploy/k8s/helm/nexent/charts" / name
         defaults = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))
         assert defaults["images"]["backend"]["repository"] == f"nexent/nexent-{service}"
-        assert f'"{service}Image"' in (chart / "templates/deployment.yaml").read_text(encoding="utf-8")
+        assert f'"{checksum}"' in (chart / "templates/deployment.yaml").read_text(encoding="utf-8")
 
 
-def test_offline_application_collects_both_service_images():
+def test_offline_application_collects_independent_service_images_and_mcp_proxy():
     from test.backend.deploy.test_gateway_image import bash_run
     result = bash_run("bash deploy/offline/build_offline_package.sh --defaults --target docker "
                       "--version latest --components application --image-source general "
                       "--include-sandbox false --dry-run")
     assert "nexent/nexent-management:latest" in result
     assert "nexent/nexent-runtime:latest" in result
+    assert "nexent/nexent-mcp-service:latest" in result
+    assert "nexent/nexent-ops:latest" in result
+    assert "nexent/nexent-mcp:latest" in result
+
+
+@pytest.mark.parametrize("service", ["mcp-service", "ops"])
+def test_source_collection_includes_dependencies_without_other_launchers(service):
+    packaging = run_path(str(ROOT / "deploy/images/dockerfiles/main/copy_service_sources.py"))
+    files = {
+        path.as_posix()
+        for path in packaging["collect_sources"](ROOT, packaging["SERVICE_MODULES"][service])
+    }
+    assert "backend/contracts/constants/environment.py" in files
+    assert "infrastructure/rdb/client.py" in files
+    assert "backend/http/config_service.py" not in files
+    assert "backend/http/runtime_service.py" not in files
+    assert not any(path.startswith("backend/data_process/") for path in files)
+    if service == "ops":
+        assert "backend/ops/services/trajectory/lifecycle.py" in files
+        assert "backend/http/mcp_service.py" not in files
+        assert "backend/management/db/models/__init__.py" not in files
+    else:
+        assert "backend/management/services/agent/nl2agent.py" in files
+        assert not any(path.startswith("backend/ops/") for path in files)
+
+
+def test_source_collection_resolves_relative_and_literal_dynamic_imports(tmp_path):
+    package = tmp_path / "backend" / "service"
+    package.mkdir(parents=True)
+    for name, code in {
+        "__init__.py": "",
+        "app.py": "from . import helpers\nimport importlib\nimportlib.import_module('service.plugin')",
+        "helpers.py": "",
+        "plugin.py": "",
+        "unused.py": "",
+    }.items():
+        (package / name).write_text(code, encoding="utf-8")
+    packaging = run_path(str(ROOT / "deploy/images/dockerfiles/main/copy_service_sources.py"))
+    paths = packaging["collect_sources"](tmp_path, ("service.app",))
+    assert {p.name for p in paths} == {"__init__.py", "app.py", "helpers.py", "plugin.py"}

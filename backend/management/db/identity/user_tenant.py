@@ -28,7 +28,7 @@ from management.db.identity.membership import (
     locked_members,
 )
 from management.db.identity.roles import replace_member_roles
-from management.db.models import (
+from management.db.identity.models import (
     TenantGroupInfo,
     TenantGroupUser,
     UserOAuthAccount,

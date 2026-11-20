@@ -27,14 +27,6 @@ on:
         type: boolean
 
 jobs:
-  build-main:
-    runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Build main application image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent:${{ github.event.inputs.app_version }} -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
-
   build-data-process:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
     steps:
@@ -99,7 +91,7 @@ jobs:
 
   deploy:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    needs: [ build-main, build-data-process, build-web, build-docs, build-sandbox, build-mcp ]
+    needs: [ build-data-process, build-web, build-docs, build-sandbox, build-mcp ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -110,12 +102,12 @@ jobs:
           docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple \
             -t "nexent/nexent-gateway:$APP_VERSION" -t nexent/nexent-gateway:latest \
             -f deploy/images/dockerfiles/gateway/Dockerfile .
-      - name: Build Management and Runtime images on the deployment runner
+      - name: Build independent backend images on the deployment runner
         env:
           APP_VERSION: ${{ inputs.app_version }}
         run: |
           set -euo pipefail
-          for service in management runtime; do
+          for service in management runtime mcp-service ops; do
             docker build --target "$service" \
               --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua \
               -t "nexent/nexent-$service:$APP_VERSION" -f deploy/images/dockerfiles/main/Dockerfile .

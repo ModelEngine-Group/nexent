@@ -63,18 +63,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build independent Management and Runtime images
+      - name: Build independent backend images
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          for service in management runtime; do
+          for service in management runtime mcp-service ops; do
             docker build --target "$service" --platform "linux/$ARCH" \
               -t "nexent/nexent-$service:dev-$ARCH" -f deploy/images/dockerfiles/main/Dockerfile .
           done
-      - name: Start both services and check readiness
+      - name: Start and check independent services
         timeout-minutes: 8
         env:
           ARCH: ${{ matrix.arch }}
         run: |
           bash deploy/tests/smoke-independent-service-images.sh \
-            "nexent/nexent-management:dev-$ARCH" "nexent/nexent-runtime:dev-$ARCH"
+            "nexent/nexent-management:dev-$ARCH" "nexent/nexent-runtime:dev-$ARCH" \
+            "nexent/nexent-mcp-service:dev-$ARCH" "nexent/nexent-ops:dev-$ARCH"

@@ -4,7 +4,10 @@
 from sqlalchemy import func, literal, select, union_all
 
 from infrastructure.rdb.client import get_db_session
-from management.db.models import AgentInfo, KnowledgeRecord, McpRecord, ModelRecord
+from management.db.agent.models import AgentInfo
+from management.db.knowledge_base.models import KnowledgeRecord
+from management.db.mcp.models import McpRecord
+from management.db.model.models import ModelRecord
 from permissions.resource_access import require_inventory_scope
 
 

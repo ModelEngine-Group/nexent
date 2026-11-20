@@ -25,10 +25,12 @@ Available images (use --images LIST with comma-separated names, or matching flag
   main          nexent/nexent
   management    nexent/nexent-management
   runtime       nexent/nexent-runtime
+  mcp-service   nexent/nexent-mcp-service
+  ops           nexent/nexent-ops
   gateway       nexent/nexent-gateway
   web           nexent/nexent-web
   data-process  nexent/nexent-data-process
-  mcp           nexent/nexent-mcp
+  mcp           nexent/nexent-mcp (proxy)
   terminal      nexent/nexent-ubuntu-terminal
   docs          nexent/nexent-docs
   sandbox       nexent/nexent-sandbox
@@ -38,6 +40,7 @@ Available images (use --images LIST with comma-separated names, or matching flag
 Examples:
   bash build.sh --main --version latest --dry-run
   bash build.sh --images runtime,management --version latest --load
+  bash build.sh --images mcp-service,ops --version latest --load
   bash build.sh --package --version latest --target docker --dry-run
 
 More options:
