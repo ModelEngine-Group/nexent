@@ -27,9 +27,11 @@ change:
     behaviors:
     - Store ordered native chunks once per step, block, invocation and attempt using the established unit type and the first unit index.
     - Preserve existing replay receipts, other unit indexes and historical answer reclassification.
+    - Preserve legacy model output and native units whose identity cannot be grouped.
     reason: Repository tests cover the actual write payload and retry boundary. The real D4 verifies raw storage in PostgreSQL alongside history reload and clarification.
     test_selectors:
     - test/backend/database/test_conversation_projection_receipt.py::test_native_thinking_groups_at_write_without_changing_receipt_input
+    - test/backend/database/test_conversation_projection_receipt.py::test_projection_keeps_unmergeable_model_output_units
     - test/backend/utils/test_nexent_output.py::test_compacted_native_history_matches_legacy_chunks
   notes: >-
     SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md.

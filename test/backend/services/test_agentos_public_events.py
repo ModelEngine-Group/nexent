@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import AgentResume, CompatibilityConversationRun
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
 from management.services.agent import agentos_events as public_events
 from management.services.agent import runtime_client
 
@@ -100,6 +101,7 @@ async def test_native_cursor_resume_restores_tool_pairing_without_republishing_p
 
     async def prefix():
         try:
+            yield b": keep-alive\n\n"
             yield observer(1, native("tool", 1, content="{}", local_call_id="call"))
             pytest.fail("Projection prefix read past the acknowledged cursor")
         finally:
@@ -123,8 +125,21 @@ async def test_native_cursor_resume_restores_tool_pairing_without_republishing_p
 
 
 @pytest.mark.asyncio
-async def test_unavailable_native_resume_prefix_stops_without_publishing_unpaired_events():
-    replay = AsyncMock(return_value=response(status_code=410))
+@pytest.mark.parametrize(
+    ("prefix_frames", "status", "error"),
+    [
+        pytest.param((), 410, None, id="cursor-expired"),
+        pytest.param((), 200, RuntimeServiceTimeoutError, id="runtime-timeout"),
+        pytest.param((), 200, RuntimeServiceUnavailableError, id="runtime-unavailable"),
+        pytest.param((observer(1, {}).replace(CURSOR.run_id.encode(), b"b" * 32),), 200, None, id="foreign-run"),
+        pytest.param((observer(1, {}).replace(b"data: {}", b"data: {"),), 200, None, id="invalid-json"),
+        pytest.param((observer(2, ["unexpected payload"]), terminal(3)), 200, None, id="cursor-absent"),
+    ],
+)
+async def test_unavailable_native_resume_prefix_stops_without_publishing_unpaired_events(prefix_frames, status, error):
+    replay = AsyncMock(return_value=response(*prefix_frames, status_code=status))
+    if error is not None:
+        replay.side_effect = error("replay failed")
     upstream = response(observer(2, native("model_output", 2, content="unpaired")))
     output = public_events.present_public_resume(upstream, CURSOR, "actor", replay_from_start=replay)
     frames = [frame async for frame in output.body_iterator]
@@ -132,6 +147,25 @@ async def test_unavailable_native_resume_prefix_stops_without_publishing_unpaire
     assert len(frames) == 1
     assert json.loads(frames[0].removeprefix(b"data: "))["type"] == "error"
     replay.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_native_stream_keeps_derived_step_and_thinking_at_one_cursor():
+    request = CURSOR.model_copy(update={"after_event_id": None})
+    upstream = response(
+        observer(1, native("step_count", 1, content="Step 1", step_id="first")),
+        observer(2, native("model_output", 2, content="unfinished", step_id="second", block_id="body")),
+    )
+    result = public_events.present_public_resume(upstream, request, "actor")
+    frames = [frame async for frame in result.body_iterator]
+    events = [json.loads(frame.split(b"data: ", 1)[1]) for frame in frames]
+
+    assert [event["type"] for event in events] == ["step_count", "step_count", "model_output_thinking", "error"]
+    assert events[1]["step_id"] == events[2]["step_id"] == "second"
+    assert events[2]["content"] == "unfinished"
+    assert frames[1].startswith(b"data: ")
+    assert frames[2].startswith(f"id: {CURSOR.run_id}:2\ndata: ".encode())
+    assert frames[3].startswith(b"data: ")
 
 
 @pytest.mark.asyncio

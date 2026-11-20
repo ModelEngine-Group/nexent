@@ -33,6 +33,8 @@ change:
     - test/backend/services/test_agentos_public_events.py::test_prepared_native_clarification_keeps_the_persisted_unit_identity
     - test/backend/services/test_agentos_public_events.py::test_native_cursor_resume_restores_tool_pairing_without_republishing_prefix
     - test/backend/services/test_agentos_public_events.py::test_unavailable_native_resume_prefix_stops_without_publishing_unpaired_events
+    - test/backend/services/test_agentos_public_events.py::test_interrupted_native_stream_keeps_derived_step_and_thinking_at_one_cursor
   notes: >-
     SPEC: ../nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/design.md.
     The existing D4 owns its assistant clone, conversations and temporary authentication, with no shared families. The existing D3 retains signed runtime transport coverage. No additional D1 case is needed.
+    Presenter unit tests cover unavailable and invalid replay prefixes, cursor placement after derived events and an interrupted stream.

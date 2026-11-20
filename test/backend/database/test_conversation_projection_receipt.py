@@ -97,6 +97,42 @@ def test_native_thinking_groups_at_write_without_changing_receipt_input(projecti
         assert session.execute.call_count == 1
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("legacy model text", id="legacy-plain-text"),
+        pytest.param('{"type":"model_output","content":"legacy model text"}', id="legacy-envelope"),
+        pytest.param({"agent_core": "smolagents"}, id="other-core"),
+        pytest.param({"turn_id": None}, id="no-turn"),
+        pytest.param({"step_id": None, "block_id": None}, id="no-step-or-block"),
+        pytest.param({"attempt_id": 42}, id="invalid-attempt"),
+    ],
+)
+def test_projection_keeps_unmergeable_model_output_units(projection_db, content):
+    session, _, _, _ = projection_db
+    envelope = {
+        "type": "model_output", "schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+        "turn_id": "turn", "step_id": "step", "block_id": "body", "content": "fragment",
+    }
+    original = content if isinstance(content, str) else envelope | content
+    units = [
+        {"unit_index": index, "unit_type": "model_output", "unit_content": original}
+        for index in (1, 2)
+    ]
+    units.append({"unit_index": 3, "unit_type": "model_output", "unit_content": envelope})
+
+    project(message_units=units)
+
+    rows = session.execute.call_args_list[1].args[1]
+    assert [(row["unit_index"], row["unit_type"]) for row in rows] == [
+        (1, "model_output"), (2, "model_output"), (3, "model_output_thinking"),
+    ]
+    for row in rows[:2]:
+        persisted = row["unit_content"]
+        assert (persisted if isinstance(original, str) else json.loads(persisted)) == original
+    assert json.loads(rows[2]["unit_content"]) == (envelope | {"type": "model_output_thinking"})
+
+
 @pytest.mark.parametrize("change", [{"message_content": "changed"}, {"projection_run_id": "b" * 32}, {"message_id": 18}])
 def test_assistant_projection_rejects_conflicting_replay(projection_db, change):
     session, parent, _, receipts = projection_db
