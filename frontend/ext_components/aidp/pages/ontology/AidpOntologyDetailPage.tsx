@@ -87,14 +87,6 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  useEffect(() => {
-    if (!pendingCreate) return;
-    // Consume the quick-action intent after the target tab has mounted so
-    // switching tabs later does not reopen the drawer.
-    const timer = window.setTimeout(() => setPendingCreate(null), 0);
-    return () => window.clearTimeout(timer);
-  }, [pendingCreate]);
-
   const queryKey = useMemo(
     () => [...scope.key, "ontology-domain", domainId],
     [domainId, scope.key]
@@ -136,6 +128,16 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
   }, [domainId, queryClient, refreshDetail, scope.key]);
 
   const domain: AidpOntologyDomain | undefined = query.data;
+
+  useEffect(() => {
+    // Wait for the domain payload: the tab body (and therefore the target
+    // drawer) is not mounted until the query resolves, so clearing the intent
+    // any earlier would lose the quick action.
+    if (!pendingCreate || !domain) return;
+    const timer = window.setTimeout(() => setPendingCreate(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [domain, pendingCreate]);
+
   const errorMessage = query.error
     ? getAidpErrorMessage(
         query.error,

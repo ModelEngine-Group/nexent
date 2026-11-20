@@ -2,8 +2,8 @@
 
 /** Shared client-side limits for ontology forms. Values mirror the AIDP contract. */
 
-export const ONTOLOGY_NAME_MAX_BYTES = 64;
-export const ONTOLOGY_DESCRIPTION_MAX_BYTES = 512;
+export const ONTOLOGY_NAME_MAX_CHARS = 64;
+export const ONTOLOGY_DESCRIPTION_MAX_CHARS = 512;
 export const METADATA_FIELD_NAME_MAX_CHARS = 63;
 export const METADATA_FIELD_NAME_MAX_BYTES = 64;
 export const METADATA_FIELD_LIMIT = 20;
@@ -18,16 +18,16 @@ export const utf8ByteLength = (value: string): number =>
 export const validateOntologyName = (value: string): string | null => {
   const name = value.trim();
   if (!name) return "请输入本体库名称";
-  if (utf8ByteLength(name) > ONTOLOGY_NAME_MAX_BYTES) {
-    return `名称不能超过 ${ONTOLOGY_NAME_MAX_BYTES} 字节（当前 ${utf8ByteLength(name)} 字节）`;
+  if (name.length > ONTOLOGY_NAME_MAX_CHARS) {
+    return `名称不能超过 ${ONTOLOGY_NAME_MAX_CHARS} 个字符（当前 ${name.length} 个字符）`;
   }
   return null;
 };
 
 export const validateOntologyDescription = (value: string): string | null => {
   const description = value.trim();
-  if (utf8ByteLength(description) > ONTOLOGY_DESCRIPTION_MAX_BYTES) {
-    return `描述不能超过 ${ONTOLOGY_DESCRIPTION_MAX_BYTES} 字节（当前 ${utf8ByteLength(description)} 字节）`;
+  if (description.length > ONTOLOGY_DESCRIPTION_MAX_CHARS) {
+    return `描述不能超过 ${ONTOLOGY_DESCRIPTION_MAX_CHARS} 个字符（当前 ${description.length} 个字符）`;
   }
   return null;
 };

@@ -2,7 +2,13 @@
 
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -37,12 +43,18 @@ import {
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpResizableTitle, {
+  type AidpResizableTitleProps,
+} from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import {
+  AIDP_MIN_COLUMN_WIDTH,
+  fitAidpColumnWidths,
+  resizeAidpColumnPair,
+} from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
 import AidpOntologyDomainDrawer from "./components/AidpOntologyDomainDrawer";
@@ -50,12 +62,21 @@ import AidpOntologyDeleteModal from "./components/AidpOntologyDeleteModal";
 import AidpOntologyGuide from "./components/AidpOntologyGuide";
 import styles from "./AidpOntologyListPage.module.css";
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
-const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
+const DEFAULT_PAGE_SIZE = 12;
 const GUIDE_STORAGE_KEY = "aidpOntology.guideExpanded";
+const VIEW_MODE_STORAGE_KEY = "aidpOntology.viewMode";
 const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 
 type ListView = "table" | "cards";
+type ColumnKey = "name" | "description" | "update_time" | "actions";
+
+const BASE_COLUMN_WEIGHTS: Record<ColumnKey, number> = {
+  name: 2,
+  description: 4,
+  update_time: 1.6,
+  actions: 3,
+};
 
 /** Format AIDP audit values without inventing a missing date. */
 const formatDisplayDate = (value?: string | number | null): string => {
@@ -79,14 +100,21 @@ const AidpOntologyListPage: React.FC = () => {
   const locale = (params?.locale as string) || "zh";
   const queryClient = useQueryClient();
   const scope = useAidpQueryScope();
-  const demo = useAidpOntologyDemoMode();
   const { user } = useAuthorizationContext();
   const canManage = !!user && MANAGER_ROLES.has(user.role);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<ListView>("table");
+  const [viewMode, setViewMode] = useState<ListView>(() => {
+    try {
+      const saved = window.sessionStorage.getItem(VIEW_MODE_STORAGE_KEY);
+      if (saved === "table" || saved === "cards") return saved;
+    } catch {
+      // Fall through to the card default when storage is unavailable.
+    }
+    return "cards";
+  });
   const [guideExpanded, setGuideExpanded] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AidpOntologyDomain | null>(null);
@@ -94,6 +122,68 @@ const AidpOntologyListPage: React.FC = () => {
     useState<AidpOntologyDomain | null>(null);
   const screens = Grid.useBreakpoint();
   const isNarrow = screens.md === false;
+
+  // Column widths follow the knowledge-base list: fit the container, then let
+  // each drag move one boundary without changing the total table width.
+  const tableContainer = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [columnWeights, setColumnWeights] =
+    useState<Record<ColumnKey, number>>(BASE_COLUMN_WEIGHTS);
+  useEffect(() => {
+    const element = tableContainer.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const activeColumnKeys = useMemo<ColumnKey[]>(
+    () =>
+      canManage
+        ? ["name", "description", "update_time", "actions"]
+        : ["name", "description", "update_time"],
+    [canManage]
+  );
+  const columnWidths = fitAidpColumnWidths(
+    activeColumnKeys,
+    columnWeights,
+    containerWidth ||
+      activeColumnKeys.reduce((sum, key) => sum + columnWeights[key], 0)
+  );
+  const totalTableWidth = activeColumnKeys.reduce(
+    (sum, key) => sum + columnWidths[key],
+    0
+  );
+  const handleResize = (
+    key: ColumnKey,
+    nextKey: ColumnKey,
+    delta: number,
+    renderedWidths: Record<string, number>
+  ) => {
+    const resized = resizeAidpColumnPair(renderedWidths, key, nextKey, delta);
+    setColumnWeights((current) => {
+      const totalWeight = activeColumnKeys.reduce(
+        (sum, item) => sum + current[item],
+        0
+      );
+      const totalWidth =
+        activeColumnKeys.reduce((sum, item) => sum + resized[item], 0) || 1;
+      const next = { ...current };
+      activeColumnKeys.forEach((item) => {
+        next[item] = (resized[item] / totalWidth) * totalWeight;
+      });
+      return next;
+    });
+  };
+  const changeViewMode = (value: ListView) => {
+    setViewMode(value);
+    try {
+      window.sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, value);
+    } catch {
+      // Keep the choice in memory when storage is unavailable.
+    }
+  };
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -218,17 +308,38 @@ const AidpOntologyListPage: React.FC = () => {
         {
           key: "delete",
           label: t("aidpKnowledge.ontologyDelete"),
-          danger: true,
         },
       ]
     : [];
 
+  const makeColumn = (
+    key: ColumnKey,
+    column: TableColumnsType<AidpOntologyDomain>[number]
+  ): TableColumnsType<AidpOntologyDomain>[number] => {
+    const nextKey = activeColumnKeys[activeColumnKeys.indexOf(key) + 1];
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          width: columnWidths[key],
+          maxWidth: nextKey
+            ? columnWidths[key] + columnWidths[nextKey] - AIDP_MIN_COLUMN_WIDTH
+            : undefined,
+          "data-column-key": key,
+          onResize: nextKey
+            ? (delta: number, renderedWidths: Record<string, number>) =>
+                handleResize(key, nextKey, delta, renderedWidths)
+            : undefined,
+        }) as AidpResizableTitleProps,
+    };
+  };
+
   const columns: TableColumnsType<AidpOntologyDomain> = [
-    {
+    makeColumn("name", {
       title: t("aidpKnowledge.ontologyDomainColumnName"),
       dataIndex: "name",
       key: "name",
-      width: 160,
       render: (name: string, record) => (
         <Tooltip title={name} placement="topLeft">
           <button
@@ -240,8 +351,8 @@ const AidpOntologyListPage: React.FC = () => {
           </button>
         </Tooltip>
       ),
-    },
-    {
+    }),
+    makeColumn("description", {
       title: t("aidpKnowledge.ontologyDomainColumnDescription"),
       dataIndex: "description",
       key: "description",
@@ -252,52 +363,51 @@ const AidpOntologyListPage: React.FC = () => {
           <span className={styles.ellipsis}>{description || "—"}</span>
         </Tooltip>
       ),
-    },
-    {
+    }),
+    makeColumn("update_time", {
       title: t("aidpKnowledge.ontologyDomainColumnUpdateTime"),
       dataIndex: "update_time",
       key: "update_time",
-      width: 140,
       render: (value: string | number | null | undefined) =>
         formatDisplayDate(value),
-    },
+    }),
   ];
 
   if (canManage) {
-    columns.push({
-      title: t("aidpKnowledge.ontologyColumnActions"),
-      key: "actions",
-      width: 280,
-      render: (_value, record) => (
-        <div className={styles.rowActions}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => openCreateEntity(record)}
-          >
-            {t("aidpKnowledge.ontologyEntityCreate")}
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => openCreateMetadata(record)}
-          >
-            {t("aidpKnowledge.ontologyCreateMetadata")}
-          </Button>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            {t("aidpKnowledge.ontologyEdit")}
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            onClick={() => handleDelete(record)}
-          >
-            {t("aidpKnowledge.ontologyDelete")}
-          </Button>
-        </div>
-      ),
-    });
+    columns.push(
+      makeColumn("actions", {
+        title: t("aidpKnowledge.ontologyColumnActions"),
+        key: "actions",
+        render: (_value, record) => (
+          <div className={styles.rowActions}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => openCreateEntity(record)}
+            >
+              {t("aidpKnowledge.ontologyEntityCreate")}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => openCreateMetadata(record)}
+            >
+              {t("aidpKnowledge.ontologyCreateMetadata")}
+            </Button>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              {t("aidpKnowledge.ontologyEdit")}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => handleDelete(record)}
+            >
+              {t("aidpKnowledge.ontologyDelete")}
+            </Button>
+          </div>
+        ),
+      })
+    );
   }
 
   const renderCard = (domain: AidpOntologyDomain) => (
@@ -417,18 +527,21 @@ const AidpOntologyListPage: React.FC = () => {
       return <div className={styles.cardGrid}>{domains.map(renderCard)}</div>;
     }
     return (
-      <Table<AidpOntologyDomain>
-        rowKey="domain_id"
-        size="middle"
-        className={styles.table}
-        columns={columns}
-        dataSource={domains}
-        pagination={false}
-        tableLayout="fixed"
-        scroll={{
-          x: canManage ? (isNarrow ? 720 : 860) : isNarrow ? 600 : 700,
-        }}
-      />
+      <div className={styles.tableArea} ref={tableContainer}>
+        <Table<AidpOntologyDomain>
+          rowKey="domain_id"
+          size="middle"
+          className={styles.table}
+          columns={columns}
+          dataSource={domains}
+          pagination={false}
+          tableLayout="fixed"
+          components={{
+            header: { cell: AidpResizableTitle },
+          }}
+          scroll={{ x: totalTableWidth }}
+        />
+      </div>
     );
   };
 
@@ -466,11 +579,6 @@ const AidpOntologyListPage: React.FC = () => {
               {errorMessage}
             </div>
           )}
-          <AidpOntologyGapNote>
-            {demo
-              ? t("aidpKnowledge.ontologyListDemoUpdateTimeGap")
-              : t("aidpKnowledge.ontologyListRealUpdateTimeGap")}
-          </AidpOntologyGapNote>
           <div className={styles.toolbar}>
             <Input
               allowClear
@@ -501,7 +609,7 @@ const AidpOntologyListPage: React.FC = () => {
               )}
               <Segmented
                 value={viewMode}
-                onChange={(value) => setViewMode(value as ListView)}
+                onChange={(value) => changeViewMode(value as ListView)}
                 options={[
                   {
                     value: "table",
@@ -527,7 +635,6 @@ const AidpOntologyListPage: React.FC = () => {
                 total={total}
                 totalReliable={totalReliable}
                 hasMore={hasMore}
-                selectedCount={0}
                 onPageChange={setPage}
                 onPageSizeChange={(nextSize) => {
                   setPageSize(nextSize);

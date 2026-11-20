@@ -1951,7 +1951,7 @@
   "aidpKnowledge.ontologyBindingSelectLabel": "Select knowledge bases",
   "aidpKnowledge.ontologyBindingSelectRequired": "Select a knowledge base to bind",
   "aidpKnowledge.ontologyBindingStatusGap": "There is no public API to query a knowledge base's binding or unbind-task state. A missing list row does not mean background cleanup finished; rebinding during cleanup may return 409, and the page must not poll and claim completion.",
-  "aidpKnowledge.ontologyBytesUnit": "bytes",
+  "aidpKnowledge.ontologyBytesUnit": "characters",
   "aidpKnowledge.ontologyCardUpdatedAt": "Updated {{time}}",
   "aidpKnowledge.ontologyChunkAnnotate": "Annotate",
   "aidpKnowledge.ontologyChunkDetailLoadFailed": "Failed to load the chunk",

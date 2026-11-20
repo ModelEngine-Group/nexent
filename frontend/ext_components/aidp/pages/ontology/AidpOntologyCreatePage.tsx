@@ -3,20 +3,25 @@
 "use client";
 
 import React, { useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, ConfigProvider, Form, Input, Skeleton } from "antd";
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  Breadcrumb,
+  Button,
+  ConfigProvider,
+  Form,
+  Input,
+  Skeleton,
+} from "antd";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
-  ONTOLOGY_DESCRIPTION_MAX_BYTES,
-  ONTOLOGY_NAME_MAX_BYTES,
-  utf8ByteLength,
+  ONTOLOGY_DESCRIPTION_MAX_CHARS,
+  ONTOLOGY_NAME_MAX_CHARS,
   validateOntologyDescription,
   validateOntologyName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
@@ -113,86 +118,96 @@ const AidpOntologyCreatePage: React.FC = () => {
   return (
     <ConfigProvider theme={aidpKnowledgeVisualTheme}>
       <div
-        className={`${typography.page} ${styles.page} flex h-full min-h-0 w-full flex-col overflow-y-auto`}
+        className={`${typography.page} relative flex h-full min-h-0 w-full flex-col`}
       >
-        <div className={styles.breadcrumb}>
-          <Link
-            href={`/${locale}/knowledges/ontology`}
-            className={styles.backLink}
-            aria-label={t("aidpKnowledge.ontologyBackToList")}
-          >
-            <ArrowLeftOutlined />
-          </Link>
-        </div>
-        <div className={styles.headerRow}>
-          <div>
-            <h1 className={typography.pageTitle}>
-              {t("aidpKnowledge.ontologyCreatePageTitle")}
-            </h1>
-          </div>
-        </div>
-        <section className={styles.panel}>
-          <Form
-            form={form}
-            layout="vertical"
-            requiredMark
-            className={drawerStyles.form}
-          >
-            <Form.Item
-              name="name"
-              label={t("aidpKnowledge.ontologyDomainName")}
-              extra={`${utf8ByteLength(nameValue)}/${ONTOLOGY_NAME_MAX_BYTES} ${t("aidpKnowledge.ontologyBytesUnit")}`}
-              rules={[
-                {
-                  validator: async (_rule, value: string) => {
-                    const error = validateOntologyName(value ?? "");
-                    if (error) throw new Error(error);
-                  },
-                },
-              ]}
+        <header className="shrink-0 px-6 pt-4">
+          <Breadcrumb
+            items={[
+              {
+                title: (
+                  <button
+                    type="button"
+                    onClick={backToList}
+                    className={typography.breadcrumbLink}
+                  >
+                    {t("aidpKnowledge.ontologyTitle")}
+                  </button>
+                ),
+              },
+              {
+                title: (
+                  <span className={typography.pageTitle}>
+                    {t("aidpKnowledge.ontologyCreatePageTitle")}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+          <section className={styles.panel}>
+            <Form
+              form={form}
+              layout="vertical"
+              requiredMark
+              className={drawerStyles.form}
             >
-              <Input
-                maxLength={ONTOLOGY_NAME_MAX_BYTES}
-                placeholder={t("aidpKnowledge.ontologyDomainNamePlaceholder")}
-              />
-            </Form.Item>
-            <Form.Item
-              name="description"
-              label={t("aidpKnowledge.ontologyDomainDescription")}
-              extra={`${utf8ByteLength(descriptionValue)}/${ONTOLOGY_DESCRIPTION_MAX_BYTES} ${t("aidpKnowledge.ontologyBytesUnit")}`}
-              rules={[
-                {
-                  validator: async (_rule, value: string) => {
-                    const error = validateOntologyDescription(value ?? "");
-                    if (error) throw new Error(error);
+              <Form.Item
+                name="name"
+                label={t("aidpKnowledge.ontologyDomainName")}
+                extra={`${nameValue.length}/${ONTOLOGY_NAME_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+                rules={[
+                  {
+                    validator: async (_rule, value: string) => {
+                      const error = validateOntologyName(value ?? "");
+                      if (error) throw new Error(error);
+                    },
                   },
-                },
-              ]}
-            >
-              <Input.TextArea
-                autoSize={{ minRows: 4, maxRows: 8 }}
-                placeholder={t(
-                  "aidpKnowledge.ontologyDomainDescriptionPlaceholder"
-                )}
-              />
-            </Form.Item>
-          </Form>
-          {errorMessage && (
-            <div className={drawerStyles.error} role="alert">
-              {errorMessage}
+                ]}
+              >
+                <Input
+                  maxLength={ONTOLOGY_NAME_MAX_CHARS}
+                  placeholder={t("aidpKnowledge.ontologyDomainNamePlaceholder")}
+                />
+              </Form.Item>
+              <Form.Item
+                name="description"
+                label={t("aidpKnowledge.ontologyDomainDescription")}
+                extra={`${descriptionValue.length}/${ONTOLOGY_DESCRIPTION_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+                rules={[
+                  {
+                    validator: async (_rule, value: string) => {
+                      const error = validateOntologyDescription(value ?? "");
+                      if (error) throw new Error(error);
+                    },
+                  },
+                ]}
+              >
+                <Input.TextArea
+                  autoSize={{ minRows: 4, maxRows: 8 }}
+                  placeholder={t(
+                    "aidpKnowledge.ontologyDomainDescriptionPlaceholder"
+                  )}
+                />
+              </Form.Item>
+            </Form>
+            {errorMessage && (
+              <div className={drawerStyles.error} role="alert">
+                {errorMessage}
+              </div>
+            )}
+            <div className={styles.footer}>
+              <Button onClick={backToList}>{t("common.cancel")}</Button>
+              <Button
+                type="primary"
+                loading={saving}
+                onClick={() => void handleCreate()}
+              >
+                {t("aidpKnowledge.ontologyCreateSubmit")}
+              </Button>
             </div>
-          )}
-          <div className={styles.footer}>
-            <Button onClick={backToList}>{t("common.cancel")}</Button>
-            <Button
-              type="primary"
-              loading={saving}
-              onClick={() => void handleCreate()}
-            >
-              {t("aidpKnowledge.ontologyCreateSubmit")}
-            </Button>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </ConfigProvider>
   );

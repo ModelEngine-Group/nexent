@@ -8,9 +8,8 @@ import { App, Button, Drawer, Form, Input } from "antd";
 
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
-  ONTOLOGY_DESCRIPTION_MAX_BYTES,
-  ONTOLOGY_NAME_MAX_BYTES,
-  utf8ByteLength,
+  ONTOLOGY_DESCRIPTION_MAX_CHARS,
+  ONTOLOGY_NAME_MAX_CHARS,
   validateOntologyDescription,
   validateOntologyName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
@@ -44,8 +43,8 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
   const nameValue = (Form.useWatch("name", form) as string | undefined) ?? "";
   const descriptionValue =
     (Form.useWatch("description", form) as string | undefined) ?? "";
-  const nameLength = utf8ByteLength(nameValue);
-  const descriptionLength = utf8ByteLength(descriptionValue);
+  const nameLength = nameValue.length;
+  const descriptionLength = descriptionValue.length;
   const editing = !!domain;
 
   const handleClose = () => {
@@ -130,7 +129,7 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
         <Form.Item
           name="name"
           label={t("aidpKnowledge.ontologyDomainName")}
-          extra={`${nameLength}/${ONTOLOGY_NAME_MAX_BYTES} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+          extra={`${nameLength}/${ONTOLOGY_NAME_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
           rules={[
             {
               validator: async (_rule, value: string) => {
@@ -141,14 +140,14 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
           ]}
         >
           <Input
-            maxLength={ONTOLOGY_NAME_MAX_BYTES}
+            maxLength={ONTOLOGY_NAME_MAX_CHARS}
             placeholder={t("aidpKnowledge.ontologyDomainNamePlaceholder")}
           />
         </Form.Item>
         <Form.Item
           name="description"
           label={t("aidpKnowledge.ontologyDomainDescription")}
-          extra={`${descriptionLength}/${ONTOLOGY_DESCRIPTION_MAX_BYTES} ${t("aidpKnowledge.ontologyBytesUnit")}`}
+          extra={`${descriptionLength}/${ONTOLOGY_DESCRIPTION_MAX_CHARS} ${t("aidpKnowledge.ontologyBytesUnit")}`}
           rules={[
             {
               validator: async (_rule, value: string) => {

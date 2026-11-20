@@ -15,10 +15,10 @@ from contracts.roles import has_any_role
 from management.db.identity.user_tenant import get_user_role_by_tenant
 
 
-_DOMAIN_NAME_MAX_BYTES = 64
+_DOMAIN_NAME_MAX_CHARS = 64
 
 
-_DOMAIN_DESCRIPTION_MAX_BYTES = 512
+_DOMAIN_DESCRIPTION_MAX_CHARS = 512
 
 
 _METADATA_FIELD_NAME_MAX_CHARS = 63
@@ -69,8 +69,8 @@ def _clean_required(value: Any, message: str) -> str:
 
 def _validate_domain_name(value: str) -> str:
     name = _clean_required(value, "本体库名称不能为空")
-    if _utf8_size(name) > _DOMAIN_NAME_MAX_BYTES:
-        raise _bad_request(f"本体库名称不能超过 {_DOMAIN_NAME_MAX_BYTES} 字节")
+    if len(name) > _DOMAIN_NAME_MAX_CHARS:
+        raise _bad_request(f"本体库名称不能超过 {_DOMAIN_NAME_MAX_CHARS} 个字符")
     # AIDP rejects hyphens with an opaque 500/code1001; fail fast with a
     # readable 400 before the request leaves Nexent.
     if "-" in name:
@@ -80,8 +80,8 @@ def _validate_domain_name(value: str) -> str:
 
 def _validate_domain_description(value: str | None) -> str:
     description = (value or "").strip()
-    if _utf8_size(description) > _DOMAIN_DESCRIPTION_MAX_BYTES:
-        raise _bad_request(f"本体库描述不能超过 {_DOMAIN_DESCRIPTION_MAX_BYTES} 字节")
+    if len(description) > _DOMAIN_DESCRIPTION_MAX_CHARS:
+        raise _bad_request(f"本体库描述不能超过 {_DOMAIN_DESCRIPTION_MAX_CHARS} 个字符")
     return description
 
 

@@ -1951,7 +1951,7 @@
   "aidpKnowledge.ontologyBindingSelectLabel": "选择知识库",
   "aidpKnowledge.ontologyBindingSelectRequired": "请选择要绑定的知识库",
   "aidpKnowledge.ontologyBindingStatusGap": "没有按知识库查询绑定或解绑任务状态的对外接口。列表里没有记录不代表后台清理完成；清理期间重新绑定可能返回 409，页面不能自动轮询并宣称已完成。",
-  "aidpKnowledge.ontologyBytesUnit": "字节",
+  "aidpKnowledge.ontologyBytesUnit": "字符",
   "aidpKnowledge.ontologyCardUpdatedAt": "更新于 {{time}}",
   "aidpKnowledge.ontologyChunkAnnotate": "标注",
   "aidpKnowledge.ontologyChunkDetailLoadFailed": "Chunk 详情加载失败",

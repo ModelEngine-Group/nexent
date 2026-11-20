@@ -76,7 +76,6 @@ const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
       okText={t("aidpKnowledge.ontologyDomainDeleteSubmit")}
       cancelText={t("common.cancel")}
       okButtonProps={{
-        danger: true,
         disabled: confirmText.trim() !== CONFIRM_TEXT,
         loading: deleting,
       }}
