@@ -117,3 +117,26 @@ async def test_ingested_document_projection_keeps_internal_location_private(sear
         "id": "one", "content": "worker content", "filename": "source.txt",
         "path_or_url": "source.txt", "file_size": 42,
     })
+
+
+@pytest.mark.parametrize("metadata", [
+    {},
+    {"chunk_index": 0, "file_type": "xlsx"},
+    {"chunk_index": 3, "element_type": "CompositeElement", "page_number": 2,
+     "coordinates": {"points": [[1, 2], [3, 4]]}},
+])
+async def test_cleansed_text_restores_legacy_metadata_shape(search, metadata):
+    s, request, _, hit, service = search
+    location = {**metadata, "path_or_url": "source.txt", "language": "en",
+                "internal_location": {"version": "private"}}
+    s.vectors.search.return_value = (replace(hit, payload={
+        **hit.payload, "parser_version": "parser-v1", "location": location,
+    }),)
+
+    result = await service.search(request.model_copy(update={"include_public_document": True}), s.actor)
+
+    assert result.hits[0].public_document == {
+        "id": "one", "content": "worker content", "filename": "source.txt",
+        "path_or_url": "source.txt", "language": "en",
+        "metadata": metadata, "process_source": "Unstructured", "date": None,
+    }

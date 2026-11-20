@@ -62,6 +62,12 @@ def _public_document(hit):
         "path_or_url", "source_type", "file_size", "create_time",
         "title", "language", "author", "date", "process_source",
     ) if field in location})
+    if payload.get("parser_version"):
+        document["metadata"] = {field: location[field] for field in (
+            "chunk_index", "element_type", "page_number", "coordinates", "file_type",
+        ) if field in location}
+        document.setdefault("process_source", "Unstructured")
+        document.setdefault("date", None)
     return document
 
 
