@@ -89,3 +89,36 @@ def test_missing_pg_evidence_does_not_write_a_receipt(broker, tmp_path, error):
 
     assert legacy_broker.main(args(output)) == 1
     assert not output.exists()
+
+
+def test_optional_result_inventory_is_aggregate_and_keeps_queue_semantics(broker, tmp_path):
+    port, _, roles = broker
+    port.get.side_effect = [
+        port.get.return_value,
+        {"id": "result_metadata", "with_index_hint": 7, "without_index_hint": 2, "invalid_task_key": 1,
+         "private_result": "must not appear"},
+    ]
+    output = tmp_path / "receipt.json"
+
+    assert legacy_broker.main(args(output) + ["--include-result-inventory"]) == 0
+
+    result = json.loads(output.read_text())
+    assert result["broker_empty"] is True and result["migration_ready"] is False
+    assert result["result_metadata"] == {"with_index_hint": 7, "without_index_hint": 2, "invalid_task_key": 1}
+    assert [call.args[1] for call in port.get.call_args_list] == ["queues", "result_metadata"]
+    assert roles.call_count == 2
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+def test_result_inventory_failure_or_late_revocation_prevents_receipt(broker, tmp_path, revoked):
+    port, _, roles = broker
+    port.get.side_effect = [
+        port.get.return_value,
+        {"with_index_hint": 0, "without_index_hint": 0, "invalid_task_key": 0} if revoked else Unavailable(),
+    ]
+    if revoked:
+        roles.side_effect = [{"SU"}, {"ADMIN"}]
+    output = tmp_path / "receipt.json"
+
+    assert legacy_broker.main(args(output) + ["--include-result-inventory"]) == 1
+    assert not output.exists()

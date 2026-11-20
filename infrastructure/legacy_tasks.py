@@ -46,7 +46,7 @@ def legacy_broker_ports(actor, *, context):
         identity = bind_quota_identity(actor, engine)
         broker = LegacyBrokerRecords(
             StorageScope("management", actor.tenant_id, actor.user_id, {BROKER_INVENTORY}),
-            environment.REDIS_URL,
+            environment.REDIS_URL, result_url=environment.REDIS_BACKEND_URL,
         )
         scope = StorageScope(
             "management", None, actor.user_id, {LEGACY_INGESTION_INVENTORY}, system=True,

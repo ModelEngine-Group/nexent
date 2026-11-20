@@ -32,6 +32,16 @@ STATUSES = {'PENDING', 'RECEIVED', 'STARTED', 'RETRY', 'SUCCESS', 'FAILURE', 'RE
 TASK_ID = re.compile(r'[A-Za-z0-9_-]{1,100}')
 
 
+def scan_legacy_keys(client, cursor, pattern, context):
+    response = client.scan(cursor=cursor, match=pattern, count=100)
+    context.remaining()
+    if (not isinstance(response, (tuple, list)) or len(response) != 2 or type(response[0]) is not int
+        or response[0] < 0 or not isinstance(response[1], (tuple, list)) or len(response[1]) > 10000
+        or any(not isinstance(key, bytes) for key in response[1])):
+        raise Unavailable()
+    return response
+
+
 class LegacyTaskRecords:
     capabilities = CapabilitySet(frozenset({'record.get', 'record.query'}))
 
@@ -147,7 +157,7 @@ class LegacyTaskRecords:
         with self._client('general', context) as client:
             cursor, seen = 0, set(keys)
             while True:
-                cursor, parts = self._scan_keys(client, cursor, 'dp:'+task_id+':part:*', context)
+                cursor, parts = scan_legacy_keys(client, cursor, 'dp:'+task_id+':part:*', context)
                 for raw in parts:
                     try: key = raw.decode('ascii')
                     except UnicodeError: raise Unavailable() from None
@@ -179,22 +189,12 @@ class LegacyTaskRecords:
             cursor = 0
             while True:
                 context.remaining()
-                cursor, keys = self._scan_keys(client, cursor, 'dp:' + task_id + ':part:*', context)
+                cursor, keys = scan_legacy_keys(client, cursor, 'dp:' + task_id + ':part:*', context)
                 if keys:
                     present.append('parts'); break
                 if not cursor: break
         row['auxiliary_present'] = present
         return row
-
-    @staticmethod
-    def _scan_keys(client, cursor, pattern, context):
-        response = client.scan(cursor=cursor, match=pattern, count=100)
-        context.remaining()
-        if (not isinstance(response, (tuple, list)) or len(response) != 2 or type(response[0]) is not int
-            or response[0] < 0 or not isinstance(response[1], (tuple, list)) or len(response[1]) > 10000
-            or any(not isinstance(key, bytes) for key in response[1])):
-            raise Unavailable()
-        return response
 
     def get(self, dataset, key, *, fields=(), consistency=ReadConsistency.AUTHORITATIVE, context):
         self._authorize(dataset, fields=fields, consistency=consistency)
@@ -214,7 +214,7 @@ class LegacyTaskRecords:
         with self._client('backend', context) as client:
             while len(selected) < page.limit:
                 if not self._buffer:
-                    self._scan, keys = self._scan_keys(client, self._scan, 'celery-task-meta-*', context)
+                    self._scan, keys = scan_legacy_keys(client, self._scan, 'celery-task-meta-*', context)
                     self._buffer.extend(keys)
                 while self._buffer and len(selected) < page.limit:
                     try: task_id = self._buffer.popleft().decode('ascii').removeprefix('celery-task-meta-')

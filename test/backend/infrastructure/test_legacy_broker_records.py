@@ -71,3 +71,37 @@ def test_provider_error_is_redacted_and_never_retried(broker):
         store.get(BROKER_INVENTORY, "queues", context=context())
     pipe.execute.assert_called_once()
     client.__exit__.assert_called_once()
+
+
+def test_result_inventory_counts_distinct_keys_without_exposing_metadata(broker):
+    store, client, pipe, factory = broker
+    store._result_url = "redis://local/1"
+    prefix = b"celery-task-meta-"
+    indexed, missing, malformed, oversized, expired, invalid = (
+        prefix + suffix for suffix in (b"first", b"second", b"bad", b"huge", b"gone", b"/invalid")
+    )
+    client.scan.side_effect = [(8, [indexed, missing, invalid]), (0, [indexed, malformed, oversized, expired])]
+    client.getrange.side_effect = [
+        b'{"result":{"index_name":"private-index"}}', b'{"result":{"tenant_id":"private-tenant"}}',
+        b'not-json', b' ' * (1024 * 1024 + 1), b'',
+    ]
+
+    assert store.get(BROKER_INVENTORY, "result_metadata", context=context()) == {
+        "id": "result_metadata", "with_index_hint": 1, "without_index_hint": 4, "invalid_task_key": 1,
+    }
+    assert [call.args for call in client.getrange.call_args_list] == [
+        (key, 0, 1024 * 1024) for key in (indexed, missing, malformed, oversized, expired)
+    ]
+    assert factory.call_args.args == ("redis://local/1",)
+    client.pipeline.assert_not_called()
+
+
+@pytest.mark.parametrize("response", [(False, []), (0, ["decoded"]), None])
+def test_invalid_result_scan_cannot_report_counts(broker, response):
+    store, client, _, _ = broker
+    store._result_url = "redis://local/1"
+    client.scan.return_value = response
+    with pytest.raises(Unavailable):
+        store.get(BROKER_INVENTORY, "result_metadata", context=context())
+    client.getrange.assert_not_called()
+    client.__exit__.assert_called_once()

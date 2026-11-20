@@ -21,7 +21,7 @@ from infrastructure.legacy_tasks import legacy_broker_ports
 logger = logging.getLogger(__name__)
 
 
-def _read(actor, context):
+def _read(actor, context, *, include_result_inventory):
     with legacy_broker_ports(actor, context=context) as (identity, broker, files):
         if not has_any_role(quota_identity_roles(identity, actor, context=context), {"SU"}):
             raise ScopeDenied()
@@ -29,10 +29,16 @@ def _read(actor, context):
         inflight = files.get(LEGACY_INGESTION_INVENTORY, "files", context=context)
         if inflight is None:
             raise Unavailable(operation_id=context.operation_id)
+        result = {}
+        if include_result_inventory:
+            counts = broker.get(BROKER_INVENTORY, "result_metadata", context=context)
+            result["result_metadata"] = {name: counts[name] for name in (
+                "with_index_hint", "without_index_hint", "invalid_task_key",
+            )}
         if not has_any_role(quota_identity_roles(identity, actor, context=context), {"SU"}):
             raise ScopeDenied()
         broker_counts.pop("id")
-        return {**broker_counts, "legacy_inflight_files": inflight["count"]}
+        return {**broker_counts, "legacy_inflight_files": inflight["count"], **result}
 
 
 def main(argv=None):
@@ -41,6 +47,8 @@ def main(argv=None):
     parser.add_argument("--user-id", required=True, help="Actual operator with active SU membership")
     parser.add_argument("--legacy-quiesced", required=True, action="store_true",
                         help="Operator confirms legacy publishers and early-ack workers have stopped")
+    parser.add_argument("--include-result-inventory", action="store_true",
+                        help="Scan the result backend for counts of keys with and without index hints")
     parser.add_argument("--output", required=True, type=Path, help="New private JSON receipt")
     parser.add_argument("--timeout", type=int, default=30, help="Total deadline in seconds, at most 300")
     args = parser.parse_args(argv)
@@ -51,7 +59,7 @@ def main(argv=None):
     context = OperationContext("legacy-broker-" + uuid4().hex, monotonic() + args.timeout)
     try:
         actor = ServicePrincipal(args.user_id, args.tenant_id)
-        evidence = _read(actor, context)
+        evidence = _read(actor, context, include_result_inventory=args.include_result_inventory)
         broker_empty = not (
             any(evidence["queues"].values()) or evidence["shared_default_queue"]
             or evidence["shared_unacked"] or evidence["shared_unacked_index"]
