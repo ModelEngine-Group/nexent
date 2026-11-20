@@ -15,7 +15,7 @@ from gateway.security.identity import IdentityError, sign_delegation, sign_ident
 from gateway.mcp import identity_router as mcp
 from gateway.security.context import identity_context
 from gateway.mcp import credential_client
-from gateway.mcp.credential_client import resolve_delegated_identity, resolve_mcp_identity
+from gateway.mcp.credential_client import resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
@@ -110,6 +110,8 @@ async def test_delegated_identity_adapter_reads_gateway_origin_and_key_from_sett
     authenticated MCP call fail with a TypeError that surfaced as a 403.
     """
     from contracts.constants import environment
+
+    from backend.http import mcp_service
     from gateway.security.identity import derive_signing_key
 
     seen = {}
@@ -121,9 +123,9 @@ async def test_delegated_identity_adapter_reads_gateway_origin_and_key_from_sett
     monkeypatch.setattr(environment, "GATEWAY_SERVICE_URL", "http://gateway:5013")
     monkeypatch.setattr(environment, "JWT_SECRET", KEY)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "")
-    monkeypatch.setattr(credential_client, "resolve_mcp_identity", fake_resolve)
+    monkeypatch.setattr(mcp_service, "_resolve_gateway_mcp_identity", fake_resolve)
 
-    result = await resolve_delegated_identity(SCOPE, "Bearer test")
+    result = await mcp_service._resolve_delegated_identity(SCOPE, "Bearer test")
 
     assert result == PRINCIPAL
     assert seen["gateway_url"] == "http://gateway:5013"

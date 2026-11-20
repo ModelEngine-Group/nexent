@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from management.utils.exception_handlers import register_exception_handlers
+from backend.http.server.exception_handlers import register_exception_handlers
 from backend.http.server.health import install_health_contract
 
 try:

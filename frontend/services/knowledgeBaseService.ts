@@ -1988,9 +1988,7 @@ class KnowledgeBaseService {
   }> {
     try {
       const response = await fetch(
-        `${API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId)}${
-          fileId ? `?file_id=${encodeURIComponent(fileId)}` : ""
-        }`,
+        API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId, fileId),
         {
           headers: getAuthHeaders(),
         }

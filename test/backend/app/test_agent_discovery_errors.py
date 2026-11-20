@@ -5,9 +5,19 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from test.backend.app import test_agent_app as legacy
+from management.api.agent.agent import agent_config_router
 from contracts.errors.exceptions import AgentNotFoundError
+
+
+@pytest.fixture
+def client():
+    app = FastAPI()
+    app.include_router(agent_config_router)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.mark.parametrize("lookup", ["detail", "name"])
@@ -19,7 +29,7 @@ from contracts.errors.exceptions import AgentNotFoundError
         (ValueError("invalid internal configuration"), 500),
     ],
 )
-def test_discovery_classifies_errors_without_disclosure(mocker, lookup, error, status):
+def test_discovery_classifies_errors_without_disclosure(mocker, client, lookup, error, status):
     mocker.patch(
         "management.api.agent.agent.get_current_user_id", return_value=("user-b", "tenant-b")
     )
@@ -29,13 +39,13 @@ def test_discovery_classifies_errors_without_disclosure(mocker, lookup, error, s
             new_callable=AsyncMock,
             side_effect=error,
         )
-        response = legacy.config_client.post(
+        response = client.post(
             "/agent/search_info", json={"agent_id": 42, "version_no": 0}
         )
         service.assert_awaited_once_with(42, "tenant-b", 0, "user-b")
     else:
         service = mocker.patch("management.api.agent.agent.get_agent_by_name_impl", side_effect=error)
-        response = legacy.config_client.get("/agent/by-name/missing")
+        response = client.get("/agent/by-name/missing")
         service.assert_called_once_with("missing", "tenant-b")
 
     assert response.status_code == status

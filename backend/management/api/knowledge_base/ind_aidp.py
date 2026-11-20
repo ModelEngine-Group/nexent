@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from infrastructure.agentos_identity import ServicePrincipal
 
 from management.services.knowledge_base.providers.aidp import (
     IndependentAidpServiceError,
@@ -36,14 +36,17 @@ async def list_ind_aidp_knowledge_bases(
 
 
 @router.get("/images/{image_ref}")
-async def proxy_ind_aidp_image(image_ref: str):
+async def proxy_ind_aidp_image(image_ref: str, authorization: Optional[str] = Header(None)):
     """Stream an AIDP image without exposing its API key to the browser."""
     try:
-        content, content_type = await fetch_ind_aidp_image_impl(image_ref)
+        user_id, tenant_id = get_current_user_id(authorization)
+        content, content_type, cache_control = await fetch_ind_aidp_image_impl(
+            image_ref, ServicePrincipal(user_id, tenant_id),
+        )
         return StreamingResponse(
             BytesIO(content),
             media_type=content_type,
-            headers={"Cache-Control": "private, max-age=3600"},
+            headers={"Cache-Control": cache_control},
         )
     except IndependentAidpServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

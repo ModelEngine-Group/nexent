@@ -127,6 +127,14 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
+            "management.api.agent.conversation_run": {"router": APIRouter()},
+            "management.api.agent.creator": {"router": APIRouter()},
+            "management.api.skill.creation": {"skill_creator_router": APIRouter()},
+            "management.api.agent.nl2agent_callback": {"router": APIRouter()},
+            "management.api.agent.workbench_callback": {"router": APIRouter()},
+            "management.api.automation.agentos_callback": {"router": APIRouter()},
+            "management.api.memory.agentos_callback": {"router": APIRouter()},
+            "management.api.automation.agent_automation": {"router": APIRouter(), "conversation_automation_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
             "management.api.configuration.config_sync": {"router": APIRouter()},
@@ -137,6 +145,10 @@ class TestConfigAppRouterConfiguration:
             "management.api.knowledge_base.ragflow": {"router": APIRouter()},
             "management.api.file.file_management": {"file_management_config_router": APIRouter()},
             "management.api.file.image": {"router": APIRouter()},
+            "management.api.file.storage": {"router": APIRouter()},
+            "management.api.conversation.conversation_management": {"router": APIRouter()},
+            "management.api.conversation.conversation_share": {"router": APIRouter()},
+            "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
             "ops.api.access": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
@@ -148,7 +160,6 @@ class TestConfigAppRouterConfiguration:
             "management.api.configuration.tenant_config": {"router": APIRouter()},
             "management.api.tool.tool_config": {"router": APIRouter()},
             "management.api.identity.user_management": {"router": APIRouter()},
-            "management.api.voice.voice": {"voice_config_router": APIRouter()},
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
@@ -212,6 +223,7 @@ class TestConfigAppRouterConfiguration:
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
         const_module.ENABLE_AGENT_WORKBENCH = False
+        const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
         monkeypatch.setitem(sys.modules, "contracts.constants.environment", const_module)
         manager_state = types.SimpleNamespace(CREATED="created")
@@ -237,6 +249,7 @@ class TestConfigAppRouterConfiguration:
                 return {"service_name": "config", "active_count": 0}
 
         concurrency_module = types.ModuleType("nexent.core.concurrency")
+        concurrency_module.__dict__.update(vars(importlib.import_module("nexent.core.concurrency")))
         concurrency_module.ManagedTaskSpec = ManagedTaskSpec
         concurrency_module.ManagerState = manager_state
 
@@ -261,12 +274,21 @@ class TestConfigAppRouterConfiguration:
             "management.thread_management",
             thread_lifecycle_module,
         )
-        configuration_runtime = types.ModuleType("management.configuration.runtime")
+        configuration_runtime = types.ModuleType("infrastructure.system_configuration.runtime")
         configuration_runtime.start_system_configuration = AsyncMock()
         configuration_runtime.stop_system_configuration = AsyncMock()
         monkeypatch.setitem(
-            sys.modules, "management.configuration.runtime", configuration_runtime
+            sys.modules, "infrastructure.system_configuration.runtime", configuration_runtime
         )
+
+        runtime_state = MagicMock()
+        monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
+                            types.SimpleNamespace(runtime_state_service=runtime_state))
+        component_path = Path(backend_dir) / "management/api/northbound_application.py"
+        component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
+        component = importlib.util.module_from_spec(component_spec)
+        component_spec.loader.exec_module(component)
+        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
 
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
@@ -309,22 +331,45 @@ class TestConfigAppRouterConfiguration:
             dreaming_scheduler_module,
         )
 
-        runtime_state = MagicMock()
-        monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
-                            types.SimpleNamespace(runtime_state_service=runtime_state))
-        component_path = Path(backend_dir) / "management/api/northbound_application.py"
-        component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
-        component = importlib.util.module_from_spec(component_spec)
-        component_spec.loader.exec_module(component)
-        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
+        automation_scheduler = types.SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
+        automation_recover = MagicMock()
+        monkeypatch.setitem(sys.modules, "management.services.automation.scheduler", types.SimpleNamespace(
+            agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
+        ))
+
+        from contextlib import asynccontextmanager
+        prepared_events = []
+
+        @asynccontextmanager
+        async def prepared_lifespan():
+            prepared_events.append("start")
+            try:
+                yield
+            finally:
+                prepared_events.append("stop")
+
+        monkeypatch.setitem(sys.modules, "management.services.agent.prepared_turn", types.SimpleNamespace(
+            prepared_turn_lifespan=prepared_lifespan,
+        ))
+        shutdown_creators = AsyncMock()
+        monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
+            shutdown_creator_streams=shutdown_creators,
+        ))
 
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
-        assert all(router is not retired_router for router in config_app.app.included_routers)
+        assert all(
+            registered is not retired
+            for registered in config_app.app.included_routers
+            for retired in (retired_router,)
+        )
         assert api_key_router in config_app.app.included_routers
+        assert router_modules["management.api.file.storage"]["router"] in config_app.app.included_routers
+        for router in router_modules["management.api.northbound"].values():
+            assert router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",
             "/api-keys/refresh",
@@ -355,7 +400,9 @@ class TestConfigAppRouterConfiguration:
         ):
             asyncio.run(exercise_lifespan())
 
+        shutdown_creators.assert_awaited_once_with(timeout=1)
         assert config_app.app.lifespan is config_app.config_lifespan
+        assert prepared_events == ["start", "stop"]
         migration.migrate_legacy_outlets.assert_called_once_with()
         concurrency_module.run_blocking.assert_awaited_once_with(
             "model-outlet-upgrade", migration.migrate_legacy_outlets
@@ -369,6 +416,11 @@ class TestConfigAppRouterConfiguration:
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
+        automation_recover.assert_called_once_with()
+        automation_scheduler.start.assert_awaited_once_with()
+        automation_scheduler.stop.assert_awaited_once_with()
+        for router in router_modules["management.api.automation.agent_automation"].values():
+            assert router in config_app.app.included_routers
         assert configuration_runtime.start_system_configuration.await_count == 1
         configuration_runtime.stop_system_configuration.assert_awaited_once_with()
 

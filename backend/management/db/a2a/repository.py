@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from contracts.errors.exceptions import AgentNotFoundError
+from infrastructure.rdb.a2a_execution_records import active_external_agent_filters
 from management.db.models import (
     AgentInfo,
     A2AExternalAgent,
@@ -861,15 +862,7 @@ def query_external_sub_agents(local_agent_id: int, tenant_id: str, version_no: i
         results = (
             session.query(A2AExternalAgentRelation, A2AExternalAgent)
             .join(A2AExternalAgent, A2AExternalAgent.id == A2AExternalAgentRelation.external_agent_id)
-            .filter(
-                A2AExternalAgentRelation.local_agent_id == local_agent_id,
-                A2AExternalAgentRelation.tenant_id == tenant_id,
-                A2AExternalAgentRelation.delete_flag != "Y",
-                A2AExternalAgentRelation.is_enabled == True,
-                A2AExternalAgent.tenant_id == tenant_id,
-                A2AExternalAgent.delete_flag != "Y",
-                A2AExternalAgent.is_available == True,
-            )
+            .filter(*active_external_agent_filters(local_agent_id, tenant_id))
             .all()
         )
 

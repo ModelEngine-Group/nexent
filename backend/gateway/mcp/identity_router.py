@@ -89,4 +89,3 @@ async def _send_not_found(send: Callable) -> None:
 async def _send_forbidden(send: Callable) -> None:
     await send({"type": "http.response.start", "status": 403, "headers": []})
     await send({"type": "http.response.body", "body": b"MCP tenant access denied"})
-

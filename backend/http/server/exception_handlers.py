@@ -1,0 +1,186 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Shared HTTP error mappings without application or telemetry initialization."""
+
+import logging
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+
+from contracts.errors.capabilities import NexentCapabilityError as _NCE
+from contracts.errors.exceptions import (
+    AppException,
+    ManagementReadBusyError,
+    QuotaExceededError,
+    TokenExpiredError,
+)
+from management.utils.domain_errors import domain_error_body
+from management.utils.request_context import get_request_id
+
+try:
+    from ext_components.aidp.consts.aidp_exceptions import (
+        AidpGroupValidationError,
+        AidpKbConflictError,
+        AidpKbNotFoundError,
+        AidpKbPermissionDeniedError,
+        AidpKbSyncError,
+    )
+    AIDP_EXCEPTIONS_AVAILABLE = True
+except ImportError:
+    AIDP_EXCEPTIONS_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """
+    Register common exception handlers for the FastAPI application.
+
+    Args:
+        app: FastAPI application instance
+    """
+
+    @app.exception_handler(ManagementReadBusyError)
+    async def management_read_busy_handler(request, exc):
+        return JSONResponse(
+            status_code=429,
+            content={"code": exc.code, "message": str(exc), "retryable": True},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request, exc):
+        logger.error(f"HTTPException: {exc.detail}")
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"message": exc.detail},
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(AppException)
+    async def app_exception_handler(request, exc):
+        logger.error(f"AppException: {exc.error_code.value} - {exc.message}")
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={
+                "code": exc.error_code.value,
+                "message": exc.message,
+                "details": exc.details if exc.details else None,
+            },
+        )
+
+    @app.exception_handler(TokenExpiredError)
+    async def token_expired_exception_handler(request, exc):
+        logger.info("TokenExpiredError: %s", exc)
+        return JSONResponse(
+            status_code=401,
+            content={
+                "message": "Session expired, please log in again",
+                "code": "TOKEN_EXPIRED",
+            },
+        )
+
+    @app.exception_handler(QuotaExceededError)
+    async def quota_exceeded_exception_handler(request, exc):
+        logger.warning("QuotaExceededError: %s", exc)
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": "TenantStorageFull",
+                "message": str(exc),
+                "usage_bytes": exc.usage_bytes,
+                "hard_limit_bytes": exc.hard_limit_bytes,
+                "exceeded_by_bytes": exc.exceeded_by_bytes,
+            },
+        )
+
+    # ---- AIDP permission subsystem exceptions (v7.1) ----
+    # These are domain exceptions (inherit from plain Exception) that map to
+    # HTTP status codes per v7.1 design. Without explicit handlers they would
+    # fall through to the generic handler below and surface as 500, hiding
+    # the real error from the client.
+    if AIDP_EXCEPTIONS_AVAILABLE:
+
+        @app.exception_handler(AidpKbNotFoundError)
+        async def aidp_kb_not_found_handler(request, exc):
+            logger.warning("AidpKbNotFoundError: %s", exc)
+            return JSONResponse(
+                status_code=404,
+                content={"message": str(exc), "code": "AIDP_KB_NOT_FOUND", "kb_id": exc.kb_id},
+            )
+
+        @app.exception_handler(AidpKbPermissionDeniedError)
+        async def aidp_permission_denied_handler(request, exc):
+            logger.warning(
+                "AidpKbPermissionDeniedError: user=%s kb=%s required=%s", exc.user_id, exc.kb_id, exc.required
+            )
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "message": str(exc),
+                    "code": "AIDP_PERMISSION_DENIED",
+                    "kb_id": exc.kb_id,
+                    "required": exc.required,
+                },
+            )
+
+        @app.exception_handler(AidpKbConflictError)
+        async def aidp_conflict_handler(request, exc):
+            logger.warning("AidpKbConflictError: %s", exc)
+            return JSONResponse(
+                status_code=409,
+                content={"message": str(exc), "code": "AIDP_KB_CONFLICT", "kb_id": exc.kb_id},
+            )
+
+        @app.exception_handler(AidpKbSyncError)
+        async def aidp_sync_error_handler(request, exc):
+            logger.error("AidpKbSyncError: %s", exc)
+            return JSONResponse(
+                status_code=502,
+                content={"message": str(exc), "code": "AIDP_SYNC_ERROR", "operation": exc.operation},
+            )
+
+        @app.exception_handler(AidpGroupValidationError)
+        async def aidp_group_validation_handler(request, exc):
+            logger.warning("AidpGroupValidationError: %s", exc)
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "message": str(exc),
+                    "code": "AIDP_GROUP_VALIDATION",
+                    "invalid_ids": exc.invalid_ids,
+                },
+            )
+    else:
+        # AIDP subsystem not installed in this deployment; safe to skip
+        logger.debug("AIDP exception classes not available, skipping AIDP exception handlers")
+
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request, exc):
+        # Don't catch AppException - it has its own handler
+        if isinstance(exc, AppException):
+            return await app_exception_handler(request, exc)
+
+        # Handle NexentCapabilityError with a friendly message
+
+        if isinstance(exc, _NCE):
+            logger.warning(f"NexentCapabilityError: {exc}")
+            return JSONResponse(
+                status_code=400,
+                content={"message": str(exc)},
+            )
+
+        # Domain exceptions registered in the shared registry (northbound and
+        # internal entry points read the same table) translate to their
+        # contract status/code instead of collapsing into a 500. Unregistered
+        # failures keep falling through to the generic 500 without leaking
+        # internals.
+        domain_body = domain_error_body(exc, get_request_id(request))
+        if domain_body is not None:
+            logger.warning("Domain exception: %s: %s", type(exc).__name__, exc)
+            return JSONResponse(status_code=domain_body["status"], content=domain_body)
+
+        logger.error(f"Generic Exception: {exc}")
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Internal server error, please try again later."},
+        )

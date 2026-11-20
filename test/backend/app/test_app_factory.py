@@ -727,7 +727,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('management.utils.exception_handlers.logger') as mock_logger:
+        with patch('backend.http.server.exception_handlers.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -887,7 +887,7 @@ class TestAidpImportErrorBranch:
         from unittest.mock import patch
         from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 
-        with patch("management.utils.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
+        with patch("backend.http.server.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
             fresh_app = FastAPI()
             register_exception_handlers(fresh_app)
 

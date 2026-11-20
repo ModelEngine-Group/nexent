@@ -8,7 +8,6 @@ import asyncio
 import json
 import re
 import time
-from urllib.parse import quote
 
 import httpx
 import pytest
@@ -532,7 +531,10 @@ async def _forward_queue_isolation(identity) -> None:
             _rel06_assert_no_secrets(explicit_failure)
             if failed_names:
                 async with client("config", token=token) as api:
-                    error_info = await api.get(f"/indices/{index}/documents/{quote(next(iter(failed_names)), safe='')}/error-info")
+                    error_info = await api.get(
+                        f"/indices/{index}/documents/error-info",
+                        params={"path_or_url": next(iter(failed_names))},
+                    )
                 assert_status(error_info, 200)
                 _rel06_assert_no_secrets(redacted_response_body(error_info))
                 retry_files = [uploaded for uploaded in fault_files if uploaded["object_name"] in failed_names]

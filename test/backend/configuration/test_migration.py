@@ -62,7 +62,7 @@ def test_migration_defines_one_audited_scalar_table_and_safe_seed_protocol():
 
 
 def test_model_matches_migration_shape():
-    from management.configuration.models import SystemConfiguration
+    from infrastructure.system_configuration.models import SystemConfiguration
 
     table = SystemConfiguration.__table__
     assert table.name == "sys_configuration_t"

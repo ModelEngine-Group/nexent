@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "generated-580-rows",
+  "revision": "generated-581-rows",
   "routes": [
     {
       "method": "GET",
@@ -391,7 +391,7 @@
       "method": "GET",
       "path": "/api/agent/automations",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-5a2a72d2a65fcc5a",
       "credential_kinds": [
@@ -402,7 +402,7 @@
       "method": "POST",
       "path": "/api/agent/automations/proposals",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-4807e86742b538e6",
       "credential_kinds": [
@@ -413,7 +413,7 @@
       "method": "PATCH",
       "path": "/api/agent/automations/proposals/{proposal_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-35d5bc9e33d531a5",
       "credential_kinds": [
@@ -424,7 +424,7 @@
       "method": "POST",
       "path": "/api/agent/automations/proposals/{proposal_id}/confirm",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-0d15b30a2b15879b",
       "credential_kinds": [
@@ -435,7 +435,7 @@
       "method": "DELETE",
       "path": "/api/agent/automations/runs/{run_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-2d8beddbdf84358a",
       "credential_kinds": [
@@ -446,7 +446,7 @@
       "method": "POST",
       "path": "/api/agent/automations/runs/{run_id}/cancel",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-e95b67344aedbd9c",
       "credential_kinds": [
@@ -457,7 +457,7 @@
       "method": "DELETE",
       "path": "/api/agent/automations/{task_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-4510a4a686db0111",
       "credential_kinds": [
@@ -468,7 +468,7 @@
       "method": "GET",
       "path": "/api/agent/automations/{task_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-c72461303e35786f",
       "credential_kinds": [
@@ -479,7 +479,7 @@
       "method": "PATCH",
       "path": "/api/agent/automations/{task_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-c0d9f4823add1f96",
       "credential_kinds": [
@@ -490,7 +490,7 @@
       "method": "POST",
       "path": "/api/agent/automations/{task_id}/pause",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-4570cd3b22153382",
       "credential_kinds": [
@@ -501,7 +501,7 @@
       "method": "POST",
       "path": "/api/agent/automations/{task_id}/resume",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-06e791c0084b6446",
       "credential_kinds": [
@@ -512,7 +512,7 @@
       "method": "POST",
       "path": "/api/agent/automations/{task_id}/run",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-3e8a2b46eec53820",
       "credential_kinds": [
@@ -523,7 +523,7 @@
       "method": "GET",
       "path": "/api/agent/automations/{task_id}/runs",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-d97fa98991293290",
       "credential_kinds": [
@@ -644,8 +644,8 @@
       "method": "POST",
       "path": "/api/agent/nl2agent/run",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/agent/execution.py",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
       "route_id": "route-fd91b9ac9324dc2e",
       "credential_kinds": [
         "session"
@@ -677,8 +677,8 @@
       "method": "POST",
       "path": "/api/agent/run",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/agent/execution.py",
+      "target": "management",
+      "source": "backend/management/api/agent/conversation_run.py",
       "route_id": "route-fe4884ec2684ecae",
       "credential_kinds": [
         "session"
@@ -699,8 +699,8 @@
       "method": "GET",
       "path": "/api/agent/stop/{run_id}",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/agent/execution.py",
+      "target": "management",
+      "source": "backend/management/api/agent/conversation_run.py",
       "route_id": "route-8c19578cd9103a27",
       "credential_kinds": [
         "session"
@@ -1205,7 +1205,7 @@
       "method": "GET",
       "path": "/api/conversation/agent_groups",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-76a4de925dd02c72",
       "credential_kinds": [
@@ -1216,7 +1216,7 @@
       "method": "GET",
       "path": "/api/conversation/agent_groups/{agent_id}/conversation_ids",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-10457a116eae49c7",
       "credential_kinds": [
@@ -1227,7 +1227,7 @@
       "method": "GET",
       "path": "/api/conversation/agent_groups/{group_key}/conversations",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-e3067c58fed16f62",
       "credential_kinds": [
@@ -1238,7 +1238,7 @@
       "method": "POST",
       "path": "/api/conversation/batch-delete",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-3f881b0ecf68bf97",
       "credential_kinds": [
@@ -1260,7 +1260,7 @@
       "method": "PUT",
       "path": "/api/conversation/create",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-0e2fec25c52d0f9d",
       "credential_kinds": [
@@ -1271,7 +1271,7 @@
       "method": "POST",
       "path": "/api/conversation/generate_title",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-3d8ebe55e8062bad",
       "credential_kinds": [
@@ -1282,7 +1282,7 @@
       "method": "GET",
       "path": "/api/conversation/list",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-b11b73192502db17",
       "credential_kinds": [
@@ -1293,7 +1293,7 @@
       "method": "POST",
       "path": "/api/conversation/message/id",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-c007c02db837b96d",
       "credential_kinds": [
@@ -1304,7 +1304,7 @@
       "method": "POST",
       "path": "/api/conversation/message/update_opinion",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-044317de22af3b0b",
       "credential_kinds": [
@@ -1315,7 +1315,7 @@
       "method": "POST",
       "path": "/api/conversation/rename",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-dd9117b7730cdccd",
       "credential_kinds": [
@@ -1326,7 +1326,7 @@
       "method": "POST",
       "path": "/api/conversation/sources",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-ce783ca63662cdaf",
       "credential_kinds": [
@@ -1337,7 +1337,7 @@
       "method": "GET",
       "path": "/api/conversation/workbench_pins",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/workbench_pins.py",
       "route_id": "route-370e0d99f5f330c2",
       "credential_kinds": [
@@ -1348,7 +1348,7 @@
       "method": "DELETE",
       "path": "/api/conversation/{conversation_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-9b581dff93db1b6b",
       "credential_kinds": [
@@ -1359,7 +1359,7 @@
       "method": "GET",
       "path": "/api/conversation/{conversation_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-5243b2d571d3c255",
       "credential_kinds": [
@@ -1370,7 +1370,7 @@
       "method": "GET",
       "path": "/api/conversation/{conversation_id}/automation",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-ba15db0c1101e081",
       "credential_kinds": [
@@ -1381,7 +1381,7 @@
       "method": "PUT",
       "path": "/api/conversation/{conversation_id}/knowledge-scope",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-5fb5283f3e7ac19c",
       "credential_kinds": [
@@ -1436,7 +1436,7 @@
       "method": "PATCH",
       "path": "/api/conversation/{conversation_id}/workbench-config",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-4bdf29af85e36ff2",
       "credential_kinds": [
@@ -1447,7 +1447,7 @@
       "method": "PUT",
       "path": "/api/conversation/{conversation_id}/workbench_pin",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/workbench_pins.py",
       "route_id": "route-0eea87a63bdc5bcf",
       "credential_kinds": [
@@ -1931,8 +1931,8 @@
       "method": "POST",
       "path": "/api/file/storage",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/file/upload.py",
+      "target": "management",
+      "source": "backend/management/api/file/storage.py",
       "route_id": "route-23c3aa676d825f99",
       "credential_kinds": [
         "session"
@@ -2341,6 +2341,17 @@
       "target": "management",
       "source": "backend/management/api/knowledge_base/vectordatabase.py",
       "route_id": "route-7178d8f5d90c26de",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/{index_name}/documents/error-info",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "management-document-error-info-query",
       "credential_kinds": [
         "session"
       ]
@@ -4342,7 +4353,7 @@
       "method": "POST",
       "path": "/api/share/conversation/{conversation_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-fdf735d68912dc91",
       "credential_kinds": [
@@ -4353,7 +4364,7 @@
       "method": "GET",
       "path": "/api/share/{share_token}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-57074332384320f1",
       "credential_kinds": [
@@ -4365,7 +4376,7 @@
       "method": "GET",
       "path": "/api/share/{share_token}/assets/{asset_id}/download",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-bb4a100e19f70e70",
       "credential_kinds": [
@@ -4377,7 +4388,7 @@
       "method": "GET",
       "path": "/api/share/{share_token}/assets/{asset_id}/preview",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-eb28ffc79ffa4cb5",
       "credential_kinds": [
@@ -4455,8 +4466,8 @@
       "method": "POST",
       "path": "/api/skills/nl2skill/run",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/skill/creation.py",
+      "target": "management",
+      "source": "backend/management/api/skill/creation.py",
       "route_id": "route-769b40d11003b69f",
       "credential_kinds": [
         "session"
@@ -5673,8 +5684,8 @@
       "method": "POST",
       "path": "/api/voice/connectivity",
       "transport": "http",
-      "target": "management",
-      "source": "backend/management/api/voice/voice.py",
+      "target": "runtime",
+      "source": "backend/runtime/api/voice/streaming.py",
       "route_id": "route-45af8e77c2b4f9ac",
       "credential_kinds": [
         "session"

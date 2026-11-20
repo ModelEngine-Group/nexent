@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Skill script execution tool."""
 import json
 import logging
 import os
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents.tools import Tool
 
@@ -66,6 +67,8 @@ class RunSkillScriptTool(Tool):
         execution_backend: Optional[Any] = None,
         authorized_skill_names: Optional[Sequence[str]] = None,
         isolated_skills_root: bool = False,
+        artifact_path_resolver: Optional[Callable[[str], str]] = None,
+        artifact_uploader: Optional[Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -91,6 +94,8 @@ class RunSkillScriptTool(Tool):
         self.on_complete = on_complete
         self.execution_backend = execution_backend
         self.isolated_skills_root = isolated_skills_root
+        self.artifact_path_resolver = artifact_path_resolver
+        self.artifact_uploader = artifact_uploader
         self.authorized_skill_names = (
             frozenset(name for name in (authorized_skill_names or []) if name)
             if authorized_skill_names is not None
@@ -177,6 +182,12 @@ class RunSkillScriptTool(Tool):
                 continue
             if isinstance(file_size_bytes, bool) or not isinstance(file_size_bytes, int) or file_size_bytes < 0:
                 continue
+            if self.artifact_path_resolver is not None:
+                try:
+                    absolute_path = self.artifact_path_resolver(absolute_path)
+                except (OSError, RuntimeError, ValueError):
+                    logger.warning("Ignoring skill artifact outside the current run workspace")
+                    continue
             if not os.path.isfile(absolute_path):
                 continue
             if os.path.getsize(absolute_path) != file_size_bytes:
@@ -193,7 +204,7 @@ class RunSkillScriptTool(Tool):
                     mime_type,
                 )
                 continue
-            artifacts.append(raw_artifact)
+            artifacts.append({**raw_artifact, "absolute_path": absolute_path})
         return artifacts
 
     def _publish_artifacts(
@@ -201,6 +212,7 @@ class RunSkillScriptTool(Tool):
         skill_name: str,
         script_path: str,
         artifacts: List[Dict[str, Any]],
+        *, uploaded: bool = False,
     ) -> None:
         """Publish structured artifacts independently from model-visible output."""
         if not artifacts or self.observer is None:
@@ -218,7 +230,24 @@ class RunSkillScriptTool(Tool):
             except ImportError:
                 class ProcessType(Enum):
                     SKILL_ARTIFACT = "skill_artifact"
-        self.observer.add_message("", ProcessType.SKILL_ARTIFACT, content)
+                    FILE_ARTIFACT = "file_artifact"
+        if uploaded:
+            self.observer.add_message("", ProcessType.FILE_ARTIFACT, {"artifacts": artifacts})
+        else:
+            self.observer.add_message("", ProcessType.SKILL_ARTIFACT, content)
+
+    def _publish_uploaded_artifacts(self, skill_name, script_path, result, artifacts):
+        uploaded = self.artifact_uploader(artifacts) if artifacts else []
+        self._publish_artifacts(skill_name, script_path, uploaded, uploaded=True)
+        payload = self._parse_result_payload(result)
+        if payload is None or ("artifacts" not in payload and "absolute_path" not in payload):
+            return str(result)
+        payload = dict(payload)
+        payload.pop("absolute_path", None)
+        if "artifacts" in payload:
+            payload["artifacts"] = uploaded
+        return json.dumps(payload, ensure_ascii=False)
+
     def execute(
         self,
         skill_name: str,
@@ -298,6 +327,8 @@ class RunSkillScriptTool(Tool):
                 if normalized_source == "skill"
                 else []
             )
+            if self.artifact_uploader is not None:
+                return self._publish_uploaded_artifacts(skill_name, script_path, result, artifacts)
             self._publish_artifacts(skill_name, script_path, artifacts)
             return str(result)
         except SkillNotFoundError as e:

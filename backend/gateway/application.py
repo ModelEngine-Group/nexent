@@ -73,7 +73,7 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
 
     app.state.identity_lookup = identity_lookup or unavailable_identity
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-                       allow_methods=["*"], allow_headers=["*"])
+                       allow_methods=["*"], allow_headers=["*"], expose_headers=["run_id", "X-AgentOS-Run-ID"])
     # Last-added middleware runs first, including before CORS preflight handling.
     app.add_middleware(ExposureMiddleware, registry=registry)
     app.state.exposure_revision, app.state.exposure_digest = registry.revision, registry.digest

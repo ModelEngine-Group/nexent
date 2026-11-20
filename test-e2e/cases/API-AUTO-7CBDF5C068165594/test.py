@@ -14,13 +14,25 @@ import pytest
 import httpx
 from fastapi import FastAPI
 
-from runtime.api.agent.execution import agent_runtime_router
+from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+from gateway.downstream import internal_tokens
+from gateway.downstream.middleware import GatewayIdentityMiddleware
+from runtime.api.agent import execution
+from runtime.api.identity_routes import is_runtime_service_request
+from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeCapacityExceededError, RuntimeQueueTimeoutError
+
+_SIGNING_KEY = "synthetic-runtime-overload-signing-key"
+_IDENTITY = {"user_id": "test_user_id", "tenant_id": "test_tenant_id", "kind": "session"}
 
 
 def _build_app() -> FastAPI:
     app = FastAPI()
-    app.include_router(agent_runtime_router)
+    app.add_middleware(
+        GatewayIdentityMiddleware, audience="runtime", required=True,
+        internal_runtime_request=is_runtime_service_request,
+    )
+    app.include_router(execution.agent_runtime_router)
     return app
 
 
@@ -69,38 +81,28 @@ _SCENARIOS = [
 @pytest.mark.case_id("API-AUTO-7CBDF5C068165594")
 @pytest.mark.asyncio
 async def test_runtime_overload_error_contract(monkeypatch) -> None:
-    from management.api.agent import agent as agent_app
-
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", _SIGNING_KEY)
+    monkeypatch.setattr(environment, "JWT_SECRET", _SIGNING_KEY)
+    monkeypatch.setattr(internal_tokens, "JWT_SECRET", _SIGNING_KEY)
     transport = httpx.ASGITransport(app=_build_app())
-
-    async def fake_run_agent_stream(**kwargs):
-        raise exc
-
-    def fake_verify_internal_runtime_jwt(authorization):
-        return "test_user_id", "test_tenant_id"
 
     for scenario in _SCENARIOS:
         exc = scenario["error_factory"]()
-        fake_run_agent_stream.__globals__["exc"] = exc
 
-        original_run = agent_app.run_agent_stream
-        original_verify = agent_app.verify_internal_runtime_jwt
-        monkeypatch.setattr(agent_app, "run_agent_stream", fake_run_agent_stream)
-        monkeypatch.setattr(
-            agent_app, "verify_internal_runtime_jwt", fake_verify_internal_runtime_jwt
-        )
-        try:
-            async with httpx.AsyncClient(
-                transport=transport, base_url="http://testserver"
-            ) as client:
-                response = await client.post(
-                    scenario["path"],
-                    json={"query": "hello"},
-                    headers={"Authorization": "Bearer dummy"},
-                )
-        finally:
-            agent_app.run_agent_stream = original_run
-            agent_app.verify_internal_runtime_jwt = original_verify
+        async def fake_run_agent_stream(**kwargs):
+            assert (kwargs["user_id"], kwargs["tenant_id"]) == ("test_user_id", "test_tenant_id")
+            raise exc
+
+        monkeypatch.setattr(execution, "run_agent_stream", fake_run_agent_stream)
+        path = scenario["path"]
+        if path == "/agent/run":
+            headers = {IDENTITY_HEADER: sign_identity(_IDENTITY, "runtime", "POST", path, b"", key=_SIGNING_KEY)}
+        else:
+            headers = {"Authorization": "Bearer " + internal_tokens.generate_internal_runtime_jwt(
+                "test_user_id", "test_tenant_id",
+            )}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post(path, json={"query": "hello"}, headers=headers)
 
         assert response.status_code == 429, (
             f"{scenario['name']}: expected HTTP 429, got {response.status_code}; "

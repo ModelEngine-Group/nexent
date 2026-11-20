@@ -29,12 +29,12 @@ case:
     action: 在本地 API 集成环境启动 Agent 主服务（backend 运行时），加载固定测试账号与最小配置；不依赖真实模型或外部 A2A Agent。
     expected: 四个场景均返回 HTTP 429 TOO_MANY_REQUESTS，而非 500。
   - order: 2
-    action: 构造并发送 POST /agent/run，使后端在调度前抛出 RuntimeCapacityExceededError（通过本地容量约束或运行时内部注入过载状态触发），记录响应状态码、响应体（code/message/retryable）与响应头
+    action: 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端在调度前抛出 RuntimeCapacityExceededError（通过本地容量约束或运行时内部注入过载状态触发），记录响应状态码、响应体（code/message/retryable）与响应头
       Retry-After。
     expected: RuntimeCapacityExceededError 场景响应体 code=RUNTIME_CAPACITY_FULL、message="Agent runtime is at capacity."、retryable=true，Retry-After
       头为 "1"。
   - order: 3
-    action: 构造并发送 POST /agent/run，使后端抛出 RuntimeQueueTimeoutError（排队等待超时），记录同样字段。
+    action: 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端抛出 RuntimeQueueTimeoutError（排队等待超时），记录同样字段。
     expected: RuntimeQueueTimeoutError 场景响应体 code=RUNTIME_QUEUE_TIMEOUT、message="Agent runtime queue wait timed out."、retryable=true，Retry-After
       头等于 RuntimeQueueTimeoutError.retry_after_seconds 的字符串值。
   - order: 4
@@ -59,9 +59,9 @@ case:
     protocol: HTTP API
     request_expectations:
     - 在本地 API 集成环境启动 Agent 主服务（backend 运行时），加载固定测试账号与最小配置；不依赖真实模型或外部 A2A Agent。
-    - 构造并发送 POST /agent/run，使后端在调度前抛出 RuntimeCapacityExceededError（通过本地容量约束或运行时内部注入过载状态触发），记录响应状态码、响应体（code/message/retryable）与响应头
+    - 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端在调度前抛出 RuntimeCapacityExceededError（通过本地容量约束或运行时内部注入过载状态触发），记录响应状态码、响应体（code/message/retryable）与响应头
       Retry-After。
-    - 构造并发送 POST /agent/run，使后端抛出 RuntimeQueueTimeoutError（排队等待超时），记录同样字段。
+    - 使用经验证的 Gateway 会话签名发送 POST /agent/run，使后端抛出 RuntimeQueueTimeoutError（排队等待超时），记录同样字段。
     - 对 POST /agent/internal/northbound/run（携带合法内部 runtime JWT）重复步骤 2-3，分别触发 RuntimeCapacityExceededError 与 RuntimeQueueTimeoutError。
     - 断言各响应状态码为 429、响应体契约字段与 Retry-After 头正确，且未落入 500 兜底（响应体不是 "Agent run error."/"Agent run error." 的通用 detail）。
     response_expectations:

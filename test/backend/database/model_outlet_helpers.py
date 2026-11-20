@@ -59,7 +59,7 @@ def database(monkeypatch):
     monkeypatch.setitem(sys.modules, client.__name__, client)
     database = load(
         "_outlet_unit_db.model_outlet_db",
-        "backend/management/db/model/outlets.py",
+        "infrastructure/rdb/outlets.py",
         monkeypatch,
     )
     return database, client, exceptions

@@ -18,12 +18,10 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 
-from test.backend.app import test_tool_config_app as legacy_tool
-from test.backend.app import test_agent_app as legacy_agent  # noqa: F401
+from management.api.agent import agent as agent_app
+from management.api.tool import tool_config as tool_app
 
 
-agent_app = importlib.import_module("management.api.agent.agent")
-tool_app = legacy_tool.tool_config_app
 tool_service = importlib.import_module(tool_app.validate_tool_impl.__module__)
 
 

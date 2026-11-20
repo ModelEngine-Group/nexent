@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Explicit exposure preserves registered APIs and denies accidental publication."""
 
+import ast
 import json
 from pathlib import Path
 
@@ -62,13 +63,79 @@ def test_snapshot_keeps_all_original_northbound_contracts():
 
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"), ("POST", "/api/users/list", "management"),
-    ("POST", "/api/agent/run", "runtime"), ("GET", "/api/conversation/list", "runtime"),
-    ("POST", "/api/file/storage", "runtime"), ("GET", "/api/file/storage", "management"),
+    ("POST", "/api/skills/nl2skill/run", "management"),
+    ("POST", "/api/agent/nl2agent/run", "management"),
+    ("POST", "/api/agent/run", "management"), ("GET", "/api/conversation/list", "management"),
+    ("GET", "/api/agent/stop/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "management"),
+    ("GET", "/api/conversation/workbench_pins", "management"),
+    ("PUT", "/api/conversation/42/workbench_pin", "management"),
+    ("POST", "/api/share/conversation/42", "management"),
+    ("GET", "/api/share/token", "management"),
+    ("GET", "/api/share/token/assets/file/download", "management"),
+    ("GET", "/api/share/token/assets/file/preview", "management"),
+    ("POST", "/api/internal/agentos/v1/compat/agent/run", None),
+    ("POST", "/api/internal/agentos/v1/compat/agent/background", None),
+    ("POST", "/api/internal/agentos/v1/compat/agent/inspect", None),
+    ("POST", "/api/internal/agentos/v1/memory/stored", None),
+    ("POST", "/api/agent/automations/42/run", "management"),
+    ("POST", "/api/agent/automations/runs/42/cancel", "management"),
+    ("GET", "/api/conversation/42/automation", "management"),
+    ("POST", "/api/file/storage", "management"), ("GET", "/api/file/storage", "management"),
     ("POST", "/nb/v1/chat/run", "management"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])
 def test_regular_backend_and_northbound_have_explicit_targets(method, path, target):
     assert select_upstream(method, path) == target
+
+
+def test_conversation_share_and_pins_are_mounted_by_management():
+    root = Path(__file__).resolve().parents[3] / "backend"
+    owners = {"workbench_pins_router", "conversation_share_router"}
+    for service, expected in (("management", owners), ("runtime", set())):
+        tree = ast.parse((root / service / "api/application.py").read_text(encoding="utf-8"))
+        mounted = {
+            node.args[0].id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "include_router" and node.args and isinstance(node.args[0], ast.Name)
+        }
+        assert mounted & owners == expected
+
+
+def test_conversation_snapshot_target_matches_the_mounting_service():
+    """Every conversation row must point at the service that mounts its router.
+
+    The conversation router is mounted by exactly one service. Rows generated
+    from its source file previously straddled both upstreams: the subset marked
+    ``management`` 404'd while its siblings answered 200, which broke the model
+    preference panel and turned clarification cards read-only. Keep the snapshot
+    target and the real mount point tied together so a router move cannot leave
+    a subset of rows behind.
+    """
+    root = Path(__file__).resolve().parents[3] / "backend"
+    mount_owner = {}
+    for service in ("management", "runtime", "ops"):
+        tree = ast.parse((root / service / "api/application.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "include_router" and node.args):
+                continue
+            argument = node.args[0]
+            names = [argument.id] if isinstance(argument, ast.Name) else []
+            names += [keyword.value.id for keyword in node.keywords
+                      if isinstance(keyword.value, ast.Name) and getattr(keyword, "arg", None) is None]
+            for name in names:
+                if "conversation" in name.lower():
+                    mount_owner[name] = service
+
+    snapshot = json.loads(
+        (Path(__file__).resolve().parents[3] / "backend/gateway/exposure/registry.json").read_text(encoding="utf-8"))
+    conversation_rows = [row for row in snapshot["routes"]
+                         if row.get("source", "").endswith("conversation/conversation_management.py")]
+    assert conversation_rows
+    assert {row["target"] for row in conversation_rows} == {"management"}, sorted(
+        {row["target"] for row in conversation_rows})
+    assert "management" in mount_owner.values()
 
 
 @pytest.mark.parametrize("method,path", [
@@ -83,6 +150,7 @@ def test_regular_backend_and_northbound_have_explicit_targets(method, path, targ
     ("PATCH", "/api/conversation/1/model_preferences/7"),
     ("GET", "/api/ops/authorization"),
     ("GET", "/api/ops/scope"),
+    ("GET", "/api/indices/kb/documents/error-info"),
 ])
 def test_web_features_are_exposed_only_to_sessions(method, path):
     match = default_registry().match(method, path)
