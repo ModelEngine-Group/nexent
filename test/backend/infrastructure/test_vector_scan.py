@@ -7,6 +7,7 @@ import pytest
 from nexent.storage.errors import InvalidInput, ScopeDenied, Unavailable
 from nexent.storage.models import Comparison, PageRequest, StorageScope
 
+from infrastructure.storage.catalog import FieldDefinition
 from infrastructure.vdb.vector_store import ElasticsearchVectorStore
 from test.backend.infrastructure.test_vector_store import context, store  # noqa: F401
 
@@ -62,7 +63,7 @@ def test_cursor_resumes_by_key_after_previous_rows_disappear(store):  # noqa: F8
     assert [r.key.key for r in second.items] == ['c', 'd'] and second.next_cursor is None
 
 
-def test_existing_read_cursor_survives_payload_edit_policy(store):  # noqa: F811
+def test_existing_read_cursor_survives_payload_policy_and_nullable_addition(store):  # noqa: F811
     import base64
     import json
 
@@ -72,7 +73,10 @@ def test_existing_read_cursor_survives_payload_edit_policy(store):  # noqa: F811
         'query': 'd74b674d1e1ad437438708c9975256ee75596fd38c41aeb2b0ed2f90b68b040f',
         'after': 'a',
     }, separators=(',', ':')).encode()).decode()
-    binding = replace(port._bindings['kb'], mutable_fields=frozenset({'content'}))
+    prior = port._bindings['kb']
+    media = FieldDefinition('media_kind', 'string', nullable=True)
+    binding = replace(prior, mutable_fields=frozenset({'content'}), fields=(*prior.fields, media),
+                      additive_fields=frozenset({media.name}))
     editable = ElasticsearchVectorStore(port.scope, (binding,), factory)
     client.search.return_value = {'hits': {'hits': [hit('b')]}}
     result = editable.scan('kb', None, PageRequest(limit=1, cursor=cursor), context=context())

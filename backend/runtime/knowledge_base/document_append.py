@@ -138,14 +138,15 @@ class KnowledgeDocumentAppender:
                     executor = ChunkCreationExecutor(journal, self.mutations.models, actor, grant.collection,
                                                      ports=self.mutations.creation_ports)
                     keys = []
-                    for index, ((document, _, _), source, vector) in enumerate(zip(inputs, prepared, vectors, strict=True)):
+                    for index, ((document, _, is_image), source, vector) in enumerate(zip(inputs, prepared, vectors, strict=True)):
                         key = "document-" + uuid4().hex
                         intent = ChunkMutationIntent(knowledge_id=request.knowledge_id, chunk_id=key, operation="create",
                             request_key=f"{batch}:{index}", resource_revision=grant.revision,
                             changes={"content": document.content, "filename": source.get("filename") if isinstance(source.get("filename"), str) else None,
                                      "location": {PUBLIC_CHUNK_SOURCE_KEY: source}, "supplied_embedding": list(vector),
                                      "embedding_model": binding.model_dump(), "embedding_input": ""})
-                        state = await executor.execute(intent, context=context, authorize=authorized)
+                        state = await executor.execute(intent, context=context, authorize=authorized,
+                                                       supplied_image=is_image)
                         if state["status"] != "completed" or not state["writer_ended"]:
                             raise OutcomeUnknown(operation_id=context.operation_id)
                         if state["count_delta"] != 1:

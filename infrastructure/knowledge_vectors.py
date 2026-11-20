@@ -28,7 +28,7 @@ def knowledge_index(tenant_id, collection):
 
 def vector_binding(tenant_id, collection, dimensions, *, writable=True, allow_unembedded=False):
     fields = tuple(
-        FieldDefinition(name, kind, nullable=name in {"file_id", "file_version", "chunk_index", "embedding_model_id", "embedding_revision", "parser_version", "filename"})
+        FieldDefinition(name, kind, nullable=name in {"file_id", "file_version", "chunk_index", "embedding_model_id", "embedding_revision", "parser_version", "filename", "media_kind"})
         for name, kind in (
             ("knowledge_id", "integer"),
             ("file_id", "string"),
@@ -37,6 +37,7 @@ def vector_binding(tenant_id, collection, dimensions, *, writable=True, allow_un
             ("embedding_model_id", "integer"),
             ("embedding_revision", "string"),
             ("parser_version", "string"),
+            ("media_kind", "string"),
             ("content", "string"),
             ("filename", "string"),
             ("location", "object"),
@@ -49,6 +50,7 @@ def vector_binding(tenant_id, collection, dimensions, *, writable=True, allow_un
         fields,
         writable=writable,
         allow_unembedded=allow_unembedded,
+        additive_fields=frozenset({"media_kind"}),
     )
 
 

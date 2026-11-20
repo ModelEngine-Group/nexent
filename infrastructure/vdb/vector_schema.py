@@ -25,6 +25,7 @@ class VectorBinding:
     owns_collection: bool = False
     mutable_fields: frozenset[str] = frozenset()
     allow_unembedded: bool = False
+    additive_fields: frozenset[str] = frozenset()
 
     def __post_init__(self):
         if not isinstance(self.mutable_fields, (tuple, list, set, frozenset)):
@@ -50,6 +51,8 @@ class VectorBinding:
             or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names)
             or self.text_field not in names
             or not self.mutable_fields <= set(names)
+            or not isinstance(self.additive_fields, frozenset)
+            or not self.additive_fields <= {field.name for field in self.fields if field.nullable}
         ):
             raise InvalidInput()
         if self.metric != "cosine":

@@ -61,3 +61,17 @@ async def test_required_id_only_model_is_resolved_in_runtime_and_writes_vector(c
     assert result["status"] == "completed" and s.stored[0].vector == (1, 0, 0)
     s.models.get.assert_awaited_once_with(2, s.s.actor)
     assert s.models.invoke.await_args.args[0].expected_revision == "r1"
+    assert s.stored[0].payload["media_kind"] == "text"
+
+
+async def test_required_image_uses_the_actual_model_input_for_storage_kind(creation):
+    s = creation
+    s.models.get = AsyncMock(return_value=ModelMetadata(
+        model_id=2, model_type="multi_embedding", display_name="model", revision="r1"))
+    value = strict_intent(s, embedding_input_type="image", embedding_input="data:image/png;base64,eA==")
+    result = await s.service.execute(value, context=context())
+
+    assert result["status"] == "completed"
+    assert s.models.invoke.await_args.args[0].input_type == "image"
+    assert s.stored[0].payload["media_kind"] == "image"
+    assert "base64" not in str(s.stored[0].payload)

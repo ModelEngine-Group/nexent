@@ -208,6 +208,51 @@ def test_existing_different_vector_dimension_is_not_changed(optional):
     client.indices.delete.assert_not_called()
 
 
+def test_nullable_filter_can_be_added_without_rewriting_existing_documents(optional):
+    port, client, factory, binding, _ = optional
+    field = FieldDefinition("media_kind", "string", nullable=True)
+    upgraded = replace(binding, fields=(*binding.fields, field), additive_fields=frozenset({field.name}))
+    bound = ElasticsearchVectorStore(port.scope, (upgraded,), factory)
+    assert bound.describe_collection("kb", context=context()).dimensions is None
+    client.indices.put_mapping.assert_not_called()
+
+    client.indices.get_mapping.side_effect = [
+        {binding.index: {"mappings": binding.mapping()}},
+        {binding.index: {"mappings": upgraded.mapping()}},
+    ]
+    client.indices.put_mapping.return_value = {"acknowledged": True}
+    assert bound.ensure_collection("kb", context=context()).dimensions is None
+    assert client.indices.put_mapping.call_args.kwargs["properties"] == {
+        "payload": {"properties": {"media_kind": {"type": "keyword"}}},
+    }
+    client.index.assert_not_called()
+    client.indices.delete.assert_not_called()
+
+
+def test_existing_incompatible_additive_field_is_never_replaced(optional):
+    port, client, factory, binding, _ = optional
+    field = FieldDefinition("media_kind", "string", nullable=True)
+    upgraded = replace(binding, fields=(*binding.fields, field), additive_fields=frozenset({field.name}))
+    mapping = upgraded.mapping()
+    mapping["properties"]["payload"]["properties"]["media_kind"] = {"type": "long"}
+    client.indices.get_mapping.return_value = {binding.index: {"mappings": mapping}}
+    bound = ElasticsearchVectorStore(port.scope, (upgraded,), factory)
+    with pytest.raises(Conflict):
+        bound.ensure_collection("kb", context=context())
+    client.indices.put_mapping.assert_not_called()
+
+
+def test_unconfirmed_additive_mapping_is_not_reported_as_installed(optional):
+    port, client, factory, binding, _ = optional
+    field = FieldDefinition("media_kind", "string", nullable=True)
+    upgraded = replace(binding, fields=(*binding.fields, field), additive_fields=frozenset({field.name}))
+    client.indices.put_mapping.return_value = {"acknowledged": True}
+    bound = ElasticsearchVectorStore(port.scope, (upgraded,), factory)
+    with pytest.raises(OutcomeUnknown):
+        bound.ensure_collection("kb", context=context())
+    client.indices.put_mapping.assert_called_once()
+
+
 def test_mismatched_payload_mapping_cannot_be_upgraded(optional):
     port, client, factory, binding, _ = optional
     actual = binding.mapping()

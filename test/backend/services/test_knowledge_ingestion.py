@@ -144,6 +144,7 @@ async def test_upload_calls_model_invoke_and_writes_stable_scoped_chunks(setup):
     assert row.key.key == f"1/{s.request.file_id}/4/0"
     assert row.payload["file_version"] == 4 and row.payload["knowledge_id"] == 1
     assert row.payload["embedding_revision"] == "model-v1"
+    assert row.payload["media_kind"] == "text"
     assert all(stream.closed for stream in s.streams)
     assert s.objects.stat.call_args.args[0].version == Revision("v1")
 

@@ -6,7 +6,6 @@ import hashlib
 import json
 import math
 from contextlib import contextmanager
-from dataclasses import replace
 
 from elastic_transport import TransportError
 from elasticsearch import ApiError
@@ -179,29 +178,43 @@ class ElasticsearchVectorStore:
             raise
         return result
 
+    @staticmethod
+    def _inspect_mapping(binding, expected, actual, *, context):
+        properties = actual.get("properties") if isinstance(actual, dict) else None
+        fields = properties.get("payload") if isinstance(properties, dict) else None
+        fields = fields.get("properties") if isinstance(fields, dict) else None
+        if not isinstance(fields, dict):
+            raise Conflict(operation_id=context.operation_id)
+        expected_properties = expected["properties"]
+        expected_fields = expected_properties["payload"]["properties"]
+        missing = {name: expected_fields.pop(name) for name in binding.additive_fields if name not in fields}
+        additions = {"payload": {"properties": missing}} if missing else {}
+        if binding.allow_unembedded and "embedding" not in properties and "embedding" in expected_properties:
+            additions["embedding"] = expected_properties.pop("embedding")
+        if not matches_mapping(expected, actual):
+            raise Conflict(operation_id=context.operation_id)
+        dimensions = None if "embedding" in additions else binding.dimensions
+        if dimensions is None and "embedding" in properties:
+            embedding = properties["embedding"]
+            dimensions = embedding.get("dims") if isinstance(embedding, dict) else None
+            if (type(dimensions) is not int or dimensions < 1 or embedding.get("type") != "dense_vector"
+                or embedding.get("similarity", "cosine") != binding.metric):
+                raise Conflict(operation_id=context.operation_id)
+        return dimensions, additions
+
     def describe_collection(self, collection, *, context):
         binding = self._binding(collection, maintenance=True)
+        return self._describe_collection(binding, context=context)
+
+    def _describe_collection(self, binding, *, context, require_mapped=False):
         expected = binding.mapping()
         with self._client(context) as client:
             result = self._call(client, "indices.get_mapping", context, index=binding.index)
         mapping = result.get(binding.index, {}).get("mappings", {})
-        dimensions = binding.dimensions
-        if not matches_mapping(expected, mapping):
-            if (not binding.allow_unembedded or not isinstance(mapping, dict)
-                or not isinstance(mapping.get("properties"), dict)
-                or "embedding" in mapping.get("properties", {})
-                or not matches_mapping(replace(binding, dimensions=None).mapping(), mapping)):
-                raise Conflict(operation_id=context.operation_id)
-            dimensions = None
-        if dimensions is None:
-            properties = mapping.get("properties", {})
-            embedding = properties.get("embedding")
-            if "embedding" in properties:
-                dimensions = embedding.get("dims") if isinstance(embedding, dict) else None
-                if (type(dimensions) is not int or dimensions < 1 or embedding.get("type") != "dense_vector"
-                    or embedding.get("similarity", "cosine") != binding.metric):
-                    raise Conflict(operation_id=context.operation_id)
-        return VectorCollectionInfo(collection, dimensions, binding.metric)
+        dimensions, additions = self._inspect_mapping(binding, expected, mapping, context=context)
+        if require_mapped and additions:
+            raise Conflict(operation_id=context.operation_id)
+        return VectorCollectionInfo(binding.collection, dimensions, binding.metric)
 
     def statistics(self, collection, fields=(), *, context):
         from infrastructure.vdb.vector_statistics import collection_statistics
@@ -257,21 +270,17 @@ class ElasticsearchVectorStore:
                     changed = True
                     if result.get("acknowledged") is not True:
                         raise OutcomeUnknown(operation_id=context.operation_id)
-                elif binding.allow_unembedded and binding.dimensions is not None:
+                elif binding.additive_fields or binding.allow_unembedded and binding.dimensions is not None:
                     current = self._call(client, "indices.get_mapping", context, index=binding.index)
                     actual = current.get(binding.index, {}).get("mappings", {})
-                    if not isinstance(actual, dict) or not isinstance(actual.get("properties"), dict):
-                        raise Conflict(operation_id=context.operation_id)
-                    if "embedding" not in actual.get("properties", {}):
-                        base = {**expected, "properties": {name: value for name, value in expected["properties"].items() if name != "embedding"}}
-                        if not matches_mapping(base, actual):
-                            raise Conflict(operation_id=context.operation_id)
+                    _, additions = self._inspect_mapping(binding, expected, actual, context=context)
+                    if additions:
                         result = self._call(client, "indices.put_mapping", context, write=True, index=binding.index,
-                            properties={"embedding": expected["properties"]["embedding"]})
+                            properties=additions)
                         changed = True
                         if result.get("acknowledged") is not True:
                             raise OutcomeUnknown(operation_id=context.operation_id)
-            return self.describe_collection(collection, context=context)
+            return self._describe_collection(binding, context=context, require_mapped=changed)
         except StorageError as error:
             if changed and not isinstance(error, OutcomeUnknown):
                 raise OutcomeUnknown(operation_id=context.operation_id) from error

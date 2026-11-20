@@ -61,6 +61,7 @@ async def test_mixed_image_and_text_keep_input_correspondence_and_caption(images
     rows = list(a.rows.values())
     assert [row.payload['content'] for row in rows] == ['first text', 'caption remains', 'last text']
     assert [tuple(row.vector) for row in rows] == [(1., 0., 0.), (0., 1., 0.), (1., 0., 0.)]
+    assert [row.payload['media_kind'] for row in rows] == ['text', 'image', 'text']
     assert all(base64.b64encode(a.raw).decode('ascii') not in str(row.payload) for row in rows)
     a.image_reader.assert_called_once_with(a.ref, user_id=a.s.s.actor.user_id,
                                          tenant_id=a.s.s.actor.tenant_id, context=a.image_reader.call_args.kwargs['context'])

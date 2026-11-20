@@ -184,7 +184,7 @@ class ChunkCreationExecutor:
             )
         return self._supplied(data, binding)
 
-    def _write(self, intent, data, admitted, previous, dimensions, vector, binding, generated, *, context):
+    def _write(self, intent, data, admitted, previous, dimensions, vector, binding, generated, media_kind, *, context):
         key = admitted["mutation_id"]
         with self.ports(
             self.actor, self.collection, dimensions, context=context, **self.namespace
@@ -229,6 +229,7 @@ class ChunkCreationExecutor:
                         "embedding_model_id": binding.model_id if binding else None,
                         "embedding_revision": binding.revision if binding else None,
                         "parser_version": None,
+                        "media_kind": media_kind,
                         "content": data.content,
                         "filename": data.filename,
                         "location": location,
@@ -272,7 +273,7 @@ class ChunkCreationExecutor:
                 context=context,
             )
 
-    async def execute(self, intent, *, context=None, authorize=None):
+    async def execute(self, intent, *, context=None, authorize=None, supplied_image=False):
         if not isinstance(intent, ChunkMutationIntent) or intent.operation != "create":
             raise InvalidInput()
         intent = ChunkMutationIntent.model_validate(intent.model_dump(mode="json"))
@@ -296,6 +297,10 @@ class ChunkCreationExecutor:
                         self._existing, intent, context=context
                     )
                     embedding = await self._embedding(data, context=context)
+                    _, vector, _, generated = embedding
+                    media_kind = data.embedding_input_type if generated else ("image" if supplied_image else "text")
+                    if not vector:
+                        media_kind = None
                     if authorize is not None:
                         await authorize()
                         context.remaining()
@@ -318,6 +323,7 @@ class ChunkCreationExecutor:
                     admitted,
                     previous,
                     *embedding,
+                    media_kind,
                     context=context,
                 )
         except (TimeoutError, DeadlineExceeded) as error:

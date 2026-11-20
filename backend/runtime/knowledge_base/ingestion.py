@@ -324,6 +324,7 @@ class KnowledgeIngestor:
                         "embedding_model_id": expected.model_id,
                         "embedding_revision": expected.revision,
                         "parser_version": request.parser_version,
+                        "media_kind": "image" if "_image_ref" in item else "text",
                         "content": item["content"],
                         "filename": filename,
                         "location": {

@@ -33,9 +33,11 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True, a
         raise InvalidInput()
     query = store._filter(binding, where)
     read_schema = asdict(binding)
-    # Payload edit policy does not alter the established read cursor contract.
+    # Write policies and nullable projection additions do not change key ordering.
     read_schema.pop('mutable_fields')
     read_schema.pop('allow_unembedded')
+    additive = read_schema.pop('additive_fields')
+    read_schema['fields'] = tuple(field for field in read_schema['fields'] if field['name'] not in additive)
     identity = [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, read_schema, query, include_vector]
     if allow_missing_vector:
         identity.append("optional-vector")
