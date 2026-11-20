@@ -3535,7 +3535,7 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
-                "current_user_message_index": current.message_index}
+                "current_user_message_index": before_message_index}
 
 
 def _remove_scope_references(
