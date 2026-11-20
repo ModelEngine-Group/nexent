@@ -85,9 +85,13 @@ async def _consume_projection(resume, reference, user_id, tenant_id, projection,
                     elif kind == "agentos_execution_summary" and type(payload.get("fact_sequence")) is int:
                         unit = facts.get(payload["fact_sequence"])
                         summary = payload.get("summary")
-                        if unit is not None and isinstance(summary, str):
+                        view = payload.get("model_view")
+                        if unit is not None and (isinstance(summary, str) or isinstance(view, dict)):
                             content = json.loads(unit["unit_content"])
-                            content["summary"] = summary
+                            if isinstance(summary, str):
+                                content["summary"] = summary
+                            if isinstance(view, dict) and "model_action" in content:
+                                content["model_view"] = view
                             unit["content"] = unit["unit_content"] = json.dumps(content, ensure_ascii=False)
                     else:
                         raise RuntimeServiceUnavailableError("Unexpected AgentOS projection event")

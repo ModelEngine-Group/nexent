@@ -25,6 +25,8 @@ class ExecutionRecord:
     attempted: bool = False
     called: bool = False
     persisted: bool = False
+    model_action: dict | None = None
+    model_view: dict | None = None
     ready: Event = field(default_factory=Event)
     summary_lock: Lock = field(default_factory=Lock)
 
@@ -32,10 +34,14 @@ class ExecutionRecord:
     def text(self) -> str:
         return result_text(self.fields)
 
-    def payload(self) -> dict[str, str]:
+    def payload(self) -> dict[str, Any]:
         payload = {"content": self.text}
         if self.summary:
             payload["summary"] = self.summary
+        if self.model_action is not None:
+            payload["model_action"] = self.model_action
+        if self.model_view is not None:
+            payload["model_view"] = self.model_view
         return payload
 
 
@@ -47,6 +53,7 @@ class ExecutionHistory:
         self._read_persisted = read_persisted
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
+        self._restored: dict[tuple[str, str], ExecutionRecord] = {}
         self._read_chars: dict[str, int] = {}
         self._rendered_budget: dict[str, int | None] = {}
 
@@ -55,6 +62,21 @@ class ExecutionHistory:
         with self._lock:
             self._records[key] = ExecutionRecord(owner, dict(fields))
         return key
+
+    def restore(self, owner: str, message_id: int, unit_index: int, fields: dict[str, str]) -> None:
+        """Register only history already authorized and bound by the backend loader."""
+        if type(message_id) is not int or message_id <= 0 or type(unit_index) is not int or unit_index < 0:
+            raise ValueError("Invalid persisted execution reference")
+        reference = f"message:{message_id}/unit-index:{unit_index}"
+        with self._lock:
+            existing = self._restored.get((owner, reference))
+            if existing is not None:
+                if existing.fields != fields:
+                    raise PermissionError("Conflicting persisted execution reference")
+                return
+            record = ExecutionRecord(owner, dict(fields), reference=reference)
+            record.ready.set()
+            self._restored[owner, reference] = record
 
     def get(self, key: str) -> ExecutionRecord | None:
         with self._lock:
@@ -106,7 +128,7 @@ class ExecutionHistory:
         if isinstance(max_chars, bool) or not isinstance(max_chars, int) or not 0 < max_chars <= 16000:
             raise ValueError("max_chars must be between 1 and 16000")
         with self._lock:
-            record = self._records.get(self._references.get(reference, ""))
+            record = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
             if record is None or record.owner != owner:
                 raise PermissionError("Execution result is unavailable or not authorized")
             if record.persisted and self._read_persisted is not None:

@@ -3508,12 +3508,12 @@ def get_historical_context(
             records = session.execute(select(
                 ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
                 ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
-                ConversationMessageUnit.invocation_id,
+                ConversationMessageUnit.invocation_id, ConversationMessageUnit.unit_index,
             ).where(
                 ConversationMessageUnit.conversation_id == conversation_id,
                 ConversationMessageUnit.message_id.in_(assistant_ids),
                 ConversationMessageUnit.unit_type.in_([
-                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result",
                 ]),
                 ConversationMessageUnit.unit_status == "completed",
                 ConversationMessageUnit.delete_flag == "N",
@@ -3525,6 +3525,7 @@ def get_historical_context(
                 history_record = {
                     "record_type": record.unit_type, "content": record.unit_content,
                     "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
+                    "unit_index": record.unit_index,
                 }
                 event = decode_history_event(history_record)
                 if event is not None:

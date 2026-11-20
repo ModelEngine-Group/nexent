@@ -658,6 +658,14 @@ class CoreAgent(CodeAgent):
             from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
             from nexent.core.agents.contracts.context import ContextItemInput
             context_manager.config.execution_history = self._execution_history
+            from nexent.core.agents.context.action_history import render_persisted_actions
+            for item in self.context_runtime.items:
+                if item.type == "conversation_turn":
+                    render_persisted_actions(
+                        item.content.get("execution_records") or [],
+                        assistant_message_id=item.content.get("assistant_message_id"),
+                        history=self._execution_history, owner=self._execution_owner,
+                    )
             if "read_execution_output" in self.tools:
                 raise ValueError("read_execution_output is reserved for execution history")
             # The additive contract must not suppress the caller's fallback
@@ -1801,6 +1809,7 @@ Additional Args:
             ):
                 from nexent.core.agents.sandbox.execution import _execute_with_tool_context
 
+                memory_step.execution_dispatched = True
                 code_output = _execute_with_tool_context(self.python_executor, code_action, trace_execution=True)
                 monitoring_manager.set_tool_output({
                     "output": getattr(code_output, "output", None),
@@ -2510,6 +2519,14 @@ Additional Args:
         memory_step.execution_loaded = self._execution_loaded
         key = history.register(self._execution_owner, fields)
         memory_step.execution_key = key
+        dispatched = getattr(memory_step, "execution_dispatched", False) is True
+        calls = (getattr(memory_step, "tool_calls", None) or []) if dispatched else []
+        self._execution_history.get(key).model_action = {
+            "schema_version": 1, "agent_core": "smolagents",
+            "dispatch_state": "dispatched" if dispatched else "not_dispatched",
+            "step_number": memory_step.step_number,
+            "tool_calls": [{"id": call.id, "name": call.name, "arguments": call.arguments} for call in calls],
+        }
         self.observer.add_message(self.agent_name, ProcessType.EXECUTION_RESULT,
                                   json.dumps({"execution_key": key}, ensure_ascii=False))
 

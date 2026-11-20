@@ -189,3 +189,30 @@ def test_native_history_facts_survive_authorized_database_and_prepared_roundtrip
     assert messages[1]["tool_calls"][0]["function"]["name"] == "lookup"
     assert messages[2] == {"role": "tool", "tool_call_id": "provider", "content": "real error"}
     assert "read_only" in str(messages[3])
+
+
+def test_fix01_closed_action_preserves_raw_storage_and_authorized_roundtrip(history_db):
+    from contracts.agentos import PreparedHistoryTurn
+    from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
+
+    module, message, unit = history_db
+    message(1, 'user', 'prior question')
+    message(2, 'assistant', 'actual answer')
+    message(3, 'user', 'new question')
+    unit(1, 2, 'tool', json.dumps({'tool_name': 'write', 'tool_arguments': {'body': 'EXPANDED' * 12000}}))
+    unit(2, 2, 'execution_logs', 'actual result')
+    unit(3, 2, 'execution_result', json.dumps({
+        'content': '<STDOUT>actual result</STDOUT>', 'covered_unit_indices': [1, 2],
+        'model_action': {'schema_version': 1, 'agent_core': 'smolagents', 'dispatch_state': 'dispatched',
+                         'step_number': 1, 'tool_calls': [{'id': 'python', 'name': 'python_interpreter',
+                                                        'arguments': 'write(body=computed)'}]},
+    }))
+    turn = module.get_historical_context(1, 3, 'owner', 'tenant')['conversation_turns'][0]
+    assert 'EXPANDED' in turn['execution_records'][0]['content']
+    prepared = PreparedHistoryTurn.model_validate({k: v for k, v in turn.items() if k != 'attachments'})
+    item = ContextItem.from_input(ContextItemInput(id='old', type='conversation_turn',
+                                  content=prepared.model_dump(exclude={'attachment_refs'})))
+    text = str(ContextManager(message_format='codeagent').build_context_messages([item]))
+    assert 'write(body=computed)' in text and 'actual result' in text and 'EXPANDED' not in text
+    assert 'message:2/unit-index:3' in text
+    assert module.get_historical_context(1, 3, 'other-owner', 'tenant') is None

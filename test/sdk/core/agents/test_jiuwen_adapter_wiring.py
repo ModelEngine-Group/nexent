@@ -42,7 +42,8 @@ def capture_registration(adapter, mocker):
     return handler
 
 
-def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker):
+@pytest.mark.parametrize("retriever", [False, True])
+def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker, retriever):
     from openjiuwen.harness import factory as native_factory
 
     child = AgentConfig(name="child", description="Child", model_name="child-model", tools=[])
@@ -56,6 +57,15 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
                                to_a2a_agent_info=Mock(return_value="external-info"))
     adapter.external_agents = [external]
     local, worker = Mock(), Mock()
+    documents = [{"id": "doc-1", "content": "evidence", "source": "source-1"}]
+    if retriever:
+        local = type("KnowledgeBaseSearchTool", (), {})()
+        local.forward = Mock(return_value=documents)
+    original_forward = getattr(local, "forward")
+    monitoring = Mock()
+    from contextlib import nullcontext
+    monitoring.trace_retriever_call.side_effect = lambda *args, **kwargs: nullcontext()
+    mocker.patch("nexent.core.agents.resources.monitoring.get_monitoring_manager", return_value=monitoring)
     for tool, name in [(local, "lookup"), (worker, "child")]:
         tool.name, tool.description, tool.inputs = name, name, {"task": {"type": "string"}}
     resources = Mock()
@@ -64,7 +74,6 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     resources._prepare_file_workspace.return_value = "Authorized latest task"
     resources._wrap_subagent.side_effect = lambda definition, *args, **kwargs: definition
     resource_type = mocker.patch("nexent.core.agents.cores.jiuwen.adapter.AgentResources", return_value=resources)
-    mocker.patch("nexent.core.agents.cores.jiuwen.adapter._wrap_tool_with_monitoring", side_effect=lambda tool, name: tool)
     capture_registration(adapter, mocker)
     native = adapter.native_agent
     factory = mocker.patch.object(native_factory, "create_deep_agent", return_value=native)
@@ -82,6 +91,17 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     proxy_type = mocker.patch("nexent.core.agents.resources.a2a.ExternalA2AAgentWrapper", side_effect=proxies)
     adapter.prepare()
     resources.create_tool.assert_called_once_with(tools[0])
+    if retriever:
+        assert local._nexent_monitoring_wrapped is True
+        assert local.forward(task="search") is documents
+        original_forward.assert_called_once_with(task="search")
+        monitoring.trace_retriever_call.assert_called_once()
+        monitoring.set_retriever_output.assert_called_once_with(documents)
+        monitoring.trace_tool_call.assert_not_called()
+    else:
+        assert local.forward is original_forward
+        monitoring.trace_retriever_call.assert_not_called()
+        monitoring.trace_tool_call.assert_not_called()
     resources._create_subagent_definition.assert_called_once_with(child, {})
     assert set(adapter.business_tools) == {"lookup", "child", "remote"}
     assert adapter.query == "Authorized latest task" and resources.core_run_info is adapter.run_info

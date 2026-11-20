@@ -731,7 +731,7 @@ async def test_prepared_conversation_cannot_export_unowned_message_boundary(mock
 
 def test_prepared_conversation_keeps_authorized_tool_records_across_runtime_boundary():
     records = [{
-        "record_type": "execution_logs", "content": "Actual result 2603",
+        "record_type": "execution_logs", "content": "Actual result 2603", "unit_index": 7,
         "tool_call_id": "call-1", "invocation_id": None,
     }]
     history = {"conversation_turns": [{

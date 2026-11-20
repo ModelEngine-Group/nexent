@@ -27,6 +27,9 @@ def turn_execution_text(content):
     records = content.get("execution_records") or []
     if not records:
         return ""
+    if any(isinstance(record, dict) and record.get("record_type") == "execution_result" for record in records):
+        from .action_history import render_persisted_actions
+        return render_persisted_actions(records, assistant_message_id=content.get("assistant_message_id"))
     records = [{key: value for key, value in record.items() if key != "execution_event"}
                if isinstance(record, dict) else record for record in records]
     return (
