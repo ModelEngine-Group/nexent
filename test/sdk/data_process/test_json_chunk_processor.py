@@ -1,14 +1,7 @@
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import orjson
-
-MODULE_PATH = Path(__file__).resolve().parents[3] / "sdk/nexent/data_process/json_chunk_processor.py"
-SPEC = spec_from_file_location("json_chunk_processor_under_test", MODULE_PATH)
-MODULE = module_from_spec(SPEC)
-assert SPEC and SPEC.loader
-SPEC.loader.exec_module(MODULE)
-JSONChunkProcessor = MODULE.JSONChunkProcessor
+from nexent.core.utils.json_chunking import JSONChunkProcessor
 
 
 class TestJSONChunkProcessor:

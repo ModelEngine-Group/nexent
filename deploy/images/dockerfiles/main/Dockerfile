@@ -97,6 +97,9 @@ RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sh
     esac && \
     uv sync --no-editable --link-mode copy --extra runtime-knowledge --extra runtime-images --index "$dependency_index" \
         $(test -n "$MIRROR" && echo "--default-index $MIRROR")
+# Management and the legacy worker still use the SDK outer parser. Runtime only needs chunking.
+RUN rm -rf /opt/sdk/nexent/data_process \
+    /opt/backend/.venv/lib/python3.11/site-packages/nexent/data_process
 
 FROM base AS backend-common
 
@@ -183,7 +186,7 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 FROM backend-common AS runtime
 
 COPY --from=runtime-deps /opt/backend/.venv /opt/backend/.venv
-COPY --from=builder /opt/sdk /opt/sdk
+COPY --from=runtime-deps /opt/sdk /opt/sdk
 RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
     mkdir -p /opt/models && \
     cp -a /tmp/model-assets/clip-vit-base-patch32 /opt/models/clip-vit-base-patch32 && \

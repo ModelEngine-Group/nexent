@@ -1,7 +1,12 @@
-from typing import List
-import string
-import orjson
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Provider-independent boundary selection for JSON and plain text."""
+
 import logging
+import string
+from typing import List
+
+import orjson
+
 
 logger = logging.getLogger(__name__)
 

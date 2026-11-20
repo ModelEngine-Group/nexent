@@ -3,7 +3,9 @@ import io
 import os
 from typing import Dict, List, Optional
 
-from .base import STRUCTURE_METADATA_FIELDS, FileProcessor
+from nexent.core.utils.document_structure import STRUCTURE_METADATA_FIELDS
+
+from .base import FileProcessor
 
 
 class UnstructuredProcessor(FileProcessor):
@@ -294,7 +296,7 @@ class UnstructuredProcessor(FileProcessor):
         """
         from unstructured.documents.elements import CompositeElement
 
-        from .json_chunk_processor import JSONChunkProcessor
+        from nexent.core.utils.json_chunking import JSONChunkProcessor
 
         return [
             CompositeElement(text=chunk)

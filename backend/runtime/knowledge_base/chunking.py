@@ -4,6 +4,7 @@
 import hashlib
 
 from contracts.agentos_knowledge import CleanseArtifact
+from nexent.core.utils.document_structure import STRUCTURE_METADATA_FIELDS
 
 
 def _document(content, filename, *, index=None, element_type=None, metadata=None):
@@ -36,7 +37,7 @@ def chunk_text(
         raise ValueError("Invalid text chunking request")
     blocks = [block for block in artifact.blocks if block.kind != "image"]
     if filename.lower().endswith(".json"):
-        from nexent.data_process.json_chunk_processor import JSONChunkProcessor
+        from nexent.core.utils.json_chunking import JSONChunkProcessor
 
         if (
             len(blocks) != 1
@@ -77,7 +78,6 @@ def chunk_text(
                 metadata=blocks[0].location if blocks else {},
             )
         ]
-    from nexent.data_process.base import STRUCTURE_METADATA_FIELDS
     from unstructured.chunking.basic import chunk_elements
     from unstructured.chunking.title import chunk_by_title
     from unstructured.documents.elements import (

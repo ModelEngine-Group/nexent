@@ -64,18 +64,26 @@ def test_workbook_keeps_rendered_block_boundaries(strategy):
 
 @pytest.mark.parametrize("strategy", ["basic", "by_title", "none"])
 def test_json_uses_original_bytes_with_existing_algorithm(strategy):
-    from nexent.data_process.json_chunk_processor import JSONChunkProcessor
-
     source = b'{"hello":"world", "other": 42}'
     value = artifact(
         [""],
         source=source,
         locations=[{"element_type": "JSONSource", "source_format": "json"}],
     )
-    expected = JSONChunkProcessor(20).split(source)
+    expected = ['hello: "world"', 'other: 42']
     result = chunk(value, "source.json", strategy, json_source=source)
     assert [row["content"] for row in result] == (
         ["\n\n".join(expected)] if strategy == "none" else expected
     )
     with pytest.raises(ValueError, match="pinned source"):
         chunk(value, "source.json", strategy, json_source=b"changed")
+
+
+def test_basic_restores_source_structure_for_chunker():
+    value = artifact(["heading", "body"], locations=[
+        {"element_type": "Title", "page_number": 4},
+        {"element_type": "NarrativeText", "page_number": 4},
+    ])
+    result = chunk(value, "source.pdf", "basic")
+    assert result[0]["content"] == "heading\n\nbody"
+    assert result[0]["metadata"] == {"chunk_index": 0, "element_type": "CompositeElement", "page_number": 4}
