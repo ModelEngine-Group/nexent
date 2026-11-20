@@ -26,8 +26,8 @@ case:
     preparation: 使用测试私有 profile、独占 namespace、数据库、Redis、MinIO 和动态 RWX StorageClass；用调度约束将两个真实 Runtime Pod 固定到不同 worker 主机。
   steps:
   - order: 1
-    action: 在两个工作节点上分别启动 A/B，记录 nodeName、PVC 来源与实际挂载；在 A 写唯一标记，在 B 读并反向写读。
-    expected: 双向内容和版本相同；节点确实不同，非同节点 hostPath。
+    action: 在两个工作节点上分别启动 A/B，记录 nodeName、PVC/PV 绑定、Filesystem 卷模式与实际挂载；在 A 写唯一标记，在 B 读并反向写读。
+    expected: 双向内容和版本相同；节点确实不同，卷为可挂载的 RWX 文件系统，不是裸块卷或同节点 hostPath。
   - order: 2
     action: 读取同批次 Skill/插件配置，在 A/B 分别启动带独立 Run 工作区的任务并生成输出。
     expected: 副本读取一致配置；每次运行文件归属明确，经现有对象存储下载的结果内容正确。

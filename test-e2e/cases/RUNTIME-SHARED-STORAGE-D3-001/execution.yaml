@@ -17,6 +17,8 @@ notes: >-
   Self-contained storage preparation in the enabled machine-local cluster:
   the case creates and removes its own namespace, product services, data domain,
   and dynamically provisioned volumes, without switching the default test stack.
+  The volume receipts include the validated RWX Filesystem bindings before
+  the Runtime pair exercises actual cross-node mounts.
   The case also owns a secretless model Pod and an internal Service. Independent
   barriers hold two real Agent Runs. The test lets A finish and remove its own
   workspace, checks B and the unrelated files, then replaces A while B remains

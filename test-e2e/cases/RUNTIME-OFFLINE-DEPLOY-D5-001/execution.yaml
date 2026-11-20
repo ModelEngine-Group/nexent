@@ -27,8 +27,10 @@ notes: >-
   endpoint. Versioning in the isolated embedded MinIO bucket records actual
   upload-tool writes, including repeated writes to the same key. Both receipts
   are checked before owner interruption, across failed and repeated maintenance,
-  after activation, and after the explicit new request. The case-owned storage
-  and its versions are reclaimed with the namespace and volumes. A separate
+  after activation, and after the explicit new request. The injected workspace
+  failure leaves PostgreSQL messages, evaluation state, reservations, scheduler
+  runs and leases unchanged until the same maintenance batch succeeds.
+  Case-owned storage and its versions are reclaimed with the namespace and volumes. A separate
   owned release gates a successful maintenance Job result and terminates only
   the uniquely tagged PostgreSQL deployment lock session. Helm activation must
   not be requested; the old batch stays committed and a fresh window recovers.

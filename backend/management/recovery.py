@@ -20,10 +20,8 @@ def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
     from management.db.conversation.repository import fail_streaming_assistant_messages
     from infrastructure.redis.run_state import runtime_state_service
 
-    if db_session is None:
-        messages = fail_streaming_assistant_messages()
-    else:
-        messages = fail_streaming_assistant_messages(db_session=db_session)
+    transaction = {} if db_session is None else {"db_session": db_session}
+    messages = fail_streaming_assistant_messages(**transaction)
     for message in messages:
         user_id = message.get("user_id")
         if user_id:
@@ -44,13 +42,13 @@ def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
         if db_session is None:
             evaluations += reap_stale_runs(tenant_id, timeout_minutes=0)
         else:
-            evaluations += reap_stale_runs(tenant_id, timeout_minutes=0, recover_owned=True, db_session=db_session)
+            evaluations += reap_stale_runs(tenant_id, timeout_minutes=0, recover_owned=True, **transaction)
 
     result = {
         "conversation_messages": len(messages),
         "agent_evaluations": evaluations,
-        "automation_runs": recover_orphaned_runs(),
-        "automation_locks": release_all_task_locks(),
+        "automation_runs": recover_orphaned_runs(**transaction),
+        "automation_locks": release_all_task_locks(**transaction),
     }
     logger.info("Runtime startup recovery completed: %s", result)
     return result

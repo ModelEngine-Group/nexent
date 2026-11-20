@@ -607,18 +607,21 @@ class RuntimeScalingCluster:
         volume_name = claim_spec.get("volumeName")
         if (claim["metadata"].get("namespace") != NAMESPACE or claim["status"]["phase"] != "Bound"
                 or not volume_name or claim_spec.get("storageClassName") != self.profile.storage_class
+                or claim_spec.get("volumeMode", "Filesystem") != "Filesystem"
                 or "ReadWriteMany" not in claim_spec.get("accessModes", ())):
-            raise IsolationError(f"Runtime claim {claim_name} is not a Bound RWX claim in the reserved StorageClass")
+            raise IsolationError(f"Runtime claim {claim_name} is not a Bound RWX Filesystem claim in the reserved StorageClass")
         volume = self._read("pv", volume_name)
         volume_spec = volume["spec"]
+        volume_mode = volume_spec.get("volumeMode", "Filesystem")
         claim_ref = volume_spec.get("claimRef", {})
         if (volume["status"]["phase"] != "Bound" or volume_spec.get("storageClassName") != self.profile.storage_class
-                or "ReadWriteMany" not in volume_spec.get("accessModes", ())
+                or volume_mode != "Filesystem" or "ReadWriteMany" not in volume_spec.get("accessModes", ())
                 or any(key in volume_spec for key in ("hostPath", "local"))
                 or (claim_ref.get("namespace"), claim_ref.get("name"), claim_ref.get("uid")) !=
                 (NAMESPACE, claim_name, claim["metadata"]["uid"])):
             raise IsolationError(f"Runtime volume for {claim_name} is not the expected shared binding")
         return {"claim": claim_name, "volume": volume_name, "storage_class": self.profile.storage_class,
+                "volume_mode": volume_mode,
                 "driver": volume_spec.get("csi", {}).get("driver", "nfs" if "nfs" in volume_spec else "other")}
 
     def fixture_logs(self, resource):

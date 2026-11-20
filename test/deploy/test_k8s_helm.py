@@ -177,18 +177,37 @@ fi
 if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then exit 1; fi
 if [ "$1" = "get" ] && [ "$2" = "pvc" ]; then
   if [ "${MOCK_RUNTIME_STORAGE:-}" = "missing" ]; then exit 1; fi
-  if [ "${MOCK_RUNTIME_STORAGE:-}" = "pending" ]; then printf 'Pending::ReadWriteMany,'; exit 0; fi
-  if [ "${MOCK_RUNTIME_STORAGE:-}" = "rwo" ]; then printf 'Bound:pv-%s:ReadWriteOnce,' "$3"; exit 0; fi
-  printf 'Bound:pv-%s:ReadWriteMany,' "$3"
+  case "${MOCK_RUNTIME_STORAGE:-}" in
+    pending) printf 'Pending::ReadWriteMany,' ;;
+    rwo) printf 'Bound:pv-%s:ReadWriteOnce,' "$3" ;;
+    *) printf 'Bound:pv-%s:ReadWriteMany,' "$3" ;;
+  esac
+  if [[ "$*" == *'.spec.volumeMode'* ]]; then
+    case "${MOCK_RUNTIME_STORAGE:-}" in
+      pvc-block) printf ':Block' ;;
+      omitted-volume-mode) printf ':' ;;
+      *) printf ':Filesystem' ;;
+    esac
+  fi
   exit 0
 fi
 if [ "$1" = "get" ] && [ "$2" = "pv" ] && [[ "$3" == pv-* ]]; then
+  if [[ "$*" == *'.spec.volumeMode'* ]]; then
+    case "${MOCK_RUNTIME_STORAGE:-}" in
+      pv-block) volume_mode='Block' ;;
+      omitted-volume-mode) volume_mode='' ;;
+      *) volume_mode='Filesystem' ;;
+    esac
+    field=":$volume_mode"
+  else
+    field=''
+  fi
   case "${MOCK_RUNTIME_STORAGE:-}" in
-    hostpath) printf 'Bound:ReadWriteMany,:/var/lib/nexent:' ;;
-    local) printf 'Bound:ReadWriteMany,::/var/lib/nexent' ;;
-    wrong-pv-mode) printf 'Bound:ReadWriteOnce,::' ;;
+    hostpath) printf 'Bound:ReadWriteMany,%s:/var/lib/nexent:' "$field" ;;
+    local) printf 'Bound:ReadWriteMany,%s::/var/lib/nexent' "$field" ;;
+    wrong-pv-mode) printf 'Bound:ReadWriteOnce,%s::' "$field" ;;
     unavailable) exit 1 ;;
-    *) printf 'Bound:ReadWriteMany,::' ;;
+    *) printf 'Bound:ReadWriteMany,%s::' "$field" ;;
   esac
   exit 0
 fi

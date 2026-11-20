@@ -92,6 +92,32 @@ def test_maintenance_redis_failure_leaves_conversation_update_for_transaction_ro
     automation.release_all_task_locks.assert_not_called()
 
 
+def test_maintenance_enlists_automation_recovery_in_batch_transaction(monkeypatch):
+    session = object()
+    messages = _install_module(
+        monkeypatch, "management.db.conversation.repository", fail_streaming_assistant_messages=MagicMock(return_value=[]),
+    )
+    automation = _install_module(
+        monkeypatch, "management.db.automation.repository",
+        recover_orphaned_runs=MagicMock(return_value=2), release_all_task_locks=MagicMock(return_value=3),
+    )
+    evaluations = _install_module(
+        monkeypatch, "management.db.evaluation.runs",
+        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1"]), reap_stale_runs=MagicMock(return_value=1),
+    )
+    _install_module(monkeypatch, "infrastructure.redis.run_state", runtime_state_service=MagicMock())
+
+    result = startup_recovery_service.recover_runtime_tasks(db_session=session)
+
+    assert result == {"conversation_messages": 0, "agent_evaluations": 1, "automation_runs": 2, "automation_locks": 3}
+    messages.fail_streaming_assistant_messages.assert_called_once_with(db_session=session)
+    evaluations.reap_stale_runs.assert_called_once_with(
+        "tenant-1", timeout_minutes=0, recover_owned=True, db_session=session,
+    )
+    automation.recover_orphaned_runs.assert_called_once_with(db_session=session)
+    automation.release_all_task_locks.assert_called_once_with(db_session=session)
+
+
 def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     _install_module(
         monkeypatch,

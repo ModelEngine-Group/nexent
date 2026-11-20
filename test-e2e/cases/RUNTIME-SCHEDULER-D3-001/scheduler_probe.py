@@ -2,6 +2,7 @@
 
 """Seed and observe a disposable scheduled occurrence using the real PostgreSQL store."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import json
 import sys
@@ -10,7 +11,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 from uuid import UUID, uuid5
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 
 from contracts.automation import ScheduleTrigger
 from contracts.constants.environment import (
@@ -113,6 +114,58 @@ def assert_only_race_row_due(session, task_id):
         or_(AgentAutomationTask.lock_until.is_(None), AgentAutomationTask.lock_until < func.now()),
     ))
     assert not list(rows), "Refusing to poll an unrelated due scheduler task"
+
+
+def assert_waiting_lease_updates_are_fenced(task):
+    task_id, tenant, owner, lease_owner = (
+        task[name] for name in ("task_id", "tenant_id", "user_id", "lock_owner")
+    )
+    task_row = update(AgentAutomationTask).where(
+        AgentAutomationTask.task_id == task_id, AgentAutomationTask.tenant_id == tenant,
+        AgentAutomationTask.user_id == owner, AgentAutomationTask.delete_flag == "N",
+    )
+    attempts = {
+        "renewal": (renew_task_lock, (task_id, lease_owner, 120), False),
+        "missed_fire": (update_task_if_lock_owner, (task_id, tenant, owner, lease_owner, {
+            "next_fire_at": datetime.fromisoformat(task["next_fire_at"]) + timedelta(hours=1),
+            "lock_owner": None, "lock_until": None,
+        }), None),
+    }
+    rejected = {}
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        for action, (operation, arguments, expected) in attempts.items():
+            with get_db_session() as session:
+                expiry = session.scalar(select(func.clock_timestamp())) + timedelta(seconds=4)
+                session.execute(task_row.values(next_fire_at=None, lock_owner=lease_owner, lock_until=expiry))
+            before = get_task(task_id, tenant, owner)
+            with get_db_session() as blocker:
+                blocker.execute(select(AgentAutomationTask.task_id).where(
+                    AgentAutomationTask.task_id == task_id,
+                ).with_for_update()).scalar_one()
+                attempt = workers.submit(operation, *arguments)
+                while blocker.scalar(select(func.clock_timestamp())) < expiry:
+                    assert not attempt.done(), f"{action} did not wait for the held task row"
+                    blocker.scalar(select(func.pg_stat_clear_snapshot()))
+                    if blocker.scalar(text("""
+                        SELECT EXISTS (
+                            SELECT FROM pg_stat_activity
+                            WHERE datname = current_database() AND xact_start < :expiry
+                              AND pg_backend_pid() = ANY(pg_blocking_pids(pid))
+                        )
+                    """), {"expiry": expiry}):
+                        break
+                    sleep(0.02)
+                else:
+                    raise AssertionError(f"{action} did not reach PostgreSQL before lease expiry")
+                while blocker.scalar(select(func.clock_timestamp())) <= expiry:
+                    sleep(0.02)
+            result = attempt.result(timeout=10)
+            rejected[action] = result is expected and get_task(task_id, tenant, owner) == before
+
+    assert all(rejected.values()), f"Expired row wait changed the task: {rejected}"
+    with get_db_session() as session:
+        session.execute(task_row.values(next_fire_at=task["next_fire_at"], lock_until=task["lock_until"]))
+    return rejected
 
 
 def reclaim_and_submit_stale_result(session, token, task, previous_actor):
@@ -247,10 +300,12 @@ def observe_schedule(raw_token, action, raw_identifier, *arguments):
             if action == "compete":
                 return contend_for_occurrence(raw_token, task, arguments[0])
             return reclaim_and_submit_stale_result(session, raw_token, task, arguments[0])
-        if action == "unblock" and not arguments:
+        if action in {"wait-expiry", "unblock"} and not arguments:
             task = snapshot(session, identifier, tenant, owner)["task"]
             fixture_lock = f"runtime-scheduler-fixture:{raw_token}"
             assert task["instruction"] == f"runtime-stream:{raw_token}:pending" and task["lock_owner"] == fixture_lock
+            if action == "wait-expiry":
+                return assert_waiting_lease_updates_are_fenced(task)
             unlocked = update_task_if_lock_owner(task["task_id"], tenant, owner, fixture_lock,
                                                  {"lock_owner": None, "lock_until": None})
             return {"unblocked": unlocked is not None}

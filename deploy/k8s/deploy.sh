@@ -947,25 +947,27 @@ require_paused_runtime_epoch() {
 }
 
 require_runtime_rwx_claim() {
-    local claim="$1" pvc pv volume pvc_modes pv_modes phase host_path local_path
+    local claim="$1" pvc pv volume pvc_modes pv_modes volume_mode phase host_path local_path
     if ! pvc=$(kubectl get pvc "$claim" -n "$NAMESPACE" -o \
-        'jsonpath={.status.phase}:{.spec.volumeName}:{range .spec.accessModes[*]}{.}{","}{end}'); then
+        'jsonpath={.status.phase}:{.spec.volumeName}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}'); then
         echo "Error: cannot inspect shared Runtime claim $NAMESPACE/$claim." >&2
         return 1
     fi
-    IFS=: read -r phase volume pvc_modes <<< "$pvc"
-    if [ "$phase" != "Bound" ] || [ -z "$volume" ] || [[ ",$pvc_modes" != *,ReadWriteMany,* ]]; then
-        echo "Error: Runtime claim $NAMESPACE/$claim must be Bound with ReadWriteMany access." >&2
+    IFS=: read -r phase volume pvc_modes volume_mode <<< "$pvc"
+    if [ "$phase" != "Bound" ] || [ -z "$volume" ] || [[ ",$pvc_modes" != *,ReadWriteMany,* ]] || \
+        [ "${volume_mode:-Filesystem}" != "Filesystem" ]; then
+        echo "Error: Runtime claim $NAMESPACE/$claim must be Bound with ReadWriteMany access and Filesystem volume mode." >&2
         return 1
     fi
     if ! pv=$(kubectl get pv "$volume" -o \
-        'jsonpath={.status.phase}:{range .spec.accessModes[*]}{.}{","}{end}:{.spec.hostPath.path}:{.spec.local.path}'); then
+        'jsonpath={.status.phase}:{range .spec.accessModes[*]}{@}{","}{end}:{.spec.volumeMode}:{.spec.hostPath.path}:{.spec.local.path}'); then
         echo "Error: cannot inspect volume $volume bound to Runtime claim $NAMESPACE/$claim." >&2
         return 1
     fi
-    IFS=: read -r phase pv_modes host_path local_path <<< "$pv"
-    if [ "$phase" != "Bound" ] || [[ ",$pv_modes" != *,ReadWriteMany,* ]] || [ -n "$host_path$local_path" ]; then
-        echo "Error: Runtime volume $volume must be Bound, ReadWriteMany, and backed by shared storage rather than hostPath or local storage." >&2
+    IFS=: read -r phase pv_modes volume_mode host_path local_path <<< "$pv"
+    if [ "$phase" != "Bound" ] || [[ ",$pv_modes" != *,ReadWriteMany,* ]] || \
+        [ "${volume_mode:-Filesystem}" != "Filesystem" ] || [ -n "$host_path$local_path" ]; then
+        echo "Error: Runtime volume $volume must be Bound, ReadWriteMany, Filesystem, and backed by shared storage rather than hostPath or local storage." >&2
         return 1
     fi
 }

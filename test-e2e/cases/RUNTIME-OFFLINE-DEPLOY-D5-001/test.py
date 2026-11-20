@@ -352,6 +352,15 @@ def assert_preserved(prior, current):
     assert current["redis_sentinel"] is not None and current["redis_sentinel"] == prior["redis_sentinel"]
 
 
+def assert_failed_recovery_did_not_commit(seeded, after_failure):
+    assert_preserved(seeded, after_failure)
+    for name in ("messages", "later_messages", "evaluations", "evaluation_cases", "reservations",
+                 "automation_runs", "tasks"):
+        assert after_failure[name] == seeded[name], f"Failed maintenance committed {name}"
+    assert after_failure["run_file"] == seeded["run_file"] and seeded["run_file"] is not None
+    assert after_failure["redis_status"] == after_failure["redis_done"] == "failed"
+
+
 def induce_maintenance_failure(cluster, script, probe, seeded, prior_epoch):
     probe("block-cleanup")
     try:
@@ -369,12 +378,7 @@ def induce_maintenance_failure(cluster, script, probe, seeded, prior_epoch):
             pytest.fail("Maintenance Job did not report the injected workspace failure")
         assert cluster.committed_maintenance_count(epoch) == 0
         assert_no_autoscalers(cluster)
-        after_failure = probe("snapshot")
-        assert_preserved(seeded, after_failure)
-        for name in ("messages", "later_messages", "evaluations", "evaluation_cases", "reservations"):
-            assert after_failure[name] == seeded[name], f"Failed maintenance committed {name}"
-        assert after_failure["run_file"] == seeded["run_file"] and seeded["run_file"] is not None
-        assert after_failure["redis_status"] == after_failure["redis_done"] == "failed"
+        assert_failed_recovery_did_not_commit(seeded, probe("snapshot"))
         return paused
     finally:
         probe("restore-cleanup")

@@ -31,6 +31,7 @@ change:
     - 普通 Kubernetes Pod 启动不全局恢复；维护前提、幂等、批次校验与失败保持停止。
     - 未终态旧 bootstrap/维护 Job 或 Pod 阻止新批次；同步官方 Skill 前和放行 bootstrap SQL 前验证部署锁。
     - 即使暂时没有 Pod，也不将未确认的缩零配置或仍报告副本的 Deployment 视为全停；维护 Job 独立核验 Runtime 状态。
+    - 全停维护失败时调度运行和租约随其他 PostgreSQL 遗留状态回滚；同批次成功才提交，单 Runtime 启动行为不变。
     - 维护回收遗留 streaming 消息时，Redis 终态写入绑定该消息，不覆盖同会话已完成的后续执行。
     - 同会话预约、租户/Agent 全局配额、稳定锁键和锁序、真实收尾后释放、依赖故障及准备/提交失败补偿。
     - 北向用户消息在 Runtime 接纳后由 control-io 写入；拒绝不追加消息，取消时保留预约直到写入退出，A2A 请求保持原转发行为。
@@ -41,6 +42,7 @@ change:
     - 固定 Runtime 副本数边界、暂停时为零、共享存储预检、失败不激活与停机回退。
     - 多调度器启动不误恢复、租约与失租、忙碌/misfire；工作区路径/归属及非 Run 保留。
     - 调度执行接纳与收尾使用 PostgreSQL 时钟核对租约，过期 owner 在新实例领取前后均不能提交结果。
+    - 调度续租与错过周期写入在获得任务行锁后使用 PostgreSQL 实时时钟；等待行锁期间过期时不得写入。
     - 重领按任务、身份和准确触发时间查找已原子提交的自动化 prompt；已开始的周期跳过，未开始及下一周期仍可执行，查找失败不执行。
     reason: 维护和协调器 UT 覆盖启动隔离、锁序、失败和容量边界；不替代实际跨进程业务接纳和分布式流的正式证明。
     test_selectors:
@@ -57,7 +59,12 @@ change:
     - test/backend/services/test_agent_run_workbench_state_coverage.py
     - test/backend/services/test_agent_automation_runner.py
     - test/backend/services/test_automation_lease_commit.py
+    - test/backend/services/test_automation_terminal_boundaries.py
     - test/backend/database/test_automation_task_run_locking.py
+    - test/backend/database/test_agent_automation_message_binding.py
+    - test/backend/database/test_agent_automation_db.py::test_lease_recovery_helpers_cover_empty_and_success_paths
+    - test/backend/database/test_agent_automation_db.py::test_automation_recovery_uses_existing_transaction
+    - test/backend/database/test_agent_automation_db.py::test_lease_writes_check_database_clock_after_lock
     - test/backend/services/test_northbound_service.py
     - test/backend/services/test_runtime_proxy_service.py
     - test/backend/app/test_agent_evaluation_runtime_app.py
@@ -80,4 +87,5 @@ change:
     - frontend/tests/workbench/ConversationResumeBranch.test.tsx
     - frontend/tests/workbench/UnifiedOutputStream.test.ts
   notes: 已接入停机批次、维护 Job、固定副本数和共享存储预检；Agent、Workbench、自动任务、北向、持久化评测、NL2Agent 和 NL2Skill 已接入预约。停止和共享回放已验证组件行为；Agent/Workbench 和北向支持显式游标，Web 恢复固定原 assistant 分支。Feature 保持 planned，Case 保持 blocked；尚无真实 Kubernetes 部署、跨节点共享、指定 Pod 或稳定代理的正式验收证据。
+    test/deploy 下的命令回归覆盖默认/显式 Filesystem 放行、已有裸块卷不暂停、动态卷预检失败不写入或激活；不计入后端传统 UT selector 或真实集群 Case 执行。
     默认责任 runtime；停机部署、共享存储、HPA Case 归 deployment，调度 Case 归 task。未增加 D1；D4 无新增用户流程。

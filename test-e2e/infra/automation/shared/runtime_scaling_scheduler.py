@@ -84,7 +84,10 @@ def exercise_live_lease_loss(identifier, seed, held, *, snapshot, probe, control
                          "The original worker did not settle or the next regular occurrence did not finish")
     assert completed["runs"][:2] == [timed_out, replay], "The stale worker rewrote a settled occurrence"
     final_run, = completed["runs"][2:]
-    assert final_run["status"] == "SUCCEEDED" and final_run["trigger_type"] == "SCHEDULED"
+    assert final_run["status"] == "SUCCEEDED" and final_run["trigger_type"] == "SCHEDULED", (
+        f"The next regular occurrence ended as {final_run['status']}/{final_run['error_code']}; "
+        f"reservations: {[row['status'] for row in completed['reservations']]}"
+    )
     assert final_run["scheduled_fire_at"] == following_fire and final_run["finished_at"]
     old, new = completed["reservations"]
     assert old["execution_id"] == reservation["execution_id"] and old["status"] == "STOPPED"
@@ -173,6 +176,14 @@ def exercise_scheduler(urls, stable_url, identity, agent, token, *, control, pro
         def seed(identifier, tag):
             return probe("seed", identifier, tag, agent["agent_id"], agent["model_id"])
 
+        pending_seed = seed(pending_conversation, "pending")
+        waiting_updates = probe("wait-expiry", pending_conversation)
+        assert waiting_updates == {"renewal": True, "missed_fire": True}
+        pending_before = snapshot(pending_conversation)
+        assert pending_before["task"]["lock_owner"] == pending_seed["fixture_lock"]
+        assert pending_before["task"]["next_fire_at"] == pending_seed["scheduled"]
+        assert not any(pending_before[key] for key in ("runs", "reservations", "messages"))
+
         assert snapshot(auto_conversation)["scheduler_capacity"] == 1
         auto_seed = seed(auto_conversation, "auto")
         wait_for(lambda: control("probe")["calls_by_tag"].get("auto") == 1, wait_seconds,
@@ -215,11 +226,6 @@ def exercise_scheduler(urls, stable_url, identity, agent, token, *, control, pro
             assert current_run == run and current_reservation == reservation and observed["messages"] == held["messages"]
             return datetime.fromisoformat(current_task["lock_until"])
 
-        pending_seed = seed(pending_conversation, "pending")
-        pending_before = snapshot(pending_conversation)
-        assert pending_before["task"]["lock_owner"] == pending_seed["fixture_lock"]
-        assert pending_before["task"]["next_fire_at"] == pending_seed["scheduled"]
-        assert not any(pending_before[key] for key in ("runs", "reservations", "messages"))
         before_restart = lease_expiry()
         replacement = restart_peer(peer)
         after_restart = lease_expiry()
@@ -312,4 +318,4 @@ def exercise_scheduler(urls, stable_url, identity, agent, token, *, control, pro
                 "same_row_claim_winner": accepted["actor"], "lease_loss": fault, "recovered_occurrence": race_run["run_id"],
                 "live_worker_lease_loss": live_loss, "settled_worker_lease_loss": settled_loss,
                 "model_calls": model["calls_by_tag"],
-                "lease_renewed": True, "test_records_removed": True}
+                "lease_renewed": True, "waiting_updates_rejected": waiting_updates, "test_records_removed": True}

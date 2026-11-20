@@ -475,7 +475,8 @@ def test_cross_node_placement_updates_only_the_owned_runtime_pod_template(bounda
     ]
 
 
-@pytest.mark.parametrize("problem", [None, "hostPath", "local", "foreign-claim", "read-write-once", "foreign-class"])
+@pytest.mark.parametrize("problem", [None, "explicit-filesystem", "hostPath", "local", "foreign-claim",
+                                     "read-write-once", "foreign-class", "block-pvc", "block-pv"])
 def test_bound_shared_runtime_volume_requires_the_owned_rwx_binding(boundary, monkeypatch, problem):
     cluster, _, _ = boundary
     claim_name = "nexent-workspace"
@@ -494,15 +495,21 @@ def test_bound_shared_runtime_volume_requires_the_owned_rwx_binding(boundary, mo
         volume["spec"]["accessModes"] = ["ReadWriteOnce"]
     elif problem == "foreign-class":
         claim["spec"]["storageClassName"] = "other-class"
+    elif problem == "block-pvc":
+        claim["spec"]["volumeMode"] = "Block"
+    elif problem == "block-pv":
+        volume["spec"]["volumeMode"] = "Block"
+    elif problem == "explicit-filesystem":
+        claim["spec"]["volumeMode"] = volume["spec"]["volumeMode"] = "Filesystem"
     monkeypatch.setattr(cluster, "resources", lambda *args: claim)
     monkeypatch.setattr(cluster, "_read", lambda *args: volume)
-    if problem:
+    if problem not in {None, "explicit-filesystem"}:
         with pytest.raises(runtime.IsolationError, match="Runtime (volume|claim)"):
             cluster.bound_shared_volume(claim_name)
     else:
         assert cluster.bound_shared_volume(claim_name) == {
             "claim": claim_name, "volume": "test-volume", "storage_class": cluster.profile.storage_class,
-            "driver": "fixture.example.test",
+            "driver": "fixture.example.test", "volume_mode": "Filesystem",
         }
 
 

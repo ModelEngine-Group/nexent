@@ -157,9 +157,10 @@ def test_maintenance_retry_rejects_mismatched_pause_before_job_or_rollout(isolat
                    for line in commands)
 
 
-def test_existing_rwx_claims_are_checked_before_pause_and_bootstrap_writes(isolated_k8s_project):
+@pytest.mark.parametrize("storage", ["", "omitted-volume-mode"])
+def test_existing_rwx_claims_are_checked_before_pause_and_bootstrap_writes(isolated_k8s_project, storage):
     project, env, mock_log = isolated_k8s_project
-    env.update({"MOCK_APP_EXISTS": "true", "MOCK_INFRA_EXISTS": "true"})
+    env.update({"MOCK_APP_EXISTS": "true", "MOCK_INFRA_EXISTS": "true", "MOCK_RUNTIME_STORAGE": storage})
     result = _run([*_deploy_command(project, scope="nexent"), "--persistence-mode", "existing",
                    "--existing-claim-prefix", "shared", "--runtime-replicas", "3"], check=False, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -172,11 +173,19 @@ def test_existing_rwx_claims_are_checked_before_pause_and_bootstrap_writes(isola
               "nexent-trajectory"}
     for window in (commands[:first_scale], commands[pause:first_copy]):
         assert {line.split()[3] for line in window if line.startswith("kubectl get pvc ")} == claims
+        assert {line.split()[3] for line in window if line.startswith("kubectl get pv ")} == {
+            f"pv-{claim}" for claim in claims
+        }
+        for line in window:
+            if line.startswith(("kubectl get pvc ", "kubectl get pv ")):
+                assert '{range .spec.accessModes[*]}{@}{","}{end}' in line
 
 
 @pytest.mark.parametrize("mode,failure", [("dynamic", "hostpath"), ("dynamic", "local"),
                                           ("dynamic", "wrong-pv-mode"), ("dynamic", "unavailable"),
-                                          ("existing", "rwo"), ("existing", "pending"), ("existing", "missing")])
+                                          ("dynamic", "pv-block"), ("existing", "pvc-block"),
+                                          ("existing", "pv-block"), ("existing", "rwo"),
+                                          ("existing", "pending"), ("existing", "missing")])
 def test_multi_replica_storage_failures_never_activate_runtime(isolated_k8s_project, mode, failure):
     project, env, mock_log = isolated_k8s_project
     env.update({"MOCK_APP_EXISTS": "true", "MOCK_INFRA_EXISTS": "true", "MOCK_RUNTIME_STORAGE": failure})
@@ -184,6 +193,8 @@ def test_multi_replica_storage_failures_never_activate_runtime(isolated_k8s_proj
                   check=False, env=env)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Error: " in result.stderr and "Runtime" in result.stderr
+    if failure.endswith("-block"):
+        assert "Filesystem" in result.stderr
     commands = mock_log.read_text(encoding="utf-8").splitlines()
     assert not any(line.startswith("kubectl apply -f -") for line in commands)
     assert not any(line.startswith("kubectl cp ") or "nexent-bootstrap-start" in line for line in commands)

@@ -19,9 +19,12 @@ notes: >-
   An opted-in isolated Kubernetes cluster provides two Runtime
   workers, dynamic volumes and a disposable PostgreSQL/Redis data domain. The
   test seeds owned tasks and identities, holds real provider requests, and makes
-  each scheduler single-slot only in the staged release. A case-owned temporary
-  lock holds a due recurring occurrence across the peer startup; the replacement
-  must execute that occurrence after unlocking. Two Pod-local claim workers
+  each scheduler single-slot only in the staged release. Before opening the
+  live model barriers, the probe parks an owned task and holds its row lock
+  across expiry separately for renewal and missed-fire writes. Both attempts
+  must leave the row unchanged. The probe restores the task's due time and
+  case-owned lease, which holds the occurrence across peer startup; the
+  replacement must execute it after unlocking. Two Pod-local claim workers
   rendezvous using case-owned Redis keys and call the real PostgreSQL repository
   while the application schedulers are occupied. The probe expires the winner's
   synthetic run lease, verifies stale completion, renewal and release are fenced,
