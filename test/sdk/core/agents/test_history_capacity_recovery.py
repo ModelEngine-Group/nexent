@@ -432,3 +432,20 @@ def test_b004_explicit_provider_overflow_may_recover_when_local_estimate_fit(moc
     with pytest.raises(ValueError):
         runtime.recover_step(model=model, memory=memory, current_run_start_idx=0)
     assert generated.call_count == count
+
+
+@pytest.mark.parametrize("parent", [None, 5000.0])
+def test_recovery_inherits_parent_deadline_without_turning_read_timeout_into_wallclock(
+    mocker, parent
+):
+    runtime, _, _, _ = configured(mocker)
+    model = SimpleNamespace(
+        profile=SimpleNamespace(connection=SimpleNamespace(timeout_seconds=180)),
+        deadline=parent,
+    )
+    mocker.patch("time.monotonic", return_value=1000.0)
+    runtime.begin_request(model=model)
+    assert runtime._capacity_budget.deadline == parent
+    mocker.patch("time.monotonic", return_value=2000.0)
+    if parent is None:
+        runtime._capacity_budget.check(lambda: False)

@@ -102,3 +102,50 @@ def test_b004_native_prepare_reentry_does_not_reset_failed_transaction(mocker):
         bridge._assemble(messages, [])
     assert generated.call_count == calls and bridge._capacity_budget is budget
     assert budget.used and bridge.context_manager._history_candidate is None
+
+
+@pytest.mark.parametrize("parent", [None, 5000.0])
+def test_native_recovery_does_not_invent_deadline_from_connection_timeout(
+    mocker, parent
+):
+    bridge, info = make_bridge()
+    info.model_deadline = parent
+    mocker.patch("time.monotonic", return_value=1000.0)
+    bridge.begin_request()
+    assert bridge._capacity_budget.deadline == parent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent", [None, 1001.0])
+async def test_native_recovery_reuses_actual_prepare_task_deadline(mocker, parent):
+    from concurrent.futures import Future
+
+    bridge, info = make_bridge()
+    info.model_deadline = parent
+    mocker.patch("time.monotonic", return_value=1000.0)
+    observed = []
+
+    def submit(lane, spec, work, *args):
+        observed.append((spec.deadline_monotonic, bridge._capacity_budget.deadline))
+        result = Future()
+        result.set_result([])
+        return SimpleNamespace(future=result)
+
+    bridge.manager.submit.side_effect = submit
+    await bridge.prepare_messages([{"role": "user", "content": "CURRENT_TASK"}], [])
+    expected = (
+        min(1000.0 + bridge.context_timeout, parent)
+        if parent is not None
+        else 1000.0 + bridge.context_timeout
+    )
+    assert observed == [(expected, expected)]
+    assert bridge._capacity_budget.deadline == expected
+    mocker.patch("time.monotonic", return_value=1000.5)
+    await bridge.prepare_messages([{"role": "user", "content": "CURRENT_TASK"}], [])
+    next_task = (
+        min(1000.5 + bridge.context_timeout, parent)
+        if parent is not None
+        else 1000.5 + bridge.context_timeout
+    )
+    assert observed[-1] == (next_task, expected)
+    assert bridge._capacity_budget.deadline == expected

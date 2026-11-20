@@ -141,10 +141,7 @@ class JiuwenContextBridge:
 
     def begin_request(self):
         """One recovery allowance across corrections of one native main request."""
-        deadline = time.monotonic() + min(self.context_timeout, 3 * self.summary_model.model.profile.connection.timeout_seconds)
-        if self.info.model_deadline is not None:
-            deadline = min(deadline, self.info.model_deadline)
-        self._capacity_budget = ContextRecoveryBudget(deadline=deadline)
+        self._capacity_budget = ContextRecoveryBudget(deadline=self.info.model_deadline)
 
     def _assemble(self, messages, tools):
         if self.scope.cancelled:
@@ -307,6 +304,10 @@ class JiuwenContextBridge:
             finally:
                 self._maintenance_execution = None
             timeout = max(0.0, deadline - time.monotonic())
+        if self._capacity_budget is None:
+            self.begin_request()
+        inherited = self._capacity_budget.deadline
+        self._capacity_budget.deadline = min(inherited, deadline) if inherited is not None else deadline
         execution = self.manager.submit(
             "model-tool-io", ManagedTaskSpec(task_name="jiuwen-context", owner=__name__,
                 run_id=self.summary_model.model.run_id, deadline_monotonic=deadline),
