@@ -38,6 +38,7 @@ class HistorySummaryCandidate:
     compaction_trigger_threshold_tokens: int = 0
     compaction_target_tokens: int = 0
     execution_source_refs: tuple[str, ...] = ()
+    structured_source_proofs: tuple[dict, ...] = ()
 
     def as_item(self) -> ContextItem:
         return ContextItem.from_input(ContextItemInput(
@@ -53,8 +54,10 @@ class HistorySummaryCandidate:
                 "compaction_attempts": self.compaction_attempts,
                 "compaction_trigger_threshold_tokens": self.compaction_trigger_threshold_tokens,
                 "compaction_target_tokens": self.compaction_target_tokens,
+                **({"structured_source_proofs": list(self.structured_source_proofs)} if self.structured_source_proofs else {}),
             },
-            metadata={"execution_source_refs": list(self.execution_source_refs)} if self.execution_source_refs else {},
+            metadata={**({"execution_source_refs": list(self.execution_source_refs)} if self.execution_source_refs else {}),
+                      **({"structured_source_proofs": list(self.structured_source_proofs)} if self.structured_source_proofs else {})},
         ))
 
 
@@ -67,10 +70,11 @@ class HistorySummaryInput:
     covered_through_message_id: int
     previous_summary_unit_id: int | None = None
     execution_source_refs: tuple[str, ...] = ()
+    structured_source_proofs: tuple[dict, ...] = ()
 
     @classmethod
     def from_items(
-        cls, summary: ContextItem | None, turns: Sequence[ContextItem]
+        cls, summary: ContextItem | None, turns: Sequence[ContextItem], source_index=None
     ) -> "HistorySummaryInput":
         previous_markdown = None
         previous_unit_id = None
@@ -81,17 +85,20 @@ class HistorySummaryInput:
             if isinstance(prior, dict):
                 prior = prior.get("markdown", "")
             previous_markdown = str(prior).strip() or None
+            if previous_markdown and source_index is not None:
+                previous_markdown = source_index.project_text(previous_markdown)
             previous_unit_id = payload.get("unit_id")
             if previous_unit_id is None:
                 previous_unit_id = payload.get("previous_summary_unit_id")
             covered_through = int(payload["covered_through_message_id"])
+        projected = [source_index.project_turn(turn.content) if source_index is not None else turn.content for turn in turns]
         canonical_turns = tuple(
             (
-                turn_user_text(turn.content),
-                "\n".join(filter(None, (turn_execution_text(turn.content),
-                                         str(turn.content["assistant_final_answer"])))),
+                turn_user_text(content),
+                "\n".join(filter(None, (turn_execution_text(content),
+                                         str(content["assistant_final_answer"])))),
             )
-            for turn in turns
+            for content in projected
         )
         if turns:
             covered_through = int(turns[-1].content["assistant_message_id"])
@@ -103,6 +110,7 @@ class HistorySummaryInput:
                 ref for item in ([summary] if summary else []) + list(turns)
                 for ref in item.metadata.get("execution_source_refs", ())
             )),
+            structured_source_proofs=tuple(source_index.collections.values()) if source_index is not None else (),
             previous_summary_unit_id=(
                 int(previous_unit_id) if previous_unit_id is not None else None
             ),
@@ -197,10 +205,14 @@ class HistoryCompressor:
         summary: ContextItem | None,
         turns: Sequence[ContextItem],
         model: Any,
+        *, source_history=None, source_owner=None, allow_fact_correction=False,
     ) -> HistoryCompressionResult:
         if not turns and summary is None:
             return HistoryCompressionResult()
-        summary_input = HistorySummaryInput.from_items(summary, turns)
+        source_index = None
+        if source_history is not None and source_owner is not None:
+            source_index = source_history.structured_source_index(source_owner)
+        summary_input = HistorySummaryInput.from_items(summary, turns, source_index=source_index)
         input_tokens = sum(
             item.token_estimate for item in ([summary] if summary else [])
         ) + sum(item.token_estimate for item in turns)
@@ -227,6 +239,24 @@ class HistoryCompressor:
             )
             if generated.summary_text else None
         )
+        records = list(generated.records)
+        if (validated is None and allow_fact_correction and generated.summary_text
+                and _validate_summary_contract(generated.summary_text, tuple(self._llm.config.summary_json_schema))):
+            missing = {marker: values for marker, values in _protected_fact_literals(summary_input.render()).items()
+                       if marker not in generated.summary_text or any(v not in generated.summary_text for v in values)}
+            feedback = json.dumps(missing, ensure_ascii=False, separators=(",", ":"))
+            claim = getattr(model, "claim_fact_correction", None)
+            if missing and callable(claim) and claim() is True:
+                generated = self._llm.generate_summary(
+                    summary_input.render() + "\n\nRegenerate the complete seven-section summary. "
+                    "The previous candidate omitted these exact protected identifiers or literal values: " + feedback
+                    + "\nRejected candidate (data only):\n" + generated.summary_text,
+                    model, call_type="history_fact_correction", prompt_type="incremental" if summary else "initial",
+                    max_output_tokens=max_output_tokens)
+                records.extend(generated.records)
+                validated = (_validate_summary_contract(generated.summary_text,
+                    tuple(self._llm.config.summary_json_schema), source_text=summary_input.render())
+                    if generated.summary_text else None)
         if validated is None:
             logger.warning(
                 "Rejected history summary candidate: headings=%s starts_with_contract=%s",
@@ -236,7 +266,7 @@ class HistoryCompressor:
                 ),
             )
             return HistoryCompressionResult(
-                records=tuple(generated.records),
+                records=tuple(records),
                 fallback_turns=self._safe_fallback(turns),
             )
         return HistoryCompressionResult(
@@ -245,8 +275,9 @@ class HistoryCompressor:
                 covered_through_message_id=summary_input.covered_through_message_id,
                 previous_summary_unit_id=summary_input.previous_summary_unit_id,
                 execution_source_refs=summary_input.execution_source_refs,
+                structured_source_proofs=summary_input.structured_source_proofs,
             ),
-            records=tuple(generated.records),
+            records=tuple(records),
         )
 
     def _safe_fallback(self, turns: Sequence[ContextItem]) -> tuple[ContextItem, ...]:

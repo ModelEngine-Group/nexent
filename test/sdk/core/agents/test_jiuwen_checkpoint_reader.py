@@ -15,8 +15,9 @@ adapter = _adapter
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tracing", [True, False])
+@pytest.mark.parametrize("source_kind", ["execution_result", "tool_result", "user_message"])
 async def test_b010_native_reader_uses_real_localfunction_owner_and_middle_page(
-    adapter, mocker, tracing
+    adapter, mocker, tracing, source_kind
 ):
     from openjiuwen.harness import factory
 
@@ -34,25 +35,19 @@ async def test_b010_native_reader_uses_real_localfunction_owner_and_middle_page(
     mocker.patch.object(adapter, "_create_model", return_value=SimpleNamespace())
     bridge = mocker.patch("nexent.core.agents.cores.jiuwen.context.JiuwenContextBridge")
     text = "<STDOUT>" + "prefix" * 1000 + "真实中段" + "tail" * 1000 + "</STDOUT>"
-    adapter.context_items = [
-        ContextItem.from_input(
-            ContextItemInput(
-                id="checkpoint",
-                type="history_summary",
-                content={
-                    "summary": "accepted facts",
-                    "covered_through_message_id": 42,
-                    "execution_sources": [
-                        {
-                            "message_id": 42,
-                            "unit_index": 5,
-                            "content": json.dumps({"content": text}),
-                        }
-                    ],
-                },
-            )
-        )
-    ]
+    source = {"message_id": 42, "unit_index": 5, "record_type": source_kind,
+              "content": json.dumps({"content": text})}
+    reference = "message:42/unit-index:5"
+    if source_kind == "user_message":
+        source.update(unit_index=None, content=text)
+        reference = "message:42/user-message"
+    elif source_kind == "tool_result":
+        source.update(tool_call_id="local-source", content=json.dumps({
+            "schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen", "type": "tool_result",
+            "local_call_id": "local-source", "tool_call_id": "local-source", "provider_call_id": "provider-source",
+            "turn_id": "source-turn", "invocation_id": None, "parent_call_id": None, "result": text, "is_error": False}))
+    adapter.context_items = [ContextItem.from_input(ContextItemInput(id="checkpoint", type="history_summary",
+        content={"summary": "accepted facts", "covered_through_message_id": 42, "execution_sources": [source]}))]
     mocker.patch.object(adapter, "_compile_context", return_value="instructions")
     monitoring = mocker.patch(
         "nexent.core.agents.cores.jiuwen.adapter.get_monitoring_manager", create=True
@@ -83,7 +78,7 @@ async def test_b010_native_reader_uses_real_localfunction_owner_and_middle_page(
         )
         result = await reader.invoke(
             {
-                "output_ref": "message:42/unit-index:5",
+                "output_ref": reference,
                 "offset": text.index("真实中段"),
                 "max_chars": 4,
             }
@@ -94,7 +89,7 @@ async def test_b010_native_reader_uses_real_localfunction_owner_and_middle_page(
         with pytest.raises(ValueError):
             await reader.invoke({"output_ref": "invalid"})
         with pytest.raises(PermissionError):
-            adapter.execution_history.read("foreign-owner", "message:42/unit-index:5")
+            adapter.execution_history.read("foreign-owner", reference)
         assert adapter._active_resource.get() is None
         assert bridge.return_value.completed_tool.called
     finally:

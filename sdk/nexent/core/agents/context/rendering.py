@@ -60,8 +60,11 @@ def _render_summary(item: ContextItem) -> list[dict[str, Any]]:
         text = _summary_dict_to_markdown(summary, labels)
     refs = item.metadata.get("execution_source_refs") or ()
     if refs:
-        text += "\n\nOriginal execution results (read with read_execution_output):\n" + "\n".join(
+        text += "\n\nOriginal historical sources (read with read_execution_output):\n" + "\n".join(
             "<OUTPUT_REF>" + escape(reference) + "</OUTPUT_REF>" for reference in refs)
+    proofs = item.metadata.get("structured_source_proofs") or ()
+    if proofs:
+        text += "\n\nTrusted structured original data:\n" + json.dumps(proofs, ensure_ascii=False, separators=(",", ":"))
     return [_text_message("user", f"{labels['summary_prefix']}\n{text}")]
 
 

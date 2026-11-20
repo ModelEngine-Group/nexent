@@ -658,6 +658,7 @@ class CoreAgent(CodeAgent):
             from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
             from nexent.core.agents.contracts.context import ContextItemInput
             context_manager.config.execution_history = self._execution_history
+            context_manager.config.execution_owner = self._execution_owner
             from nexent.core.agents.context.action_history import register_authorized_sources
             self.context_runtime.items = register_authorized_sources(
                 self.context_runtime.items, self._execution_history, self._execution_owner)

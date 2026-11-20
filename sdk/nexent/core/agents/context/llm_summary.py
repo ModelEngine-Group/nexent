@@ -3,6 +3,7 @@
 """LLM call orchestration for summary generation with retry and error handling."""
 
 import inspect
+import json
 import logging
 import re
 from collections.abc import Mapping
@@ -170,6 +171,17 @@ class LLMSummary:
                 f"{contract_instruction}\n\n"
                 f"Conversation content to summarize:\n{text}"
             )
+        if call_type in {"history_summary", "history_incremental"}:
+            from .history_compression import _protected_fact_literals
+            ledger = "\n".join(json.dumps({marker: values}, ensure_ascii=False, separators=(",", ":"))
+                               for marker, values in _protected_fact_literals(text).items())
+            if ledger:
+                hint = "\n\nExact protected identifier ledger: retain each identifier and associated literal value:\n" + ledger
+                hinted = [{"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+                          {"role": "user", "content": [{"type": "text", "text": user_prompt + hint}]}]
+                limit = self.config.effective_input_limit_tokens or self.config.context_window_tokens
+                if limit and len(json.dumps(hinted, ensure_ascii=False)) / self.config.chars_per_token < limit:
+                    user_prompt += hint
         messages = [
             ContextMessage(role="system",
                         content=[{"type": "text", "text": system_prompt}]),

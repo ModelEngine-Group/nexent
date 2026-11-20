@@ -55,6 +55,11 @@ change:
     - test/sdk/core/agents/test_checkpoint_execution_sources.py
     - test/sdk/core/agents/test_jiuwen_history_capacity_recovery.py
     - test/sdk/core/agents/test_jiuwen_checkpoint_reader.py
+    - test/sdk/core/agents/test_structured_source_proofs.py
+    - test/sdk/core/agents/test_structured_history_sources.py
+    - test/sdk/core/agents/test_history_fact_correction.py
+    - test/backend/app/test_history_source_contracts.py
+    - test/backend/services/test_agentos_conversation_projection.py
   notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md
     FIX01 and RSR-003; RSR-001 delegated to stacked PR4378; RSR-002 withdrawn after complete Phoenix events proved
     usage was retained. Approved isolated follow-up from2c18. No original worktree/VM change, C/O change, guessed
@@ -65,4 +70,9 @@ change:
     Case remains normal-path regression with fitting-frame qualification and self-contained owned provider cleanup;
     manual AGENT-HISTORY AC-07 owns actual two-runtime/model recovery and recall proof. Current implementation UT
     is not D3 real-model acceptance; new container/Phoenix evidence remains pending. No extra D1 or new generic
-    historical user-message browser.'
+    historical user-message browser. v11 real summary failure is protected-marker overreach across source-backed
+    bulk. Approved limited user_message/tool_result/execution_result kinds remain separate; existing source proof,
+    owner reader and internal checkpoint contracts are extended, with strict outside facts and numeric/array identity.
+    No arbitrary history RPC or per-task/model exception. Row/character/depth/proof-count thresholds are not introduced;
+    actual useful reduction and existing C/deadline/three-summary budget govern. Formal owned HTTP Case covers all
+    three kinds with typed checkpoint continuation; real AC-08 remains separately required.'

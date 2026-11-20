@@ -233,13 +233,8 @@ class ContextManager:
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
             if (turns or summary) and self._run_compaction_attempts < 3:
-                original_history_tokens = sum(
-                    item.token_estimate for item in final_items
-                    if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
-                )
-                if history_only_recovery or self.message_format == "openai_chat_completions":
-                    original_history_tokens = self._history_token_cost(
-                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                original_history_tokens = self._history_token_cost(
+                    final_items, purpose_stable, purpose_dynamic, canonical_tools)
                 compressible_history_tokens = original_history_tokens
                 non_history_tokens = max(0, raw_tokens - original_history_tokens)
                 if (
@@ -286,7 +281,12 @@ class ContextManager:
                 for _ in range(remaining_attempts if should_compress_history else 0):
                     self._run_compaction_attempts += 1
                     attempt = self._run_compaction_attempts
-                    result = self._history_compressor.compress(current_summary, current_turns, model)
+                    source_options = ({"source_history": self.config.execution_history,
+                                       "source_owner": self.config.execution_owner}
+                                      if self.config.execution_history is not None and self.config.execution_owner else {})
+                    if history_only_recovery:
+                        source_options["allow_fact_correction"] = True
+                    result = self._history_compressor.compress(current_summary, current_turns, model, **source_options)
                     attempts = attempt
                     self._record_compression(result.records)
                     candidate = result.candidate
@@ -297,16 +297,12 @@ class ContextManager:
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
                     candidate_item = candidate.as_item()
-                    previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
-                    previous_tokens += sum(item.token_estimate for item in current_turns)
-                    candidate_tokens = candidate_item.token_estimate
-                    if history_only_recovery or self.message_format == "openai_chat_completions":
-                        previous_tokens = self._history_token_cost(
-                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
-                        replacement = [item for item in final_items if item.type not in {
-                            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
-                        candidate_tokens = self._history_token_cost(
-                            replacement, purpose_stable, purpose_dynamic, canonical_tools)
+                    previous_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                    replacement = [item for item in final_items if item.type not in {
+                        ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
+                    candidate_tokens = self._history_token_cost(
+                        replacement, purpose_stable, purpose_dynamic, canonical_tools)
                     required_saving = max(
                         self.config.minimum_history_reduction_tokens,
                         math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
@@ -333,10 +329,8 @@ class ContextManager:
                     if should_compress_history:
                         compaction_stop_reason = "compaction_attempts_exhausted"
                 if last_valid is not None:
-                    final_history_tokens = last_valid.as_item().token_estimate
-                    if history_only_recovery:
-                        final_history_tokens = self._history_token_cost(
-                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                    final_history_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
                     last_valid = replace(
                         last_valid,
                         history_tokens_before=original_history_tokens,

@@ -425,6 +425,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items,
                                                   message_format="openai_chat_completions")
         self.context_bridge.context_manager.config.execution_history = self.execution_history
+        self.context_bridge.context_manager.config.execution_owner = self.owner_id
         model.prepare_messages = self._prepare_model_messages
         model.prefix = []
         self.native_agent = create_deep_agent(

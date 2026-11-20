@@ -21,6 +21,7 @@ HISTORY_TYPES = {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_T
 class ContextRecoveryBudget:
     used: bool = False
     summary_calls: int = 0
+    fact_correction_used: bool = False
     max_summary_calls: int = 3
     deadline: float | None = None
 
@@ -34,10 +35,12 @@ class ContextRecoveryBudget:
 class RecoverySummaryModel:
     allow_summary_input_truncation = False
 
-    def __init__(self, model, budget, cancelled):
+    def __init__(self, model, budget, cancelled, *, estimate=None, input_limit=None):
         object.__setattr__(self, "_model", model)
         object.__setattr__(self, "_budget", budget)
         object.__setattr__(self, "_cancelled", cancelled)
+        object.__setattr__(self, "_estimate", estimate)
+        object.__setattr__(self, "_input_limit", input_limit)
 
     def __getattr__(self, name):
         return getattr(self._model, name)
@@ -49,10 +52,19 @@ class RecoverySummaryModel:
     def context_call_parameters(self):
         return getattr(self._model, "context_call_parameters", inspect.signature(self._model.__call__).parameters)
 
+    def claim_fact_correction(self):
+        self._budget.check(self._cancelled)
+        if self._budget.fact_correction_used or self._budget.summary_calls >= self._budget.max_summary_calls:
+            return False
+        self._budget.fact_correction_used = True
+        return True
+
     def __call__(self, messages, **kwargs):
         self._budget.check(self._cancelled)
         if self._budget.summary_calls >= self._budget.max_summary_calls:
             raise ContextInputCapacityExceeded("Context capacity recovery summary budget exhausted")
+        if self._estimate is not None and self._input_limit and self._estimate(messages) >= self._input_limit:
+            raise ContextInputCapacityExceeded("Summary input exceeds the combined context window")
         self._budget.summary_calls += 1
         recover_call = getattr(self._model, "capacity_recovery_call", None)
         result = (
@@ -118,7 +130,8 @@ def recover_history(
         manager._run_compaction_attempts = 0
         before = assemble(run_context, False, model)
         before_tokens = manager.estimate_request_tokens(before.messages, before.tools)
-        bounded_model = RecoverySummaryModel(model, budget, cancelled)
+        bounded_model = RecoverySummaryModel(model, budget, cancelled,
+            estimate=lambda messages: manager.estimate_request_tokens(messages, ()), input_limit=limit)
         final = assemble(run_context, True, bounded_model)
         candidate = manager._pending_capacity_candidate
         budget.check(cancelled)
