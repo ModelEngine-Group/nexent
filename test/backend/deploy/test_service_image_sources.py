@@ -43,6 +43,31 @@ def test_independent_images_do_not_package_other_service_implementations():
     assert "COPY deploy/sql/" not in runtime + common
 
 
+def test_runtime_packages_aidp_search_without_management_extensions():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    runtime = dockerfile.split(" AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
+    copies = [line.split() for line in runtime.replace("\\\n", " ").splitlines() if line.startswith("COPY ")]
+    sources = {source.rstrip("/") for parts in copies for source in parts[1:-1]}
+    aidp = "backend/ext_components/aidp"
+
+    assert {
+        f"{aidp}/consts",
+        f"{aidp}/database",
+        f"{aidp}/services/aidp_access_service.py",
+        f"{aidp}/services/aidp_permission_service.py",
+        f"{aidp}/services/aidp_service.py",
+    } <= sources
+    assert sources.isdisjoint({
+        "backend/adapters",
+        "backend/ext_components",
+        aidp,
+        f"{aidp}/apps",
+        f"{aidp}/apps/aidp_mgmt_app.py",
+        f"{aidp}/services",
+        f"{aidp}/services/aidp_kb_update_service.py",
+    })
+
+
 @pytest.mark.parametrize("service", ["management", "runtime", "mcp-service", "ops"])
 @pytest.mark.parametrize("syntax", ["list", "flag"])
 def test_service_build_selection_uses_independent_target_and_latest(service, syntax):

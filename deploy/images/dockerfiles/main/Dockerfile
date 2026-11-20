@@ -146,8 +146,14 @@ COPY backend/contracts /opt/backend/contracts
 COPY backend/configs /opt/backend/configs
 COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
 COPY backend/permissions/__init__.py backend/permissions/dac.py backend/permissions/models.py /opt/backend/permissions/
-COPY backend/ext_components /opt/backend/ext_components
-COPY backend/adapters /opt/backend/adapters
+COPY backend/ext_components/__init__.py /opt/backend/ext_components/
+COPY backend/ext_components/aidp/__init__.py /opt/backend/ext_components/aidp/
+COPY backend/ext_components/aidp/consts /opt/backend/ext_components/aidp/consts
+COPY backend/ext_components/aidp/database /opt/backend/ext_components/aidp/database
+COPY backend/ext_components/aidp/services/__init__.py \
+    backend/ext_components/aidp/services/aidp_access_service.py \
+    backend/ext_components/aidp/services/aidp_permission_service.py \
+    backend/ext_components/aidp/services/aidp_service.py /opt/backend/ext_components/aidp/services/
 COPY backend/http/client.py backend/http/logging.py /opt/backend/http/
 RUN ln -s ../runtime/launcher.py /opt/backend/http/runtime_service.py
 COPY backend/http/server /opt/backend/http/server
