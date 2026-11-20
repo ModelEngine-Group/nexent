@@ -33,6 +33,7 @@ import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpG
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
 import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeInformationTab";
+import AidpSensitiveWordsPage from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordsPage";
 import AidpKnowledgeFilesPanel from "@/ext_components/aidp/pages/knowledge-files/components/AidpKnowledgeFilesPanel";
 import { formatDetailDateTime } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
 
@@ -45,7 +46,7 @@ interface AidpKnowledgeFilesPageProps {
   initialTab?: DetailTab;
 }
 
-type DetailTab = "files" | "tasks" | "information";
+type DetailTab = "files" | "tasks" | "information" | "sensitive-words";
 
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
 
@@ -237,6 +238,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             key: "information",
             label: t("aidpKnowledge.detailTabInformation"),
           },
+          {
+            key: "sensitive-words",
+            label: t("aidpKnowledge.detailTabSensitiveWords"),
+          },
         ]}
       />
 
@@ -267,8 +272,19 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           canConfigureGroupPermissions={canConfigureGroupPermissions}
           detailFetching={detailQuery.isFetching}
           onEditPermissions={() => setEditingKbMode("permissions")}
+          onEditMetadata={() => setEditingKbMode("metadata")}
           onRefreshDetail={() => detailQuery.refetch()}
         />
+      )}
+
+      {activeTab === "sensitive-words" && (
+        <section className="flex min-h-0 flex-1 flex-col bg-white">
+          <AidpSensitiveWordsPage
+            key={detail.kds_id}
+            knowledgeBaseId={detail.kds_id}
+            canManage={canEdit}
+          />
+        </section>
       )}
 
       <AidpUpdateKbModal

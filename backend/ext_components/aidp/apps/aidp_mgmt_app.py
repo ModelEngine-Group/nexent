@@ -20,7 +20,7 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from urllib.parse import quote
 from uuid import UUID
 
@@ -51,6 +51,9 @@ from ext_components.aidp.apps.aidp_mgmt_common import (
     _credentials,
     _normalize_folder_path,
     _relative_path_to_directory,
+)
+from ext_components.aidp.apps.aidp_sensitive_word_routes import (
+    aidp_sensitive_word_router,
 )
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
@@ -98,11 +101,11 @@ from management.services.knowledge_base.providers.shared_aidp import (
     get_bound_agents,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.services.tag.library import TagManagementService
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 aidp_mgmt_router.include_router(aidp_folder_router)
+aidp_mgmt_router.include_router(aidp_sensitive_word_router)
 logger = logging.getLogger("aidp_mgmt_app")
 
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
@@ -164,7 +167,10 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
     user_id: str,
 ) -> None:
     """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
-
+    # Imported lazily: the tag service pulls in the MCP container stack, which
+    # is unnecessary for the rest of the AIDP router and makes test collection
+    # depend on Docker/paramiko being importable.
+    from management.services.tag.library import TagManagementService
 
     TagManagementService.cleanup_document_assignments_for_knowledge_base(
         tenant_id, "aidp", knowledge_base_id, user_id
@@ -196,6 +202,13 @@ class CreateKbRequest(BaseModel):
     topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
     similarity: float = Field(0.0, ge=0, le=1, description="Similarity score threshold")
     caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
+    sensitive_intercept_enable: int = Field(
+        0,
+        ge=0,
+        le=1,
+        strict=True,
+        description="Sensitive word interception toggle for future files, int 0 or 1",
+    )
     chunk_mode: int = Field(
         0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
     )
@@ -256,6 +269,12 @@ class UpdateKbRequest(BaseModel):
     topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
     caption_enable: Optional[int] = Field(
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
+    )
+    sensitive_intercept_enable: Optional[int] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Sensitive word interception toggle, int 0 or 1",
     )
     vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
     is_exist_graph: Optional[bool] = Field(
@@ -340,6 +359,21 @@ def _infer_is_multimodal(detail: dict) -> bool:
     return caption in (1, "1", True)
 
 
+def _normalize_int_toggle(value: Any, default: int = 0) -> int:
+    """Normalize an AIDP 0/1 toggle without hiding an explicit enabled value."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return 1 if value else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "是"}:
+            return 1
+        if normalized in {"0", "false", "no", "否", ""}:
+            return 0
+    return default
+
+
 def _normalize_kb_config_fields(detail: dict) -> dict:
     """Extract configuration fields the frontend expects from the AIDP detail response.
 
@@ -376,6 +410,12 @@ def _normalize_kb_config_fields(detail: dict) -> dict:
     # Derive is_multimodal from caption_enable when not already present.
     if "is_multimodal" not in detail or detail["is_multimodal"] is None:
         detail["is_multimodal"] = _infer_is_multimodal(detail)
+
+    # Historical KBs predate the sensitive-word toggle; treat a missing value
+    # as disabled while keeping an explicit upstream 1 intact.
+    detail["sensitive_intercept_enable"] = _normalize_int_toggle(
+        detail.get("sensitive_intercept_enable"), 0
+    )
 
     # Normalize the graph configuration for the frontend. AIDP serializes the
     # three graph toggles as "是"/"否" and the hop count as a string, while the
@@ -652,6 +692,12 @@ async def list_knowledge_bases(
             "is_multimodal": _infer_is_multimodal(detail or row),
             "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
             "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
+            "sensitive_intercept_enable": _normalize_int_toggle(
+                detail.get("sensitive_intercept_enable")
+                if detail.get("sensitive_intercept_enable") is not None
+                else row.get("sensitive_intercept_enable"),
+                0,
+            ),
             "created_at": _timestamp_to_iso(row.get("create_time")),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),

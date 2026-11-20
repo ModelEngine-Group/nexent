@@ -104,6 +104,7 @@ TENANT = "aidp"  # tenant segment used in all path prefixes
 # expressed as the canonical ``hybrid_search`` value.
 _RETRIEVAL_CHANNELS = ("vector_search", "full_text_search", "graph_search")
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
+_SW_PREFIX = f"{_KB_PREFIX}/{{kds_id}}/SensitiveWords"
 _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 
 # Document status constants mirroring the real AIDP vocabulary.
@@ -152,6 +153,8 @@ _STATE_DIR = _STATE_FILE.parent
 # =============================================================================
 _KNOWLEDGE_BASES: Dict[str, Dict[str, Any]] = {}
 _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
+# Sensitive word dictionaries keyed by knowledge base, then by word ID.
+_SENSITIVE_WORDS: Dict[str, Dict[str, Dict[str, Any]]] = {}
 # Explicit folders per knowledge base. Documents also carry ``folder_path``;
 # a folder exists here even when it is empty, matching AIDP's real Folders API.
 # Entries look like ``{"folder_path": "/政策制度", "create_time": 173...}``.
@@ -308,10 +311,95 @@ def _seed_initial_data() -> None:
             "llm_model_name": "qwen3_8b",
         },
     })
+    _seed_sensitive_words_if_empty()
+
+
+def _seed_sensitive_words_if_empty() -> None:
+    """Seed two knowledge bases with distinct dictionaries for isolation tests."""
+    if _SENSITIVE_WORDS:
+        return
+    seeds = {
+        "aidp-kb-faq": [
+            {
+                "id": "sw-faq-builtin-black",
+                "word": "涉政",
+                "mode": "BLACK",
+                "description": "内置禁止词示例，命中后拦截文件入库。",
+                "source": "BUILT_IN",
+            },
+            {
+                "id": "sw-faq-builtin-white",
+                "word": "示例",
+                "mode": "WHITE",
+                "description": "内置允许词示例，用于排除误判。",
+                "source": "BUILT_IN",
+            },
+            {
+                "id": "sw-faq-black",
+                "word": "暴力",
+                "mode": "BLACK",
+                "description": "自定义禁止词示例。",
+                "source": "CUSTOM",
+            },
+            {
+                "id": "sw-faq-white",
+                "word": "携带",
+                "mode": "WHITE",
+                "description": "自定义允许词示例。",
+                "source": "CUSTOM",
+            },
+            {
+                "id": "sw-faq-white-2",
+                "word": "合规",
+                "mode": "WHITE",
+                "description": "自定义允许词示例：合规表述。",
+                "source": "CUSTOM",
+            },
+        ],
+        "aidp-kb-04": [
+            {
+                "id": "sw-support-builtin-black",
+                "word": "诈骗",
+                "mode": "BLACK",
+                "description": "客服库内置禁止词示例。",
+                "source": "BUILT_IN",
+            },
+            {
+                "id": "sw-support-black",
+                "word": "退款",
+                "mode": "BLACK",
+                "description": "客服库禁止词示例。",
+                "source": "CUSTOM",
+            },
+            {
+                "id": "sw-support-black-2",
+                "word": "保证收益",
+                "mode": "BLACK",
+                "description": "客服库禁止词示例：承诺收益。",
+                "source": "CUSTOM",
+            },
+            {
+                "id": "sw-support-white",
+                "word": "优惠",
+                "mode": "WHITE",
+                "description": "客服库允许词示例。",
+                "source": "CUSTOM",
+            },
+            {
+                "id": "sw-support-white-2",
+                "word": "合同",
+                "mode": "WHITE",
+                "description": "客服库允许词示例：合同条款。",
+                "source": "CUSTOM",
+            },
+        ],
+    }
+    for kds_id, words in seeds.items():
+        _SENSITIVE_WORDS[kds_id] = {item["id"]: dict(item) for item in words}
 
 
 def _save_state() -> None:
-    """Atomically persist _KNOWLEDGE_BASES and _DOCUMENTS_BY_KB to disk.
+    """Atomically persist KB, document and sensitive-word state to disk.
 
     Writes to a temporary file and then renames it into place, so a crash
     mid-write cannot corrupt the existing state file. Silently no-ops the
@@ -322,6 +410,7 @@ def _save_state() -> None:
     payload = {
         "knowledge_bases": _KNOWLEDGE_BASES,
         "documents_by_kb": _DOCUMENTS_BY_KB,
+        "sensitive_words_by_kb": _SENSITIVE_WORDS,
         "folders_by_kb": _FOLDERS_BY_KB,
     }
     tmp_path = _STATE_FILE.with_suffix(".json.tmp")
@@ -347,16 +436,20 @@ def _load_state() -> None:
                 payload = json.load(f)
             kb_data = payload.get("knowledge_bases", {})
             doc_data = payload.get("documents_by_kb", {})
+            word_data = payload.get("sensitive_words_by_kb", {})
             folder_data = payload.get("folders_by_kb", {})
             if not isinstance(kb_data, dict) or not isinstance(doc_data, dict):
                 raise ValueError("state file payload is not {dict, dict}")
             _KNOWLEDGE_BASES.update(kb_data)
             _DOCUMENTS_BY_KB.update(doc_data)
+            if isinstance(word_data, dict):
+                _SENSITIVE_WORDS.update(word_data)
             if isinstance(folder_data, dict):
                 _FOLDERS_BY_KB.update(folder_data)
             for kb in _KNOWLEDGE_BASES.values():
                 if isinstance(kb, dict):
                     kb.pop("sensitive_intercept_enalbe", None)
+            _seed_sensitive_words_if_empty()
             logger.info(
                 "STATE LOAD  restored %d KBs from %s",
                 len(_KNOWLEDGE_BASES), _STATE_FILE,
@@ -1182,6 +1275,7 @@ class CreateKbBody(BaseModel):
     vlm_model: str = ""
     is_exist_graph: bool = False
     graph_config: Optional[str] = None
+    sensitive_intercept_enable: int = 0
 
 
 class UpdateKbBody(BaseModel):
@@ -1195,6 +1289,7 @@ class UpdateKbBody(BaseModel):
     vlm_model: Optional[str] = None
     is_exist_graph: Optional[bool] = None
     graph_config: Optional[str] = None
+    sensitive_intercept_enable: Optional[int] = None
 
 
 class DocHistoryBody(BaseModel):
@@ -1326,6 +1421,41 @@ class CountFilesBody(BaseModel):
 
 class DownloadFileBody(BaseModel):
     file_uuid: uuid.UUID = Field(...)
+
+
+class CreateSensitiveWordBody(BaseModel):
+    word: str = Field(..., min_length=1, max_length=64)
+    mode: Literal["BLACK", "WHITE"]
+    description: str = Field(..., min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def strip_fields(self):
+        self.word = self.word.strip()
+        self.description = self.description.strip()
+        if not self.word or not self.description:
+            raise ValueError("word and description must not be blank")
+        return self
+
+
+class UpdateSensitiveWordBody(BaseModel):
+    word: Optional[str] = Field(default=None, max_length=64)
+    mode: Optional[Literal["BLACK", "WHITE"]] = None
+    description: Optional[str] = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def require_a_change(self):
+        if self.word is None and self.mode is None and self.description is None:
+            raise ValueError("At least one field must be provided")
+        if self.word is not None:
+            self.word = self.word.strip()
+            if not self.word:
+                raise ValueError("word must not be blank")
+        if self.description is not None:
+            self.description = self.description.strip()
+            if not self.description:
+                raise ValueError("description must not be blank")
+        return self
+
 
 
 # =============================================================================
@@ -1731,6 +1861,8 @@ def update_knowledge_base(
         kb["caption_enable"] = body.caption_enable
     if body.vlm_model is not None:
         kb["vlm_model"] = body.vlm_model
+    if body.sensitive_intercept_enable is not None:
+        kb["sensitive_intercept_enable"] = body.sensitive_intercept_enable
     if body.is_exist_graph is not None:
         # Disabling is permanent: a disabled graph can never be re-enabled.
         if body.is_exist_graph and not kb.get("is_exist_graph"):
@@ -2981,6 +3113,205 @@ def list_models(
 
 
 # =============================================================================
+# Sensitive words
+# =============================================================================
+
+
+class SensitiveWordBusinessError(Exception):
+    """AIDP business error returned with an ``error.code`` body."""
+
+    def __init__(self, status_code: int, code: int, message: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+@app.exception_handler(SensitiveWordBusinessError)
+def sensitive_word_business_error(
+    _request: StarletteRequest,
+    exc: SensitiveWordBusinessError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.code, "message": exc.message}},
+    )
+
+
+def _sensitive_word_error(status_code: int, code: int, message: str) -> SensitiveWordBusinessError:
+    """Build an AIDP-style business error.
+
+    AIDP reports duplicate words as HTTP 500 with ``error.code=1022``; the
+    mock keeps that shape so the proxy's business-code handling is exercised.
+    """
+    return SensitiveWordBusinessError(status_code, code, message)
+
+
+def _public_sensitive_word(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": item["id"],
+        "word": item["word"],
+        "mode": item["mode"],
+        "description": item["description"],
+        "source": item.get("source", "CUSTOM"),
+        "create_time": item.get("create_time", 0),
+        "update_time": item.get("update_time", 0),
+    }
+
+
+def _require_sensitive_word_kb(kds_id: str) -> Dict[str, Dict[str, Any]]:
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise _sensitive_word_error(
+            404, 1004, f"Knowledge base {kds_id} not found for sensitive words"
+        )
+    return _SENSITIVE_WORDS.setdefault(kds_id, {})
+
+
+def _find_duplicate_word(
+    kds_id: str, word: str, mode: str, exclude_id: str | None = None
+) -> bool:
+    normalized = word.strip().lower()
+    return any(
+        item["word"].strip().lower() == normalized
+        and item["mode"] == mode
+        and item["id"] != exclude_id
+        for item in _SENSITIVE_WORDS.get(kds_id, {}).values()
+    )
+
+
+@app.get(_SW_PREFIX)
+def list_sensitive_words(
+    kds_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    keyword: Optional[str] = Query(default=None, max_length=200),
+    mode: Optional[Literal["BLACK", "WHITE"]] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    words = _require_sensitive_word_kb(kds_id)
+    normalized_keyword = (keyword or "").strip().lower()
+    rows = [
+        _public_sensitive_word(item)
+        for item in words.values()
+        if (not normalized_keyword or normalized_keyword in item["word"].lower())
+        and (mode is None or item["mode"] == mode)
+    ]
+    rows.sort(key=lambda item: (item["word"], item["id"]))
+    start = (page - 1) * page_size
+    total = len(rows)
+    # Real AIDP returns a next_link without the active filters; the Nexent
+    # client must keep mode/keyword itself instead of following this link.
+    next_link = (
+        f"{_KB_PREFIX}/{quote(kds_id, safe='')}/SensitiveWords"
+        f"?page={page + 1}&page_size={page_size}"
+        if page * page_size < total
+        else None
+    )
+    return JSONResponse(
+        content={
+            "value": rows[start:start + page_size],
+            "next_link": next_link,
+            "total_count": total,
+        }
+    )
+
+
+@app.put(_SW_PREFIX)
+def create_sensitive_word(
+    kds_id: str,
+    body: CreateSensitiveWordBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    words = _require_sensitive_word_kb(kds_id)
+    if _find_duplicate_word(kds_id, body.word, body.mode):
+        raise _sensitive_word_error(
+            500, 1022, "Sensitive word already exists in this knowledge base"
+        )
+    word_id = f"sw-{uuid.uuid4().hex[:8]}"
+    now = int(time.time())
+    words[word_id] = {
+        "id": word_id,
+        "word": body.word,
+        "mode": body.mode,
+        "description": body.description,
+        "source": "CUSTOM",
+        "create_time": now,
+        "update_time": now,
+    }
+    _save_state()
+    return JSONResponse(status_code=201, content={"id": word_id})
+
+
+@app.get(f"{_SW_PREFIX}/{{word_id}}")
+def get_sensitive_word(
+    kds_id: str,
+    word_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    words = _require_sensitive_word_kb(kds_id)
+    item = words.get(word_id)
+    if item is None:
+        raise _sensitive_word_error(
+            404, 1004, f"Sensitive word {word_id} not found in knowledge base {kds_id}"
+        )
+    return JSONResponse(content={"data": _public_sensitive_word(item)})
+
+
+@app.patch(f"{_SW_PREFIX}/{{word_id}}")
+def update_sensitive_word(
+    kds_id: str,
+    word_id: str,
+    body: UpdateSensitiveWordBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    words = _require_sensitive_word_kb(kds_id)
+    item = words.get(word_id)
+    if item is None:
+        raise _sensitive_word_error(
+            404, 1004, f"Sensitive word {word_id} not found in knowledge base {kds_id}"
+        )
+    if item.get("source") == "BUILT_IN":
+        raise _sensitive_word_error(500, 1008, "Built-in sensitive words are read-only")
+    next_word = body.word if body.word is not None else item["word"]
+    next_mode = body.mode if body.mode is not None else item["mode"]
+    if _find_duplicate_word(kds_id, next_word, next_mode, exclude_id=word_id):
+        raise _sensitive_word_error(
+            500, 1022, "Sensitive word already exists in this knowledge base"
+        )
+    item["word"] = next_word
+    item["mode"] = next_mode
+    if body.description is not None:
+        item["description"] = body.description
+    item["update_time"] = int(time.time())
+    _save_state()
+    return JSONResponse(content={})
+
+
+@app.delete(f"{_SW_PREFIX}/{{word_id}}")
+def delete_sensitive_word(
+    kds_id: str,
+    word_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> StarletteResponse:
+    _check_auth(authorization)
+    words = _require_sensitive_word_kb(kds_id)
+    item = words.get(word_id)
+    if item is None:
+        raise _sensitive_word_error(
+            404, 1004, f"Sensitive word {word_id} not found in knowledge base {kds_id}"
+        )
+    if item.get("source") == "BUILT_IN":
+        raise _sensitive_word_error(500, 1008, "Built-in sensitive words are read-only")
+    del words[word_id]
+    _save_state()
+    return StarletteResponse(status_code=204)
+
+
+# =============================================================================
 # System endpoints
 # =============================================================================
 
@@ -3008,6 +3339,7 @@ def reset_state() -> Dict[str, str]:
     _KNOWLEDGE_BASES.clear()
     _DOCUMENTS_BY_KB.clear()
     _DOCUMENT_PAYLOADS.clear()
+    _SENSITIVE_WORDS.clear()
     _seed_initial_data()
     _save_state()
     logger.info("RESET  state restored to seeds, persisted to %s", _STATE_FILE)

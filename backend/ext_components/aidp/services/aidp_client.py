@@ -191,6 +191,16 @@ def _get_folders_path(kds_id: str, tenant_id: str | None = None) -> str:
     )
 
 
+def _get_sensitive_words_path(
+    kds_id: str, tenant_id: str | None = None
+) -> str:
+    """Build the knowledge-base scoped sensitive-word collection API path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{quote(str(kds_id), safe='')}/SensitiveWords"
+    )
+
+
 def _get_folder_tree_path(
     kds_id: str,
     folder_id: int = 0,

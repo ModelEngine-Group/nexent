@@ -496,6 +496,143 @@ def test_chinese_demo_failure_reasons_are_json_without_top_level_code(
         assert parsed["error_code"] and parsed["msg"]
 
 
+def test_kb_sensitive_intercept_round_trip(mock_aidp_server):
+    client = TestClient(mock_aidp_server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    kb_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+
+    created = client.put(
+        kb_path,
+        headers=headers,
+        json={
+            "name": "敏感词开关",
+            "description": "desc",
+            "embedding_model": "bge-m3",
+            "sensitive_intercept_enable": 0,
+        },
+    ).json()
+    kds_id = created["kds_id"]
+    assert created["sensitive_intercept_enable"] == 0
+
+    detail = client.get(f"{kb_path}/{kds_id}", headers=headers).json()
+    assert detail["sensitive_intercept_enable"] == 0
+
+    updated = client.patch(
+        f"{kb_path}/{kds_id}",
+        headers=headers,
+        json={"sensitive_intercept_enable": 1},
+    ).json()
+    assert updated["sensitive_intercept_enable"] == 1
+    assert client.get(f"{kb_path}/{kds_id}", headers=headers).json()[
+        "sensitive_intercept_enable"
+    ] == 1
+
+
+def test_sensitive_words_are_scoped_to_each_knowledge_base(mock_aidp_server):
+    client = TestClient(mock_aidp_server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    kb1 = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/aidp-kb-faq/SensitiveWords"
+    kb2 = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/aidp-kb-04/SensitiveWords"
+
+    list1 = client.get(kb1, headers=headers, params={"page": 1, "page_size": 10}).json()
+    list2 = client.get(kb2, headers=headers, params={"page": 1, "page_size": 10}).json()
+    ids1 = {row["id"] for row in list1["value"]}
+    ids2 = {row["id"] for row in list2["value"]}
+    assert ids1 and ids2 and not (ids1 & ids2)
+    assert list1["total_count"] == len(list1["value"])
+    assert list2["total_count"] == len(list2["value"])
+    assert "next_link" in list1
+
+    # The same word may exist in two different knowledge bases.
+    created1 = client.put(
+        kb1,
+        headers=headers,
+        json={"word": "跨库词", "mode": "BLACK", "description": "kb1"},
+    )
+    assert created1.status_code == 201
+    assert set(created1.json()) == {"id"}
+    word_id = created1.json()["id"]
+
+    created2 = client.put(
+        kb2,
+        headers=headers,
+        json={"word": "跨库词", "mode": "BLACK", "description": "kb2"},
+    )
+    assert created2.status_code == 201
+
+    duplicate = client.put(
+        kb1,
+        headers=headers,
+        json={"word": "跨库词", "mode": "BLACK", "description": "dup"},
+    )
+    assert duplicate.status_code == 500
+    assert duplicate.json()["error"]["code"] == 1022
+    assert "knowledge base" in duplicate.json()["error"]["message"]
+
+    # A word id from another knowledge base is not visible here.
+    wrong_kb = client.get(f"{kb1}/{created2.json()['id']}", headers=headers)
+    assert wrong_kb.status_code == 404
+    assert wrong_kb.json()["error"]["code"] == 1004
+    assert "not found in knowledge base" in wrong_kb.json()["error"]["message"]
+
+    updated = client.patch(
+        f"{kb1}/{word_id}",
+        headers=headers,
+        json={"mode": "WHITE", "description": "changed"},
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {}
+
+    detail = client.get(f"{kb1}/{word_id}", headers=headers).json()["data"]
+    assert detail["mode"] == "WHITE"
+    assert detail["description"] == "changed"
+
+    builtin = client.patch(
+        f"{kb1}/sw-faq-builtin-black",
+        headers=headers,
+        json={"description": "不能改"},
+    )
+    assert builtin.status_code == 500
+    assert builtin.json()["error"]["code"] == 1008
+    assert "read-only" in builtin.json()["error"]["message"]
+
+    filtered = client.get(
+        kb1,
+        headers=headers,
+        params={
+            "page": 1,
+            "page_size": 2,
+            "mode": "WHITE",
+            "keyword": "跨库",
+        },
+    ).json()
+    assert filtered["total_count"] == 1
+    assert [row["id"] for row in filtered["value"]] == [word_id]
+    assert filtered["next_link"] is None
+
+    paged = client.get(
+        kb1,
+        headers=headers,
+        params={"page": 1, "page_size": 2, "mode": "WHITE"},
+    ).json()
+    assert paged["next_link"]
+    # The upstream next_link drops the active filters; Nexent must keep them.
+    assert "mode=" not in paged["next_link"]
+    assert "keyword=" not in paged["next_link"]
+
+    deleted = client.delete(f"{kb1}/{word_id}", headers=headers)
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+
+    missing = client.get(f"{kb1}/{word_id}", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == 1004
+
+    # Deleting the word in kb1 leaves the same word in kb2 untouched.
+    still_there = client.get(
+        f"{kb2}/{created2.json()['id']}", headers=headers
+    )
+    assert still_there.status_code == 200
 def _folder_client(mock_aidp_server):
     mock_aidp_server._KNOWLEDGE_BASES["kb-1"] = {
         "kds_id": "kb-1",

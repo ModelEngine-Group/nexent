@@ -295,6 +295,8 @@ export interface AidpKnowledgeBaseItem {
   embedding_model?: string;
   /** Whether this AIDP knowledge base supports multimodal content. */
   is_multimodal?: boolean;
+  /** Sensitive word interception for files ingested after it is enabled. */
+  sensitive_intercept_enable?: number | null;
 }
 
 export interface AidpKnowledgeBaseListResponse {
