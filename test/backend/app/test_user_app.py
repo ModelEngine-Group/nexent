@@ -429,7 +429,7 @@ class TestUpdateUserEndpoint:
         assert "result=success" in messages[0]
         assert "user_id=admin-1" in messages[0]
         assert "tenant_id=tenant-1" in messages[0]
-        assert 'details={"target_user_id":"user-9","changed_fields":["role"]}' in messages[0]
+        assert 'details={"target_user_id":"user-9","changes":{"role":"ADMIN"}}' in messages[0]
 
 
 class TestDeleteUserEndpoint:

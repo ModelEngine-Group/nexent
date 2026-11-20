@@ -337,7 +337,10 @@ class TestConfigAppRouterConfiguration:
             agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
         ))
 
-        from contextlib import asynccontextmanager
+        # The function-wide local binding from a mid-function import would
+        # shadow the module-level `from contextlib import asynccontextmanager`
+        # and turn the earlier decorator use at the `_northbound_lifespan`
+        # definition into an UnboundLocalError. Rely on the top-level import.
         prepared_events = []
 
         @asynccontextmanager
