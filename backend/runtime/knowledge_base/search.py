@@ -43,6 +43,14 @@ def _identity(hit):
     return hit.key.collection, hit.key.key, hit.generation.value if hit.generation else ""
 
 
+def _display_identity(hit):
+    display_id = public_chunk_value(hit.payload.get("location", {}), "id", hit.key.key)
+    if isinstance(display_id, (dict, list)):
+        return ("record", _identity(hit))
+    return ("display", display_id)
+
+
+
 def _public_document(hit):
     payload = hit.payload
     location = payload.get("location", {})
@@ -71,7 +79,7 @@ def _public_document(hit):
     return document
 
 
-def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None, image_semantic=()):
+def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None, image_semantic=(), merge_display_ids=False):
     if mode != "hybrid":
         return sorted(lexical if mode == "accurate" else semantic, key=lambda h: (-h.score, _identity(h)))
     weight = weight_accurate if weight_accurate is not None else (0.7 if any(char.isdigit() for char in query) else 0.3)
@@ -79,6 +87,20 @@ def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None, ima
         max((hit.score for hit in lexical), default=1),
         max((hit.score for branch in (semantic, image_semantic) for hit in branch), default=1),
     )
+    if merge_display_ids:
+        combined = {_display_identity(hit): (hit, hit.score, 0) for hit in lexical}
+        for branch in (semantic, image_semantic):
+            for hit in branch:
+                key = _display_identity(hit)
+                representative, accurate, _ = combined[key] if key in combined else (replace(hit, highlights=()), 0, 0)
+                combined[key] = representative, accurate, hit.score
+        ranked = []
+        for hit, accurate, semantic_score in combined.values():
+            accurate = accurate / maxima[0] if maxima[0] > 0 else 0
+            semantic_score = semantic_score / maxima[1] if maxima[1] > 0 else 0
+            ranked.append(replace(hit, score=weight * accurate + (1 - weight) * semantic_score,
+                                  score_kind="runtime.hybrid", scores={"accurate": accurate, "semantic": semantic_score}))
+        return sorted(ranked, key=lambda hit: -hit.score)
     merged = {}
     for branch, maximum, factor, name in zip((lexical, semantic), maxima, (weight, 1 - weight), ("accurate", "semantic"), strict=True):
         for hit in branch:
@@ -308,7 +330,8 @@ class KnowledgeSearchService:
                         images = await self._blocking(self._visible, records, grant, request, images, views, True, context=context)
                         images = sorted(images, key=lambda hit: -hit.score)[:request.top_k]
                     candidates = rank_candidates(lexical, semantic, request.search_mode, request.query,
-                                                 weight_accurate=request.weight_accurate, image_semantic=images)
+                                                 weight_accurate=request.weight_accurate, image_semantic=images,
+                                                 merge_display_ids=request.merge_display_ids)
                     if request.split_multimodal_candidates:
                         candidates = [hit for hit in candidates if hit.payload.get("media_kind") != "image"]
                     candidates = candidates[:limit]

@@ -251,6 +251,7 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     weight_accurate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     global_hybrid_candidates: bool = False
     split_multimodal_candidates: bool = False
+    merge_display_ids: bool = False
     include_public_document: bool = False
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
@@ -265,6 +266,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
             raise ValueError("Global candidates require hybrid search without reranking")
         if self.split_multimodal_candidates and not self.global_hybrid_candidates:
             raise ValueError("Separate media candidates require global hybrid search")
+        if self.merge_display_ids and not self.global_hybrid_candidates:
+            raise ValueError("Display ID fusion requires global hybrid search")
         if self.file_versions and (
             set(self.file_versions) != set(self.file_ids)
             or any(type(value) is not int or value < 0 for value in self.file_versions.values())
@@ -285,6 +288,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
             result.pop("global_hybrid_candidates", None)
         if not self.split_multimodal_candidates:
             result.pop("split_multimodal_candidates", None)
+        if not self.merge_display_ids:
+            result.pop("merge_display_ids", None)
         if not self.include_public_document:
             result.pop("include_public_document", None)
         return result

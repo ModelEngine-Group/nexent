@@ -2,6 +2,7 @@
 """UT-BE-DPR-HYBRID-WEIGHT-01/02/03 preserve caller and tool ranking policies."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from contracts.agentos import ModelMetadata
@@ -9,6 +10,7 @@ from contracts.agentos_knowledge import KnowledgeSearch, KnowledgeSearchResult
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from nexent.storage.errors import Conflict
 from nexent.storage.models import Comparison, Revision, SearchHit, VectorKey
+from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from pydantic import ValidationError
 from runtime.knowledge_base.search import rank_candidates
 
@@ -39,12 +41,15 @@ def test_global_candidate_policy_is_opt_in_and_requires_hybrid_without_rerank():
     base = {"knowledge_ids": [1, 2], "query": "query", "embedding_model": {"model_id": 2, "revision": "v1"}}
     assert "global_hybrid_candidates" not in KnowledgeSearch(**base).model_dump()
     assert "split_multimodal_candidates" not in KnowledgeSearch(**base).model_dump()
+    assert "merge_display_ids" not in KnowledgeSearch(**base).model_dump()
     request = KnowledgeSearch(**base, search_mode="hybrid", global_hybrid_candidates=True)
     assert KnowledgeSearch.model_validate_json(request.model_dump_json()).global_hybrid_candidates is True
     with pytest.raises(ValidationError):
         KnowledgeSearch(**base, global_hybrid_candidates=True)
     with pytest.raises(ValidationError):
         KnowledgeSearch(**base, search_mode="hybrid", split_multimodal_candidates=True)
+    with pytest.raises(ValidationError):
+        KnowledgeSearch(**base, search_mode="hybrid", merge_display_ids=True)
     with pytest.raises(ValidationError):
         KnowledgeSearch(**base, search_mode="hybrid", global_hybrid_candidates=True,
                         rerank_model={"model_id": 3, "revision": "v1"})
@@ -199,3 +204,54 @@ async def test_multimodal_requires_the_pinned_multimodal_model(search):
         await service.search(multimodal(request), s.actor)
     s.vectors.search.assert_not_called()
     s.models.invoke.assert_not_awaited()
+
+
+@pytest.mark.parametrize("with_image", [False, True])
+def test_public_fusion_matches_legacy_duplicate_and_tie_semantics(with_image):
+    def candidate(index, key, display, score, highlights=(), *, kind="text"):
+        return SearchHit(VectorKey(index, key), score, "native",
+                         {"media_kind": kind, "location": {PUBLIC_CHUNK_SOURCE_KEY: {"id": display}}},
+                         highlights=highlights)
+
+    def old_results(candidates):
+        return [{"document": {**hit.payload["location"][PUBLIC_CHUNK_SOURCE_KEY], "key": hit.key.key,
+                              "process_source": ("UniversalImageExtractor" if hit.payload["media_kind"] == "image" else "Unstructured")},
+                 "index": hit.key.collection, "score": hit.score, "highlight_terms": list(hit.highlights)}
+                for hit in candidates]
+
+    lexical = [candidate("z", "first", "same", 10, ("first",)), candidate("a", "winner", "same", 6, ("last",)),
+               candidate("z", "tie-first", "tie-a", 5), candidate("a", "tie-second", "tie-b", 5)]
+    semantic = [candidate("b", "best", "same", .9), candidate("z", "sem-first", "only", .8),
+                candidate("a", "sem-last", "only", .5), candidate("c", "semantic-winner", "same", .45)]
+    images = [candidate("c", "media", "same", .95, kind="image")] if with_image else []
+    legacy = ElasticSearchCore.hybrid_search(
+        SimpleNamespace(accurate_search=lambda *a, **kw: old_results(lexical),
+                        semantic_search=lambda *a, **kw: old_results(semantic + images)),
+        ["z", "a", "b", "c"], "query", top_k=10, weight_accurate=.6,
+        embedding_model=SimpleNamespace(model_type="multimodal") if with_image else None)
+    ranked = rank_candidates(lexical, semantic, "hybrid", "query", weight_accurate=.6,
+                             image_semantic=images, merge_display_ids=True)
+
+    assert [(hit.key.collection, hit.key.key, hit.score, hit.scores, list(hit.highlights)) for hit in ranked] == [
+        (item["index"], item["document"]["key"], item["score"], item["scores"], item["highlight_terms"])
+        for item in legacy if item["document"]["process_source"] != "UniversalImageExtractor"
+    ]
+    assert len(rank_candidates(lexical, semantic, "hybrid", "query")) == 8
+
+
+async def test_public_fusion_merges_only_authorized_candidates_after_global_cutoff(search):
+    s, request, _, hit, service = search
+    source = {PUBLIC_CHUNK_SOURCE_KEY: {"id": "shared-id"}}
+    text = replace(hit, payload={**hit.payload, "location": source})
+    semantic = replace(text, key=VectorKey("kb", "semantic"), score=1)
+    stale = replace(semantic, generation=Revision("stale"), score=2)
+    s.vectors.search.side_effect = [(text,), (stale, semantic)]
+    request = KnowledgeSearch.model_validate({
+        **request.model_dump(), "search_mode": "hybrid", "top_k": 1,
+        "global_hybrid_candidates": True, "merge_display_ids": True,
+    })
+    result = await service.search(request, s.actor)
+
+    selected, = result.hits
+    assert selected.chunk_id == "one" and selected.score == 1
+    assert selected.score_details == {"accurate": 1.0, "semantic": 1.0}
