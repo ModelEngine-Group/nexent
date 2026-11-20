@@ -232,7 +232,7 @@ class ChunkReadView:
         return self._mutation_state(record, context=context) is not None
 
     @staticmethod
-    def _scan(vectors, resource, where, *, context, include_vectors=False):
+    def _scan(vectors, resource, where, *, context, include_vectors=False, vectors_only=False):
         cursor, seen = None, set()
         while True:
             context.remaining()
@@ -243,6 +243,7 @@ class ChunkReadView:
                 context=context,
                 include_vector=include_vectors,
                 **({"allow_missing_vector": True} if include_vectors else {}),
+                **({"vectors_only": True} if vectors_only else {}),
             )
             yield from page.items
             if page.next_cursor is None:

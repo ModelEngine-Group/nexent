@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from contracts.agentos import EmbeddingInvocation, RerankInvocation
 from contracts.agentos_knowledge import (
+    KnowledgeFileReference,
     KnowledgeSearch,
     KnowledgeSearchAuthorization,
     KnowledgeSearchGrant,
@@ -187,30 +188,36 @@ class KnowledgeSearchService:
             public_document=_public_document(hit) if include_public_document else None,
         )
 
-    def _visible(self, records, grant, request, hits, views, require_embedding, *, context):
+    def _visible(self, records, grant, request, hits, views, require_embedding, *, context, first_only=False):
         self._stable_views(views, context=context)
         allowed = {g.collection: g.knowledge_id for g in grant.knowledge_bases}
         result = []
         for hit in hits:
-            reference = self._dto(hit)
-            if allowed.get(hit.key.collection) != reference.knowledge_id:
+            data = hit.payload
+            knowledge_id, file_id, file_version = data.get("knowledge_id"), data.get("file_id"), data.get("file_version")
+            if allowed.get(hit.key.collection) != knowledge_id or knowledge_id not in records:
                 raise ScopeDenied()
-            policy = KnowledgeJobs(records[reference.knowledge_id], authorize=lambda *a, **kw: None)
-            if request.file_ids and reference.file_id not in request.file_ids:
+            if (file_id is None) != (file_version is None):
                 raise ScopeDenied()
-            if request.file_versions and request.file_versions[reference.file_id] != reference.file_version:
+            reference = KnowledgeFileReference(knowledge_id=knowledge_id, file_id=file_id, file_version=file_version) if file_id is not None else None
+            policy = KnowledgeJobs(records[knowledge_id], authorize=lambda *a, **kw: None)
+            if request.file_ids and file_id not in request.file_ids:
+                raise ScopeDenied()
+            if request.file_versions and request.file_versions[file_id] != file_version:
                 raise ScopeDenied()
             matches_model = (hit.payload.get("embedding_model_id") == request.embedding_model.model_id
                 and normalize_model_revision(hit.payload.get("embedding_revision"))
                 == normalize_model_revision(request.embedding_model.revision))
             if require_embedding and not matches_model and (
                 hit.payload.get("embedding_model_id") is not None or hit.payload.get("embedding_revision") is not None
-                or not views[reference.knowledge_id].has_manual_create(hit, context=context)):
+                or not views[knowledge_id].has_manual_create(hit, context=context)):
                 continue
             if (hit.generation
-                and (reference.file_id is None or policy.is_visible(reference, hit.generation.value, context=context))
-                and views[reference.knowledge_id].allows_candidate(hit, context=context)):
+                and (reference is None or policy.is_visible(reference, hit.generation.value, context=context))
+                and views[knowledge_id].allows_candidate(hit, context=context)):
                 result.append(hit)
+                if first_only:
+                    break
         self._stable_views(views, context=context)
         return result
 
@@ -243,8 +250,7 @@ class KnowledgeSearchService:
         except TimeoutError as error:
             raise DeadlineExceeded(operation_id=context.operation_id) from error
 
-    @staticmethod
-    def _collect(vectors, grant, request, query_vector, limit, *, context):
+    def _collect(self, records, views, vectors, grant, request, query_vector, limit, *, context):
         lexical, semantic, images = [], [], []
         for resource in grant.knowledge_bases:
             port = vectors[resource.collection]
@@ -273,7 +279,9 @@ class KnowledgeSearchService:
                         Junction("and", (Comparison("media_kind", "ne", "text"), Comparison("media_kind", "ne", "image")))))
                     unclassified = Junction("and", (*semantic_where.terms, unknown_kind))
                     if port.count(resource.collection, unclassified, vectors_only=True, context=context):
-                        raise Conflict(operation_id=context.operation_id)
+                        rows = ChunkReadView._scan(port, resource, unclassified, context=context, vectors_only=True)
+                        if self._visible(records, grant, request, rows, views, True, context=context, first_only=True):
+                            raise Conflict(operation_id=context.operation_id)
                     for kind, branch in (("text", semantic), ("image", images)):
                         scoped = Junction("and", (*semantic_where.terms, Comparison("media_kind", "eq", kind)))
                         hits = port.search(resource.collection, SearchQuery(vector=query_vector, where=scoped, limit=limit), context=context)
@@ -320,7 +328,11 @@ class KnowledgeSearchService:
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
                     validate_read_ports(records, vectors, grant, actor)
                     views = await self._blocking(self._views, records, grant, context=context)
-                    lexical, semantic, images = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
+                    observed = None
+                    if request.split_multimodal_candidates:
+                        observed = await self._blocking(self._data_revisions, records, grant, context=context)
+                    lexical, semantic, images = await self._blocking(self._collect, records, views, vectors, grant,
+                                                                    request, query_vector, limit, context=context)
                     lexical = await self._blocking(self._visible, records, grant, request, lexical, views, False, context=context)
                     semantic = await self._blocking(self._visible, records, grant, request, semantic, views, True, context=context)
                     if request.global_hybrid_candidates:
@@ -343,7 +355,8 @@ class KnowledgeSearchService:
                         candidates = self._reranked(output, candidates)
                     if await self._grant(request, actor) != grant:
                         raise Conflict()
-                    revisions = await self._blocking(self._data_revisions, records, grant, context=context)
+                    revisions = observed if observed is not None else await self._blocking(
+                        self._data_revisions, records, grant, context=context)
                     candidates = await self._blocking(self._visible, records, grant, request, candidates, views, False, context=context)
                     if request.split_multimodal_candidates:
                         images = await self._blocking(self._visible, records, grant, request, images, views, True, context=context)

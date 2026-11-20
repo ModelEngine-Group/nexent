@@ -9,7 +9,15 @@ from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import KnowledgeSearch, KnowledgeSearchResult
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from nexent.storage.errors import Conflict
-from nexent.storage.models import Comparison, Junction, Revision, SearchHit, VectorKey
+from nexent.storage.models import (
+    Comparison,
+    Junction,
+    Page,
+    Revision,
+    SearchHit,
+    VectorKey,
+    VectorRecord,
+)
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from pydantic import ValidationError
 from runtime.knowledge_base.search import rank_candidates
@@ -194,14 +202,50 @@ async def test_multimodal_text_and_images_use_independent_limits_and_original_sc
 
 
 async def test_multimodal_does_not_silently_exclude_unclassified_dense_records(search):
-    s, request, _, _, service = search
+    s, request, _, hit, service = search
     s.models.get.side_effect = None
     s.models.get.return_value = ModelMetadata(model_type="multi_embedding", model_id=2, display_name=None, revision="v1")
     s.vectors.search.return_value = ()
     s.vectors.count.return_value = 1
+    s.vectors.scan.return_value = Page((VectorRecord(hit.key, (), hit.payload, hit.generation),))
     with pytest.raises(Conflict):
         await service.search(multimodal(request), s.actor)
     assert s.vectors.search.call_count == 1
+
+
+@pytest.mark.parametrize("ineligible", ["stale", "wrong-model"])
+async def test_multimodal_ignores_unclassified_rows_that_cannot_be_recalled(search, ineligible):
+    s, request, _, hit, service = search
+    s.models.get.side_effect = None
+    s.models.get.return_value = ModelMetadata(model_type="multi_embedding", model_id=2, display_name=None, revision="v1")
+    stale = VectorRecord(VectorKey("kb", "unknown"), (), hit.payload, Revision("old"))
+    if ineligible == "wrong-model":
+        stale = replace(stale, generation=hit.generation, payload={**hit.payload, "embedding_revision": "older"})
+    visible = replace(hit, payload={**hit.payload, "media_kind": "text"})
+    s.vectors.count.return_value = 1
+    s.vectors.scan.return_value = Page((stale,))
+    s.vectors.search.side_effect = [(), (visible,), ()]
+
+    result = await service.search(multimodal(request), s.actor)
+
+    assert [item.chunk_id for item in result.hits] == [hit.key.key]
+    assert result.image_hits == []
+    assert s.vectors.scan.call_args.kwargs["vectors_only"]
+    assert s.vectors.scan.call_args.kwargs["include_vector"] is False
+
+
+async def test_multimodal_rejects_publication_change_between_guard_and_results(search, mocker):
+    s, request, _, _, service = search
+    s.models.get.side_effect = None
+    s.models.get.return_value = ModelMetadata(model_type="multi_embedding", model_id=2, display_name=None, revision="v1")
+    s.vectors.search.return_value = ()
+    s.vectors.count.return_value = 0
+    revisions = mocker.patch.object(service, "_data_revisions", side_effect=[{1: "a" * 64}, {1: "b" * 64}])
+
+    with pytest.raises(Conflict):
+        await service.search(multimodal(request), s.actor)
+
+    assert revisions.call_count == 2
 
 
 async def test_multimodal_requires_the_pinned_multimodal_model(search):
