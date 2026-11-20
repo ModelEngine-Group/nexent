@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from contracts.knowledge_ingestion import LegacyIngestionSnapshot
+from contracts.knowledge_ingestion import (
+    LegacyIngestionSnapshot,
+    canonical_legacy_file_id,
+)
 from management.maintenance import migration as module
 from nexent.storage.errors import DeadlineExceeded, InvalidInput, ScopeDenied
 
@@ -148,3 +151,31 @@ def test_historical_file_id_option_applies_only_to_planning(cli, monkeypatch):
     assert run.call_args.args[0].map_legacy_file_id is True
     with pytest.raises(SystemExit):
         module.main(['admit', *tail, '--map-legacy-file-id', '--plan', str(cli.args.output)])
+
+
+
+async def test_explicit_reservation_receipt_preserves_original_id_and_does_not_report_ingestion(cli):
+    s = cli
+    original_id = 'old-file'
+    snapshot = s.value.legacy_snapshot.model_copy(update={'previous_file_id': original_id})
+    standard_id = canonical_legacy_file_id(snapshot.tenant_id, s.value.knowledge_id, original_id)
+    plan = s.value.model_copy(update={'legacy_snapshot': snapshot, 'file_id': standard_id})
+    s.service.plan.return_value = plan
+    s.args.file_id = original_id
+    await module.run(s.args, service=s.service)
+
+    s.args.plan = s.args.output
+    s.args.output = s.args.output.with_name('reserved.jsonl')
+    s.args.action = 'reserve-file-id'
+    s.service.reserve_file_id = AsyncMock(return_value={
+        'original_file_id': original_id, 'lifecycle_revision': snapshot.lifecycle_revision,
+    })
+    result = await module.run(s.args, service=s.service)
+
+    assert result['state'] == 'identity_reserved'
+    assert result['original_file_id'] == original_id and result['file_id'] == standard_id
+    assert result['lifecycle_revision'] == snapshot.lifecycle_revision
+    assert result['migration_complete'] is False and result['retirement_complete'] is False
+    s.service.reserve_file_id.assert_awaited_once()
+    s.service.admit.assert_not_awaited()
+    s.service.execute.assert_not_awaited()

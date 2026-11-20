@@ -12,6 +12,7 @@ from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.knowledge_ingestion import (
     bind_ingestion_records,
     bind_legacy_file_id_occupancy,
+    reserve_legacy_file_identity,
 )
 from infrastructure.rdb.knowledge_ingestion_dispatch import bind_ingestion_dispatch
 
@@ -26,6 +27,14 @@ def ingestion_dispatch_ports(*, context):
         close_owned(
             context, ([records.close] if records is not None else []) + [engine.dispose]
         )
+
+
+def reserve_legacy_identity(actor, plan, *, context):
+    engine = record_engine(context)
+    try:
+        return reserve_legacy_file_identity(actor, plan, engine, context=context)
+    finally:
+        close_owned(context, [engine.dispose])
 
 
 def legacy_file_id_occupied(actor, file_id, *, context):

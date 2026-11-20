@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management-owned immutable ingestion intent; no credentials or provider setup."""
 
+import hashlib
 import json
 import re
 from datetime import datetime
@@ -19,9 +20,15 @@ from pydantic import Field, model_serializer, model_validator
 
 INGESTION_DATASET = "knowledge_ingestion_files"
 LEGACY_FILE_ID_OCCUPANCY = "legacy_file_id_occupancy"
+LEGACY_FILE_IDENTITIES = "legacy_file_identities"
 LOCAL_SOURCE_DATASET = "management_local_sources"
 FILE_READ_DATASET = "management_file_lifecycle"
 FILE_KNOWLEDGE_READ_DATASET = "management_file_knowledge"
+
+
+def legacy_ingestion_plan_hash(plan):
+    payload = json.dumps(plan.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def is_canonical_file_id(value):

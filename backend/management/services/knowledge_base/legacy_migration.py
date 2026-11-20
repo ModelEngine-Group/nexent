@@ -42,6 +42,7 @@ from infrastructure.agentos_client import AgentOSClient
 from infrastructure.knowledge_ingestion import (
     knowledge_ingestion_ports,
     legacy_file_id_occupied,
+    reserve_legacy_identity,
 )
 from infrastructure.legacy_tasks import legacy_task_records
 
@@ -58,13 +59,15 @@ async def _deadline(context):
 
 class LegacyMigrationService:
     def __init__(self, *, ports=knowledge_ingestion_ports, client=None, sources=None, parser_version=None,
-                 cancellation_scope=None, tasks=legacy_task_records, file_id_occupied=legacy_file_id_occupied):
+                 cancellation_scope=None, tasks=legacy_task_records, file_id_occupied=legacy_file_id_occupied,
+                 reserve_identity=reserve_legacy_identity):
         self.ports = ports
         self.client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
         self.sources = sources or KnowledgeSourceInspector(cancellation_scope=cancellation_scope)
         self.parser_version = parser_version or environment.KNOWLEDGE_CLEANSE_PARSER_VERSION
         self.tasks, self.cancellation_scope = tasks, cancellation_scope
         self.file_id_occupied = file_id_occupied
+        self.reserve_identity = reserve_identity
 
     @staticmethod
     async def _blocking(method, *args):
@@ -194,15 +197,28 @@ class LegacyMigrationService:
                 authorization.authorize(plan.cleanse_request(), context=context)
             return getattr(journal, action)(plan, row, context=context)
 
-    def _plan(self, plan, actor, *, check_parser=True):
+    def _plan(self, plan, actor, *, check_parser=True, mapping=False):
         if not isinstance(plan, KnowledgeIngestionIntent) or plan.legacy_snapshot is None: raise InvalidInput()
         KnowledgeIngestionIntent.model_validate_json(plan.model_dump_json())
         if plan.user_id != actor.user_id or plan.legacy_snapshot.tenant_id != actor.tenant_id: raise ScopeDenied()
         if bool(plan.legacy_snapshot.task_references) != bool(plan.legacy_snapshot.task_archive_sha256): raise InvalidInput()
-        if plan.legacy_snapshot.previous_file_id is not None:
-            # A plan does not reserve or rename the lifecycle primary key.
+        if (plan.legacy_snapshot.previous_file_id is not None) != mapping:
             raise Conflict()
         if check_parser and plan.parser_version != self.parser_version: raise Conflict()
+
+    async def reserve_file_id(self, plan, actor, *, context, task_archive=None):
+        self._plan(plan, actor, mapping=True)
+        snapshot = plan.legacy_snapshot
+        async with _deadline(context):
+            current = await self.plan(plan.knowledge_id, snapshot.previous_file_id, actor, legacy_quiesced=True,
+                context=context, task_archive=task_archive, bind_observed_source=snapshot.source_binding is not None,
+                map_legacy_file_id=True)
+            if current != plan:
+                raise Conflict()
+            return await self._blocking(self._reserve, plan, actor, context)
+
+    def _reserve(self, plan, actor, context):
+        return self.reserve_identity(actor, plan, context=context)
 
     async def inspect(self, plan, actor, *, context):
         self._plan(plan, actor, check_parser=False)

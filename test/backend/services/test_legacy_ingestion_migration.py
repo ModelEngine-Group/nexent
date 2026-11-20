@@ -20,7 +20,10 @@ from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, Scop
 from nexent.storage.models import FieldPatch, OperationContext
 from pydantic import ValidationError
 
-from infrastructure.rdb.knowledge_ingestion import bind_legacy_file_id_occupancy
+from infrastructure.rdb.knowledge_ingestion import (
+    bind_legacy_file_id_occupancy,
+    reserve_legacy_file_identity,
+)
 from test.backend.infrastructure.test_knowledge_ingestion_records import (
     records as records,  # noqa: PLC0414
 )
@@ -205,3 +208,74 @@ async def test_mapping_checks_current_permission_and_never_accepts_implicit_or_l
         await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True,
             map_legacy_file_id=True, context=context())
     h.m.service.file_id_occupied.assert_not_called()
+
+
+
+@pytest.fixture
+def reservation(historical, monkeypatch):
+    from infrastructure.rdb import knowledge_ingestion
+
+    h = historical
+    table = knowledge_ingestion.legacy_file_identities.to_metadata(h.table.metadata, schema=None)
+    monkeypatch.setattr(knowledge_ingestion, 'legacy_file_identities', table)
+    table.create(h.engine)
+    h.m.service.reserve_identity = lambda actor, plan, *, context: reserve_legacy_file_identity(
+        actor, plan, h.engine, context=context,
+    )
+    return h, table
+
+
+async def test_reservation_is_repeatable_and_cannot_start_ingestion(reservation):
+    h, identities = reservation
+    s = h.m.s
+    plan = await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+        context=context())
+    first = await h.m.service.reserve_file_id(plan, s.actor, context=context())
+    assert await h.m.service.reserve_file_id(plan, s.actor, context=context()) == first
+    assert first['original_file_id'] == h.old_id and first['standard_file_id'] == h.target_id
+
+    with h.engine.connect() as connection:
+        assert connection.execute(identities.select()).mappings().one()['created_by'] == s.actor.user_id
+        assert connection.execute(h.table.select()).mappings().one()['ingestion_request'] is None
+    s.cleanse.submit.assert_not_called()
+    s.client.upload_knowledge_file.assert_not_awaited()
+
+
+async def test_reservation_revalidates_after_a_stale_plan_and_accepts_fresh_evidence(reservation):
+    h, identities = reservation
+    s = h.m.s
+    async def make_plan():
+        return await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+            context=context())
+    prior = await make_plan()
+    original = await h.m.service.reserve_file_id(prior, s.actor, context=context())
+    next_version = h.row['version'] + 1
+    with h.engine.begin() as connection:
+        connection.execute(h.table.update().where(h.table.c.file_id == h.old_id).values(version=next_version))
+    h.m.source.page.return_value.files[0].lifecycle_revision = next_version
+    with pytest.raises(Conflict):
+        await h.m.service.reserve_file_id(prior, s.actor, context=context())
+    fresh = await make_plan()
+    updated = await h.m.service.reserve_file_id(fresh, s.actor, context=context())
+    assert updated['standard_file_id'] == original['standard_file_id']
+    assert updated['create_time'] == original['create_time']
+    assert updated['lifecycle_revision'] == next_version and updated['plan_sha256'] != original['plan_sha256']
+    with h.engine.connect() as connection:
+        assert connection.execute(identities.select()).mappings().one()['lifecycle_revision'] == next_version
+
+
+async def test_reservation_rechecks_source_version_inside_storage_transaction(reservation):
+    h, identities = reservation
+    s = h.m.s
+    plan = await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+        context=context())
+    store = h.m.service.reserve_identity
+    def changed(actor, intent, *, context):
+        with h.engine.begin() as connection:
+            connection.execute(h.table.update().where(h.table.c.file_id == h.old_id).values(version=h.row['version'] + 1))
+        return store(actor, intent, context=context)
+    h.m.service.reserve_identity = changed
+    with pytest.raises(Conflict):
+        await h.m.service.reserve_file_id(plan, s.actor, context=context())
+    with h.engine.connect() as connection:
+        assert connection.execute(identities.select()).mappings().all() == []
