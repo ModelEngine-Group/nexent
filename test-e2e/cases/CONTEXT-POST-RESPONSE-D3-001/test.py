@@ -368,7 +368,7 @@ def test_source_backed_bulk_and_checkpoint_restore_over_http(source_kind):
             readable = raw
         elif source_kind == "execution_result":
             body = {
-                "content": result_text({"STDOUT": raw}),
+                "content": result_text({"STDOUT": raw, "ERROR": "\x1b[31mTool observation: failed to resolve input\x1b[0m"}),
                 "covered_unit_indices": [],
                 "model_action": {
                     "schema_version": 1,
@@ -461,6 +461,9 @@ def test_source_backed_bulk_and_checkpoint_restore_over_http(source_kind):
             json.loads(next_history.read("new-owner", reference, offset, 100))["text"]
             == readable[offset : offset + 100]
         )
+        if source_kind == "execution_result":
+            error_offset = readable.index("\x1b")
+            assert json.loads(next_history.read("new-owner", reference, error_offset, 100))["text"] == readable[error_offset:error_offset + 100]
         with pytest.raises(PermissionError):
             next_history.read("old-owner", reference)
         continued = runtime(next_history, "new-owner", restored)
