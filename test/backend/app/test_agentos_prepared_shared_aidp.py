@@ -1,5 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import sys
+from pathlib import Path
+from runpy import run_path
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +10,16 @@ import pytest
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
 from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
+
+
+def test_shared_aidp_permissions_import_without_management(monkeypatch):
+    monkeypatch.setitem(sys.modules, "management.db.identity", None)
+    backend = Path(__file__).resolve().parents[3] / "backend"
+    service = backend / "ext_components/aidp/services/aidp_permission_service.py"
+
+    permission_service = run_path(str(service))
+
+    assert callable(permission_service["intersect_accessible_kbs_with_name_map"])
 
 
 @pytest.mark.asyncio

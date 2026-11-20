@@ -9,7 +9,7 @@ from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import Session
 
 from management.db.models import AgentInfo, KnowledgeRecord, McpRecord, ModelRecord
-from ops.services import access
+from management.services.permission import ops_access as access
 from permissions.models import CurrentUser
 
 
