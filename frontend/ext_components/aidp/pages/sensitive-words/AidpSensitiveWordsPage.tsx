@@ -13,6 +13,7 @@ import enUS from "antd/locale/en_US";
 import log from "@/lib/logger";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
+import { getAidpPlainMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import type {
   AidpSensitiveWordItem,
   AidpSensitiveWordMode,
@@ -85,14 +86,8 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
       ),
     [rows, selectedKeys]
   );
-  const selectedIds = useMemo(
-    () => selectedRows.map((row) => row.id),
-    [selectedRows]
-  );
   const loadErrorMessage = listQuery.isError
-    ? listQuery.error instanceof Error && listQuery.error.message
-      ? listQuery.error.message
-      : t("aidpSensitiveWords.loadFailed")
+    ? getAidpPlainMessage(listQuery.error, t("aidpSensitiveWords.loadFailed"))
     : undefined;
   const { refetch } = listQuery;
 
@@ -156,9 +151,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
     } catch (error) {
       log.error("Failed to delete AIDP sensitive word:", { id, error });
       message.error(
-        error instanceof Error && error.message
-          ? error.message
-          : t("aidpSensitiveWords.deleteFailed")
+        getAidpPlainMessage(error, t("aidpSensitiveWords.deleteFailed"))
       );
     }
   };
@@ -207,9 +200,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
         error,
       });
       message.error(
-        error instanceof Error && error.message
-          ? error.message
-          : t("aidpSensitiveWords.guardrailSaveFailed")
+        getAidpPlainMessage(error, t("aidpSensitiveWords.guardrailSaveFailed"))
       );
     } finally {
       setSavingGuardrail(false);
@@ -285,9 +276,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
             error,
           });
           message.error(
-            error instanceof Error && error.message
-              ? error.message
-              : t("aidpSensitiveWords.deleteFailed")
+            getAidpPlainMessage(error, t("aidpSensitiveWords.deleteFailed"))
           );
         }
       },
@@ -355,7 +344,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
           keywordInput={keywordInput}
           loading={listQuery.isFetching}
           canManage={canManage}
-          selectedCount={selectedIds.length}
+          selectedCount={selectedRows.length}
           onKeywordChange={setKeywordInput}
           onSearch={applySearch}
           onRefresh={() => void refetch()}

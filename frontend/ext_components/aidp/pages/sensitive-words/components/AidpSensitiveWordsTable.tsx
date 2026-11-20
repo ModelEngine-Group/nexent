@@ -163,6 +163,20 @@ const AidpSensitiveWordsTable: React.FC<AidpSensitiveWordsTableProps> = ({
   );
   const tableWidth = sumSensitiveWordColumnWidths(resizableColumns);
   const hasMore = page * pageSize < total;
+  const pagination = (
+    <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
+      <AidpPagination
+        currentPage={page}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
+        total={total}
+        totalReliable
+        hasMore={hasMore}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </div>
+  );
 
   if (errorMessage && rows.length === 0) {
     return (
@@ -175,18 +189,7 @@ const AidpSensitiveWordsTable: React.FC<AidpSensitiveWordsTableProps> = ({
             </Button>
           </div>
         </div>
-        <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
-          <AidpPagination
-            currentPage={page}
-            pageSize={pageSize}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            total={total}
-            totalReliable
-            hasMore={hasMore}
-            onPageChange={onPageChange}
-            onPageSizeChange={onPageSizeChange}
-          />
-        </div>
+        {pagination}
       </>
     );
   }
@@ -235,18 +238,7 @@ const AidpSensitiveWordsTable: React.FC<AidpSensitiveWordsTableProps> = ({
         />
       </div>
 
-      <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
-        <AidpPagination
-          currentPage={page}
-          pageSize={pageSize}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
-          total={total}
-          totalReliable
-          hasMore={hasMore}
-          onPageChange={onPageChange}
-          onPageSizeChange={onPageSizeChange}
-        />
-      </div>
+      {pagination}
     </>
   );
 };

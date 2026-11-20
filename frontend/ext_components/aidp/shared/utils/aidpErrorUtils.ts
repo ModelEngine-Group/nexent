@@ -15,6 +15,13 @@ export const isAidpNameConflictError = (error: unknown): boolean =>
   error instanceof ApiError &&
   (String(error.code) === "1089" || upstreamCodeOf(error) === "1089");
 
+/** Resolve an upstream message without remapping its business code. */
+export const getAidpPlainMessage = (
+  error: unknown,
+  fallbackMessage: string
+): string =>
+  error instanceof Error && error.message ? error.message : fallbackMessage;
+
 /** Resolve errors for a caller-owned inline state or notification. */
 export const getAidpErrorMessage = (
   error: unknown,

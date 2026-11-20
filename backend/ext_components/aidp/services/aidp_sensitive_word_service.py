@@ -210,10 +210,8 @@ def list_sensitive_words_impl(
     response = _request("GET", normalized_url, path, api_key=api_key)
     payload = _response_json(response)
 
-    container = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    container = _unwrap(payload)
     raw_items = container.get("value")
-    if not isinstance(raw_items, list):
-        raw_items = payload.get("value")
     if not isinstance(raw_items, list):
         raise AppException(
             ErrorCode.AIDP_RESPONSE_ERROR,
@@ -228,13 +226,13 @@ def list_sensitive_words_impl(
             continue
         items.append(item)
 
-    raw_total = container.get("total_count", payload.get("total_count"))
+    raw_total = container.get("total_count")
     total = (
         int(raw_total)
         if isinstance(raw_total, int) and not isinstance(raw_total, bool)
         else (page - 1) * page_size + len(items)
     )
-    next_link = container.get("next_link", payload.get("next_link"))
+    next_link = container.get("next_link")
     return {
         "value": items,
         "next_link": next_link if isinstance(next_link, str) else None,

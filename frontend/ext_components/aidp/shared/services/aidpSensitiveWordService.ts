@@ -11,7 +11,7 @@ import type {
 
 function buildUrl(
   base: string,
-  params: Record<string, string | number | undefined>
+  params: Record<string, string | number | undefined> = {}
 ): string {
   const url = new URL(base, globalThis.location.origin);
   for (const [key, value] of Object.entries(params)) {
@@ -20,17 +20,6 @@ function buildUrl(
     }
   }
   return url.toString();
-}
-
-/** Parse a response body that may legitimately be empty (200/204). */
-async function readOptionalJson<T>(response: Response): Promise<T | null> {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -73,7 +62,7 @@ class AidpSensitiveWordService {
     signal?: AbortSignal
   ): Promise<AidpSensitiveWordItem> {
     const response = await fetchWithErrorHandling(
-      buildUrl(API_ENDPOINTS.aidpMgmt.sensitiveWord(kdsId, id), {}),
+      buildUrl(API_ENDPOINTS.aidpMgmt.sensitiveWord(kdsId, id)),
       { method: "GET", headers: getAuthHeaders(), signal }
     );
     return (await response.json()) as AidpSensitiveWordItem;
@@ -99,7 +88,7 @@ class AidpSensitiveWordService {
     payload: AidpSensitiveWordUpdatePayload
   ): Promise<void> {
     await fetchWithErrorHandling(
-      buildUrl(API_ENDPOINTS.aidpMgmt.sensitiveWord(kdsId, id), {}),
+      buildUrl(API_ENDPOINTS.aidpMgmt.sensitiveWord(kdsId, id)),
       {
         method: "PATCH",
         headers: {
@@ -113,11 +102,10 @@ class AidpSensitiveWordService {
 
   /** AIDP deletes return 204 with no body, so the response is not parsed. */
   async remove(kdsId: string, id: string): Promise<void> {
-    const response = await fetchWithErrorHandling(
-      buildUrl(API_ENDPOINTS.aidpMgmt.sensitiveWord(kdsId, id), {}),
+    await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.sensitiveWord(kdsId, id)),
       { method: "DELETE", headers: getAuthHeaders() }
     );
-    await readOptionalJson(response);
   }
 }
 

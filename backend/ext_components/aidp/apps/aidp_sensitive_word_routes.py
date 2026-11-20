@@ -15,7 +15,7 @@ from typing import Annotated, Literal, NoReturn
 from fastapi import APIRouter, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -37,7 +37,7 @@ aidp_sensitive_word_router = APIRouter()
 class CreateSensitiveWordRequest(BaseModel):
     """Body for creating one custom sensitive word."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     word: str = Field(..., min_length=1, max_length=64, description="Word or phrase to match")
     mode: Literal["BLACK", "WHITE"] = Field(..., description="BLACK blocks, WHITE allows")
@@ -45,25 +45,15 @@ class CreateSensitiveWordRequest(BaseModel):
         ..., min_length=1, max_length=512, description="Why the word is in the dictionary"
     )
 
-    @field_validator("word", "description", mode="before")
-    @classmethod
-    def trim_text(cls, value):
-        return value.strip() if isinstance(value, str) else value
-
 
 class UpdateSensitiveWordRequest(BaseModel):
     """Partial update for one custom sensitive word."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     word: str | None = Field(None, min_length=1, max_length=64)
     mode: Literal["BLACK", "WHITE"] | None = None
     description: str | None = Field(None, min_length=1, max_length=512)
-
-    @field_validator("word", "description", mode="before")
-    @classmethod
-    def trim_text(cls, value):
-        return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def require_at_least_one_field(self):

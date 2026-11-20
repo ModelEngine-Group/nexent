@@ -13,7 +13,10 @@ import type {
   AidpSensitiveWordItem,
   AidpSensitiveWordPayload,
 } from "@/ext_components/aidp/shared/types/sensitiveWord";
-import { isAidpDuplicateWordError } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import {
+  getAidpPlainMessage,
+  isAidpDuplicateWordError,
+} from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   useCreateAidpSensitiveWord,
   useUpdateAidpSensitiveWord,
@@ -55,7 +58,7 @@ const AidpSensitiveWordDrawer: React.FC<AidpSensitiveWordDrawerProps> = ({
     (error: unknown, fallback: string) => {
       if (isAidpDuplicateWordError(error))
         return t("aidpSensitiveWords.duplicateWord");
-      return error instanceof Error && error.message ? error.message : fallback;
+      return getAidpPlainMessage(error, fallback);
     },
     [t]
   );
