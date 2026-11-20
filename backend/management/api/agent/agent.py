@@ -52,6 +52,12 @@ from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
+from contracts.errors.exceptions import AgentDraftEditError
+from contracts.errors.exceptions import RunModelControlsError
+from management.services.conversation.creation_history import (
+    prepare_creation_history,
+    persist_creation_stream,
+)
 from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
@@ -371,12 +377,13 @@ async def generate_guardrail_rules_api(
         JSONResponse with ``{"message": "Success", "data": <result>}`` on
         success, or ``{"message": <error>, "data": null}`` on AppException.
     """
-    _, tenant_id, auth_language = get_current_user_info(authorization, http_request)
+    user_id, tenant_id, auth_language = get_current_user_info(authorization, http_request)
     try:
-        result = generate_guardrail_rules_impl(
+        result = await generate_guardrail_rules_impl(
             description=description,
             model_id=model_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             language=auth_language or language,
         )
         return JSONResponse(

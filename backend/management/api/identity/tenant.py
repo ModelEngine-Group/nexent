@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
+from contracts.constants.constants import SU_ROLES
 from contracts.identity import PaginationRequest, TenantCreateRequest, TenantUpdateRequest
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from management.services.monitor.audit import record_security_event
@@ -239,8 +240,9 @@ async def delete_tenant_endpoint(
         JSONResponse: Deletion result
     """
     try:
-        # Get current user ID from token
-        user_id, operator_tenant_id = get_current_user_id(authorization)
+        user_id, operator_tenant_id, role = get_current_user_context(authorization)
+        if (role or "").upper() not in SU_ROLES:
+            raise ForbiddenError("Only super administrators can delete tenants")
 
         # Perform tenant deletion with all associated resources
         await delete_tenant(tenant_id, deleted_by=user_id)
@@ -265,6 +267,8 @@ async def delete_tenant_endpoint(
     except ValidationError as exc:
         logger.warning(f"Tenant deletion validation error: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized tenant deletion attempt: {str(exc)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))

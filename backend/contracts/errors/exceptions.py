@@ -109,6 +109,15 @@ class RuntimeServiceTimeoutError(Exception):
     pass
 
 
+class AgentBackgroundError(Exception):
+    """A scoped background admission or completion cannot proceed."""
+
+    def __init__(self, code: str, status_code: int = 409):
+        super().__init__(code)
+        self.code = code
+        self.status_code = status_code
+
+
 class RuntimeUpstreamError(Exception):
     """Preserve an explicit error response returned by the runtime service."""
 
@@ -550,26 +559,26 @@ class ModelProviderError(Exception):
         super().__init__(f"{upstream_status}: {message}")
 
 
+class AgentRunAlreadyActiveError(RuntimeError):
+    """Raised when a conversation already has an active agent run."""
+
+
+class AgentRunConcurrencyExceededError(RuntimeError):
+    """Raised when an agent has reached its admitted run limit."""
+
+
 class RuntimeCapacityExceededError(RuntimeError):
     """Raised when Runtime agent worker and queue capacity is full."""
 
     retry_after_seconds = 1
 
 
-class ModelOutletConflictError(ValueError):
-    """An absent, stale or unavailable outlet cannot be overwritten."""
+def __getattr__(name):
+    if name in {"ModelOutletConflictError", "ModelOutletValidationError"}:
+        from nexent.core.model_service.profiles import configuration_errors
 
-    def __init__(self):
-        super().__init__("MODEL_OUTLET_VERSION_CONFLICT")
-
-
-class ModelOutletValidationError(ValueError):
-    """Invalid storage input without parameter or credential details."""
-
-    def __init__(self, category="MODEL_OUTLET_INVALID", path=""):
-        super().__init__("MODEL_OUTLET_INVALID")
-        self.category = category
-        self.path = path
+        return getattr(configuration_errors, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class ModelOutletDatabaseError(RuntimeError):
@@ -664,5 +673,31 @@ class ReviewConflictError(Exception):
     """The submitted review state or revision is no longer current."""
 
 
+class SnapshotCompilationError(Exception):
+    """Keep safe compiler diagnostics separate from the original failure cause."""
+
+    def __init__(self, stage: str, cause: Exception):
+        self.stage = stage
+        self.error_type = type(cause).__name__
+        self.category = (
+            "dependency_io" if isinstance(cause, OSError) else
+            "unresolved" if isinstance(cause, LookupError) else
+            "compiler" if isinstance(cause, TypeError) else "contract"
+        )
+        super().__init__(f"Snapshot compilation failed at {stage} ({self.category}, {self.error_type})")
+
+
 class AccountConflictError(Exception):
     """An account email or stable identity conflicts with an existing record."""
+
+
+def sampling_configuration_error_payload(exception: Optional[BaseException]) -> Optional[dict]:
+    """Expose only actionable sampling intent errors, never raw provider details."""
+    seen = set()
+    while exception is not None and id(exception) not in seen:
+        seen.add(id(exception))
+        if getattr(exception, "is_sampling_configuration_error", False):
+            return {"type": "error", "code": "MODEL_SAMPLING_CONFIG_INVALID",
+                    "content": "The model provider rejected temperature or Top P. Restore defaults or change these settings."}
+        exception = exception.__cause__ or exception.__context__
+    return None

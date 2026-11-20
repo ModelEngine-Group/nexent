@@ -18,7 +18,7 @@ async def test_start_chat_forwards_answer_mode_and_retains_headers(options, expe
     with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
             patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
             patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as history, \
-            patch.object(ns, "forward_agent_run", new_callable=AsyncMock, return_value=response) as forward:
+            patch.object(ns, "forward_northbound_run", new_callable=AsyncMock, return_value=response) as forward:
         history.return_value = {"data": {"history": []}}
         result = await ns.start_streaming_chat(
             ctx=MockNorthboundContext(token_id=0), conversation_id=123,

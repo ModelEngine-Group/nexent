@@ -20,6 +20,8 @@ bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 
 ## 2. 执行升级
 
+Web 默认给登录 Cookie 加上 `Secure`。如果内网仍通过 HTTP 直连 Web，升级前在 `deploy/env/.env` 中设置 `NEXENT_AUTH_COOKIE_SECURE=false`，让浏览器能保存会话。通过 HTTPS 反向代理访问时保留默认值 `true`，即使代理和 Web 之间使用 HTTP。
+
 ### 2.1 在线升级
 
 在能够访问 GitHub 和所需镜像仓库的环境中，使用当前 Nexent 仓库执行在线升级。先确认当前分支和目标版本，再以快进方式更新。不要用未记录的 `latest` 代替明确版本。

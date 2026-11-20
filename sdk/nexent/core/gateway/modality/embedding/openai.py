@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """OpenAI-compatible text embedding adapter."""
 
 from __future__ import annotations
@@ -91,10 +93,11 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
 
     async def invoke(self, request: EmbeddingRequest):
         """Embed ``request.inputs`` (text), offloaded to a worker thread."""
+        worker_options = {"lane": request.worker_lane} if request.worker_lane is not None else {}
         return await run_blocking(
             "gateway-embedding-invoke",
             self.get_embeddings, request.inputs,
-            with_metadata=request.with_metadata, timeout=request.timeout,
+            with_metadata=request.with_metadata, timeout=request.timeout, **worker_options,
         )
 
     def get_model_info(self) -> ModelInfo:

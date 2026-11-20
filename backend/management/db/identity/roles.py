@@ -7,7 +7,7 @@ from contracts.errors.exceptions import (
     RoleAssignmentConflict,
 )
 from contracts.roles import normalize_roles, primary_role, roles_from_record
-from management.configuration.runtime import get_config_snapshot
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import set_account_profile
 from management.db.identity.membership import (

@@ -23,7 +23,7 @@ async def test_a2a_forwards_published_version_without_chat_persistence(mocker, s
         yield 'data: {"type": "final_answer", "content": "done"}\n\n'
 
     response = MagicMock(status_code=200, headers={}, body_iterator=body())
-    forward = mocker.patch.object(module, "forward_agent_run", new_callable=AsyncMock, return_value=response)
+    forward = mocker.patch.object(module, "forward_a2a_run", new_callable=AsyncMock, return_value=response)
     # Caller metadata must not choose the executed version.
     payload = {"message": {"parts": [{"text": "hello"}], "metadata": {"version_no": 999}}}
     if streaming:
@@ -60,7 +60,7 @@ async def test_a2a_invalid_version_never_dispatches_draft(mocker, streaming, ver
     mocker.patch.object(module.a2a_agent_db, "get_server_agent_by_endpoint", return_value=registration)
     resolve = mocker.patch.object(service, "_resolve_task_id")
     store = mocker.patch.object(service, "_store_user_message")
-    forward = mocker.patch.object(module, "forward_agent_run", new_callable=AsyncMock)
+    forward = mocker.patch.object(module, "forward_a2a_run", new_callable=AsyncMock)
     with pytest.raises(module.EndpointNotFoundError, match="valid published version"):
         if streaming:
             [event async for event in service.handle_message_stream("endpoint", {"message": {}})]
@@ -90,7 +90,7 @@ async def test_a2a_preserves_absent_vs_explicit_metadata(mocker, streaming, meta
         yield 'data: {"type": "final_answer", "content": "done"}\n\n'
 
     response = MagicMock(status_code=200, headers={}, body_iterator=body())
-    forward = mocker.patch.object(module, "forward_agent_run", new_callable=AsyncMock, return_value=response)
+    forward = mocker.patch.object(module, "forward_a2a_run", new_callable=AsyncMock, return_value=response)
     # Request-level metadata must not become Message.metadata.
     payload = {"metadata": {"ignored": True}, "message": {"parts": [{"text": "hello"}]}}
     if metadata is not None:

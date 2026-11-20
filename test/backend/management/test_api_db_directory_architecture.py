@@ -104,7 +104,7 @@ assert len(SimpleTableBase.metadata.tables) == 5
 assert models.ResourceReview.__module__ == 'management.db.resource_review_model'
 assert models.OuterApiTool is models.OuterApiService
 assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
-assert models.ModelMonitoringRecord.__module__ == 'management.db.monitoring.models'
+assert models.ModelMonitoringRecord.__module__ == 'infrastructure.rdb.model_monitoring'
 assert models.TrajectoryExecution.__module__ == 'management.db.trajectory.models'
 assert models.TrajectoryStatistics.__module__ == 'management.db.trajectory.models'
 assert all(value.metadata is TableBase.metadata or value.metadata is SimpleTableBase.metadata
@@ -113,7 +113,7 @@ assert 'infrastructure.rdb.client' not in sys.modules
 print(json.dumps({'tables': len(classes), 'client_loaded': False}))
 """
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(BACKEND)
+    environment["PYTHONPATH"] = os.pathsep.join((str(BACKEND), str(ROOT / "sdk")))
     result = subprocess.run(
         [sys.executable, "-c", program],
         cwd=ROOT,

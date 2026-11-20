@@ -26,7 +26,7 @@ def test_web_dispatches_trajectory_queries_through_gateway():
         ("/api/conversation/agent_groups?view=chat", "GET", "runtime"),
         ("/api/conversation/agent_groups?search=trajectory", "GET", "runtime"),
         ("/api/conversation/delete?view=trajectory", "DELETE", "runtime"),
-        ("/api/agent/run", "POST", "runtime"),
+        ("/api/agent/run", "POST", "config"),
         ("/api/agent/create", "POST", "config"),
     ]
     script = (

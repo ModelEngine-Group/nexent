@@ -6,14 +6,14 @@ import logging
 
 import redis
 from contracts.constants.environment import REDIS_URL
-from management.configuration.catalog import (
+from infrastructure.system_configuration.catalog import (
     DEFAULT_CATALOG,
     ConfigValue,
     SystemConfigurationSnapshot,
 )
-from management.configuration.database import configuration_database
-from management.configuration.repository import SystemConfigurationRepository
-from management.configuration.runtime import (
+from infrastructure.system_configuration.database import configuration_database
+from infrastructure.system_configuration.repository import SystemConfigurationRepository
+from infrastructure.system_configuration.runtime import (
     CONFIGURATION_CHANGED,
     CONFIGURATION_CHANNEL,
 )
