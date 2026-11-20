@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict
 
 from nexent.storage.errors import InvalidInput, Unavailable
-from nexent.storage.models import Page, PageRequest, VectorRecord
+from nexent.storage.models import Page, PageRequest, Revision, VectorRecord
 
 from infrastructure.vdb.vector_schema import vector
 
@@ -28,7 +28,8 @@ def _after(cursor, fingerprint):
     return data['after']
 
 
-def scan_vectors(store, binding, where, page, *, context, include_vector=True, allow_missing_vector=False, vectors_only=False):
+def scan_vectors(store, binding, where, page, *, context, include_vector=True, allow_missing_vector=False,
+                 vectors_only=False, include_storage_revision=False):
     if not isinstance(page, PageRequest):
         raise InvalidInput()
     query = store._filter(binding, where, vectors_only=vectors_only)
@@ -41,6 +42,8 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True, a
     identity = [store.scope.service_role, store.scope.tenant_id, store.scope.actor_id, read_schema, query, include_vector]
     if allow_missing_vector:
         identity.append("optional-vector")
+    if include_storage_revision:
+        identity.append("storage-revision")
     fingerprint = hashlib.sha256(json.dumps(
         identity,
         sort_keys=True, separators=(',', ':'), allow_nan=False,
@@ -54,6 +57,8 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True, a
     }
     if after is not None:
         options['search_after'] = [after]
+    if include_storage_revision:
+        options['seq_no_primary_term'] = True
     with store._client(context) as client:
         result = store._call(client, 'search', context, **options)
     result = result.body if hasattr(result, 'body') else result
@@ -74,7 +79,13 @@ def scan_vectors(store, binding, where, page, *, context, include_vector=True, a
         try:
             key, data, generation = store._decode(binding, source)
             values = vector(binding, source.get('embedding')) if include_vector and not (allow_missing_vector and 'embedding' not in source) else ()
-            record = VectorRecord(key, values, data, generation)
+            revision = None
+            if include_storage_revision:
+                seq, term = hit.get('_seq_no'), hit.get('_primary_term')
+                if type(seq) is not int or seq < 0 or type(term) is not int or term < 1:
+                    raise InvalidInput()
+                revision = Revision(f"{seq}:{term}")
+            record = VectorRecord(key, values, data, generation, revision)
         except InvalidInput:
             raise Unavailable(operation_id=context.operation_id) from None
         if previous is not None and key.key <= previous:

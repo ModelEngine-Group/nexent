@@ -2,16 +2,15 @@
 """Media evidence only trusts confirmed publication and the exact image manifest."""
 
 from contextlib import contextmanager
-from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from contracts.agentos_knowledge import KnowledgeContentGrant, ObjectReference
 from contracts.errors.exceptions import RuntimeUpstreamError
 from contracts.knowledge_collections import KnowledgeCollectionGrant
-from nexent.storage.errors import ScopeDenied
-from nexent.storage.models import Page, Revision, VectorKey
+from nexent.storage.errors import Conflict, ScopeDenied
+from nexent.storage.models import Page, Revision, VectorKey, VectorRecord, WriteReceipt
 from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.media_inspection import inspect_media
 
@@ -20,7 +19,8 @@ from test.backend.services.test_knowledge_worker import setup  # noqa: F401
 
 
 @pytest.mark.parametrize("mode", ["text", "image", "revoked-image", "foreign-grant", "stale", "standalone", "mutated"])
-async def test_media_evidence_uses_visible_ingestion_or_reports_reason(search, mode, mocker):  # noqa: F811
+@pytest.mark.parametrize("apply", [False, True])
+async def test_media_evidence_uses_visible_ingestion_or_reports_reason(search, mode, mocker, apply):  # noqa: F811
     s, _, _, record, _ = search
     file_id = record.payload["file_id"]
     data = {**record.payload, "chunk_index": 0, "parser_version": "v1"}
@@ -31,8 +31,9 @@ async def test_media_evidence_uses_visible_ingestion_or_reports_reason(search, m
         data.update(file_id=None, file_version=None, chunk_index=None)
     if mode == "mutated":
         mocker.patch.object(ChunkReadView, "has_confirmed_mutation", return_value=True)
-    row = replace(record, key=VectorKey("kb", f"1/{file_id}/0/0"), payload=data,
-                  generation=Revision("stale") if mode == "stale" else record.generation)
+    row = VectorRecord(VectorKey("kb", f"1/{file_id}/0/0"), (), data,
+                       Revision("stale") if mode == "stale" else record.generation,
+                       storage_revision=Revision("10:2") if apply else None)
     s.vectors.collection_exists.return_value = True
     s.vectors.scan.return_value = Page((row,))
     grant = KnowledgeCollectionGrant(knowledge_id=1, collection="kb", revision="a" * 64,
@@ -64,8 +65,30 @@ async def test_media_evidence_uses_visible_ingestion_or_reports_reason(search, m
               "revoked-image": "UNPROVEN_IMAGE", "stale": "NO_CURRENT_FILE_PUBLICATION",
               "standalone": "STANDALONE_PROVENANCE_UNAVAILABLE", "mutated": "CHUNK_HAS_MUTATION"}[mode]
     assert result["counts"] == {reason: 1}
+    assert result["applied"] == 0
     assert frames == [{"kind": "vector", "chunk_id": row.key.key, "file_id": data["file_id"],
                        "file_version": data["file_version"], "generation": row.generation.value, "reason": reason}]
     options = s.vectors.scan.call_args.kwargs
     assert options["vectors_only"] and not options["include_vector"]
     assert client.authorize_knowledge_content.await_count == (1 if mode in {"image", "revoked-image"} else 0)
+    if apply:
+        writer = Mock()
+        writer.patch_payload.return_value = WriteReceipt("patch", True)
+        factory = Mock(return_value=writer)
+        frames.clear()
+        with pytest.raises(Conflict):
+            await inspect_media(client, s.actor, 1, frames.append, context=s.context, ports=ports,
+                                apply_revision="0" * 64, writer_factory=factory)
+        factory.assert_not_called()
+        result = await inspect_media(client, s.actor, 1, frames.append, context=s.context, ports=ports,
+                                     apply_revision=result["data_revision"], writer_factory=factory)
+        kind = mode if mode in {"text", "image"} else None
+        assert result["applied"] == int(kind is not None)
+        if kind is None:
+            factory.assert_not_called()
+        else:
+            assert frames[0]["applied_media_kind"] == kind
+            assert writer.patch_payload.call_args.args[1].set_values == {"media_kind": kind}
+            assert writer.patch_payload.call_args.kwargs["expected_generation"] == row.generation
+            assert writer.patch_payload.call_args.kwargs["expected_storage_revision"] == row.storage_revision
+            writer.close.assert_called_once()

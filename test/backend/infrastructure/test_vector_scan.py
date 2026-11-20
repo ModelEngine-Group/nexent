@@ -43,6 +43,18 @@ def test_payload_only_scan_needs_no_model_dimensions_or_embedding(store):  # noq
     assert 'embedding' not in client.search.call_args.kwargs['source']
 
 
+def test_scan_can_read_storage_revision_without_loading_vectors(store):  # noqa: F811
+    port, client, _ = store
+    row = {**hit('a'), '_seq_no': 7, '_primary_term': 2}
+    client.search.return_value = {'hits': {'hits': [row]}}
+    result = port.scan('kb', None, PageRequest(), context=context(), include_vector=False,
+                       include_storage_revision=True)
+    assert result.items[0].storage_revision.value == '7:2'
+    assert result.items[0].vector == ()
+    assert client.search.call_args.kwargs['seq_no_primary_term']
+    assert 'embedding' not in client.search.call_args.kwargs['source']
+
+
 def test_vector_cursor_cannot_be_reused_for_payload_only_scan(store):  # noqa: F811
     port, client, factory = store
     client.search.return_value = {'hits': {'hits': [hit('a'), hit('b')]}}

@@ -114,3 +114,16 @@ def bind_knowledge_creation_vectors(actor, collection, dimensions, *, resource_t
         (vector_binding(tenant, collection, dimensions, allow_unembedded=True),),
         _configured_client,
     )
+
+
+def bind_knowledge_media_vectors(actor, resource):
+    from nexent.storage.errors import ScopeDenied
+
+    if resource.resource_tenant_id != actor.tenant_id:
+        raise ScopeDenied()
+    binding = replace(vector_binding(actor.tenant_id, resource.collection, None, allow_unembedded=True),
+                      mutable_fields=frozenset({"media_kind"}))
+    return ElasticsearchVectorStore(
+        StorageScope("runtime", actor.tenant_id, actor.user_id, {resource.collection}),
+        (binding,), _configured_client,
+    )

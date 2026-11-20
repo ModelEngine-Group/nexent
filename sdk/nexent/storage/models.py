@@ -340,6 +340,7 @@ class VectorRecord:
     vector: tuple[float, ...]
     payload: Record
     generation: Revision | None = None
+    storage_revision: Revision | None = None
 
 
 @dataclass(frozen=True)

@@ -209,7 +209,7 @@ class VectorStore(StoragePort, Protocol):
 
     def patch_payload(
         self, key: VectorKey, patch: FieldPatch, *, expected_generation: Revision | None,
-        context: OperationContext,
+        context: OperationContext, expected_storage_revision: Revision | None = None,
     ) -> WriteReceipt:
         """Edit explicitly mutable payload fields without changing vectors or identity."""
         ...
@@ -219,7 +219,7 @@ class VectorStore(StoragePort, Protocol):
     def scan(
         self, collection: str, where: Comparison | Junction | None, page: PageRequest,
         *, context: OperationContext, include_vector: bool = True, allow_missing_vector: bool = False,
-        vectors_only: bool = False,
+        vectors_only: bool = False, include_storage_revision: bool = False,
     ) -> Page[VectorRecord]:
         """Read scoped keys; explicitly optional vectors distinguish absence from invalid data."""
         ...

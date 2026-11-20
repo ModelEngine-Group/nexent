@@ -1,10 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Read-only, editor-scoped evidence for vectors lacking a recognized media kind."""
+"""Inspect or explicitly backfill editor-scoped vectors without a recognized media kind."""
 
 import argparse
 import asyncio
 import json
 import os
+from contextlib import ExitStack
 from time import monotonic
 from uuid import uuid4
 
@@ -22,17 +23,31 @@ from nexent.core.concurrency import (
     run_blocking,
     set_default_thread_manager,
 )
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
-from nexent.storage.models import Comparison, Junction, OperationContext, PageRequest
+from nexent.storage.errors import (
+    Conflict,
+    DeadlineExceeded,
+    OutcomeUnknown,
+    ScopeDenied,
+)
+from nexent.storage.models import (
+    Comparison,
+    FieldPatch,
+    Junction,
+    OperationContext,
+    PageRequest,
+    WriteOutcome,
+)
 from pydantic import ValidationError
 from runtime.knowledge_base.chunk_view import ChunkReadView
 from runtime.knowledge_base.data_revision import knowledge_data_revision
+from runtime.knowledge_base.jobs import KnowledgeJobs
 from runtime.knowledge_base.publication import published_files, published_job
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.knowledge_runtime import knowledge_chunks_ports
+from infrastructure.knowledge_vectors import bind_knowledge_media_vectors
 
 
 def _evidence(record, resource, manifests, jobs, view, *, context):
@@ -69,19 +84,38 @@ def _evidence(record, resource, manifests, jobs, view, *, context):
     return "UNPROVEN_IMAGE", None
 
 
-def _page(vectors, resource, cursor, page_size, *, context):
+def _page(vectors, resource, cursor, page_size, *, context, apply):
     unknown = Junction("or", (
         Comparison("media_kind", "is_null", True),
         Junction("and", (Comparison("media_kind", "ne", "text"), Comparison("media_kind", "ne", "image"))),
     ))
     return vectors.scan(resource.collection, Junction("and", (
         Comparison("knowledge_id", "eq", resource.knowledge_id), unknown,
-    )), PageRequest(limit=page_size, cursor=cursor), context=context, include_vector=False, vectors_only=True)
+    )), PageRequest(limit=page_size, cursor=cursor), context=context, include_vector=False, vectors_only=True,
+        include_storage_revision=apply)
 
 
-async def inspect_media(client, actor, knowledge_id, emit, *, context, page_size=100, ports=knowledge_chunks_ports):
-    async def blocking(action):
-        return await run_blocking("inspect-vector-media", action, lane="control-io", owner=__name__)
+def _write_media(writer, row, kind, view, *, context):
+    if row.storage_revision is None or row.generation is None or row.payload.get("media_kind") in {"image", "text"}:
+        raise Conflict()
+    view.stable(context=context)
+    reference = KnowledgeContentRequest(knowledge_id=view.knowledge_id, file_id=row.payload["file_id"],
+                                        file_version=row.payload["file_version"])
+    policy = KnowledgeJobs(view.records, authorize=lambda *args, **kwargs: None)
+    if not policy.is_visible(reference, row.generation.value, context=context):
+        raise Conflict()
+    receipt = writer.patch_payload(row.key, FieldPatch(set_values={"media_kind": kind}),
+        expected_generation=row.generation, expected_storage_revision=row.storage_revision, context=context)
+    if receipt.outcome != WriteOutcome.CONFIRMED:
+        raise OutcomeUnknown(operation_id=context.operation_id)
+    if receipt.matched is not True:
+        raise Conflict(operation_id=context.operation_id)
+
+
+async def inspect_media(client, actor, knowledge_id, emit, *, context, page_size=100, ports=knowledge_chunks_ports,
+                        apply_revision=None, writer_factory=bind_knowledge_media_vectors):
+    async def blocking(action, *args):
+        return await run_blocking("inspect-vector-media", action, *args, lane="control-io", owner=__name__)
 
     async def authorize():
         result = await client.authorize_knowledge_collection(
@@ -107,7 +141,7 @@ async def inspect_media(client, actor, knowledge_id, emit, *, context, page_size
         grant = await authorize()
         resource = KnowledgeChunksGrant.model_validate(grant.model_dump(exclude={"embedding_model_id"}))
         counts, jobs, cursor = {}, {}, None
-        with ports(actor, resource, context=context) as (records, vectors):
+        with ports(actor, resource, context=context) as (records, vectors), ExitStack() as owned:
             for port in (records, vectors):
                 scope = port.scope
                 if (scope.system or scope.resource_prefix or scope.service_role != "runtime"
@@ -124,12 +158,25 @@ async def inspect_media(client, actor, knowledge_id, emit, *, context, page_size
                 )
 
             revision, manifests, view, present = await blocking(snapshot)
+            if apply_revision is not None and apply_revision != revision:
+                raise Conflict()
 
             def scan_page():
-                page = _page(vectors, resource, cursor, page_size, context=context)
+                page = _page(vectors, resource, cursor, page_size, context=context, apply=apply_revision is not None)
                 findings = [(row, *_evidence(row, resource, manifests, jobs, view, context=context)) for row in page.items]
                 return findings, page.next_cursor
 
+            writer = None
+
+            def apply_row(row, kind):
+                nonlocal writer
+                if writer is None:
+                    writer = writer_factory(actor, resource)
+                    owned.callback(writer.close)
+                    writer.ensure_collection(resource.collection, context=context)
+                _write_media(writer, row, kind, view, context=context)
+
+            applied = 0
             while present:
                 findings, next_cursor = await blocking(scan_page)
                 if await authorize() != grant:
@@ -138,10 +185,18 @@ async def inspect_media(client, actor, knowledge_id, emit, *, context, page_size
                     context.remaining()
                     if image is not None:
                         reason = await check_image(image)
+                    kind = {"CONFIRMED_INGESTED_TEXT": "text", "CONFIRMED_MANIFEST_IMAGE": "image"}.get(reason)
+                    effect = {}
+                    if apply_revision is not None and kind is not None:
+                        if await authorize() != grant:
+                            raise Conflict()
+                        await blocking(apply_row, row, kind)
+                        applied += 1
+                        effect["applied_media_kind"] = kind
                     counts[reason] = counts.get(reason, 0) + 1
                     emit({"kind": "vector", "chunk_id": row.key.key, "file_id": row.payload.get("file_id"),
                           "file_version": row.payload.get("file_version"),
-                          "generation": row.generation.value if row.generation else None, "reason": reason})
+                          "generation": row.generation.value if row.generation else None, "reason": reason, **effect})
                 if next_cursor is None:
                     break
                 if next_cursor == cursor:
@@ -154,7 +209,7 @@ async def inspect_media(client, actor, knowledge_id, emit, *, context, page_size
                 raise Conflict()
         context.remaining()
         return {"kind": "finished", "collection_present": present, "knowledge_revision": grant.revision,
-                "data_revision": revision, "counts": counts}
+                "data_revision": revision, "counts": counts, "applied": applied}
 
 
 def main():
@@ -164,9 +219,19 @@ def main():
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--expected-data-revision")
+    parser.add_argument("--writers-paused", action="store_true",
+                        help="Confirm KB writes are paused during the backfill")
     args = parser.parse_args()
     if args.knowledge_id < 1 or not 1 <= args.timeout <= 3600:
         parser.error("Expected a positive knowledge ID and a timeout from 1 to 3600 seconds")
+    if args.apply:
+        revision = args.expected_data_revision or ""
+        if not args.writers_paused or len(revision) != 64 or any(c not in "0123456789abcdef" for c in revision):
+            parser.error("Apply requires paused writers and the completed inspection data revision")
+    elif args.writers_paused or args.expected_data_revision is not None:
+        parser.error("Backfill options require --apply")
     context = OperationContext("knowledge-vector-media-" + uuid4().hex, monotonic() + args.timeout)
     actor = ServicePrincipal(args.user_id, args.tenant_id)
     client = AgentOSClient(environment.MANAGEMENT_AGENTOS_URL, create_httpx_client)
@@ -177,7 +242,8 @@ def main():
         manager.start()
         set_default_thread_manager(manager)
         try:
-            return await inspect_media(client, actor, args.knowledge_id, emit, context=context)
+            return await inspect_media(client, actor, args.knowledge_id, emit, context=context,
+                                       apply_revision=args.expected_data_revision)
         finally:
             clear_default_thread_manager(manager)
             if (await manager.shutdown(timeout=15)).stuck_execution_ids:
@@ -189,7 +255,8 @@ def main():
                 stream.write(json.dumps(value) + "\n")
                 stream.flush()
 
-            emit({"kind": "start", "knowledge_id": args.knowledge_id, "user_id": actor.user_id, "tenant_id": actor.tenant_id})
+            emit({"kind": "start", "knowledge_id": args.knowledge_id, "user_id": actor.user_id,
+                  "tenant_id": actor.tenant_id, "apply": args.apply})
             emit(asyncio.run(run(emit)))
     except (TimeoutError, DeadlineExceeded):
         parser.exit(1, "Vector media inspection deadline exceeded\n")

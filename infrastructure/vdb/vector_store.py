@@ -440,10 +440,12 @@ class ElasticsearchVectorStore:
             actual, vector(binding, source.get("embedding")) if include_vector else (), data, generation
         )
 
-    def patch_payload(self, key, patch, *, expected_generation, context):
+    def patch_payload(self, key, patch, *, expected_generation, context, expected_storage_revision=None):
         if not isinstance(key, VectorKey) or not isinstance(patch, FieldPatch):
             raise InvalidInput()
         if expected_generation is not None and not isinstance(expected_generation, Revision):
+            raise InvalidInput()
+        if expected_storage_revision is not None and not isinstance(expected_storage_revision, Revision):
             raise InvalidInput()
         binding = self._binding(key.collection, write=True, maintenance=True)
         if not binding.mutable_fields:
@@ -461,6 +463,8 @@ class ElasticsearchVectorStore:
             if target is None:
                 return WriteReceipt(context.operation_id, False)
             sequence, term = target
+            if expected_storage_revision is not None and expected_storage_revision != Revision(f"{sequence}:{term}"):
+                raise Conflict(operation_id=context.operation_id)
             try:
                 result = self._call(client, 'update', context, write=True, index=binding.index, id=provider_key,
                     if_seq_no=sequence, if_primary_term=term, retry_on_conflict=0, scripted_upsert=False,
@@ -578,17 +582,19 @@ class ElasticsearchVectorStore:
             hits.append(SearchHit(key, float(score), score_kind, data, generation, highlights=terms))
         return tuple(hits)
 
-    def scan(self, collection, where, page, *, context, include_vector=True, allow_missing_vector=False, vectors_only=False):
+    def scan(self, collection, where, page, *, context, include_vector=True, allow_missing_vector=False,
+             vectors_only=False, include_storage_revision=False):
         from infrastructure.vdb.vector_scan import scan_vectors
 
-        if (type(include_vector) is not bool or type(allow_missing_vector) is not bool or type(vectors_only) is not bool
+        if (any(type(flag) is not bool for flag in (include_vector, allow_missing_vector, vectors_only, include_storage_revision))
             or allow_missing_vector and not include_vector):
             raise InvalidInput()
         binding = self._binding(collection, maintenance=not include_vector or allow_missing_vector)
         if allow_missing_vector and not binding.allow_unembedded:
             raise CapabilityUnsupported()
         return scan_vectors(self, binding, where, page, context=context,
-                            include_vector=include_vector, allow_missing_vector=allow_missing_vector, vectors_only=vectors_only)
+                            include_vector=include_vector, allow_missing_vector=allow_missing_vector, vectors_only=vectors_only,
+                            include_storage_revision=include_storage_revision)
 
     def count(self, collection, where, *, context, vectors_only=False):
         if type(vectors_only) is not bool:

@@ -107,6 +107,15 @@ def test_payload_edit_preserves_identity_and_uses_fixed_cas_script(editable):
     client.close.assert_called_once()
 
 
+def test_payload_patch_rejects_changed_storage_revision_even_with_same_generation(editable):
+    port, client, _, _ = editable
+    with pytest.raises(Conflict):
+        port.patch_payload(VectorKey("kb", "chunk"), FieldPatch(set_values={"content": "new"}),
+                           expected_generation=Revision("published"),
+                           expected_storage_revision=Revision("6:2"), context=context())
+    client.update.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "patch",
     [
