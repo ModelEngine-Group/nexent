@@ -15,7 +15,6 @@ from enum import Enum
 from typing import Any, Callable, Dict, Literal, Optional, Sequence
 
 from nexent.core.agents.contracts.context import ContextEvidence, FinalContext, ModelMessage
-
 from nexent.monitor.run_capture import capture_context_assembly, capture_current_context_input
 
 from .budget import message_role
@@ -69,6 +68,7 @@ class ContextManager:
         self._llm = LLMSummary(self.config, self._renderer)
         self._history_compressor = HistoryCompressor(self._llm)
         self._history_candidate: HistorySummaryCandidate | None = None
+        self._pending_capacity_candidate: HistorySummaryCandidate | None = None
         self._current_item_cache: dict[int, ContextItem] = {}
         self._step_local_log: list[CompressionCallRecord] = []
         self.compression_calls_log: list[CompressionCallRecord] = []
@@ -171,6 +171,7 @@ class ContextManager:
         run_context: ManagedRunContext | None = None,
         force_compaction: bool = False,
         maintenance: bool = False,
+        history_only_recovery: bool = False,
         request_system_messages: Sequence[ModelMessage] = (),
         request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
@@ -236,7 +237,7 @@ class ContextManager:
                     item.token_estimate for item in final_items
                     if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
                 )
-                if self.message_format == "openai_chat_completions":
+                if history_only_recovery or self.message_format == "openai_chat_completions":
                     original_history_tokens = self._history_token_cost(
                         final_items, purpose_stable, purpose_dynamic, canonical_tools)
                 compressible_history_tokens = original_history_tokens
@@ -259,8 +260,15 @@ class ContextManager:
                     # new turn cannot reach Target and steadily degrades it.
                     history_target = max(
                         0,
-                        self.config.effective_input_limit_tokens - non_history_tokens,
+                        self.config.effective_input_limit_tokens - non_history_tokens - int(history_only_recovery),
                     )
+                if history_only_recovery and original_history_tokens > 0:
+                    required_saving = max(
+                        self.config.minimum_history_reduction_tokens,
+                        math.ceil(original_history_tokens * self.config.minimum_history_reduction_ratio),
+                    )
+                    # An explicit Provider rejection can contradict the local estimate.
+                    history_target = min(history_target, max(0, original_history_tokens - required_saving))
                 # A checkpoint with no uncovered turns is already canonical.
                 # If it is within the useful history target, fixed request
                 # content is the remaining excess and cannot be reclaimed by
@@ -284,7 +292,7 @@ class ContextManager:
                     candidate = result.candidate
                     if candidate is None:
                         compaction_stop_reason = "invalid_candidate"
-                        if last_valid is None and result.fallback_turns and not maintenance:
+                        if last_valid is None and result.fallback_turns and not maintenance and not history_only_recovery:
                             fallback_by_id = {item.id: item for item in result.fallback_turns}
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
@@ -292,7 +300,7 @@ class ContextManager:
                     previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
                     previous_tokens += sum(item.token_estimate for item in current_turns)
                     candidate_tokens = candidate_item.token_estimate
-                    if self.message_format == "openai_chat_completions":
+                    if history_only_recovery or self.message_format == "openai_chat_completions":
                         previous_tokens = self._history_token_cost(
                             final_items, purpose_stable, purpose_dynamic, canonical_tools)
                         replacement = [item for item in final_items if item.type not in {
@@ -326,6 +334,9 @@ class ContextManager:
                         compaction_stop_reason = "compaction_attempts_exhausted"
                 if last_valid is not None:
                     final_history_tokens = last_valid.as_item().token_estimate
+                    if history_only_recovery:
+                        final_history_tokens = self._history_token_cost(
+                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
                     last_valid = replace(
                         last_valid,
                         history_tokens_before=original_history_tokens,
@@ -334,27 +345,32 @@ class ContextManager:
                         compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
                         compaction_target_tokens=self._compaction_target_tokens(),
                     )
-                    self._history_candidate = last_valid
+                    if history_only_recovery:
+                        self._pending_capacity_candidate = last_valid
+                    else:
+                        self._history_candidate = last_valid
                     new_coverage = last_valid.covered_through_message_id
                     final_items = [
                         item for item in final_items if item.type != ContextItemType.HISTORY_SUMMARY
                     ] + [last_valid.as_item()]
-                    persist_status = self._persist_candidate(last_valid)
-                    self._pending_history_summary_event = {
-                        **deepcopy(last_valid.as_item().content),
-                        "persist_status": persist_status,
-                        "status": "accepted",
-                    }
+                    persist_status = "staged" if history_only_recovery else self._persist_candidate(last_valid)
+                    if not history_only_recovery:
+                        self._pending_history_summary_event = {
+                            **deepcopy(last_valid.as_item().content),
+                            "persist_status": persist_status,
+                            "status": "accepted",
+                        }
                 elif should_compress_history:
                     self._emit_history_summary_status("idle")
 
-            final_items = self._compact_to_compaction_target(
-                final_items,
-                purpose_stable,
-                purpose_dynamic,
-                canonical_tools,
-                model=model,
-            )
+            if not history_only_recovery:
+                final_items = self._compact_to_compaction_target(
+                    final_items,
+                    purpose_stable,
+                    purpose_dynamic,
+                    canonical_tools,
+                    model=model,
+                )
 
         if maintenance or force_compaction:
             originals = {item.id: item for item in original_items}

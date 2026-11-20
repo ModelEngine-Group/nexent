@@ -9,9 +9,10 @@ runtime only adapts CoreAgent lifecycle calls to the ContextManager API.
 from __future__ import annotations
 
 import inspect
-from dataclasses import replace
+import time
 from collections.abc import Sequence
-from copy import deepcopy
+from copy import copy, deepcopy
+from dataclasses import replace
 from typing import Any, Mapping
 
 from smolagents.memory import ActionStep, AgentMemory, TaskStep
@@ -19,11 +20,12 @@ from smolagents.models import ChatMessage, MessageRole, Model
 
 from nexent.core.agents.context.budget import extract_message_text
 from nexent.core.agents.context.evidence import ContextEvidenceCollector
+from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
+from nexent.core.agents.context.recovery import ContextInputCapacityExceeded, ContextRecoveryBudget, recover_history
 from nexent.core.agents.context.run_context import ManagedRunContext
 from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
-from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.contracts.context import ContextEvidence, ContextMessage, ContextToolView, FinalContext
 from nexent.core.agents.cores.smolagents.context_contracts import (
     ContextRuntime as ContextRuntime,
@@ -58,6 +60,8 @@ class ManagedContextRuntime:
         self._memory_adapter = SmolagentsMemoryAdapter(context_manager)
         self.usage_baseline = ContextUsageBaseline()
         self.last_maintenance_evidence = None
+        self._capacity_budget = None
+        self._recovery_finalize = None
         self._request_system_messages = ()
         self._request_tail_messages = ()
 
@@ -76,6 +80,8 @@ class ManagedContextRuntime:
         self._evidence.reset()
         self.usage_baseline = ContextUsageBaseline()
         self.last_maintenance_evidence = None
+        self._capacity_budget = None
+        self._recovery_finalize = None
         self._request_system_messages = ()
         self._request_tail_messages = ()
         self._run_context = self.context_manager.prepare_items_context(
@@ -91,6 +97,61 @@ class ManagedContextRuntime:
             )
         return self._run_context
 
+    def begin_request(self, *, model, recovery_finalize=None):
+        """Start a budget only at the Core's new logical completion boundary."""
+        timeout = getattr(getattr(getattr(model, "profile", None), "connection", None), "timeout_seconds", None)
+        deadline = time.monotonic() + 3 * timeout if type(timeout) in (int, float) and timeout > 0 else None
+        model_deadline = getattr(model, "deadline", None)
+        if type(model_deadline) in (int, float):
+            deadline = min(deadline, model_deadline) if deadline is not None else model_deadline
+        self._capacity_budget = ContextRecoveryBudget(deadline=deadline)
+        self._recovery_finalize = recovery_finalize
+
+    def _capacity_assemble(self, *, model, memory, current_run_start_idx, tools=None,
+                           recovery_origin=None, **options):
+        manager = self.context_manager
+        run_context = self._ensure_run_context(memory)
+        if self._capacity_budget is None:
+            self.begin_request(model=model)
+        current = self._memory_adapter._project_current_run(memory, current_run_start_idx)
+        definitions = context_tool_views(tools)
+        summary_model = adapt_context_model(model)
+        def assemble(context, recovering, selected_model):
+            return manager.assemble_context_items(
+                model=selected_model, current_items=current, tools=definitions, run_context=context,
+                **({"force_compaction": True, "history_only_recovery": True} if recovering else {}), **options)
+        def revision():
+            return manager._fingerprint({
+                "model": self._model_key(model),
+                "capacity": self.effective_input_limit_tokens,
+                "source": [(item.id, item.content, item.metadata) for item in self.items],
+                "memory": [manager._to_json_value({name: getattr(step, name, None) for name in (
+                    "task", "model_output", "tool_calls", "observations", "action_output",
+                    "execution_fields", "execution_key", "error")})
+                    for step in memory.steps[current_run_start_idx:]],
+                "current": [(item.id, item.content) for item in self._memory_adapter._project_current_run(
+                    memory, current_run_start_idx)], "options": options, "tools": definitions,
+            })
+        final = assemble(run_context, False, summary_model)
+        error = ContextInputCapacityExceeded(
+            "Context input exceeds the combined context window; reduce the new input")
+        if recovery_origin is None:
+            try:
+                self.check_input_capacity(final.messages, final.tools, model)
+                return final
+            except ContextInputCapacityExceeded as rejected:
+                error = rejected
+        stop = getattr(model, "stop_event", None)
+        final = recover_history(
+            manager=manager, run_context=run_context, assemble=assemble, model=summary_model,
+            budget=self._capacity_budget, cancelled=lambda: stop is not None and stop.is_set() is True,
+            revision=revision, limit=self.effective_input_limit_tokens or self.context_window_tokens,
+            error=error, origin=recovery_origin or "local_capacity_recovery", finalize=self._recovery_finalize)
+        self.usage_baseline.invalidate()
+        self.usage_baseline.source = "estimated_after_capacity_recovery"
+        self.check_input_capacity(final.messages, final.tools, model)
+        return final
+
     def prepare_step(
         self,
         *,
@@ -103,12 +164,9 @@ class ManagedContextRuntime:
     ) -> FinalContext:
         self._request_system_messages = tuple(context_messages(request_system_messages))
         self._request_tail_messages = tuple(context_messages(request_tail_messages))
-        final_context = self.context_manager.assemble_context_items(
-            model=adapt_context_model(model),
-            current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-            tools=context_tool_views(tools),
+        final_context = self._capacity_assemble(
+            model=model, memory=memory, current_run_start_idx=current_run_start_idx, tools=tools,
             purpose="step",
-            run_context=self._ensure_run_context(memory),
             request_system_messages=self._request_system_messages,
             request_tail_messages=self._request_tail_messages,
         )
@@ -127,17 +185,15 @@ class ManagedContextRuntime:
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        recovery_origin="provider_overflow_recovery",
     ) -> FinalContext:
         """Force a source-backed rebuild after explicit Provider overflow."""
         self._request_system_messages = tuple(context_messages(request_system_messages))
         self._request_tail_messages = tuple(context_messages(request_tail_messages))
-        final_context = self.context_manager.assemble_context_items(
-            model=adapt_context_model(model),
-            current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-            tools=context_tool_views(tools),
+        final_context = self._capacity_assemble(
+            model=model, memory=memory, current_run_start_idx=current_run_start_idx, tools=tools,
             purpose="step",
-            run_context=self._ensure_run_context(memory),
-            force_compaction=True,
+            recovery_origin=recovery_origin,
             request_system_messages=context_messages(request_system_messages),
             request_tail_messages=context_messages(request_tail_messages),
         )
@@ -156,14 +212,11 @@ class ManagedContextRuntime:
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
-        final_context = self.context_manager.assemble_context_items(
-            model=adapt_context_model(model),
-            current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-            tools=context_tool_views(tools),
+        final_context = self._capacity_assemble(
+            model=model, memory=memory, current_run_start_idx=current_run_start_idx, tools=tools,
             purpose="final_answer",
             task=task,
             final_answer_templates=final_answer_templates,
-            run_context=self._ensure_run_context(memory),
         )
         self.check_input_capacity(final_context.messages, final_context.tools, model)
         self.capture_request(final_context.messages, final_context.tools, model)
@@ -180,17 +233,15 @@ class ManagedContextRuntime:
         task: str,
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
+        recovery_origin="provider_overflow_recovery",
     ) -> FinalContext:
         """Force a final-answer rebuild after explicit Provider overflow."""
-        final_context = self.context_manager.assemble_context_items(
-            model=adapt_context_model(model),
-            current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-            tools=context_tool_views(tools),
+        final_context = self._capacity_assemble(
+            model=model, memory=memory, current_run_start_idx=current_run_start_idx, tools=tools,
             purpose="final_answer",
             task=task,
             final_answer_templates=final_answer_templates,
-            run_context=self._ensure_run_context(memory),
-            force_compaction=True,
+            recovery_origin=recovery_origin,
         )
         self.capture_request(final_context.messages, final_context.tools, model)
         final_context = self._with_usage_evidence(final_context, model)
@@ -198,7 +249,9 @@ class ManagedContextRuntime:
         return final_context
 
     def _with_usage_evidence(self, final, model, phase="prepare"):
-        evidence = replace(final.evidence, maintenance_phase=phase,
+        evidence = replace(final.evidence, maintenance_phase=(
+            final.evidence.maintenance_phase if final.evidence.maintenance_phase in {
+                "local_capacity_recovery", "provider_overflow_recovery"} else phase),
             usage_source=self.usage_baseline.source,
             provider_input_tokens=self.usage_baseline.actual_input_tokens,
             calibrated_input_estimate=self.usage_baseline.estimate(
@@ -230,7 +283,7 @@ class ManagedContextRuntime:
         if limit and estimate >= limit:
             record_capacity_rejection(local_tokens=local, estimated_tokens=estimate, limit=limit,
                                       baseline=self.usage_baseline, model_key=model_key)
-            raise ValueError("Context input exceeds the combined context window; reduce the new input")
+            raise ContextInputCapacityExceeded("Context input exceeds the combined context window; reduce the new input")
         return estimate
 
     def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
@@ -446,6 +499,16 @@ class SmolagentsContextModel:
     @property
     def context_call_parameters(self):
         return inspect.signature(self._model.__call__).parameters
+
+    def capacity_recovery_call(self, messages, *, deadline, **kwargs):
+        """Bind the shared deadline without mutating the main model or protocol."""
+        from nexent.core.agents.context.recovery import RecoveryDeadlineService
+
+        if getattr(self._model, "service", None) is None:
+            return self(messages, **kwargs)
+        model = copy(self._model)
+        model.service = RecoveryDeadlineService(self._model.service, deadline)
+        return SmolagentsContextModel(model)(messages, **kwargs)
 
     def __call__(self, messages, **kwargs):
         converted = [

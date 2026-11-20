@@ -8,6 +8,48 @@ from .execution_history import result_text
 from .models import ContextItem, ContextItemInput
 
 
+def decode_execution_fields(payload):
+    """Decode the exact canonical original, including empty and error channels."""
+    try:
+        root = ElementTree.fromstring("<fields>" + payload["content"] + "</fields>")
+        fields = {}
+        for node in root:
+            if node.tag not in {"STDOUT", "OUTPUT", "RETURN_VALUE", "ERROR"} or len(node) or node.tag in fields:
+                return None
+            fields[node.tag] = node.text or ""
+        return fields if fields and result_text(fields) == payload["content"] else None
+    except (KeyError, TypeError, ValueError, ElementTree.ParseError):
+        return None
+
+
+def register_authorized_sources(items, history, owner):
+    """Restore private checkpoint sources without rendering their original bodies."""
+    sources, refs_by_item = [], {}
+    for item in items:
+        refs = []
+        if item.type == "history_summary":
+            for source in item.content.get("execution_sources", []):
+                fields = decode_execution_fields(json.loads(source["content"]))
+                if fields is None:
+                    raise PermissionError("Invalid historical execution source")
+                sources.append((source["message_id"], source["unit_index"], fields))
+                refs.append(f"message:{source['message_id']}/unit-index:{source['unit_index']}")
+        elif item.type == "conversation_turn":
+            for record, _, fields in persisted_actions(item.content.get("execution_records") or []):
+                message_id = item.content["assistant_message_id"]
+                sources.append((message_id, record["unit_index"], fields))
+                refs.append(f"message:{message_id}/unit-index:{record['unit_index']}")
+        refs_by_item[item.id] = refs
+    history.restore_many(owner, sources)
+    authorized = []
+    for item in items:
+        metadata = {key: value for key, value in item.metadata.items() if key != "execution_source_refs"}
+        if refs_by_item[item.id]:
+            metadata["execution_source_refs"] = refs_by_item[item.id]
+        authorized.append(item if metadata == item.metadata else item.model_copy(update={"metadata": metadata}))
+    return authorized
+
+
 def _payload(record):
     if record.get("record_type") != "execution_result" or record.get("invocation_id"):
         return None
@@ -40,13 +82,8 @@ def _payload(record):
                 or not isinstance(call.get("arguments"), (dict, str, type(None)))
             ):
                 return None
-        root = ElementTree.fromstring("<fields>" + payload["content"] + "</fields>")
-        fields = {}
-        for node in root:
-            if node.tag not in {"STDOUT", "OUTPUT", "RETURN_VALUE", "ERROR"} or len(node) or node.tag in fields:
-                return None
-            fields[node.tag] = node.text or ""
-        if not fields or result_text(fields) != payload["content"]:
+        fields = decode_execution_fields(payload)
+        if fields is None:
             return None
         return payload, fields
     except (KeyError, TypeError, ValueError, AttributeError, ElementTree.ParseError):

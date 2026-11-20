@@ -102,7 +102,7 @@ class LLMSummary:
                 text, model, call_type, prompt_type, max_output_tokens
             )
         except Exception as e:
-            if _is_context_length_error(e):
+            if _is_context_length_error(e) and getattr(model, "allow_summary_input_truncation", True) is not False:
                 logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
                 shrunk = self._renderer.truncate_text_to_tokens(
                     text, int(self.config.max_summary_input_tokens * 0.66)

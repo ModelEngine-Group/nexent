@@ -21,7 +21,10 @@ class ReadExecutionOutputTool(Tool):
         self.on_read = on_read
 
     def forward(self, output_ref: str, offset: int = 0, max_chars: int = 4000) -> str:
-        result = self.history.read(self.owner, output_ref, offset, max_chars)
+        result = self.history.read(
+            self.owner, output_ref, 0 if offset is None else offset,
+            4000 if max_chars is None else max_chars,
+        )
         self.on_read()
         return result
 

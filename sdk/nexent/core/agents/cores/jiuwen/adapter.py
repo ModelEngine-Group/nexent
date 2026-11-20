@@ -174,7 +174,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             raise ValueError("Duplicate tool names in agent configuration")
         from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
 
-        reserved = {EXECUTION_TOOL, NATIVE_EXECUTION_TOOL}
+        reserved = {EXECUTION_TOOL, NATIVE_EXECUTION_TOOL, "read_execution_output"}
         if reserved.intersection(registry):
             raise UnsupportedAgentCoreConfig("Reserved Jiuwen execution tool name")
         self.visible_tool_names = set(registry)
@@ -405,12 +405,26 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
+        from nexent.core.agents.context.action_history import register_authorized_sources
+        from nexent.core.agents.context.execution_history import ExecutionHistory
+        from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
+        self.execution_history = ExecutionHistory()
+        self.context_items = register_authorized_sources(self.context_items, self.execution_history, self.owner_id)
+        if any(item.metadata.get("execution_source_refs") for item in self.context_items):
+            reader = ReadExecutionOutputTool(self.execution_history, self.owner_id, lambda: None)
+            self.business_tools[reader.name] = reader
+            self.visible_tool_names.add(reader.name)
+            native_tools.append(LocalFunction(
+                self._tool_card(name=reader.name, description=reader.description, input_params=_tool_schema(reader.inputs)),
+                self._business_handler(reader.name, reader.forward),
+            ))
         rails = self._skill_rails()
         model = self._create_model()
         from nexent.core.agents.cores.jiuwen.context import JiuwenContextBridge
 
         self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items,
                                                   message_format="openai_chat_completions")
+        self.context_bridge.context_manager.config.execution_history = self.execution_history
         model.prepare_messages = self._prepare_model_messages
         model.prefix = []
         self.native_agent = create_deep_agent(
@@ -455,6 +469,13 @@ class JiuwenAdapter(AgentCoreAdapter):
             "timeout_s": self.run_info.tool_call_timeout_seconds,
         }
         card.properties = properties
+
+    def begin_request(self):
+        """Keep model correction re-entry inside the same context recovery budget."""
+        if self.context_bridge is not None:
+            self.context_bridge.begin_request()
+        if getattr(self, "execution_history", None) is not None:
+            self.execution_history.reset_read_budget(self.owner_id)
 
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):

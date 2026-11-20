@@ -3537,9 +3537,24 @@ def get_historical_context(
 
         summary_result = None
         if summary_record and summary_payload:
+            sources = session.execute(select(
+                ConversationMessageUnit.message_id, ConversationMessageUnit.unit_index,
+                ConversationMessageUnit.unit_content,
+            ).join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id).where(
+                ConversationMessageUnit.conversation_id == conversation_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.message_index <= boundary_index,
+                ConversationMessage.message_role == "assistant", ConversationMessage.status.in_(["completed", "stopped"]),
+                ConversationMessage.delete_flag == "N",
+                ConversationMessageUnit.unit_type == "execution_result",
+                ConversationMessageUnit.invocation_id.is_(None),
+                ConversationMessageUnit.unit_status == "completed", ConversationMessageUnit.delete_flag == "N",
+            ).order_by(ConversationMessage.message_index, ConversationMessageUnit.unit_index)).all()
             summary_result = {
                 "unit_id": summary_record.unit_id,
                 **summary_payload,
+                "execution_sources": [{"message_id": source.message_id, "unit_index": source.unit_index,
+                                       "content": source.unit_content} for source in sources],
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
                 "current_user_message_index": before_message_index}

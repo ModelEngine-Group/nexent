@@ -574,8 +574,15 @@ class HistoryCheckpointCandidate(RunSpecModel):
     compaction_target_tokens: int | None = Field(default=None, ge=0)
 
 
+class PreparedExecutionSource(RunSpecModel):
+    message_id: int = Field(gt=0, strict=True)
+    unit_index: int = Field(ge=0, strict=True)
+    content: str
+
+
 class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
+    execution_sources: list[PreparedExecutionSource] = Field(default_factory=list)
 
 
 class PreparedHistoryExecutionRecord(RunSpecModel):

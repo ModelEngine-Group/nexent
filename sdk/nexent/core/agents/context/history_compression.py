@@ -37,6 +37,7 @@ class HistorySummaryCandidate:
     compaction_attempts: int = 0
     compaction_trigger_threshold_tokens: int = 0
     compaction_target_tokens: int = 0
+    execution_source_refs: tuple[str, ...] = ()
 
     def as_item(self) -> ContextItem:
         return ContextItem.from_input(ContextItemInput(
@@ -53,6 +54,7 @@ class HistorySummaryCandidate:
                 "compaction_trigger_threshold_tokens": self.compaction_trigger_threshold_tokens,
                 "compaction_target_tokens": self.compaction_target_tokens,
             },
+            metadata={"execution_source_refs": list(self.execution_source_refs)} if self.execution_source_refs else {},
         ))
 
 
@@ -64,6 +66,7 @@ class HistorySummaryInput:
     new_turns: tuple[tuple[str, str], ...]
     covered_through_message_id: int
     previous_summary_unit_id: int | None = None
+    execution_source_refs: tuple[str, ...] = ()
 
     @classmethod
     def from_items(
@@ -96,6 +99,10 @@ class HistorySummaryInput:
             previous_summary_markdown=previous_markdown,
             new_turns=canonical_turns,
             covered_through_message_id=covered_through,
+            execution_source_refs=tuple(dict.fromkeys(
+                ref for item in ([summary] if summary else []) + list(turns)
+                for ref in item.metadata.get("execution_source_refs", ())
+            )),
             previous_summary_unit_id=(
                 int(previous_unit_id) if previous_unit_id is not None else None
             ),
@@ -237,6 +244,7 @@ class HistoryCompressor:
                 summary={"markdown": validated},
                 covered_through_message_id=summary_input.covered_through_message_id,
                 previous_summary_unit_id=summary_input.previous_summary_unit_id,
+                execution_source_refs=summary_input.execution_source_refs,
             ),
             records=tuple(generated.records),
         )

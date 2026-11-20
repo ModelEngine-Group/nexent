@@ -3,34 +3,66 @@ change:
   change_id: RUNTIME-STABILITY-20261120
   change_type: bugfix
   bug_id: RUNTIME-STABILITY-20261120
-  title: Restore completed CodeAgent history and trace actual Jiuwen tools
+  title: Recover committed history within capacity and trace actual Jiuwen tools
   description: Isolated PR4336 follow-up for cross-turn representation and tool-observation defects.
-  observed_behavior: CodeAgent history reinjects executor-expanded arguments and loses accepted action representations; Jiuwen actual tool boundaries lack consistent TOOL spans.
-  expected_behavior: Backend-bound completed actions and committed views survive turns with raw facts retained; actual tool calls have safe correlated spans.
+  observed_behavior: CodeAgent history reinjects executor-expanded arguments and loses accepted action representations;
+    Jiuwen actual tool boundaries lack consistent TOOL spans.
+  expected_behavior: Backend-bound completed actions and committed views survive turns with raw facts retained;
+    actual tool calls have safe correlated spans.
   escaped_stage: D3
   coverage_gap:
     type: missing_assertion
-    description: Current-run actions were covered, but cross-turn canonical action restoration was not. Jiuwen SSE proof did not require TOOL spans.
-  feature_contract_changed: false
+    description: Current-run actions were covered, but cross-turn canonical action restoration was not. Jiuwen SSE
+      proof did not require TOOL spans.
+  feature_contract_changed: true
   affected_features:
-    existing: [F-171, CMSR-005, JIUWEN-OUTPUT, CHAT-TRAJECTORY]
-    modified: []
+    existing:
+    - CMSR-005
+    - JIUWEN-OUTPUT
+    - CHAT-TRAJECTORY
+    modified:
+    - F-171
     added: []
     retired: []
   affected_cases:
-    existing: [CMSR-D3-001, CONTEXT-POST-RESPONSE-D3-001, JIUWEN-OUTPUT-D3-001, CHAT-TRAJECTORY-REAL-MODEL-D3-001]
-    modified: [AGENT-HISTORY-D3-001]
+    existing:
+    - CMSR-D3-001
+    - JIUWEN-OUTPUT-D3-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    modified:
+    - AGENT-HISTORY-D3-001
+    - CONTEXT-POST-RESPONSE-D3-001
     added: []
     retired: []
   traditional_ut:
     decision: strengthen
     behaviors:
-    - Restore native completed actions and accepted summary or preview through authorized storage and signed transport; keep uncovered facts, errors, owner-scoped originals and hard capacity checks.
-    - Trace actual Jiuwen calls with stable identities and correct parent context, keeping returned structured errors separate from execution exceptions.
-    reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately required. No duplicate D1.
+    - Restore native completed actions and accepted summary or preview through authorized storage and signed transport;
+      keep uncovered facts, errors, owner-scoped originals and hard capacity checks.
+    - Trace actual Jiuwen calls with stable identities and correct parent context, keeping returned structured errors
+      separate from execution exceptions.
+    - Recover eligible committed history after typed capacity rejection using one shared transaction and bounded
+      summary requests/deadline; atomically register private checkpoint sources and expose bounded native recall
+      without rendering originals.
+    reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
+      required. No duplicate D1.
     test_selectors:
     - test/sdk/core/agents/test_persisted_codeagent_actions.py
     - test/backend/services/test_agent_execution_history_stream.py
     - test/backend/database/test_conversation_history_stopped.py
     - test/sdk/core/agents/test_jiuwen_tool_spans.py
-  notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md FIX01 and RSR-003; RSR-001 delegated to stacked PR4378; RSR-002 withdrawn after complete Phoenix events proved usage was retained. Approved isolated follow-up from2c18. No original worktree/VM change, C/O change, guessed execution, business normalization, added retries or full4355. AGENT-HISTORY-D3-001 manual AC-06 is strengthened for real-model cross-turn restoration and must be executed in the unified container window; CMSR and POST-RESPONSE are adjacent regression obligations. No new D1. Formal mappings are subset obligations, not full execution claims.'
+    - test/sdk/core/agents/test_history_capacity_recovery.py
+    - test/sdk/core/agents/test_checkpoint_execution_sources.py
+    - test/sdk/core/agents/test_jiuwen_history_capacity_recovery.py
+    - test/sdk/core/agents/test_jiuwen_checkpoint_reader.py
+  notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md
+    FIX01 and RSR-003; RSR-001 delegated to stacked PR4378; RSR-002 withdrawn after complete Phoenix events proved
+    usage was retained. Approved isolated follow-up from2c18. No original worktree/VM change, C/O change, guessed
+    execution, business normalization, added retries or full4355. AGENT-HISTORY-D3-001 manual AC-06 is strengthened
+    for real-model cross-turn restoration and must be executed in the unified container window; CMSR and POST-RESPONSE
+    are adjacent regression obligations. No new D1. Formal mappings are subset obligations, not full execution claims.
+    Approved Option B changes F-171-RULE-03 with an explicit rejection-only exception. Existing post-response HTTP
+    Case remains normal-path regression with fitting-frame qualification and self-contained owned provider cleanup;
+    manual AGENT-HISTORY AC-07 owns actual two-runtime/model recovery and recall proof. Current implementation UT
+    is not D3 real-model acceptance; new container/Phoenix evidence remains pending. No extra D1 or new generic
+    historical user-message browser.'
