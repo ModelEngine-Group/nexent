@@ -6,7 +6,10 @@
 
 .propertyRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(
+      0,
+      0.8fr
+    ) auto;
   align-items: start;
   gap: 8px;
 }
@@ -103,7 +106,10 @@
 
 .propertyHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(
+      0,
+      0.8fr
+    ) auto;
   gap: 8px;
   color: #191919;
   font-size: 13px;
@@ -129,4 +135,29 @@
 
 .primaryProperties {
   margin-top: 12px;
+}
+
+.fieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.helpIcon {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
+}
+
+.kindControl {
+  width: 100%;
+}
+
+.kindControl :global(.ant-segmented-group) {
+  display: flex;
+}
+
+.kindControl :global(.ant-segmented-item) {
+  flex: 1;
+  text-align: center;
 }

@@ -15,11 +15,13 @@ import {
   InputNumber,
   Segmented,
   Select,
+  Tooltip,
 } from "antd";
 import {
   DeleteOutlined,
   DownOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   UpOutlined,
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
@@ -74,7 +76,6 @@ const RELATION_LIMIT = { parent: 9, synonym: 9, child: 100 } as const;
 
 /** AIDP api_name rule: letter first, then letters/digits/underscores, no trailing underscore. */
 const API_NAME_PATTERN = /^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$/;
-const API_NAME_HINT_KEY = "aidpKnowledge.ontologyEntityApiNameHint";
 
 const DATA_TYPE_OPTIONS: PropertyDataType[] = [
   "str",
@@ -83,6 +84,18 @@ const DATA_TYPE_OPTIONS: PropertyDataType[] = [
   "datetime",
   "list[str]",
 ];
+
+const FieldLabel: React.FC<{ label: string; help: string }> = ({
+  label,
+  help,
+}) => (
+  <span className={styles.fieldLabel}>
+    {label}
+    <Tooltip title={help}>
+      <QuestionCircleOutlined className={styles.helpIcon} aria-label={help} />
+    </Tooltip>
+  </span>
+);
 
 const relationName = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -186,6 +199,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
   const [relationKeyword, setRelationKeyword] = useState("");
   const [typeSearch, setTypeSearch] = useState("");
   const [typeKeyword, setTypeKeyword] = useState("");
+  const [apiNameTouched, setApiNameTouched] = useState(!!entity);
   const editing = !!entity;
 
   const kind = (Form.useWatch("kind", form) as "entity" | "type") ?? "entity";
@@ -336,21 +350,24 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     [entity?.properties]
   );
 
-  const suggestApiName = () => {
+  useEffect(() => {
+    if (open) setApiNameTouched(editing);
+  }, [editing, open]);
+
+  // Fill the API name from the display name while the user has not edited it.
+  // Chinese names cannot be transliterated here, so they stay manual.
+  useEffect(() => {
+    if (editing || apiNameTouched) return;
     const raw = (displayName ?? "").trim();
-    if (!raw) return;
-    if (/[^\x00-\x7F]/.test(raw)) {
-      message.warning(t("aidpKnowledge.ontologyEntityApiNameNeedsAscii"));
-      return;
-    }
+    if (!raw || /[^\x00-\x7F]/.test(raw)) return;
     let slug = raw
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "");
     if (!/^[a-z]/.test(slug)) slug = `entity_${slug}`;
     slug = slug.slice(0, ENTITY_API_NAME_MAX_CHARS).replace(/_+$/g, "");
-    form.setFieldsValue({ api_name: slug });
-  };
+    if (slug) form.setFieldsValue({ api_name: slug });
+  }, [apiNameTouched, displayName, editing, form]);
 
   const handleSubmit = async () => {
     let values: EntityFormValues;
@@ -506,10 +523,16 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       >
         <Form.Item
           name="kind"
-          label={t("aidpKnowledge.ontologyEntityObjectKind")}
-          extra={t("aidpKnowledge.ontologyEntityKindHint")}
+          label={
+            <FieldLabel
+              label={t("aidpKnowledge.ontologyEntityObjectKind")}
+              help={t("aidpKnowledge.ontologyEntityKindHint")}
+            />
+          }
         >
           <Segmented
+            block
+            className={styles.kindControl}
             disabled={editing}
             options={[
               {
@@ -526,7 +549,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
 
         <Form.Item
           name="display_name"
-          label={t("aidpKnowledge.ontologyEntityNameLabel")}
+          label={
+            <FieldLabel
+              label={t("aidpKnowledge.ontologyEntityNameLabel")}
+              help={t("aidpKnowledge.ontologyEntityNameHelp")}
+            />
+          }
           rules={[
             { required: true, whitespace: true },
             {
@@ -551,8 +579,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
 
         <Form.Item
           name="api_name"
-          label={t("aidpKnowledge.ontologyEntityApiName")}
-          extra={t(API_NAME_HINT_KEY)}
+          label={
+            <FieldLabel
+              label={t("aidpKnowledge.ontologyEntityApiName")}
+              help={t("aidpKnowledge.ontologyEntityApiNameHint")}
+            />
+          }
           rules={[
             { required: true, whitespace: true },
             {
@@ -578,19 +610,18 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             maxLength={ENTITY_API_NAME_MAX_CHARS}
             disabled={editing}
             placeholder={t("aidpKnowledge.ontologyEntityApiNamePlaceholder")}
-            addonAfter={
-              editing ? undefined : (
-                <Button type="link" size="small" onClick={suggestApiName}>
-                  {t("aidpKnowledge.ontologyEntityApiNameGenerate")}
-                </Button>
-              )
-            }
+            onChange={() => setApiNameTouched(true)}
           />
         </Form.Item>
 
         <Form.Item
           name="description"
-          label={t("aidpKnowledge.ontologyEntityDescription")}
+          label={
+            <FieldLabel
+              label={t("aidpKnowledge.ontologyEntityDescription")}
+              help={t("aidpKnowledge.ontologyEntityDescriptionHelp")}
+            />
+          }
           rules={[
             {
               validator: async (_rule, value: string) => {
@@ -620,8 +651,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         {!editing && kind === "entity" && (
           <Form.Item
             name="type_id"
-            label={t("aidpKnowledge.ontologyEntityAssignedType")}
-            extra={t("aidpKnowledge.ontologyEntityAssignedTypeHint")}
+            label={
+              <FieldLabel
+                label={t("aidpKnowledge.ontologyEntityAssignedType")}
+                help={t("aidpKnowledge.ontologyEntityAssignedTypeHint")}
+              />
+            }
           >
             <Select
               allowClear
@@ -644,7 +679,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             </div>
             <Form.Item
               name="demo_parents"
-              label={t("aidpKnowledge.ontologyEntityParent")}
+              label={
+                <FieldLabel
+                  label={t("aidpKnowledge.ontologyEntityParent")}
+                  help={t("aidpKnowledge.ontologyEntityParentHelp")}
+                />
+              }
               rules={[relationConflictRule("demo_children")]}
             >
               <Select
@@ -661,7 +701,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             </Form.Item>
             <Form.Item
               name="demo_synonyms"
-              label={t("aidpKnowledge.ontologyEntitySynonym")}
+              label={
+                <FieldLabel
+                  label={t("aidpKnowledge.ontologyEntitySynonym")}
+                  help={t("aidpKnowledge.ontologyEntitySynonymHelp")}
+                />
+              }
             >
               <Select
                 mode="multiple"
@@ -677,7 +722,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             </Form.Item>
             <Form.Item
               name="demo_children"
-              label={t("aidpKnowledge.ontologyEntityChild")}
+              label={
+                <FieldLabel
+                  label={t("aidpKnowledge.ontologyEntityChild")}
+                  help={t("aidpKnowledge.ontologyEntityChildHelp")}
+                />
+              }
               rules={[relationConflictRule("demo_parents")]}
             >
               <Select
@@ -702,7 +752,10 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             aria-expanded={propertiesOpen}
             onClick={() => setPropertiesOpen((previous) => !previous)}
           >
-            <span>{t("aidpKnowledge.ontologyEntityPropertiesOptional")}</span>
+            <FieldLabel
+              label={t("aidpKnowledge.ontologyEntityPropertiesOptional")}
+              help={t("aidpKnowledge.ontologyEntityPropertiesHelp")}
+            />
             {propertiesOpen ? <UpOutlined /> : <DownOutlined />}
           </button>
           <Form.List name="properties">
@@ -829,21 +882,27 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               </div>
             )}
           </Form.List>
-          <Form.Item
-            name="primary_properties"
-            label={t("aidpKnowledge.ontologyEntityPrimaryProperties")}
-            extra={t("aidpKnowledge.ontologyEntityPrimaryPropertiesHint")}
-            className={styles.primaryProperties}
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              options={primaryOptions}
-              placeholder={t(
-                "aidpKnowledge.ontologyEntityPrimaryPropertiesPlaceholder"
-              )}
-            />
-          </Form.Item>
+          {propertiesOpen && (
+            <Form.Item
+              name="primary_properties"
+              label={
+                <FieldLabel
+                  label={t("aidpKnowledge.ontologyEntityPrimaryProperties")}
+                  help={t("aidpKnowledge.ontologyEntityPrimaryPropertiesHint")}
+                />
+              }
+              className={styles.primaryProperties}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                options={primaryOptions}
+                placeholder={t(
+                  "aidpKnowledge.ontologyEntityPrimaryPropertiesPlaceholder"
+                )}
+              />
+            </Form.Item>
+          )}
         </section>
         {errorMessage && (
           <div className={drawerStyles.error} role="alert">
