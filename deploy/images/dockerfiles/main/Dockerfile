@@ -157,7 +157,8 @@ ENV NLTK_DATA=/opt/models/nltk_data \
 ENV NEXENT_SQL_STARTUP_MODE=migrate
 COPY infrastructure /opt/infrastructure
 COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations /opt/deploy/sql/migrations
+COPY deploy/sql/init.sql /opt/nexent/sql/init.sql
+COPY deploy/sql/migrations /opt/nexent/sql/migrations
 COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 

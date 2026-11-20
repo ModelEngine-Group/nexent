@@ -36,7 +36,8 @@ def test_role_dependency_extras_exclude_flower_and_runtime_ocr():
         (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     )["project"]["optional-dependencies"]
     assert "nexent[data_process,performance]" in extras["management-cleanse"]
-    assert any(value.startswith("celery") for value in extras["management-cleanse"])
+    assert any(value.startswith("kombu") for value in extras["management-cleanse"])
+    assert not any(value.startswith("celery") for value in extras["management-cleanse"])
     assert not any(value.startswith("flower") for value in extras["management-cleanse"])
     assert "unstructured==0.18.14" in extras["runtime-knowledge"]
     assert any(value.startswith("torch") for value in extras["runtime-images"])
@@ -48,14 +49,18 @@ def test_role_dependency_extras_exclude_flower_and_runtime_ocr():
     )
 
 
-def test_management_packages_all_immutable_migrations():
+def test_management_packages_bootstrap_at_the_migration_runner_paths():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(
         encoding="utf-8"
     )
     management = dockerfile.split("FROM backend-common AS management\n", 1)[1].split(
         "\nFROM ", 1
     )[0]
-    assert "COPY deploy/sql/migrations /opt/deploy/sql/migrations" in management
+    runner = (ROOT / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
+    assert 'NEXENT_SQL_INIT_FILE:-/opt/nexent/sql/init.sql' in runner
+    assert 'NEXENT_SQL_MIGRATION_DIR:-/opt/nexent/sql/migrations' in runner
+    assert "COPY deploy/sql/init.sql /opt/nexent/sql/init.sql" in management
+    assert "COPY deploy/sql/migrations /opt/nexent/sql/migrations" in management
 
 
 @pytest.mark.parametrize(
