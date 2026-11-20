@@ -60,6 +60,7 @@ change:
     - test/sdk/core/agents/test_history_fact_correction.py
     - test/backend/app/test_history_source_contracts.py
     - test/backend/services/test_agentos_conversation_projection.py
+    - test/sdk/core/agents/test_history_summary_contract.py
   notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md
     FIX01 and RSR-003; RSR-001 delegated to stacked PR4378; RSR-002 withdrawn after complete Phoenix events proved
     usage was retained. Approved isolated follow-up from2c18. No original worktree/VM change, C/O change, guessed
@@ -81,4 +82,8 @@ change:
     v12 turn05 failed before proof validation because XML decoding rejected ANSI in a real canonical execution_result.
     Decode the existing escaped channel format losslessly, retain exact canonical roundtrip and batch authorization,
     preserve raw controls and CR in recall, and reject malformed markup without skipping sources. Source-order proof
-    revalidation is retained and separately regressed; actual sealed data passes both orders after decoding.'
+    revalidation is retained and separately regressed; actual sealed data passes both orders after decoding.
+    v13 actual response has exactly seven complete ordered H2 sections and all protected facts but misses the fixed
+    H1: prepend only that constant for this exact shape, preserve response body, then apply all existing validation.
+    Other invalid text may reuse the same one format-or-fact correction claim within existing calls/deadline/input
+    capacity; never directly accept malformed structure or facts. No regular prompt or model policy change.'

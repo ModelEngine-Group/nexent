@@ -121,9 +121,9 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
         assert not thread.is_alive()
 
 
-@pytest.mark.parametrize("outcome", ["accepted", "invalid_summary", "main_failure"])
+@pytest.mark.parametrize("outcome", ["accepted", "invalid_summary", "main_failure", "missing_title", "contract_corrected"])
 def test_rejected_capacity_recovers_transactionally_over_http(outcome):
-    requests, committed = [], []
+    requests, committed, summary_outputs = [], [], []
     summary = "# Compact Result of History\n\n" + "\n\n".join(
         "## " + heading + "\n\n" + "The old fact remains available."
         for heading in ["Task Overview", "Completed Work", "Key Decisions", "Unresolved Issues",
@@ -138,6 +138,12 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
             requests.append(request)
             is_summary = "NEW_CURRENT_TASK" not in str(request["messages"])
             text = (summary if outcome != "invalid_summary" else "unstructured rejected summary") if is_summary else "MAIN_OK"
+            if is_summary:
+                if outcome == "missing_title":
+                    text = summary.split("\n\n", 1)[1]
+                elif outcome == "contract_corrected" and not summary_outputs:
+                    text = "Invalid summary format."
+                summary_outputs.append(text)
             if not is_summary and outcome == "main_failure":
                 body = json.dumps({"error": {"message": "controlled authentication failure", "type": "authentication_error"}}).encode()
                 self.send_response(401)
@@ -195,6 +201,13 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
                 assert model.generate(prepared.messages).content == "MAIN_OK"
             assert runtime.context_manager._history_candidate is committed[0]
             assert runtime.usage_baseline.actual_input_tokens is None
+            if outcome == "missing_title":
+                assert committed[0].summary["markdown"] == "# Compact Result of History\n\n" + summary_outputs[0]
+                assert runtime._capacity_budget.summary_calls == 1 and len(requests) == 2
+            elif outcome == "contract_corrected":
+                assert runtime._capacity_budget.fact_correction_used
+                assert runtime._capacity_budget.summary_calls == 2 and len(requests) == 3
+                assert summary_outputs[0] == "Invalid summary format."
             assert "NEW_CURRENT_TASK" in str(requests[-1]["messages"])
             assert "MANDATORY_SYSTEM" in str(requests[-1]["messages"])
         assert 1 <= runtime._capacity_budget.summary_calls <= 3

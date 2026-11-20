@@ -34,10 +34,10 @@ case:
     expected: Retired fields do not change thresholds or request behavior; provider and threads are reclaimed.
   - order: 4
     action: Reject an oversized historical full frame against an owned HTTP/SSE provider, then exercise accepted
-      summary, invalid summary and main-request authentication failure.
+      summary, missing fixed title, invalid-format correction, persistently invalid summary and main-request authentication failure.
     expected: Only a valid history-only candidate with actual reduction and full-frame fit commits. Invalid candidates
       leave no checkpoint and prepare reentry makes no extra request. A later main failure retains the accepted
-      old checkpoint; all actual bodies omit output limits and resources close.
+      old checkpoint. Only the fixed missing H1 is normalized without a model call; other invalid text may use the same single format-or-fact correction claim and strict validation. All actual bodies omit output limits and resources close.
   - order: 5
     action: Recover source-backed structured bulk over actual HTTP/SSE, then serialize/restore an internal checkpoint
       for a new owner and continue. Repeat real user_message, native tool_result and canonical execution_result
