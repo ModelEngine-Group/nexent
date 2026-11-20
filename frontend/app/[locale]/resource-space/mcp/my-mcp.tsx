@@ -32,6 +32,7 @@ import {
 import { tagManagementApi } from "@/services/tagManagementService";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { matchesNameOrTag, resolveDeploymentType } from "@/lib/mcpTools";
+import { isMineMcpCurrentlyListed } from "@/lib/mcpToolsMine";
 import type {
   CommunityMcpCard,
   McpContainerConfigPayload,
@@ -383,12 +384,10 @@ export function MyMcp({
           content,
         });
       }
-      const isInitialPublish =
-        item.kind === "local" && !onlineService?.marketId;
       message.success(
-        isInitialPublish
-          ? t("mcpTools.mine.publishApplySuccess")
-          : t("mcpTools.mine.submitVersionUpdateSuccess")
+        isMineMcpCurrentlyListed(item, onlineService)
+          ? t("mcpTools.mine.submitVersionUpdateSuccess")
+          : t("mcpTools.mine.publishApplySuccess")
       );
     } catch {
       message.error(t("mcpTools.mine.publishApplyFailed"));
@@ -761,11 +760,12 @@ export function MyMcp({
               onExit: () => setBatchMode(false),
               canApply: (item) => {
                 const local = item.kind === "local" ? item.service : undefined;
-                const review = onlineFor(item)?.reviewStatus ?? item.service.reviewStatus;
+                const onlineService = onlineFor(item);
+                const review = onlineService?.reviewStatus ?? item.service.reviewStatus;
                 const type = resolveDeploymentType(item.service);
                 return (type === McpDeploymentType.REMOTE_LINK || type === McpDeploymentType.CONTAINER) &&
-                  !local?.isListedInRepository && local?.latest_review?.status !== "pending_review" &&
-                  local?.latest_review?.status !== "approved" && review !== "approved" && review !== "pending" &&
+                  !isMineMcpCurrentlyListed(item, onlineService) &&
+                  local?.latest_review?.status !== "pending_review" && review !== "pending" &&
                   (item.kind === "local" || Boolean(item.service.marketId));
               },
               apply: (items) => setListingQueue(items.map((item) => ({ item, onlineService: onlineFor(item) }))),
@@ -844,6 +844,10 @@ export function MyMcp({
         key={applyListingItem ? getMineItemKey(applyListingItem.item) : "closed"}
         open={Boolean(applyListingItem)}
         item={applyListingItem?.item ?? null}
+        isVersionUpdate={Boolean(
+          applyListingItem &&
+            isMineMcpCurrentlyListed(applyListingItem.item, applyListingItem.onlineService)
+        )}
         loading={
           applyListingItem
             ? publishingKey === getMineItemKey(applyListingItem.item)

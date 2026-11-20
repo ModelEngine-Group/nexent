@@ -415,8 +415,9 @@ export function MineSkillsView({
             <ResourceCardGrid
               isCreateItem={isNewSkillPaddingItem}
               onListSelect={(skill) => {
-                if (!batchMode && !isNewSkillPaddingItem(skill))
-                  onViewSkill(skill);
+                if (batchMode || isNewSkillPaddingItem(skill)) return;
+                if (canEditSkill(skill)) onEditSkill(skill);
+                else onViewSkill(skill);
               }}
               batchDelete={async (skill) => {
                 if (!isNewSkillPaddingItem(skill)) await onDeleteSkill(skill);
@@ -502,6 +503,9 @@ export function MineSkillsView({
         key={applyModalSkill?.skill_id ?? "closed"}
         open={Boolean(applyModalSkill)}
         skill={applyModalSkill}
+        isVersionUpdate={Boolean(
+          applyModalSkill && sharedListing(applyModalSkill)
+        )}
         loading={applySubmitting}
         onClose={() => setApplyQueue([])}
         onSubmitted={() => setApplyQueue((queue) => queue.slice(1))}
@@ -523,7 +527,9 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
 
 function getMineSkillMenuItems({
   canApplyListing,
+  isVersionUpdate,
   canEdit,
+  canDelete,
   canPublish,
   hasRepositoryInfo,
   t,
@@ -533,7 +539,9 @@ function getMineSkillMenuItems({
   onDelete,
 }: {
   canApplyListing: boolean;
+  isVersionUpdate: boolean;
   canEdit: boolean;
+  canDelete: boolean;
   canPublish: boolean;
   hasRepositoryInfo: boolean;
   t: (key: string) => string;
@@ -554,7 +562,11 @@ function getMineSkillMenuItems({
   if (canApplyListing) {
     items.push({
       key: "apply-listing",
-      label: t("skillRepository.mine.button.apply"),
+      label: t(
+        isVersionUpdate
+          ? "repository.mine.submitVersionUpdate"
+          : "repository.mine.applyForListing"
+      ),
       icon: <Upload className="size-3.5" aria-hidden />,
       onClick: onApplyListing,
     });
@@ -567,7 +579,7 @@ function getMineSkillMenuItems({
       onClick: onViewReview,
     });
   }
-  if (canEdit) {
+  if (canDelete) {
     items.push({
       key: "delete",
       label: t("common.delete"),
@@ -577,6 +589,14 @@ function getMineSkillMenuItems({
     });
   }
   return items;
+}
+
+function hasSkillWritePermission(skill: MyEditableSkillItem): boolean {
+  return skill.permission !== "READ_ONLY" && skill.permission !== "PRIVATE";
+}
+
+function canEditSkill(skill: MyEditableSkillItem): boolean {
+  return skill.source !== "official" && hasSkillWritePermission(skill);
 }
 
 function sharedListing(skill: MyEditableSkillItem) {
@@ -614,8 +634,7 @@ export function MineSkillCard({
   const latestRepository = sharedListing(skill);
   const hasRepositoryInfo = latestRepository != null;
   const repositoryStatus = latestRepository?.status ?? "not_shared";
-  const canEdit =
-    skill.permission !== "READ_ONLY" && skill.permission !== "PRIVATE";
+  const canEdit = canEditSkill(skill);
   const canPublish = skill.can_publish === true;
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
@@ -623,7 +642,9 @@ export function MineSkillCard({
     canPublish && skill.latest_review?.status !== "pending_review";
   const menuItems = getMineSkillMenuItems({
     canApplyListing,
+    isVersionUpdate: hasRepositoryInfo,
     canEdit,
+    canDelete: hasSkillWritePermission(skill),
     canPublish,
     hasRepositoryInfo: false,
     t,
@@ -632,6 +653,7 @@ export function MineSkillCard({
     onEdit,
     onDelete,
   });
+  const hasMenuItems = Boolean(menuItems?.length);
 
   return (
     <ResourceCard
@@ -662,7 +684,7 @@ export function MineSkillCard({
       }
       subtitle={presentation ? <span title={author}>{author}</span> : undefined}
       className={presentation ? "h-full" : "h-full min-h-[200px] p-4"}
-      onClick={managing ? undefined : onView}
+      onClick={managing ? undefined : canEdit ? onEdit : onView}
       icon={
         presentation ? (
           <SkillTypeIcon className="rounded" name={skill.name || ""} tags={skill.tags} />
@@ -714,7 +736,7 @@ export function MineSkillCard({
       headerActions={
         managing ? (
           selection
-        ) : canEdit || canApplyListing || hasRepositoryInfo ? (
+        ) : hasMenuItems || hasRepositoryInfo ? (
           <div
             className={
               presentation
@@ -723,7 +745,7 @@ export function MineSkillCard({
             }
           >
             <div className="flex items-center justify-end">
-              {canEdit || canApplyListing ? (
+              {hasMenuItems ? (
                 <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
                   <Button
                     type="text"

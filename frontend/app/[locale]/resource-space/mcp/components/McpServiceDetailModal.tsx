@@ -258,9 +258,6 @@ export default function McpServiceDetailModal({
           onClose={onClose}
           footer={
             <div className="flex justify-end gap-4">
-              <Button className="min-w-[88px]" onClick={onClose}>
-                {t("common.close")}
-              </Button>
               {showGroupStep && (
                 <Button className="min-w-[88px]" onClick={() => setStep(0)}>
                   {t("common.back")}

@@ -12,6 +12,7 @@ import type { MineMcpCardItem } from "./MineMcpServiceCard";
 interface MineApplyListingModalProps {
   open: boolean;
   item: MineMcpCardItem | null;
+  isVersionUpdate?: boolean;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (
@@ -23,6 +24,7 @@ interface MineApplyListingModalProps {
 export default function MineApplyListingModal({
   open,
   item,
+  isVersionUpdate = false,
   loading = false,
   onClose,
   onConfirm,
@@ -80,6 +82,11 @@ export default function MineApplyListingModal({
   }
 
   const title = item.service.name?.trim() || "-";
+  const actionLabel = t(
+    isVersionUpdate
+      ? "repository.mine.submitVersionUpdate"
+      : "repository.mine.applyForListing"
+  );
   const isBusy = loading || submitting;
 
   const handleOk = async () => {
@@ -98,10 +105,10 @@ export default function MineApplyListingModal({
   return (
     <Modal
       open={open}
-      title={t("repository.mine.applyForListing")}
+      title={actionLabel}
       onCancel={() => { if (!isBusy) onClose(); }}
       onOk={handleOk}
-      okText={t("repository.mine.applyForListing")}
+      okText={actionLabel}
       cancelText={t("common.cancel")}
       confirmLoading={isBusy}
       centered
@@ -109,7 +116,12 @@ export default function MineApplyListingModal({
     >
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          {t("repository.mine.confirmApplyTitle", { name: title })}
+          {t(
+            isVersionUpdate
+              ? "repository.mine.confirmVersionUpdateTitle"
+              : "repository.mine.confirmApplyTitle",
+            { name: title }
+          )}
         </p>
         <div className="space-y-2">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">

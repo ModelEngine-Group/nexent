@@ -5,6 +5,7 @@ import type { ComponentProps } from "react";
 import { expect, test, vi } from "vitest";
 import MineMcpServiceCard from "@/app/resource-space/mcp/components/MineMcpServiceCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
+import type { McpServiceItem } from "@/types/mcpTools";
 import {
   McpHealthStatus,
   McpServiceStatus,
@@ -22,7 +23,8 @@ vi.mock("@/app/resource-space/components/ResourceReviewCenter", () => ({
 
 function setup(
   layout: "cards" | "list",
-  overrides: Partial<ComponentProps<typeof MineMcpServiceCard>> = {}
+  overrides: Partial<ComponentProps<typeof MineMcpServiceCard>> = {},
+  serviceOverrides: Partial<McpServiceItem> = {}
 ) {
   const props: ComponentProps<typeof MineMcpServiceCard> = {
     item: {
@@ -41,6 +43,7 @@ function setup(
         tools: [],
         healthStatus: McpHealthStatus.UNCHECKED,
         permission: "EDIT",
+        ...serviceOverrides,
       },
     },
     onEditLocal: vi.fn(),
@@ -61,6 +64,20 @@ function setup(
   );
   return props;
 }
+
+test("offers listing instead of a version update for an offline MCP with an approved review", async () => {
+  const props = setup("cards", {}, {
+    isListedInRepository: false,
+    latest_review: { review_id: "previous-review", status: "approved" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "mcpTools.mine.moreActions" })
+  );
+  fireEvent.click(await screen.findByRole("menuitem", {
+    name: "repository.mine.applyForListing",
+  }));
+  expect(props.onSubmitVersionUpdate).toHaveBeenCalledWith(props.item, undefined);
+});
 
 test.each(["cards", "list"] as const)(
   "%s exposes health checking outside the more menu",

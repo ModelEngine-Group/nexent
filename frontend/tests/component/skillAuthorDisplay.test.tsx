@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { App } from "antd";
 import { expect, test, vi } from "vitest";
 import { MineSkillCard } from "@/app/resource-space/skill/components/MineSkillsView";
@@ -122,9 +122,54 @@ test.each([
   }
 );
 
+test.each([
+  ["custom", "EDIT", "edit"],
+  ["custom", "READ_ONLY", "view"],
+  ["custom", "PRIVATE", "view"],
+  ["official", "EDIT", "view"],
+] as const)("opens the expected panel for a %s skill with %s permission", async (source, permission, target) => {
+  const onEdit = vi.fn();
+  const onView = vi.fn();
+  render(
+    <App>
+      <RepositoryPresentationContext.Provider
+        value={{ layout: "cards", resourceType: "skill" }}
+      >
+        <MineSkillCard
+          skill={{
+            skill_id: 12,
+            name: "Personal skill",
+            source,
+            permission,
+            repository_info: [],
+          }}
+          onEdit={onEdit}
+          onView={onView}
+          onDelete={vi.fn()}
+          onApplyListing={vi.fn()}
+          onViewReview={vi.fn()}
+        />
+      </RepositoryPresentationContext.Provider>
+    </App>
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Personal skill" }));
+  expect(onEdit).toHaveBeenCalledTimes(target === "edit" ? 1 : 0);
+  expect(onView).toHaveBeenCalledTimes(target === "view" ? 1 : 0);
+  if (source === "official") {
+    fireEvent.click(screen.getByRole("button", {
+      name: "skillRepository.common.moreActions",
+    }));
+    expect(await screen.findByRole("menuitem", { name: "common.delete" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "common.edit" }))
+      .not.toBeInTheDocument();
+  }
+});
+
 test.each([undefined, new URLSearchParams("view=mine")])(
-  "keeps the listed skill badge beside its name",
-  (query) => {
+  "shows the listed skill badge and offers a version update",
+  async (query) => {
+    const submit = vi.fn();
     render(
       <App>
         <RepositoryPresentationContext.Provider
@@ -135,6 +180,7 @@ test.each([undefined, new URLSearchParams("view=mine")])(
               skill_id: 5,
               name: "Listed skill",
               permission: "EDIT",
+              can_publish: true,
               downloads: 2,
               repository_info: [{ skill_repository_id: 7, status: "shared" }],
               latest_review: { review_id: "review-7", status: "approved" },
@@ -142,7 +188,7 @@ test.each([undefined, new URLSearchParams("view=mine")])(
             onEdit={vi.fn()}
             onView={vi.fn()}
             onDelete={vi.fn()}
-            onApplyListing={vi.fn()}
+            onApplyListing={submit}
             onViewReview={vi.fn()}
           />
         </RepositoryPresentationContext.Provider>
@@ -155,5 +201,12 @@ test.each([undefined, new URLSearchParams("view=mine")])(
     expect(
       screen.getByText("resourceCenter.skillInstalls").parentElement
     ).not.toContainElement(badge);
+    fireEvent.click(screen.getByRole("button", {
+      name: "skillRepository.common.moreActions",
+    }));
+    fireEvent.click(await screen.findByRole("menuitem", {
+      name: "repository.mine.submitVersionUpdate",
+    }));
+    expect(submit).toHaveBeenCalledOnce();
   }
 );

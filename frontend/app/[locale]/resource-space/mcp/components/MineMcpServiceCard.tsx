@@ -14,7 +14,10 @@ import {
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
-import { getMineCardReviewBadge } from "@/lib/mcpToolsMine";
+import {
+  getMineCardReviewBadge,
+  isMineMcpCurrentlyListed,
+} from "@/lib/mcpToolsMine";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import ResourceCard from "@/components/resource/ResourceCard";
 import RepositoryMcpIcon from "./shared/RepositoryMcpIcon";
@@ -89,18 +92,13 @@ export default function MineMcpServiceCard({
     : t(isEnabled ? "mcpTools.mine.enabled" : "mcpTools.status.disabled");
   const reviewStatus = onlineService?.reviewStatus || service.reviewStatus;
   const isPending = reviewStatus === "pending";
-  const isAlreadyListed = isLocal
-    ? Boolean(localService?.isListedInRepository) ||
-      localService?.latest_review?.status === "approved" ||
-      reviewStatus === "approved"
-    : reviewStatus === "approved";
+  const isAlreadyListed = isMineMcpCurrentlyListed(item, onlineService);
   const hasVersionUpdateTarget =
     item.kind === "community"
       ? Boolean(item.service.marketId)
       : Boolean(onlineService?.marketId);
-  const hasOnlineRecord = isLocal
-    ? Boolean(onlineService) && onlineService?.reviewStatus === "approved"
-    : reviewStatus === "approved";
+  const hasOnlineRecord =
+    isAlreadyListed && (!isLocal || onlineService?.reviewStatus === "approved");
   const reviewBadge =
     reviewStatus === "approved"
       ? getMineCardReviewBadge(item, onlineService)
@@ -177,7 +175,7 @@ export default function MineMcpServiceCard({
       items.push({
         key: isAlreadyListed ? "submit-version-update" : "apply-for-listing",
         label: isAlreadyListed
-          ? t("mcpTools.mine.submitVersionUpdate")
+          ? t("repository.mine.submitVersionUpdate")
           : t("repository.mine.applyForListing"),
         disabled: publishing,
         onClick: () => onSubmitVersionUpdate(item, onlineService),

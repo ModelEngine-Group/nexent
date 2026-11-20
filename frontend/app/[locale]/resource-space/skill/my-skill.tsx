@@ -242,6 +242,17 @@ export function MySkill({ active }: { active: boolean }) {
   const handleSkillBuildSuccess = async () => {
     await refreshSkillCaches().catch(() => {});
   };
+
+  const handleSkillEditSuccess = async () => {
+    if (
+      editingSkill?.can_publish === true &&
+      editingSkill.latest_review?.status !== "pending_review" &&
+      editingSkill.repository_info?.some((listing) => listing.status === "shared")
+    ) {
+      message.info(t("skillRepository.mine.savedVersionUpdateHint"), 6);
+    }
+    await handleSkillBuildSuccess();
+  };
   return (
     <>
       {active ? (
@@ -358,7 +369,7 @@ export function MySkill({ active }: { active: boolean }) {
             setSkillBuildOpen(false);
             setEditingSkill(null);
           }}
-          onSuccess={handleSkillBuildSuccess}
+          onSuccess={handleSkillEditSuccess}
         />
       ) : null}
       {skillDetailLoaded ? (

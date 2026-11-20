@@ -15,6 +15,7 @@ import type {
 interface MineApplyListingModalProps {
   open: boolean;
   skill: MyEditableSkillItem | null;
+  isVersionUpdate?: boolean;
   loading?: boolean;
   onClose: () => void;
   onSubmitted?: () => void;
@@ -24,6 +25,7 @@ interface MineApplyListingModalProps {
 export function MineApplyListingModal({
   open,
   skill,
+  isVersionUpdate = false,
   loading = false,
   onClose,
   onSubmitted = onClose,
@@ -80,7 +82,12 @@ export function MineApplyListingModal({
       open={open}
       closable={{ "aria-label": t("common.close") }}
       size="min(960px, 100vw)"
-      title={t("skillRepository.mine.applyTitle", { name: title })}
+      title={t(
+        isVersionUpdate
+          ? "repository.mine.confirmVersionUpdateTitle"
+          : "skillRepository.mine.applyTitle",
+        { name: title }
+      )}
       onClose={() => {
         if (!isBusy) onClose();
       }}
@@ -102,7 +109,11 @@ export function MineApplyListingModal({
     >
       <div className="space-y-4">
         <p className="text-sm leading-[22px] text-[#191919]">
-          {t("skillRepository.mine.confirmApplyContent")}
+          {t(
+            isVersionUpdate
+              ? "repository.mine.confirmVersionUpdateContent"
+              : "skillRepository.mine.confirmApplyContent"
+          )}
         </p>
         <div className="space-y-2">
           <label
