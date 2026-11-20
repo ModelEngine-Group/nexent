@@ -456,13 +456,33 @@ def _legacy_mcp_identity(authorization):
     return get_current_user_id(authorization)
 
 
+async def _resolve_delegated_identity(scope, authorization, *, transport=None):
+    """Bind the deployment Gateway origin and signing key for the tenant router.
+
+    ``TenantMCPRouter`` calls the resolver with ``(scope, authorization)`` only,
+    while ``resolve_mcp_identity`` takes the Gateway origin and signing key as
+    required keyword arguments. This adapter lives in the launcher because
+    ``backend/gateway`` is import-isolated from ``contracts`` and
+    ``gateway.downstream``, which is where the deployment settings come from.
+    """
+    from contracts.constants import environment
+    from gateway.downstream.identity import signing_key
+
+    return await _resolve_gateway_mcp_identity(
+        scope, authorization,
+        gateway_url=environment.GATEWAY_SERVICE_URL,
+        key=signing_key(),
+        transport=transport,
+    )
+
+
 class TenantMCPRouter(_TenantMCPRouter):
     """Bind the process registry and deployment trust policy to the MCP boundary."""
 
     def __init__(self):
         super().__init__(get_app=_tenant_app, refresh=refresh_openapi_services_by_tenant,
                          internal_token=NEXENT_MCP_INTERNAL_TOKEN, gateway_required=gateway_identity_enabled(),
-                         resolve_identity=_resolve_gateway_mcp_identity, legacy_identity=_legacy_mcp_identity)
+                         resolve_identity=_resolve_delegated_identity, legacy_identity=_legacy_mcp_identity)
 
 
 

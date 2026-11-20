@@ -2135,7 +2135,12 @@ def rename_conversation(
 
 def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> bool:
     """
-    Delete a conversation (soft delete)
+    Delete a conversation owned by the user (soft delete, cascading)
+
+    Only a conversation whose created_by matches user_id is affected. Child
+    rows cascade by conversation_id, and only when the owned conversation
+    row itself matched, so a caller passing an id it does not own cannot
+    touch another user's data (aligned with delete_conversations_batch).
 
     Args:
         conversation_id: Conversation ID (integer)
@@ -2153,10 +2158,14 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
-        # 1. Mark conversation as deleted
+        # 1. Mark conversation as deleted (ownership filter: created_by == user_id)
         conversation_stmt = (
             update(ConversationRecord)
-            .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                ConversationRecord.created_by == user_id,
+            )
             .values(update_data)
         )
         if user_id:
@@ -2167,6 +2176,10 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
 
         from management.db.trajectory.repository import delete_summaries
         delete_summaries(session, [conversation_id], user_id)
+
+        # Not owned (or already deleted): refuse without touching child rows.
+        if conversation_result.rowcount == 0:
+            return False
 
         # 2. Mark related messages as deleted
         message_stmt = (
@@ -2207,8 +2220,9 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         )
         session.execute(image_stmt)
 
-        # Check if the conversation record was affected
-        return conversation_result.rowcount > 0
+        # Ownership was already verified in step 1; the cascade only runs
+        # after a successful owned-conversation update.
+        return True
 
 
 def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
@@ -3345,6 +3359,9 @@ def get_historical_context(
     conversation_id = int(conversation_id)
     if (current_user_message_id is None) == (before_message_index is None):
         raise ValueError("Historical context requires one message boundary")
+    # Only the persisted current-user-message boundary has an index to report. The
+    # pre-save boundary (before_message_index) intentionally has no such message.
+    current_user_message_index: Optional[int] = None
     with get_db_session() as session:
         if before_message_index is None:
             current = session.execute(
@@ -3362,6 +3379,7 @@ def get_historical_context(
             if current is None:
                 return None
             before_message_index = current.message_index
+            current_user_message_index = current.message_index
         else:
             owned = session.scalar(select(ConversationRecord.conversation_id).where(
                 ConversationRecord.conversation_id == conversation_id,
@@ -3535,7 +3553,7 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
-                "current_user_message_index": current.message_index}
+                "current_user_message_index": current_user_message_index}
 
 
 def _remove_scope_references(

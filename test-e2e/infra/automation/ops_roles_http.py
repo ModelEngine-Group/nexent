@@ -157,7 +157,7 @@ class Runtime:
         from infrastructure.rdb.client import get_db_session
         from management.db.identity.account import create_account
         from management.db.identity.user_tenant import insert_user_tenant
-        from infrastructure.security.passwords import hash_password
+        from gateway.security.passwords import hash_password
 
         definitions = {
             "su": ("platform", ["SU"]),

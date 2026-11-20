@@ -239,10 +239,10 @@ def test_native_http_cas_sid_revocation_remains_effective(runtime):
 
 def test_native_account_bootstrap_and_cas_provisioning(runtime):
     client, auth, helpers, models = runtime
-    from infrastructure.security.account_cli import bootstrap_super_admin
+    from management.cli.account import bootstrap_super_admin
     from contracts.errors.exceptions import AccountConflictError
     from management.db.identity.account import get_account_by_email
-    from infrastructure.security.passwords import verify_password
+    from gateway.security.passwords import verify_password
     from management.services.permission.identity.cas import (
         CasPrincipal,
         _resolve_project_user,

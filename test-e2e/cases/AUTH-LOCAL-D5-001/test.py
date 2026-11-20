@@ -23,7 +23,7 @@ from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     import_users,
     read_source_users,
 )
-from infrastructure.security.passwords import verify_password
+from gateway.security.passwords import verify_password
 from local_auth import disposable_database
 
 

@@ -578,12 +578,23 @@ class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
 
 
+class PreparedHistoryRecord(RunSpecModel):
+    """Persisted evidence from a completed turn, rendered as read-only reference data."""
+
+    record_type: str
+    # Persisted unit bodies are nullable in the table, so keep this permissive.
+    content: str | None = None
+    tool_call_id: str | None = None
+    invocation_id: str | None = None
+
+
 class PreparedHistoryTurn(RunSpecModel):
     user_message: str
     assistant_final_answer: str
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    execution_records: list[PreparedHistoryRecord] = Field(default_factory=list)
 
 
 class PreparedConversationHistory(RunSpecModel):

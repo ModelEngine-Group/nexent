@@ -48,7 +48,7 @@ class ExposureRegistry:
             if not isinstance(row, dict):
                 raise ValueError("Invalid Gateway exposure entry")
             required = {"route_id", "method", "path", "transport", "target", "credential_kinds"}
-            if not required <= row.keys() or row.keys() - required - {"source"}:
+            if not required <= row.keys() or row.keys() - required - {"source", "capability_id"}:
                 raise ValueError("Invalid Gateway exposure fields")
             if any(not isinstance(row[key], str) for key in required - {"credential_kinds"}):
                 raise ValueError("Invalid Gateway exposure field type")
@@ -56,7 +56,7 @@ class ExposureRegistry:
             if (method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
                     or transport not in {"http", "websocket"}
                     or transport == "websocket" and method != "GET"
-                    or row["target"] not in {"management", "runtime", "northbound", "ops"}
+                    or row["target"] not in {"management", "runtime", "ops"}
                     or not valid_path(path) or "*" in path):
                 raise ValueError("Invalid Gateway exposure route")
             if not isinstance(row["route_id"], str) or not row["route_id"] or row["route_id"] in ids:
@@ -99,4 +99,52 @@ class ExposureRegistry:
 
 @lru_cache(maxsize=1)
 def default_registry():
-    return ExposureRegistry(json.loads(Path(__file__).with_name("registry.json").read_text(encoding="utf-8")))
+    document = json.loads(Path(__file__).with_name("registry.json").read_text(encoding="utf-8"))
+    excluded = _excluded_capabilities()
+    if excluded:
+        known_before = {r.get("capability_id") or r["path"] for r in document["routes"]}
+        kept, removed = [], []
+        for row in document["routes"]:
+            # match by capability_id, or raw path for non-gate rows
+            if row.get("capability_id") in excluded or row["path"] in excluded:
+                removed.append(row["path"])
+            else:
+                kept.append(row)
+        if removed:
+            document = {**document, "routes": kept}
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Northbound emergency exclusion removed %d exposure row(s): %s",
+                len(removed),
+                ", ".join(sorted(set(removed))),
+            )
+        # warn on ids that matched nothing; build the known set from the full
+        # document (pre-removal) so an id that just excluded its own row is
+        # not falsely reported as unknown
+        import difflib
+        import logging
+
+        known = known_before
+        for unknown in set(excluded) - known:
+            suggestions = difflib.get_close_matches(unknown, known, n=2)
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+            logging.getLogger(__name__).warning(
+                "GATEWAY_NB_EXCLUDED_CAPABILITIES entry %r matched nothing.%s",
+                unknown,
+                hint,
+            )
+    return ExposureRegistry(document)
+
+
+def _excluded_capabilities():
+    """The emergency-exclusion ids/paths, read once via the settings layer.
+
+    Deployment-level kill switch: removing a capability takes one env line
+    and a gateway restart — no image rebuild, no service restart (declared
+    and exposed separation: the snapshot stays the code truth, the env is
+    the deployment truth).
+    """
+    from gateway.configuration import load_settings
+
+    return load_settings().nb_excluded_capabilities

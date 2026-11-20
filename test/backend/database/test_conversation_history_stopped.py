@@ -139,3 +139,35 @@ def test_completed_history_keeps_only_persisted_execution_evidence(history_db):
     assert "Saved result" in str(records) and "Saved failure" in str(records)
     assert all(text not in str(records) for text in ["Never replay", "Not committed", "Deleted error"])
     assert "s3://files/old.txt" in projected["attachments"]
+
+
+def test_presave_boundary_reports_no_current_user_message_index(history_db):
+    """Regression: the pre-save boundary must not read the persisted-only row.
+
+    A follow-up turn whose user message is not stored yet passes
+    ``before_message_index`` instead of ``current_user_message_id``. The
+    projection previously ended by dereferencing the row resolved only on the
+    persisted path, raising UnboundLocalError and turning every second chat
+    message into a 500.
+    """
+    module, message, _ = history_db
+    message(1, "user", "Original task")
+    message(2, "assistant", "First answer")
+    message(3, "user", "Pending follow-up", status="streaming")
+    history = module.get_historical_context(1, None, "owner", "tenant", before_message_index=4)
+
+    assert history is not None
+    assert history["current_user_message_index"] is None
+    assert [turn["user_message"] for turn in history["conversation_turns"]] == ["Original task"]
+    assert history["conversation_turns"][0]["assistant_final_answer"] == "First answer"
+
+
+def test_persisted_boundary_still_reports_its_message_index(history_db):
+    """The persisted boundary keeps exposing the index it resolved."""
+    module, message, _ = history_db
+    message(1, "user", "Original task")
+    message(2, "assistant", "First answer")
+
+    history = module.get_historical_context(1, 1, "owner", "tenant")
+
+    assert history["current_user_message_index"] == 1
