@@ -91,7 +91,7 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
-from ext_components.aidp.apps import aidp_mgmt_app
+from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
@@ -216,10 +216,12 @@ def configure_aidp_constants(monkeypatch, _isolated_imports):
 
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", SERVER_URL)
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", API_KEY)
+    monkeypatch.setattr(aidp_mgmt_common, "AIDP_SERVER_URL", SERVER_URL)
+    monkeypatch.setattr(aidp_mgmt_common, "AIDP_API_KEY", API_KEY)
 
     # Default: auth succeeds with the standard test user/tenant.
     monkeypatch.setattr(
-        aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+        aidp_mgmt_common.auth_utils_module, "get_current_user_id",
         lambda *_a, **_kw: (USER_ID, TENANT_ID),
     )
     # Existing management tests exercise the shared-KB path. Individual
@@ -296,12 +298,12 @@ class TestAuthRequired:
             from fastapi import HTTPException
             raise HTTPException(status_code=401, detail="bad")
 
-        original = aidp_mgmt_app.auth_utils_module.get_current_user_id
-        aidp_mgmt_app.auth_utils_module.get_current_user_id = _raise
+        original = aidp_mgmt_common.auth_utils_module.get_current_user_id
+        aidp_mgmt_common.auth_utils_module.get_current_user_id = _raise
         try:
             response = client.get("/aidp-mgmt/knowledge-bases")
         finally:
-            aidp_mgmt_app.auth_utils_module.get_current_user_id = original
+            aidp_mgmt_common.auth_utils_module.get_current_user_id = original
         assert response.status_code == HTTPStatus.UNAUTHORIZED
 
     def test_missing_auth_for_set_permission_returns_401(self):
@@ -313,15 +315,15 @@ class TestAuthRequired:
         def _raise(*_a, **_kw):
             raise HTTPException(status_code=401, detail="bad")
 
-        original = aidp_mgmt_app.auth_utils_module.get_current_user_id
-        aidp_mgmt_app.auth_utils_module.get_current_user_id = _raise
+        original = aidp_mgmt_common.auth_utils_module.get_current_user_id
+        aidp_mgmt_common.auth_utils_module.get_current_user_id = _raise
         try:
             response = client.patch(
                 "/aidp-mgmt/aidp-permissions/kb-1",
                 json={"ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         finally:
-            aidp_mgmt_app.auth_utils_module.get_current_user_id = original
+            aidp_mgmt_common.auth_utils_module.get_current_user_id = original
         assert response.status_code == HTTPStatus.UNAUTHORIZED
 
 
@@ -1414,7 +1416,7 @@ class TestAuthEdgeCases:
         from contracts.errors.exceptions import UnauthorizedError
 
         monkeypatch.setattr(
-            aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+            aidp_mgmt_common.auth_utils_module, "get_current_user_id",
             lambda *_a, **_kw: (_ for _ in ()).throw(
                 UnauthorizedError("invalid token")
             ),
@@ -1428,7 +1430,7 @@ class TestAuthEdgeCases:
         from ext_components.aidp.apps import aidp_mgmt_app
 
         monkeypatch.setattr(
-            aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+            aidp_mgmt_common.auth_utils_module, "get_current_user_id",
             lambda *_a, **_kw: ("user-1", ""),
         )
         client = _client()
@@ -2991,7 +2993,7 @@ class TestFolderAndFilePathRoutes:
         )
 
     def test_folder_tree_forwards_path_paging_and_search(self, monkeypatch):
-        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.apps import aidp_folder_routes
 
         captured = {}
 
@@ -3019,7 +3021,7 @@ class TestFolderAndFilePathRoutes:
                 },
             }
 
-        monkeypatch.setattr(aidp_mgmt_app, "get_aidp_folder_tree_impl", fake_tree)
+        monkeypatch.setattr(aidp_folder_routes, "get_aidp_folder_tree_impl", fake_tree)
         response = _client().get(
             "/aidp-mgmt/knowledge-bases/kb-1/folders/tree",
             params={
@@ -3051,7 +3053,7 @@ class TestFolderAndFilePathRoutes:
         }
 
     def test_folder_crud_routes_forward_the_path_contract(self, monkeypatch):
-        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.apps import aidp_folder_routes
 
         calls = []
 
@@ -3062,11 +3064,17 @@ class TestFolderAndFilePathRoutes:
 
             return inner
 
-        monkeypatch.setattr(aidp_mgmt_app, "create_aidp_folder_impl", record("create"))
-        monkeypatch.setattr(aidp_mgmt_app, "rename_aidp_folder_impl", record("rename"))
-        monkeypatch.setattr(aidp_mgmt_app, "move_aidp_folder_impl", record("move"))
         monkeypatch.setattr(
-            aidp_mgmt_app,
+            aidp_folder_routes, "create_aidp_folder_impl", record("create")
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes, "rename_aidp_folder_impl", record("rename")
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes, "move_aidp_folder_impl", record("move")
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes,
             "delete_aidp_folder_impl",
             lambda *args: calls.append(("delete", *args)),
         )
@@ -3113,18 +3121,19 @@ class TestFolderAndFilePathRoutes:
         ]
 
     def test_file_move_and_rename_forward_per_file_objects(self, monkeypatch):
-        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.apps import aidp_folder_routes
 
         captured = {}
         monkeypatch.setattr(
-            aidp_mgmt_app,
+            aidp_folder_routes,
             "move_aidp_files_impl",
             lambda *args: captured.setdefault("move", args) or {"summary": {}},
         )
         monkeypatch.setattr(
-            aidp_mgmt_app,
+            aidp_folder_routes,
             "rename_aidp_file_impl",
-            lambda *args: captured.setdefault("rename", args) or {"file_path": "/docs/b.pdf"},
+            lambda *args: captured.setdefault("rename", args)
+            or {"file_path": "/docs/b.pdf"},
         )
         client = _client()
 

@@ -50,14 +50,6 @@ export interface AidpDocumentItem {
   [key: string]: unknown;
 }
 
-export interface AidpDocumentListResponse {
-  value: AidpDocumentItem[];
-  total_count: number;
-  has_more: boolean;
-  /** False for search pagination, whose filtered global total is unavailable. */
-  total_reliable: boolean;
-}
-
 /** One direct subfolder returned by the AIDP folder tree. */
 export interface AidpFolderItem {
   folder_name: string;

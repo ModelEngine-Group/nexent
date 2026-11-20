@@ -23,7 +23,6 @@ import { ErrorCode, isSessionExpired } from "@/const/errorCode";
 import { parseAidpUploadError } from "@/ext_components/aidp/shared/services/aidpUploadUtils";
 import type {
   AidpKbDetail,
-  AidpDocumentListResponse,
   AidpUploadResponse,
   AidpDocumentRemoveResponse,
   AidpUploadTaskListResponse,
@@ -310,38 +309,6 @@ class AidpKnowledgeService {
     const result = await response.json();
 
     return result as AidpKbDetail;
-  }
-
-  /**
-   * List only files AIDP confirms as ingested; upload history stays separate.
-   * Backed by the /files endpoint (not the legacy /documents view).
-   */
-  async listIngestedFiles(
-    id: string,
-    page: number = 1,
-    pageSize: number = 10,
-    keyword: string = "",
-    signal?: AbortSignal
-  ): Promise<AidpDocumentListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
-      page,
-      page_size: pageSize,
-      keyword,
-    });
-    const response = await fetchWithErrorHandling(url, {
-      method: "GET",
-      headers: getAuthHeaders(),
-      signal,
-    });
-    const result = await response.json();
-    return {
-      value: Array.isArray(result.value) ? result.value : [],
-      total_count:
-        typeof result.total_count === "number" ? result.total_count : 0,
-      has_more:
-        typeof result.has_more === "boolean" ? result.has_more : undefined,
-      total_reliable: result.total_reliable !== false,
-    };
   }
 
   /**
