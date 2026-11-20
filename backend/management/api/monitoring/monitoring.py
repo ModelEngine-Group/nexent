@@ -79,7 +79,7 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None, 
             m.model_id,
             m.model_name,
             MAX(COALESCE(m.model_type, 'llm')) AS model_type,
-            split_part(m.model_name, '/', -1) AS display_name,
+            COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown') AS display_name,
             COUNT(*) AS request_count,
             ROUND(
                 COALESCE(
@@ -95,7 +95,7 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None, 
         WHERE {time_filter}
         {tenant_filter}
         AND m.delete_flag = 'N'
-        GROUP BY m.model_id, m.model_name, split_part(m.model_name, '/', -1)
+        GROUP BY m.model_id, m.model_name, COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown')
         ORDER BY request_count DESC
     """
 
