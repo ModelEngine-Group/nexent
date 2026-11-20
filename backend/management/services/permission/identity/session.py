@@ -324,7 +324,17 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
     """
     identity = _gateway_identity()
     if identity is not None:
-        return identity["user_id"], identity["tenant_id"]
+        tenant_id = identity["tenant_id"]
+        if tenant_id in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}:
+            # Gateway filled a sentinel because the SU/ASSET_OWNER row in
+            # user_tenant_t has no real tenant_id yet. Management can
+            # resolve it now that we have a full DB connection.
+            record = get_user_tenant_by_user_id(identity["user_id"])
+            if record and record.get("tenant_id") not in (None, ""):
+                tenant_id = record["tenant_id"]
+            elif record:
+                tenant_id = resolve_tenant_id_from_user_tenant_record(record)
+        return identity["user_id"], tenant_id
 
     # In normal mode, missing auth header means unauthorized - return 401, not default user
     if authorization is None or (
@@ -374,8 +384,16 @@ def get_current_user_context(
             raise TokenExpiredError("User roles are unavailable") from exc
         if not roles:
             raise TokenExpiredError("User role not found")
-        return identity["user_id"], identity["tenant_id"], roles
-    user_id, tenant_id = get_current_user_id(authorization)
+        tenant_id = identity["tenant_id"]
+        if tenant_id in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}:
+            # Gateway sentinel — resolve against the real user_tenant row.
+            record = get_user_tenant_by_user_id(identity["user_id"])
+            if record and record.get("tenant_id") not in (None, ""):
+                tenant_id = record["tenant_id"]
+            elif record:
+                tenant_id = resolve_tenant_id_from_user_tenant_record(record)
+        return identity["user_id"], tenant_id, roles
+    user_id, tenant_id = _resolve_session_user(authorization)
 
 
     user_tenant_record = get_user_tenant_by_user_id(user_id)
