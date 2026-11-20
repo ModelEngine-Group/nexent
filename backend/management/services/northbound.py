@@ -81,10 +81,14 @@ logger = logging.getLogger("northbound_service")
 
 
 async def search_hybrid_for_northbound(ctx, payload):
+    from contracts.constants.environment import KNOWLEDGE_RUNTIME_HYBRID_ENABLED
     from contracts.knowledge import VectorDatabaseType
     from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
     from management.services.knowledge_base.common import get_vector_db_core
-    from management.services.knowledge_base.hybrid import search_public_hybrid
+    from management.services.knowledge_base.hybrid import (
+        search_public_hybrid,
+        search_runtime_hybrid,
+    )
 
     from infrastructure.agentos_identity import ServicePrincipal
 
@@ -95,8 +99,12 @@ async def search_hybrid_for_northbound(ctx, payload):
         except Exception:  # noqa: BLE001 - Existing Northbound lookup accepts raw index names.
             index = requested
         resolved.append(index)
+    actor = ServicePrincipal(ctx.user_id, ctx.tenant_id)
+    if KNOWLEDGE_RUNTIME_HYBRID_ENABLED:
+        return await search_runtime_hybrid(resolved, payload.query, actor,
+            top_k=payload.top_k, weight_accurate=payload.weight_accurate, northbound=True)
     return await search_public_hybrid(
-        resolved, payload.query, ServicePrincipal(ctx.user_id, ctx.tenant_id),
+        resolved, payload.query, actor,
         top_k=payload.top_k, weight_accurate=payload.weight_accurate,
         vdb_core=get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH),
     )

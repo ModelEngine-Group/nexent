@@ -14,6 +14,7 @@ from contracts.constants.constants import (
     SUMMARY_FREQUENCY_OPTIONS_FOR_API,
     VALID_SUMMARY_FREQUENCIES,
 )
+from contracts.constants.environment import KNOWLEDGE_RUNTIME_HYBRID_ENABLED
 from contracts.errors.exceptions import (
     AppException,
     DuplicateError,
@@ -86,7 +87,13 @@ from management.utils.knowledge_permission import (
     require_knowledge_base_read_permission,
 )
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import DeadlineExceeded, InvalidInput, NotFound, ScopeDenied
+from nexent.storage.errors import (
+    Conflict,
+    DeadlineExceeded,
+    InvalidInput,
+    NotFound,
+    ScopeDenied,
+)
 from nexent.storage.models import OperationContext
 from nexent.vector_database.base import VectorDatabaseCore
 
@@ -936,7 +943,6 @@ async def delete_chunk(
 @router.post("/search/hybrid")
 async def hybrid_search(
     payload: HybridSearchRequest,
-    vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
 ):
     """Run a hybrid (accurate + semantic) search across indices."""
@@ -956,13 +962,17 @@ async def hybrid_search(
                 tenant_id=tenant_id,
             )
             resolved_index_names.append(resolved_name)
-        from management.services.knowledge_base.hybrid import search_public_hybrid
-
         actor = ServicePrincipal(user_id, tenant_id)
-        result = await search_public_hybrid(
-            resolved_index_names, payload.query, actor, top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate, vdb_core=vdb_core,
-        )
+        if KNOWLEDGE_RUNTIME_HYBRID_ENABLED:
+            from management.services.knowledge_base.hybrid import search_runtime_hybrid
+
+            result = await search_runtime_hybrid(resolved_index_names, payload.query, actor,
+                top_k=payload.top_k, weight_accurate=payload.weight_accurate)
+        else:
+            from management.services.knowledge_base.hybrid import search_public_hybrid
+
+            result = await search_public_hybrid(resolved_index_names, payload.query, actor,
+                top_k=payload.top_k, weight_accurate=payload.weight_accurate, vdb_core=get_vector_db_core())
         if payload.tag_predicates:
             from management.services.knowledge_base.hybrid_tags import (
                 filter_hybrid_tags,
@@ -975,6 +985,10 @@ async def hybrid_search(
             )
             result["total"] = len(result["results"])
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except Conflict as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Knowledge bases are not ready for hybrid search") from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="No access to the selected knowledge bases") from exc
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog
         raise HTTPException(

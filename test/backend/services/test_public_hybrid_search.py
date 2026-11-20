@@ -5,10 +5,11 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from contracts.agentos import ModelMetadata, ModelResult
+from contracts.agentos_knowledge import KnowledgeSearchHit, KnowledgeSearchResult
 from contracts.errors.exceptions import RuntimeUpstreamError
 from management.services.knowledge_base import hybrid
 from management.services.knowledge_base.common import KnowledgeBaseNeedsModelConfigError
-from nexent.storage.errors import DeadlineExceeded
+from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
 
 from infrastructure.agentos_identity import ServicePrincipal
 
@@ -41,6 +42,86 @@ async def search(s, **options):
     return await hybrid.search_public_hybrid(
         **args, actor=s.actor, reader=s.reader, client=s.client, vdb_core=s.vectors,
     )
+
+
+@pytest.fixture
+def runtime_search(query_search):
+    s = query_search
+    s.resources = {name: {"knowledge_id": key, "index_name": name, "embedding_model_id": 7, "tenant_id": "tenant"}
+                   for name, key in (("kb", 1), ("shared", 2))}
+    s.reader.knowledge.side_effect = lambda name, actor, **kwargs: s.resources[name]
+    text = KnowledgeSearchHit(knowledge_id=1, chunk_id="actual", content="text", score=.9,
+        score_kind="runtime.hybrid", score_details={"accurate": 1, "retrieval_highlight_terms": ["text"]},
+        public_document={"id": "display-id", "score_details": {"source": 9}, "content": "text"})
+    image = KnowledgeSearchHit(knowledge_id=2, chunk_id="picture", content="caption", score=.4,
+        score_kind="elasticsearch.cosine", public_document={"id": "picture", "content": "caption"})
+    s.client.search_knowledge.return_value = KnowledgeSearchResult(hits=[text], image_hits=[image],
+        data_revisions={1: "a" * 64, 2: "b" * 64}, embedding_model={"model_id": 7, "revision": "r2"})
+    return s
+
+
+async def runtime_query(s):
+    return await hybrid.search_runtime_hybrid(["kb", "shared", "kb"], "query 2", s.actor, top_k=5,
+        weight_accurate=None, reader=s.reader, client=s.client)
+
+
+async def test_runtime_hybrid_preserves_envelope_and_query_authority(runtime_search):
+    s = runtime_search
+    result = await runtime_query(s)
+    request, user, tenant = s.client.search_knowledge.await_args.args
+    assert request.knowledge_ids == [1, 2] and set(request.expected_revisions) == {1, 2}
+    assert request.embedding_model.revision == "r2" and request.weight_accurate == .7
+    assert request.top_k == 5 and request.split_multimodal_candidates and request.merge_display_ids
+    assert request.global_hybrid_candidates and request.include_public_document
+    assert (user, tenant) == (s.actor.user_id, s.actor.tenant_id)
+    assert result["results"] == [
+        {"id": "display-id", "index": "kb", "content": "text", "score": .9,
+         "score_details": {"source": 9, "accurate": 1, "retrieval_highlight_terms": ["text"]}},
+        {"id": "picture", "index": "shared", "content": "caption", "score": .4},
+    ]
+    assert result["total"] == 2 and result["query_time_ms"] >= 0
+    s.client.invoke_model.assert_not_awaited()
+    s.vectors.hybrid_search.assert_not_called()
+
+
+async def test_runtime_hybrid_blocks_mixed_models_before_retrieval(runtime_search):
+    s = runtime_search
+    s.resources["shared"]["embedding_model_id"] = 8
+    with pytest.raises(Conflict):
+        await runtime_query(s)
+    s.client.search_knowledge.assert_not_awaited()
+    s.vectors.hybrid_search.assert_not_called()
+
+
+@pytest.mark.parametrize("status,error", [(403, ScopeDenied), (409, Conflict)])
+async def test_runtime_hybrid_redacts_remote_errors_without_legacy_replay(runtime_search, status, error):
+    s = runtime_search
+    s.client.search_knowledge.side_effect = RuntimeUpstreamError(status, b"private", {})
+    with pytest.raises(error):
+        await runtime_query(s)
+    s.client.search_knowledge.assert_awaited_once()
+    s.vectors.hybrid_search.assert_not_called()
+
+
+async def test_northbound_cutover_uses_agentos_without_constructing_elasticsearch(monkeypatch):
+    from contracts.constants import environment
+    from management.db.knowledge_base import repository
+    from management.services.knowledge_base import common
+    from management.services.northbound import search_hybrid_for_northbound
+
+    monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", True)
+    monkeypatch.setattr(repository, "get_index_name_by_knowledge_name", lambda name, tenant: "resolved")
+    legacy = Mock()
+    monkeypatch.setattr(common, "get_vector_db_core", legacy)
+    runtime = AsyncMock(return_value={"results": [], "total": 0})
+    monkeypatch.setattr(hybrid, "search_runtime_hybrid", runtime)
+    ctx = SimpleNamespace(user_id="operator", tenant_id="tenant")
+    payload = SimpleNamespace(index_names=["requested"], query="query", weight_accurate=.5, top_k=5)
+
+    assert await search_hybrid_for_northbound(ctx, payload) == {"results": [], "total": 0}
+    runtime.assert_awaited_once_with(["resolved"], "query", ServicePrincipal("operator", "tenant"),
+                                     top_k=5, weight_accurate=.5, northbound=True)
+    legacy.assert_not_called()
 
 
 @pytest.mark.parametrize(("query", "weight", "expected"), [

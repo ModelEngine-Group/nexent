@@ -32,6 +32,8 @@ containers:
     env:
       - name: GATEWAY_AUTH_ENABLED
         value: "true"
+      - name: KNOWLEDGE_RUNTIME_HYBRID_ENABLED
+        value: {{ .Values.config.runtimeHybridEnabled | quote }}
 {{ include "nexent.backendPlatformEnv" . | indent 6 }}
       - name: NEXENT_SQL_STARTUP_MODE
         value: "migrate"

@@ -2047,6 +2047,23 @@ async def test_hybrid_search_success(vdb_core_mock, auth_data):
         )
 
 
+def test_hybrid_cutover_uses_runtime_without_legacy_provider(auth_data):
+    with patch("management.api.knowledge_base.vectordatabase.KNOWLEDGE_RUNTIME_HYBRID_ENABLED", True), \
+            patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name",
+                  return_value="actual-index"), \
+            patch("management.api.knowledge_base.vectordatabase.get_vector_db_core") as legacy, \
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid", new_callable=AsyncMock) as runtime:
+        runtime.return_value = {"results": [], "total": 0, "query_time_ms": 10}
+        response = client.post("/indices/search/hybrid", headers=auth_data["auth_header"],
+                               json={"index_names": ["display"], "query": "cutover", "weight_accurate": .25})
+    assert response.status_code == 200
+    assert response.json() == runtime.return_value
+    runtime.assert_awaited_once_with(["actual-index"], "cutover", ANY, top_k=10, weight_accurate=.25)
+    legacy.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_hybrid_search_value_error(vdb_core_mock, auth_data):
     """

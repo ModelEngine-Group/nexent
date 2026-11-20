@@ -452,6 +452,7 @@ KUBERNETES_NAMESPACE = os.getenv('KUBERNETES_NAMESPACE', 'nexent')
 NORTHBOUND_EXTERNAL_URL = os.getenv('NORTHBOUND_EXTERNAL_URL', 'http://localhost:5013/api').rstrip('/')
 APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 KNOWLEDGE_CLEANSE_PARSER_VERSION = APP_VERSION + "-cleanse-v2"
+KNOWLEDGE_RUNTIME_HYBRID_ENABLED = os.getenv("KNOWLEDGE_RUNTIME_HYBRID_ENABLED", "false").lower() in ("true", "1")
 
 # =============================================================================
 # Agent Sandbox Configuration

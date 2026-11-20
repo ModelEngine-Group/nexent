@@ -39,7 +39,7 @@ from fastapi.responses import (
 )
 from management.services.permission.identity.session import get_user_language
 from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
-from nexent.storage.errors import DeadlineExceeded, ScopeDenied
+from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
 from contracts.errors.exceptions import ManagementReadBusyError
 from pydantic import ValidationError as PydanticValidationError
 from contracts.a2a import JSONRPCRequest
@@ -907,6 +907,10 @@ async def hybrid_search(
     try:
         ctx = await _require_asset_owner_context(request)
         return await search_hybrid_for_northbound(ctx, payload)
+    except Conflict as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Knowledge bases are not ready for hybrid search") from exc
+    except ScopeDenied as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="No access to the selected knowledge bases") from exc
     except KnowledgeBaseNeedsModelConfigError as exc:
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,

@@ -8,7 +8,11 @@ from time import monotonic, perf_counter
 from types import SimpleNamespace
 from uuid import uuid4
 
-from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeSearch,
+    ModelVersion,
+)
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
 from management.clients.model import embed_query
@@ -16,11 +20,12 @@ from management.services.knowledge_base.common import KnowledgeBaseNeedsModelCon
 from management.services.knowledge_base.file_reader import KnowledgeFileReader
 from management.services.knowledge_base.image_ticket import issue_image_url
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import DeadlineExceeded, ScopeDenied
+from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
 from nexent.storage.models import OperationContext
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
+from infrastructure.knowledge_search import knowledge_search_revision
 
 
 def project_retrieved_image(hit, actor, *, northbound=False):
@@ -62,9 +67,7 @@ async def _resolve_model(client, index, model_id, actor):
     return model
 
 
-async def search_public_hybrid(
-    index_names, query, actor, *, top_k, weight_accurate, vdb_core, reader=None, client=None,
-):
+def _search_weight(index_names, query, top_k, weight_accurate):
     if not query or not query.strip():
         raise ValueError("Query text is required for hybrid search")
     if not index_names:
@@ -74,7 +77,14 @@ async def search_public_hybrid(
     if weight_accurate is not None and not 0 <= weight_accurate <= 1:
         raise ValueError("weight_accurate must be between 0 and 1")
     if weight_accurate is None:
-        weight_accurate = 0.7 if any(char.isdigit() for char in query) else 0.5
+        return 0.7 if any(char.isdigit() for char in query) else 0.5
+    return weight_accurate
+
+
+async def search_public_hybrid(
+    index_names, query, actor, *, top_k, weight_accurate, vdb_core, reader=None, client=None,
+):
+    weight_accurate = _search_weight(index_names, query, top_k, weight_accurate)
 
     reader = reader or KnowledgeFileReader()
     client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
@@ -112,6 +122,72 @@ async def search_public_hybrid(
         raise DeadlineExceeded(operation_id=context.operation_id) from error
     finally:
         stop.set()
+    return _response(raw, elapsed_ms)
+
+
+async def search_runtime_hybrid(
+    index_names, query, actor, *, top_k, weight_accurate, northbound=False, reader=None, client=None,
+):
+    weight = _search_weight(index_names, query, top_k, weight_accurate)
+    index_names = list(dict.fromkeys(index_names))
+    if len(index_names) > 100:
+        raise ValueError("Hybrid search supports up to 100 knowledge bases per request")
+    reader = reader or KnowledgeFileReader()
+    client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
+    stop = Event()
+    context = OperationContext("runtime-public-hybrid-" + uuid4().hex, monotonic() + 180, cancelled=stop)
+
+    def resolve():
+        return [reader.knowledge(index, actor, context=context) for index in index_names]
+
+    try:
+        async with asyncio.timeout(context.remaining()):
+            resources = await run_blocking("runtime-public-hybrid-resources", resolve, lane="control-io", owner=__name__)
+            model_id = resources[0]["embedding_model_id"]
+            model = await _resolve_model(client, index_names[0], model_id, actor)
+            if any(row["embedding_model_id"] != model_id for row in resources):
+                raise Conflict(operation_id=context.operation_id)
+            collections = {row["knowledge_id"]: row["index_name"] for row in resources}
+            request = KnowledgeSearch(
+                knowledge_ids=list(collections), query=query, search_mode="hybrid", top_k=top_k,
+                weight_accurate=weight, global_hybrid_candidates=True, merge_display_ids=True,
+                split_multimodal_candidates=model.model_type == "multi_embedding", include_public_document=True,
+                embedding_model=ModelVersion(model_id=model.model_id, revision=model.revision),
+                expected_revisions={row["knowledge_id"]: knowledge_search_revision(row) for row in resources},
+            )
+            started = perf_counter()
+            result = await client.search_knowledge(request, actor.user_id, actor.tenant_id)
+            elapsed_ms = int((perf_counter() - started) * 1000)
+            if (result.embedding_model != request.embedding_model or set(result.data_revisions) != set(collections)
+                or (result.image_hits is not None) != request.split_multimodal_candidates):
+                raise Conflict(operation_id=context.operation_id)
+            raw = []
+            for images, hits in ((False, result.hits), (True, result.image_hits or [])):
+                for hit in hits:
+                    if hit.knowledge_id not in collections:
+                        raise ScopeDenied()
+                    document = (project_retrieved_image(hit, actor, northbound=northbound)
+                                if images else hit.public_document)
+                    if document is None:
+                        raise ScopeDenied()
+                    scores = dict(hit.score_details)
+                    highlights = scores.pop("retrieval_highlight_terms", [])
+                    raw.append({"document": document, "index": collections[hit.knowledge_id],
+                                "score": hit.score, "scores": scores, "highlight_terms": highlights})
+            return _response(raw, elapsed_ms)
+    except RuntimeUpstreamError as error:
+        if error.status_code == 409:
+            raise Conflict(operation_id=context.operation_id) from error
+        if error.status_code == 403:
+            raise ScopeDenied(operation_id=context.operation_id) from error
+        raise
+    except TimeoutError as error:
+        raise DeadlineExceeded(operation_id=context.operation_id) from error
+    finally:
+        stop.set()
+
+
+def _response(raw, elapsed_ms):
     results = []
     for item in raw:
         document = dict(item.get("document", {}))
