@@ -22,6 +22,7 @@ import {
   isAidpChunkEditable,
   normalizeAidpChunkType,
 } from "@/ext_components/aidp/shared/utils/aidpChunkType";
+import { sanitizeAidpTableHtml } from "@/ext_components/aidp/shared/utils/aidpTableHtml";
 import styles from "./AidpSemanticChunks.module.css";
 
 interface AidpChunkDetailDrawerProps {
@@ -124,7 +125,12 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
   );
   const text = typeof chunk?.chunk_text === "string" ? chunk.chunk_text : "";
   const chunkType = normalizeAidpChunkType(chunk?.chunk_type);
-  const tableData = chunkType === "TABLE" ? parsePipeTable(text) : null;
+  // Real AIDP formats TABLE chunks as "<title>\n\n<table>...</table>"; older
+  // fixtures used pipe-separated rows. Prefer the sanitized HTML, fall back
+  // to the pipe parser, then to the raw text.
+  const tableHtml = chunkType === "TABLE" ? sanitizeAidpTableHtml(text) : null;
+  const tableData =
+    chunkType === "TABLE" && !tableHtml ? parsePipeTable(text) : null;
   const editable = isAidpChunkEditable(chunk);
   const imageFileId =
     chunkType === "IMAGE" ? deriveAidpImageFileId(chunk?.file_url) : undefined;
@@ -312,7 +318,21 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
                 </div>
               )}
 
-              {tableData ? (
+              {tableHtml ? (
+                <div className={styles.chunkTableWrap}>
+                  {tableHtml.caption && (
+                    <div className={styles.chunkTableCaption}>
+                      {tableHtml.caption}
+                    </div>
+                  )}
+                  <div
+                    className={styles.chunkTableScroll}
+                    // Rebuilt from a table-only whitelist by
+                    // sanitizeAidpTableHtml; no script-capable markup survives.
+                    dangerouslySetInnerHTML={{ __html: tableHtml.tableHtml }}
+                  />
+                </div>
+              ) : tableData ? (
                 <div className={styles.chunkTableWrap}>
                   {tableData.caption && (
                     <div className={styles.chunkTableCaption}>

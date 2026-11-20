@@ -3231,8 +3231,8 @@ class TestChunkEndpoints:
             SERVER_URL, API_KEY, "kb-1", 5, "改后文本"
         )
 
-    @pytest.mark.parametrize("chunk_type", ["TABLE", "IMAGE", "table", "", None])
-    def test_update_rejects_non_text_chunk_without_patching(self, chunk_type):
+    @pytest.mark.parametrize("chunk_type", ["IMAGE", "image", "", None])
+    def test_update_rejects_non_editable_chunk_without_patching(self, chunk_type):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -3252,11 +3252,11 @@ class TestChunkEndpoints:
             )
 
         assert response.status_code == 400
-        assert response.json()["message"] == "Only TEXT chunks can be edited"
+        assert response.json()["message"] == "Only TEXT and TABLE chunks can be edited"
         update_chunk.assert_not_called()
 
-    @pytest.mark.parametrize("chunk_type", ["TEXT", "text", " Text "])
-    def test_update_accepts_text_chunk_type_case_insensitively(self, chunk_type):
+    @pytest.mark.parametrize("chunk_type", ["TEXT", "text", " Text ", "TABLE", "table"])
+    def test_update_accepts_editable_chunk_type_case_insensitively(self, chunk_type):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service

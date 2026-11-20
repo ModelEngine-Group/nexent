@@ -1592,9 +1592,11 @@ async def update_chunk(
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
     server_url, api_key = _credentials()
-    # Only TEXT chunks are editable; TABLE/IMAGE are readable but their content
-    # is not a text field. Check the actual chunk type AIDP reports instead of
-    # inferring it from the source file's extension or upload size class.
+    # TEXT and TABLE chunks are editable: real AIDP accepts a table chunk's
+    # HTML text on PATCH (verified 2026-11-18). IMAGE chunks stay read-only —
+    # their chunk_text is a VLM-generated description, and editing it is not
+    # validated upstream. The check uses the type AIDP reports, never the
+    # source file's extension or upload size class.
     current = await run_blocking(
         "aidp-get-chunk-for-update",
         get_aidp_chunk_impl,
@@ -1606,10 +1608,10 @@ async def update_chunk(
         owner="config",
     )
     chunk_type = str((current or {}).get("chunk_type") or "").strip().upper()
-    if chunk_type != "TEXT":
+    if chunk_type not in ("TEXT", "TABLE"):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
-            detail="Only TEXT chunks can be edited",
+            detail="Only TEXT and TABLE chunks can be edited",
         )
 
     result = await run_blocking(

@@ -2,12 +2,14 @@
 
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Drawer, Input } from "antd";
+import { Alert, Button, Drawer, Input } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
+import { normalizeAidpChunkType } from "@/ext_components/aidp/shared/utils/aidpChunkType";
+import { sanitizeAidpTableHtml } from "@/ext_components/aidp/shared/utils/aidpTableHtml";
 import styles from "./AidpSemanticChunks.module.css";
 
 export const AIDP_CHUNK_TEXT_MAX_LENGTH = 10240;
@@ -46,6 +48,15 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   );
   const [focused, setFocused] = useState(false);
   const [touched, setTouched] = useState(false);
+  // TABLE chunks edit the HTML source; the preview renders it only when it
+  // sanitizes cleanly, otherwise the toggle surfaces a format error.
+  const isTableChunk =
+    mode === "edit" && normalizeAidpChunkType(chunk?.chunk_type) === "TABLE";
+  const [previewing, setPreviewing] = useState(false);
+  const preview = useMemo(
+    () => (isTableChunk && previewing ? sanitizeAidpTableHtml(text) : null),
+    [isTableChunk, previewing, text]
+  );
 
   const trimmed = text.trim();
   const isEmpty = trimmed.length === 0;
@@ -107,39 +118,82 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
               <span className={styles.requiredMark} aria-hidden="true">
                 *
               </span>
+              {isTableChunk && (
+                <Button
+                  type="link"
+                  size="small"
+                  className={styles.previewToggle}
+                  disabled={submitting}
+                  onClick={() => setPreviewing((prev) => !prev)}
+                >
+                  {previewing
+                    ? t("aidpKnowledge.chunkTableBackToEdit")
+                    : t("aidpKnowledge.chunkTablePreview")}
+                </Button>
+              )}
             </div>
-            <Input.TextArea
-              className={styles.textArea}
-              style={{
-                border: `1px solid ${textAreaBorderColor}`,
-                borderRadius: 4,
-                boxShadow: "none",
-                minHeight: 160,
-                padding: "8px 12px",
-                resize: "vertical",
-              }}
-              value={text}
-              onChange={(event) => {
-                setText(event.target.value);
-                setTouched(true);
-              }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => {
-                setFocused(false);
-                setTouched(true);
-              }}
-              placeholder={t("aidpKnowledge.chunkTextPlaceholder")}
-              autoSize={{ minRows: 6, maxRows: 14 }}
-              aria-label={t("aidpKnowledge.chunkText")}
-              aria-invalid={isTooLong || isEmpty}
-              aria-required="true"
-              disabled={submitting}
-            />
+            {previewing ? (
+              preview ? (
+                <div className={styles.chunkTableWrap}>
+                  {preview.caption && (
+                    <div className={styles.chunkTableCaption}>
+                      {preview.caption}
+                    </div>
+                  )}
+                  <div
+                    className={styles.chunkTableScroll}
+                    // Rebuilt from a table-only whitelist by
+                    // sanitizeAidpTableHtml; no script-capable markup survives.
+                    dangerouslySetInnerHTML={{ __html: preview.tableHtml }}
+                  />
+                </div>
+              ) : (
+                <Alert
+                  type="error"
+                  showIcon
+                  title={t("aidpKnowledge.chunkTableInvalid")}
+                />
+              )
+            ) : (
+              <Input.TextArea
+                className={styles.textArea}
+                style={{
+                  border: `1px solid ${textAreaBorderColor}`,
+                  borderRadius: 4,
+                  boxShadow: "none",
+                  minHeight: 160,
+                  padding: "8px 12px",
+                  resize: "vertical",
+                }}
+                value={text}
+                onChange={(event) => {
+                  setText(event.target.value);
+                  setTouched(true);
+                }}
+                onFocus={() => setFocused(true)}
+                onBlur={() => {
+                  setFocused(false);
+                  setTouched(true);
+                }}
+                placeholder={
+                  isTableChunk
+                    ? t("aidpKnowledge.chunkTableHtmlPlaceholder")
+                    : t("aidpKnowledge.chunkTextPlaceholder")
+                }
+                autoSize={{ minRows: 6, maxRows: 14 }}
+                aria-label={t("aidpKnowledge.chunkText")}
+                aria-invalid={isTooLong || isEmpty}
+                aria-required="true"
+                disabled={submitting}
+              />
+            )}
             <div className={styles.counterRow}>
               <span className={styles.formHint}>
                 {mode === "create"
                   ? t("aidpKnowledge.chunkCreateHint")
-                  : t("aidpKnowledge.chunkEditVectorHint")}
+                  : isTableChunk
+                    ? t("aidpKnowledge.chunkTableEditHint")
+                    : t("aidpKnowledge.chunkEditVectorHint")}
               </span>
               <span className={styles.counter}>
                 {text.length}/{AIDP_CHUNK_TEXT_MAX_LENGTH}

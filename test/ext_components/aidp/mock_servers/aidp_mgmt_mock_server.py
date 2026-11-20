@@ -2038,7 +2038,7 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
     stubs = [
         ("这是文件的标题与概述部分，用于验证语义切片的查看与编辑。", [1]),
         ("第二段正文示例：AIDP 在入库时按语义边界切分文本，每个切片带有页码与元数据。", [1]),
-        ("表格示例：指标 | 取值 | 说明", [2]),
+        ("核心指标对照\n\n<table><thead><tr><th>指标</th><th>取值</th><th>说明</th></tr></thead><tbody><tr><td>准确率</td><td>98%</td><td>测试集结果</td></tr><tr><td>召回率</td><td>95%</td><td>测试集结果</td></tr></tbody></table>", [2]),
         ("第三段正文示例：切片的文本可在此页面修改，修改只提交 chunk_text 字段。", [2, 3]),
         ("图片说明示例：该切片对应文档中的插图说明文字。", [3]),
     ]
@@ -2292,7 +2292,7 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
     stubs = [
         ("这是文件的标题与概述部分，用于验证语义切片的查看与编辑。", [1]),
         ("第二段正文示例：AIDP 在入库时按语义边界切分文本，每个切片带有页码与元数据。", [1]),
-        ("表格示例：指标 | 取值 | 说明", [2]),
+        ("核心指标对照\n\n<table><thead><tr><th>指标</th><th>取值</th><th>说明</th></tr></thead><tbody><tr><td>准确率</td><td>98%</td><td>测试集结果</td></tr><tr><td>召回率</td><td>95%</td><td>测试集结果</td></tr></tbody></table>", [2]),
         ("第三段正文示例：切片的文本可在此页面修改，修改只提交 chunk_text 字段。", [2, 3]),
         ("图片说明示例：该切片对应文档中的插图说明文字。", [3]),
     ]

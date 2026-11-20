@@ -512,6 +512,13 @@
 .chunkTableWrap {
   margin-top: 16px;
 }
+.previewToggle {
+  margin-left: auto;
+  height: 22px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
 .chunkTableCaption {
   margin-bottom: 8px;
   color: var(--chunk-text);
@@ -521,6 +528,26 @@
 .chunkTableScroll {
   max-width: 100%;
   overflow-x: auto;
+}
+/* Sanitized AIDP table markup renders without classes; style it in place. */
+.chunkTableScroll table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--chunk-text, #191919);
+  font-size: 13px;
+  line-height: 20px;
+}
+.chunkTableScroll th,
+.chunkTableScroll td {
+  padding: 8px 12px;
+  border: 1px solid #e5e5e5;
+  text-align: left;
+  vertical-align: top;
+}
+.chunkTableScroll th {
+  background: #fafafa;
+  color: #595959;
+  font-weight: 500;
 }
 .chunkTable {
   width: 100%;
