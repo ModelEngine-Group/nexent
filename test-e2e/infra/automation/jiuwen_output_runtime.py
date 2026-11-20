@@ -1,54 +1,91 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Feed real runtime output through the production stream and isolated PostgreSQL DAL."""
+"""Replay real observer output through current Management SSE and PostgreSQL projection."""
 
-import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+import uuid
 
-from jiuwen_context_runtime import context_database
+from sqlalchemy import select
+from starlette.responses import StreamingResponse
+
+from jiuwen_context_runtime import context_database as context_database
 
 
 async def persist_output(monkeypatch, info, output):
-    from contracts.agent import AgentRequest
-    from contracts.conversation import HistoryItem
-    from management.db.conversation.repository import create_conversation, create_conversation_message, get_conversation_history
-    from management.services.agent import execution as application
+    from contracts.agentos import AgentResume, AgentRunReference
+    from contracts.conversation import MessageSource
+    from infrastructure.rdb.account_record import UserAccount, UserTenant
+    from infrastructure.rdb.client import get_db_session
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+    from management.db.trajectory.models import TrajectoryStatistics
+    from management.db.conversation.repository import (
+        create_conversation, create_conversation_message, get_conversation_history,
+    )
+    from management.services.agent import prepared_projection
+    from management.services.agent.agentos_events import present_public_resume
 
+    # The SDK run has already drained. Control only retained-journal delivery and
+    # the I/O scheduler; keep the production parser, public projection and DAL.
+    with get_db_session() as session:
+        for model in (UserAccount, ConversationProjectionReceipt, TrajectoryStatistics):
+            model.__table__.create(session.get_bind(), checkfirst=True)
+        if session.scalar(select(UserTenant.user_tenant_id).where(UserTenant.user_id == "owner")) is None:
+            session.add(UserTenant(user_id="owner", tenant_id="spike-tenant", created_by="owner"))
     conversation = create_conversation("Output contract", "owner", agent_id=42)["conversation_id"]
-    create_conversation_message({"conversation_id":conversation,"message_idx":0,"role":"user",
-                                 "content":"Current task"}, "owner")
+    create_conversation_message({"conversation_id": conversation, "message_idx": 0, "role": "user",
+                                 "content": "Current task"}, "owner")
     info.conversation_id, info.user_id = conversation, "owner"
-    request = AgentRequest(agent_id=42, conversation_id=conversation, query="Current task", is_debug=False,
-                           history=[HistoryItem(role="user",content="Current task")])
+    reference = AgentRunReference(conversation_id=conversation, run_id=uuid.uuid4().hex)
+    values = [("agentos_observer", event) for event in output]
+    values.append(("agentos_terminal", {"status": info.attempt_outcome}))
+    frames = tuple(f"id: {reference.run_id}:{index}\nevent: {kind}\ndata: {json.dumps(value)}\n\n".encode()
+                   for index, (kind, value) in enumerate(values, 1))
 
-    async def source(*args, **kwargs):
-        for event in output:
-            yield json.dumps(event)
+    async def resume(request, user_id, tenant_id):
+        assert request.run_id == reference.run_id and request.conversation_id == conversation
+        assert (user_id, tenant_id) == ("owner", "spike-tenant")
+        assert request.after_event_id is None
 
-    class InlinePersistence:
-        async def run(self, lane, spec, function, *args, **kwargs):
-            return function(*args, **kwargs)
+        async def body():
+            for frame in frames:
+                yield frame
+        return StreamingResponse(body())
 
-    # Runtime execution has already drained its own manager. This boundary controls only
-    # transport delivery and bookkeeping, retaining the production stream and actual DAL.
-    monkeypatch.setattr(application,"agent_run",source)
-    monkeypatch.setattr(application,"runtime_thread_manager",InlinePersistence())
-    monkeypatch.setattr(application,"_poll_runtime_cancel_signal",AsyncMock())
-    monkeypatch.setattr(application,"_unregister_agent_run_after_execution",lambda *a,**k:None)
-    monkeypatch.setattr(application,"_cleanup_channel_later",AsyncMock())
-    monkeypatch.setattr(application.streaming_channel_manager,"complete_channel",AsyncMock())
-    channel = SimpleNamespace(publish=AsyncMock())
-    wire = [chunk async for chunk in application._stream_agent_chunks(request,"owner","spike-tenant",info,None,
-                                                                    channel=channel)]
-    assert [call.args[0] for call in channel.publish.await_args_list] == wire, "Subscriber cache differs from public SSE"
-    await asyncio.sleep(0)
-    history = get_conversation_history(conversation,"owner")
-    assistant = next(m for m in history["message_records"] if m["role"]=="assistant")
-    envelopes=[]
+    async def inline_io(_task, function, *, lane, owner, **kwargs):
+        assert lane == "control-io" and owner == "management"
+        return function(**kwargs)
+
+    monkeypatch.setattr(prepared_projection, "run_blocking", inline_io)
+    projected = await prepared_projection.resume_assistant_projection(
+        resume, reference, "owner", "spike-tenant", message_index=1, message_source=MessageSource.CHAT)
+    assert projected.status == info.attempt_outcome
+    replayed = await prepared_projection.resume_assistant_projection(
+        resume, reference, "owner", "spike-tenant", message_index=1, message_source=MessageSource.CHAT)
+    assert replayed.assistant_message_id == projected.assistant_message_id
+    cursor = AgentResume(**reference.model_dump())
+
+    async def confirm_projection():
+        confirmed = await prepared_projection.resume_assistant_projection(
+            resume, reference, "owner", "spike-tenant", message_index=1, message_source=MessageSource.CHAT)
+        assert confirmed == projected
+        return True
+
+    async def public_wire():
+        upstream = await resume(cursor, "owner", "spike-tenant")
+        public = present_public_resume(upstream, cursor, "owner", on_terminal=confirm_projection,
+                                       include_journal_controls=False)
+        return [chunk.decode() if isinstance(chunk, bytes) else chunk async for chunk in public.body_iterator]
+
+    wire = await public_wire()
+    assert await public_wire() == wire, "Public journal replay changed observer projection"
+    history = get_conversation_history(conversation, "owner")
+    assistant = next(message for message in history["message_records"] if message["role"] == "assistant")
+    envelopes = []
     for unit in assistant["units"]:
-        try: value=json.loads(unit["unit_content"])
-        except (TypeError,ValueError):continue
-        if isinstance(value,dict) and value.get("runtime_mode")=="native_agent":envelopes.append(value)
-    return assistant,envelopes,wire
+        try:
+            value = json.loads(unit["unit_content"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict) and value.get("runtime_mode") == "native_agent":
+            envelopes.append(value)
+    return assistant, envelopes, wire

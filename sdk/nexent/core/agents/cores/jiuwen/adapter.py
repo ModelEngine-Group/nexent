@@ -10,6 +10,7 @@ import time
 import uuid
 from contextlib import aclosing, contextmanager
 from contextvars import ContextVar
+from copy import deepcopy
 from types import SimpleNamespace
 
 from nexent.core.agents.context.models import ContextItem, ContextItemType
@@ -460,6 +461,7 @@ class JiuwenAdapter(AgentCoreAdapter):
 
         card = ToolCard(**values)
         self._set_tool_timeout(card)
+        self.events.local_tool_schemas[card.name] = deepcopy(card.input_params)
         return card
 
     def _set_tool_timeout(self, card):
@@ -539,9 +541,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             {"role": history.role, "content": history.content}
             for history in _get_authorized_history(self.run_info) or ()
         )
-        from nexent.core.agents.prompt.policies import business_system_instructions
-
         from nexent.core.agents.cores.jiuwen.protocol import NATIVE_PROTOCOL_INSTRUCTION
+        from nexent.core.agents.prompt.policies import business_system_instructions
 
         shared = business_system_instructions(
             config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
