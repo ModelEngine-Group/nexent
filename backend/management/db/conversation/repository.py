@@ -3359,6 +3359,9 @@ def get_historical_context(
     conversation_id = int(conversation_id)
     if (current_user_message_id is None) == (before_message_index is None):
         raise ValueError("Historical context requires one message boundary")
+    # Only the persisted current-user-message boundary has an index to report. The
+    # pre-save boundary (before_message_index) intentionally has no such message.
+    current_user_message_index: Optional[int] = None
     with get_db_session() as session:
         if before_message_index is None:
             current = session.execute(
@@ -3376,6 +3379,7 @@ def get_historical_context(
             if current is None:
                 return None
             before_message_index = current.message_index
+            current_user_message_index = current.message_index
         else:
             owned = session.scalar(select(ConversationRecord.conversation_id).where(
                 ConversationRecord.conversation_id == conversation_id,
@@ -3549,7 +3553,7 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
-                "current_user_message_index": current.message_index}
+                "current_user_message_index": current_user_message_index}
 
 
 def _remove_scope_references(
