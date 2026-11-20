@@ -13,14 +13,15 @@ from ops.monitoring.contracts import MonitoringKind
 FACTS = "monitoring-facts"
 DAILY = "monitoring-daily"
 COMMON = {
-    **dict.fromkeys(("tenant_id", "fact_kind", "group_snapshot_state", "group_key"), "keyword"),
+    **dict.fromkeys(("tenant_id", "fact_kind", "group_snapshot_state", "group_key",
+                     "skill_id", "skill_name", "trigger_kind"), "keyword"),
     "initiator_group_ids": "integer", "agent_id": "integer",
 }
 FACT_FIELDS = {
     **COMMON,
     **dict.fromkeys(("fact_id", "call_context_id", "root_run_id", "agent_run_id", "usage_source",
                      "outcome"), "keyword"),
-    **dict.fromkeys(("partition_anchor_at", "started_at", "ended_at"), "date"),
+    **dict.fromkeys(("partition_anchor_at", "started_at", "ended_at", "triggered_at"), "date"),
     **dict.fromkeys(("record_revision", "write_version", "duration_ms"), "long"),
     "contract_version": "integer",
 }

@@ -614,7 +614,7 @@ class JiuwenAdapter(AgentCoreAdapter):
     def _skill_rails(self):
         from nexent.core.agents.cores.jiuwen.skills import NexentSkillRail
 
-        directories, names, authorized_by_root = set(), set(), {}
+        directories, names, authorized_by_root, skill_name_to_id = set(), set(), {}, {}
         for config in self.tool_configs:
             if config.class_name not in {"ReadSkillMdTool", "RunSkillScriptTool", "ReadSkillConfigTool"}:
                 continue
@@ -626,7 +626,11 @@ class JiuwenAdapter(AgentCoreAdapter):
                 directories.add(parameters["local_skills_dir"])
                 names.update(authorized)
                 authorized_by_root.setdefault(parameters["local_skills_dir"], set()).update(authorized)
-        return [NexentSkillRail(sorted(directories), sorted(names), authorized_by_root=authorized_by_root)] \
+            for name, skill_id in (parameters.get("skill_name_to_id") or {}).items():
+                if name in names and skill_id is not None:
+                    skill_name_to_id[name] = skill_id
+        return [NexentSkillRail(sorted(directories), sorted(names), authorized_by_root=authorized_by_root,
+                                skill_name_to_id=skill_name_to_id)] \
             if directories and names else []
 
     def _bind_skill_sandbox(self):
