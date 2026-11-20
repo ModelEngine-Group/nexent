@@ -63,10 +63,9 @@ def main():
     else:
         state = json.loads(path.read_text(encoding="utf-8"))
     headers = {"Authorization": "Bearer " + state["access_token"]}
-    with httpx.Client(base_url="http://nexent-config:5010", headers=headers, trust_env=False, timeout=90) as config, \
-            httpx.Client(base_url="http://nexent-runtime:5014", headers=headers, trust_env=False, timeout=90) as runtime:
+    with httpx.Client(base_url="http://nexent-gateway:5013/api", headers=headers, trust_env=False, timeout=90) as gateway:
         if mode == "setup":
-            exported = checked(config.post("/agent/export", json={"agent_id": state["source"]}))["data"]
+            exported = checked(gateway.post("/agent/export", json={"agent_id": state["source"]}))["data"]
             state["source_export_hash"] = digest(exported)
             original = exported["agent_info"][str(state["source"])]
             assert "agent_core" not in original, "Portable Agent still persists Core"
@@ -83,13 +82,13 @@ def main():
                 entry["name"] = "hitl_" + state["prefix"] + "_" + key
                 entry["display_name"] = "算卦助手-澄清验收-" + state["prefix"] + "-" + key
             save(path, state)
-            imported = checked(config.post("/agent/import", json={"agent_info": exported}))
+            imported = checked(gateway.post("/agent/import", json={"agent_info": exported}))
             state["agent_id"] = imported["agent_id"]
             state["owned_agents"] = list(imported["agent_id_mapping"].values())
             save(path, state)
             assert state["source"] not in state["owned_agents"]
-            checked(config.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Real HITL validation"}))
-            copied = checked(config.post("/agent/export", json={"agent_id": state["agent_id"]}))["data"]
+            checked(gateway.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Real HITL validation"}))
+            copied = checked(gateway.post("/agent/export", json={"agent_id": state["agent_id"]}))["data"]
             actual = copied["agent_info"][str(state["agent_id"])]
             assert all(actual.get(key) == value for key, value in expected.items()), "Clone changed source semantics"
             assert "agent_core" not in actual
@@ -98,7 +97,7 @@ def main():
             print(json.dumps({"setup": True, "same_model_and_config": True, "same_resources": True,
                               "source_version": state["source_version"]}))
         elif mode == "audit":
-            cid = int(sys.argv[3])
+            cid, expected_core = int(sys.argv[3]), sys.argv[4]
             with get_db_session() as session:
                 owner = session.query(ConversationRecord).filter_by(conversation_id=cid).one()
                 assert owner.agent_id == state["agent_id"] and owner.created_by == state["user"]
@@ -112,14 +111,19 @@ def main():
                     except (TypeError, ValueError):
                         continue
                     if unit["unit_type"] == "human_interaction":
-                        assert parsed.get("type") == "human_interaction" and parsed.get("agent_core") == "jiuwen"
-                        form = json.loads(parsed["content"])
+                        if expected_core == "jiuwen":
+                            assert parsed.get("type") == "human_interaction" and parsed.get("agent_core") == expected_core
+                            form = json.loads(parsed["content"])
+                        else:
+                            form = parsed
                         forms.append({"source_message_id": unit["message_id"], "unit_index": unit["unit_index"],
                                       "form": form})
                     elif unit["unit_type"] == "clarification_response":
                         responses.append(parsed)
                     elif unit["unit_type"] == "run_terminal":
-                        terminals.append({k: parsed.get(k) for k in ["status", "end_reason", "agent_core"]})
+                        terminals.append({"message_id": unit["message_id"], **{k: parsed[k] for k in (
+                            "status", "end_reason", "agent_core", "final_content", "final_block_ids", "error",
+                        )}})
                 print(json.dumps({"message_count": len(messages), "message_statuses": [m["status"] for m in messages],
                                   "messages_hash": digest(messages), "units_hash": digest(units),
                                   "forms": forms, "responses": responses, "terminals": terminals}, ensure_ascii=False))
@@ -138,11 +142,11 @@ def main():
                     ConversationRecord.agent_id.in_(ids), ConversationRecord.created_by == state["user"],
                     ConversationRecord.delete_flag == "N")]
             for cid in conversations:
-                checked(runtime.delete(f"/conversation/{cid}"))
+                checked(gateway.delete(f"/conversation/{cid}"))
             if state.get("source_export_hash"):
-                assert digest(checked(config.post("/agent/export", json={"agent_id": state["source"]}))["data"]) == state["source_export_hash"]
+                assert digest(checked(gateway.post("/agent/export", json={"agent_id": state["source"]}))["data"]) == state["source_export_hash"]
             for agent_id in ids:
-                checked(config.request("DELETE", "/agent", json={"agent_id": agent_id}))
+                checked(gateway.request("DELETE", "/agent", json={"agent_id": agent_id}))
             path.unlink(missing_ok=True)
             print(json.dumps({"cleanup": True, "source_unchanged": True, "source_history_unchanged": True,
                               "owned_conversations": len(conversations), "owned_agents": len(ids)}))
