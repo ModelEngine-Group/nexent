@@ -180,5 +180,6 @@ class TestPublicAPI:
             "AidpKbConflictError",
             "AidpKbSyncError",
             "AidpGroupValidationError",
+            "AidpSensitiveWordError",
         }
         assert set(aidp_exceptions.__all__) == expected

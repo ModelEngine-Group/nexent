@@ -250,6 +250,17 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
               placeholder={t("aidpKnowledge.kbDescriptionPlaceholder")}
             />
           </Form.Item>
+          <Form.Item
+            name="sensitive_intercept_enable"
+            label={label(
+              t("aidpKnowledge.sensitiveIntercept"),
+              t("aidpKnowledge.sensitiveInterceptHint")
+            )}
+            className={styles.fullSpan}
+            valuePropName="checked"
+          >
+            <Switch aria-label={t("aidpKnowledge.sensitiveIntercept")} />
+          </Form.Item>
           {showGroupFields && canConfigureGroupPermissions && (
             <>
               <div

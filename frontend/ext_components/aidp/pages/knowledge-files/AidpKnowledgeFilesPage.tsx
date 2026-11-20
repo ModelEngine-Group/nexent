@@ -34,6 +34,7 @@ import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/Aid
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
 import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeInformationTab";
 import AidpKnowledgeOntologyTab from "./components/AidpKnowledgeOntologyTab";
+import AidpSensitiveWordsPage from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordsPage";
 import AidpKnowledgeFilesPanel from "@/ext_components/aidp/pages/knowledge-files/components/AidpKnowledgeFilesPanel";
 import { formatDetailDateTime } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
 
@@ -46,7 +47,8 @@ interface AidpKnowledgeFilesPageProps {
   initialTab?: DetailTab;
 }
 
-type DetailTab = "files" | "tasks" | "information" | "ontology";
+type DetailTab =
+  "files" | "tasks" | "information" | "ontology" | "sensitive-words";
 
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
 
@@ -242,6 +244,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             key: "ontology",
             label: t("aidpKnowledge.detailTabOntology"),
           },
+          {
+            key: "sensitive-words",
+            label: t("aidpKnowledge.detailTabSensitiveWords"),
+          },
         ]}
       />
 
@@ -272,12 +278,23 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           canConfigureGroupPermissions={canConfigureGroupPermissions}
           detailFetching={detailQuery.isFetching}
           onEditPermissions={() => setEditingKbMode("permissions")}
+          onEditMetadata={() => setEditingKbMode("metadata")}
           onRefreshDetail={() => detailQuery.refetch()}
         />
       )}
 
       {activeTab === "ontology" && (
         <AidpKnowledgeOntologyTab kdsId={knowledgeBase.kds_id} />
+      )}
+
+      {activeTab === "sensitive-words" && (
+        <section className="flex min-h-0 flex-1 flex-col bg-white">
+          <AidpSensitiveWordsPage
+            key={detail.kds_id}
+            knowledgeBaseId={detail.kds_id}
+            canManage={canEdit}
+          />
+        </section>
       )}
 
       <AidpUpdateKbModal

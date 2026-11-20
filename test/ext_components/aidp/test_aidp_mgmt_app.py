@@ -91,13 +91,14 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
-from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
+from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common, aidp_sensitive_word_routes
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
     UpdateKbRequest,
     aidp_mgmt_router,
 )
+from ext_components.aidp.consts.aidp_exceptions import AidpSensitiveWordError  # noqa: E402
 from backend.http.server.app_factory import register_exception_handlers
 
 SERVER_URL = "http://aidp.example.com:30081"
@@ -106,9 +107,11 @@ USER_ID = "user-test"
 TENANT_ID = "tenant-test"
 
 
-def test_knowledge_base_api_models_do_not_expose_safety_guard():
+def test_knowledge_base_api_models_expose_the_sensitive_intercept_toggle():
     for model in (CreateKbRequest, UpdateKbRequest, SetPermissionRequest):
         assert "sensitive_intercept_enalbe" not in model.model_fields
+    assert CreateKbRequest.model_fields["sensitive_intercept_enable"].default == 0
+    assert "sensitive_intercept_enable" in UpdateKbRequest.model_fields
 
 
 @pytest.mark.parametrize("settings", [
@@ -332,9 +335,9 @@ class TestAuthRequired:
 
 class TestPermissionEnforcement:
     def test_get_kb_without_access_returns_404(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -350,9 +353,9 @@ class TestPermissionEnforcement:
         assert response.status_code == HTTPStatus.NOT_FOUND
 
     def test_get_kb_with_readonly_returns_metadata(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         decision = MagicMock()
         decision.permission = "READ_ONLY"
@@ -375,9 +378,9 @@ class TestPermissionEnforcement:
         assert "document_count_reliable" not in response.json()
 
     def test_update_kb_without_edit_returns_403(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -396,9 +399,9 @@ class TestPermissionEnforcement:
         assert response.status_code == HTTPStatus.FORBIDDEN
 
     def test_delete_kb_runs_and_soft_deletes(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -425,9 +428,9 @@ class TestPermissionEnforcement:
         cleanup_documents.assert_called_once_with("tenant-test", "kb-1", "user-test")
 
     def test_set_permission_private_clears_groups(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -451,9 +454,9 @@ class TestPermissionEnforcement:
         assert kwargs["group_ids"] == []
 
     def test_set_permission_requires_groups_when_not_private(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -470,9 +473,9 @@ class TestPermissionEnforcement:
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
     def test_set_permission_rejects_cross_tenant_group(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -508,9 +511,9 @@ class TestCreateKnowledgeBase:
         )
 
     def test_create_persists_permission_and_returns_edit(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with self._patch_create(), \
              patch.object(aidp_permission_service.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
@@ -540,9 +543,9 @@ class TestCreateKnowledgeBase:
         assert mock_status.call_args.kwargs["status"] == "ACTIVE"
 
     def test_create_returns_409_when_active_record_exists(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with self._patch_create(), \
              patch.object(aidp_permission_service, "_validate_group_ids_strict", side_effect=lambda g, t: list(g)), \
@@ -560,9 +563,9 @@ class TestCreateKnowledgeBase:
         assert response.status_code == HTTPStatus.CONFLICT
 
     def test_create_rolls_back_aidp_when_db_fails(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         delete_mock = MagicMock(return_value=True)
         with self._patch_create(), \
@@ -672,9 +675,9 @@ class TestListKnowledgeBases:
         assert response.json()["value"][0]["created_by"] == owner_id
 
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_mgmt_app, "_current_accessible_rows", return_value=[
                  {
@@ -825,8 +828,8 @@ from contracts.errors.codes import ErrorCode
 
 class TestUpdateKnowledgeBase:
     def test_update_rejects_empty_payload(self):
-        client = _client()
         from ext_components.aidp.services import aidp_permission_service
+        client = _client()
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")):
@@ -838,9 +841,9 @@ class TestUpdateKnowledgeBase:
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
     def test_update_calls_aidp_with_payload(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -872,9 +875,9 @@ class TestUpdateKnowledgeBase:
 
 class TestUploadDocuments:
     def test_upload_calls_aidp_with_files(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         files = [
             ("files", ("doc.txt", io.BytesIO(b"hello"), "text/plain")),
@@ -900,9 +903,9 @@ class TestUploadDocuments:
         mock_upload.assert_called_once()
 
     def test_upload_rejects_more_than_fifty_files_without_calling_aidp(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         files = [
             ("files", (f"doc-{index}.txt", io.BytesIO(b"hello"), "text/plain"))
@@ -924,9 +927,9 @@ class TestUploadDocuments:
         mock_upload.assert_not_called()
 
     def test_upload_merges_oversized_file_with_aidp_result(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         files = [
             ("files", ("valid.pdf", io.BytesIO(b"ok"), "application/pdf")),
@@ -955,9 +958,9 @@ class TestUploadDocuments:
         assert mock_upload.call_args.args[3][0].filename == "valid.pdf"
 
     def test_upload_applies_twenty_mb_limit_to_json_md_and_html(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         files = [
             ("files", ("large.json", io.BytesIO(b"xx"), "application/json")),
@@ -1003,9 +1006,9 @@ class TestUploadDocuments:
 
 class TestAidpDocumentFileOperations:
     def test_remove_forwards_only_uuids(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         aidp_result = {
             "summary": {"total": 2, "success": 1, "failed": 1},
@@ -1068,9 +1071,9 @@ class TestAidpDocumentFileOperations:
         mock_remove.assert_not_called()
 
     def test_download_returns_binary_response(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         mock_response = httpx.Response(
             200,
@@ -1115,9 +1118,9 @@ class TestAidpDocumentFileOperations:
         assert "x-file-name" not in response.headers
 
     def test_preview_streams_original_document_inline(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         docx_mime = (
             "application/vnd.openxmlformats-officedocument"
@@ -1175,9 +1178,9 @@ class TestAidpDocumentFileOperations:
         )
 
     def test_preview_reports_the_converted_file_name(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         # AIDP answers an unsupported format with a PDF conversion, so the
         # served name replaces the uploaded extension. The frontend needs the
@@ -1221,9 +1224,9 @@ class TestAidpDocumentFileOperations:
         )
 
     def test_preview_uri_encodes_a_non_ascii_served_name(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         # httpx decodes header bytes into text, so AIDP's Chinese name arrives as
         # real Unicode - which response headers (latin-1 on the wire) cannot
@@ -1268,9 +1271,9 @@ class TestAidpDocumentFileOperations:
         )
 
     def test_preview_falls_back_when_aidp_omits_headers(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         mock_response = httpx.Response(
             200,
@@ -1317,9 +1320,9 @@ class TestAidpDocumentFileOperations:
         mock_stream.assert_not_called()
 
     def test_preview_without_read_returns_403(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -1359,9 +1362,9 @@ class TestAidpDocumentFileOperations:
         assert aidp_mgmt_app._build_inline_disposition(file_name) == expected
 
     def test_remove_does_not_invalidate_cache_when_no_file_succeeds(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         aidp_result = {
             "summary": {"total": 1, "success": 0, "failed": 1},
@@ -1498,7 +1501,6 @@ class TestListKbsActiveStatus:
     def test_list_marks_kb_active_when_detail_fetch_succeeds(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_mgmt_app, "_current_accessible_rows", return_value=[
                  {
@@ -1524,9 +1526,9 @@ class TestListKbsActiveStatus:
 
 class TestCreateKnowledgeBaseEdgeCases:
     def test_user_create_normalizes_shared_permission_to_private(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_mgmt_app, "get_user_role_by_tenant", return_value="USER"), \
              patch.object(aidp_mgmt_app, "create_aidp_kb_impl", return_value={"kds_id": "kb-user"}), \
@@ -1557,9 +1559,9 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
     def test_create_with_aidp_group_validation_error(self):
+        from ext_components.aidp.services import aidp_permission_service
         """_validate_group_ids_strict raises AidpGroupValidationError -> 400. Covers line 307-311."""
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
         from ext_components.aidp.consts.aidp_exceptions import AidpGroupValidationError
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
@@ -1575,9 +1577,9 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
     def test_create_private_skips_group_validation(self):
+        from ext_components.aidp.services import aidp_permission_service
         """PRIVATE permission: group validation skipped, valid_group_ids=[] (line 313)."""
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
                     return_value={"kds_id": "kb-priv"}) as mock_create, \
@@ -1597,9 +1599,9 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert perm_kwargs["group_ids"] == []
 
     def test_create_app_exception_from_aidp_reraised(self):
+        from ext_components.aidp.services import aidp_permission_service
         """AppException from create_aidp_kb_impl is re-raised directly (line 323)."""
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
                     side_effect=AppException(ErrorCode.AIDP_AUTH_ERROR, "unauthorized")), \
@@ -1615,10 +1617,10 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert response.status_code == 502
 
     def test_create_integrity_error_on_permission_insert(self):
+        from ext_components.aidp.services import aidp_permission_service
         """IntegrityError during create_permission -> _raise_aidp_conflict -> 409 (line 363)."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
         from sqlalchemy.exc import IntegrityError
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
@@ -1638,9 +1640,9 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert response.status_code == HTTPStatus.CONFLICT
 
     def test_create_generic_exception_from_aidp(self):
+        from ext_components.aidp.services import aidp_permission_service
         """Generic exception from create_aidp_kb_impl -> AppException with AIDP_SERVICE_ERROR (502)."""
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
                     side_effect=RuntimeError("AIDP exploded")), \
@@ -1656,9 +1658,9 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert response.status_code == 502
 
     def test_create_no_kds_id_from_aidp(self):
+        from ext_components.aidp.services import aidp_permission_service
         """AIDP returns response without kds_id -> AppException AIDP_SERVICE_ERROR (502)."""
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
                     return_value={"name": "kb"}), \
@@ -1674,10 +1676,10 @@ class TestCreateKnowledgeBaseEdgeCases:
         assert response.status_code == 502
 
     def test_create_rollback_success_returns_500(self):
+        from ext_components.aidp.services import aidp_permission_service
         """DB fails -> AIDP rollback succeeds -> 500 returned (HTTPException from handler)."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         delete_mock = MagicMock(return_value=True)
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
@@ -1699,10 +1701,10 @@ class TestCreateKnowledgeBaseEdgeCases:
         delete_mock.assert_called_once()
 
     def test_create_rollback_failure_marks_orphaned(self):
+        from ext_components.aidp.services import aidp_permission_service
         """DB fails -> AIDP rollback also fails -> ORPHANED status + 500."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
                     return_value={"kds_id": "kb-new"}), \
@@ -1733,9 +1735,9 @@ class TestCreateKnowledgeBaseEdgeCases:
 
 class TestGetKbFetchFailure:
     def test_get_kb_marks_unavailable_on_aidp_error(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -1764,9 +1766,9 @@ class TestGetKbFetchFailure:
 
 class TestSetPermissionEdgeCases:
     def test_user_cannot_change_private_kb_to_shared_permission(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_mgmt_app, "get_user_role_by_tenant", return_value="USER"), \
              patch.object(aidp_permission_service, "require_permission",
@@ -1782,8 +1784,8 @@ class TestSetPermissionEdgeCases:
         mock_update.assert_not_called()
 
     def test_set_permission_rejects_unsupported_value(self):
-        client = _client()
         from ext_components.aidp.services import aidp_permission_service
+        client = _client()
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")):
@@ -1795,10 +1797,10 @@ class TestSetPermissionEdgeCases:
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
     def test_set_permission_group_validation_error(self):
+        from ext_components.aidp.services import aidp_permission_service
         """_validate_group_ids_strict raises AidpGroupValidationError -> 400."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
         from ext_components.aidp.consts.aidp_exceptions import AidpGroupValidationError
 
         with patch.object(aidp_permission_service, "require_permission",
@@ -1824,9 +1826,9 @@ class TestCreateKnowledgeBaseKdsName:
     """
 
     def _run_create(self, aidp_result, body_name="KB"):
+        from ext_components.aidp.services import aidp_permission_service
         """Helper: POST create and capture create_permission kwargs."""
         client = _client()
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
                     return_value=aidp_result), \
@@ -1880,10 +1882,10 @@ class TestUpdateKnowledgeBaseKdsNameSync:
     """Covers kds_name sync to permission table on update_knowledge_base."""
 
     def test_update_syncs_kds_name_to_database_when_name_changes(self):
+        from ext_components.aidp.services import aidp_permission_service
         """body.name set -> perms.update_permission called with kds_name."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -1902,11 +1904,11 @@ class TestUpdateKnowledgeBaseKdsNameSync:
         assert kwargs["kds_name"] == "Updated Name"
 
     def test_update_skips_sync_when_no_name_change(self):
+        from ext_components.aidp.services import aidp_permission_service
         """body.name not set, aidp result has no kds_name ->
         perms.update_permission NOT called with kds_name."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -1940,9 +1942,9 @@ class TestKnowledgeFilesEndpoint:
     """GET /knowledge-bases/{kds_id}/files - ingested files for the detail page."""
 
     def test_file_search_skips_count_and_reports_next_page(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         page = {
             "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf"}],
@@ -1971,9 +1973,9 @@ class TestKnowledgeFilesEndpoint:
         )
 
     def test_file_list_stops_on_short_filtered_page(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         page = {
             "value": [{"file_uuid": "f-1"}, {"file_uuid": "f-2"}],
@@ -1996,9 +1998,9 @@ class TestKnowledgeFilesEndpoint:
         assert body["total_reliable"] is False
 
     def test_file_list_reports_more_on_full_filtered_page(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         page = {
             "value": [{"file_uuid": "f-1"}, {"file_uuid": "f-2"}],
@@ -2017,9 +2019,9 @@ class TestKnowledgeFilesEndpoint:
         assert response.json()["has_more"] is True
 
     def test_file_list_rejects_malformed_payload(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -2037,9 +2039,9 @@ class TestKnowledgeFilesEndpoint:
         assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
 
     def test_unfiltered_file_list_uses_cached_count(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         rows = [{"file_uuid": f"f-{index}"} for index in range(10)]
         with patch.object(aidp_permission_service, "require_permission",
@@ -2063,9 +2065,9 @@ class TestKnowledgeFilesEndpoint:
         count_docs.assert_called_once_with(SERVER_URL, API_KEY, "kb-1")
 
     def test_file_list_propagates_count_failure(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -2084,9 +2086,9 @@ class TestKnowledgeFilesEndpoint:
         assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
 
     def test_file_list_propagates_upstream_list_failure(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         list_error = AppException(ErrorCode.AIDP_CONNECTION_ERROR, "AIDP is unavailable")
         with patch.object(aidp_permission_service, "require_permission",
@@ -2107,9 +2109,9 @@ class TestUploadTasksEndpoint:
     """GET /knowledge-bases/{kds_id}/upload-tasks - AIDP file history view."""
 
     def test_upload_task_query_forwards_filters_and_uses_aidp_stats(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         history = {
             "value": [{
@@ -2160,9 +2162,9 @@ class TestUploadTasksEndpoint:
         )
 
     def test_filtered_upload_task_short_page_disables_next_page(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         # Keyword-only queries (status omitted/0) can trust the filtered
         # total_record_count; a short page is the last page.
@@ -2191,9 +2193,9 @@ class TestUploadTasksEndpoint:
         assert body["stats"]["total"] == 1
 
     def test_unfiltered_upload_task_query_trusts_global_total(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         # Without keyword/status filters total_record_count matches the listed
         # set, so the unfiltered list keeps the reliable global total and the
@@ -2227,9 +2229,9 @@ class TestUploadTasksEndpoint:
         )
 
     def test_filtered_upload_task_full_page_reports_more(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         history = {
             "value": [
@@ -2256,9 +2258,9 @@ class TestUploadTasksEndpoint:
         assert body["has_more"] is True
 
     def test_filtered_upload_task_exact_full_last_page_disables_next(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         history = {
             "value": [
@@ -2286,9 +2288,9 @@ class TestUploadTasksEndpoint:
         assert body["has_more"] is False
 
     def test_unfiltered_upload_task_last_page_ignores_next_link(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         history = {
             "value": [
@@ -2317,9 +2319,9 @@ class TestUploadTasksEndpoint:
         assert body["has_more"] is False
 
     def test_upload_task_listing_survives_unresolvable_channel(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -2348,9 +2350,9 @@ class TestUploadTaskRetryEndpoint:
     """POST /knowledge-bases/{kds_id}/upload-tasks/retry."""
 
     def test_retry_delegates_selected_file_validation_to_aidp(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         file_uuid = "00000000000040008000000000000003"
         upstream_result = {
@@ -2374,9 +2376,9 @@ class TestUploadTaskRetryEndpoint:
         retry_docs.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", [file_uuid])
 
     def test_retry_requires_edit_permission(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         # Exercise the real permission matrix: a DEV user who matched the
         # record's group resolves to READ_ONLY, which must not satisfy the
@@ -2403,9 +2405,9 @@ class TestUploadTaskRetryEndpoint:
         retry_docs.assert_not_called()
 
     def test_retry_dedupes_file_uuids(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         first = "00000000000040008000000000000003"
         second = "00000000000040008000000000000004"
@@ -2423,8 +2425,8 @@ class TestUploadTaskRetryEndpoint:
         retry_docs.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", [first, second])
 
     def test_retry_rejects_empty_uuid_list(self):
-        client = _client()
         from ext_components.aidp.services import aidp_permission_service
+        client = _client()
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")):
@@ -2436,9 +2438,9 @@ class TestUploadTaskRetryEndpoint:
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
     def test_retry_invalidates_detail_and_count_caches(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -2461,9 +2463,9 @@ class TestUpdateKbConfigurationFields:
     """VLM / chunk settings carried by UpdateKbRequest (detail settings modal)."""
 
     def test_update_forwards_vlm_and_chunk_settings(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         payload = {
             "chunk_mode": 1,
@@ -2489,8 +2491,8 @@ class TestUpdateKbConfigurationFields:
         assert mock_update.call_args.args[3] == payload
 
     def test_update_rejects_out_of_range_chunk_settings(self):
-        client = _client()
         from ext_components.aidp.services import aidp_permission_service
+        client = _client()
 
         payloads = [
             {"chunk_mode": 2},
@@ -2512,12 +2514,12 @@ class TestUpdateKbConfigurationFields:
     # ---- Knowledge graph settings (detail information tab) ----
 
     def test_update_sends_only_edited_graph_fields_with_enabled_flag(self):
+        from ext_components.aidp.services import aidp_permission_service
         """A partial graph_config edit forwards only the edited fields in
         AIDP string format, and echoes is_exist_graph=true which AIDP
         requires alongside any graph_config PATCH."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         current_graph = {
             "domain": "通用",
@@ -2567,9 +2569,9 @@ class TestUpdateKbConfigurationFields:
         assert payload["is_exist_graph"] is True
 
     def test_update_forwards_graph_disable(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         current = {"kds_id": "kb-1", "is_exist_graph": True}
         with patch.object(aidp_permission_service, "require_permission",
@@ -2589,10 +2591,10 @@ class TestUpdateKbConfigurationFields:
         assert mock_update.call_args.args[3] == {"is_exist_graph": False}
 
     def test_update_rejects_graph_reenable(self):
+        from ext_components.aidp.services import aidp_permission_service
         """The graph switch is one-way: re-enabling is permanently rejected."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         current = {"kds_id": "kb-1", "is_exist_graph": True}
         with patch.object(aidp_permission_service, "require_permission",
@@ -2612,10 +2614,10 @@ class TestUpdateKbConfigurationFields:
         mock_update.assert_not_called()
 
     def test_update_rejects_graph_config_when_graph_disabled(self):
+        from ext_components.aidp.services import aidp_permission_service
         """Once the graph is off its configuration is locked for updates."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         current = {"kds_id": "kb-1", "is_exist_graph": False}
         with patch.object(aidp_permission_service, "require_permission",
@@ -2643,9 +2645,9 @@ class TestUpdateKbConfigurationFields:
         {"domain": "通用"},                # non-editable graph field
     ])
     def test_update_rejects_invalid_graph_values(self, graph_updates):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         current = {"kds_id": "kb-1", "is_exist_graph": True, "graph_config": "{}"}
         with patch.object(aidp_permission_service, "require_permission",
@@ -2760,8 +2762,10 @@ class TestNormalizeKbConfigFields:
 def test_cleanup_document_assignments_delegates_to_tag_management(monkeypatch):
     """The delete flow keeps document assignment usage in sync."""
 
+    from management.services.tag import library as tag_library
+
     sentinel = MagicMock()
-    monkeypatch.setattr(aidp_mgmt_app, "TagManagementService", sentinel)
+    monkeypatch.setattr(tag_library, "TagManagementService", sentinel)
 
     aidp_mgmt_app._cleanup_document_assignments_for_deleted_knowledge_base(
         "tenant-1", "kb-9", "user-1"
@@ -2847,11 +2851,11 @@ class TestUpdateGraphConfigDegradedStorage:
         ["not valid json", "[1, 2]", None, {"domain": "通用"}],
     )
     def test_stored_config_shape_does_not_affect_patch_payload(self, stored):
+        from ext_components.aidp.services import aidp_permission_service
         """Only edited fields are sent, so unparseable or legacy stored
         configs cannot break or pollute the update."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         current = {"kds_id": "kb-1", "is_exist_graph": True}
         if stored is not None:
@@ -2878,9 +2882,9 @@ class TestUpdateGraphConfigDegradedStorage:
 
 class TestSetPermissionBlankName:
     def test_set_permission_rejects_blank_name(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -2960,9 +2964,9 @@ class TestDeleteKnowledgeBaseFailure:
     """An upstream delete failure leaves local permission state untouched."""
 
     def test_delete_reports_failure_and_skips_local_cleanup(self):
+        from ext_components.aidp.services import aidp_permission_service
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -2979,6 +2983,298 @@ class TestDeleteKnowledgeBaseFailure:
         mock_soft.assert_not_called()
 
 
+class TestKnowledgeBaseSensitiveIntercept:
+    """BE-SW-001: the KB toggle keeps 0/1 intact across the whole chain."""
+
+    @pytest.mark.parametrize("value", [0, 1])
+    def test_create_forwards_the_toggle(self, value):
+        from ext_components.aidp.services import aidp_permission_service
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(
+            aidp_mgmt_app, "create_aidp_kb_impl",
+            return_value={"kds_id": "kb-new", "name": "kb"},
+        ) as mock_create, \
+             patch.object(aidp_permission_service.aidp_permission_db, "get_permission_by_kb_id",
+                          return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1), \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={
+                    "name": "New KB",
+                    "description": "A test knowledge base",
+                    "embedding_model": "bge-m3",
+                    "ingroup_permission": "PRIVATE",
+                    "sensitive_intercept_enable": value,
+                },
+            )
+        assert response.status_code == HTTPStatus.OK
+        payload = mock_create.call_args.args[2]
+        assert payload["sensitive_intercept_enable"] == value
+
+    def test_create_defaults_the_toggle_to_disabled(self):
+        from ext_components.aidp.apps.aidp_mgmt_app import CreateKbRequest
+
+        body = CreateKbRequest(
+            name="New KB",
+            description="A test knowledge base",
+            embedding_model="bge-m3",
+        )
+        assert body.sensitive_intercept_enable == 0
+
+    @pytest.mark.parametrize("value", [0, 1])
+    def test_update_forwards_only_the_supplied_toggle(self, value):
+        from ext_components.aidp.services import aidp_permission_service
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"sensitive_intercept_enable": value},
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert mock_update.call_args.args[3] == {
+            "sensitive_intercept_enable": value
+        }
+
+    @pytest.mark.parametrize(
+        "detail,expected",
+        [
+            ({"kds_name": "kb"}, 0),
+            ({"kds_name": "kb", "sensitive_intercept_enable": 1}, 1),
+            ({"kds_name": "kb", "sensitive_intercept_enable": 0}, 0),
+            ({"kds_name": "kb", "sensitive_intercept_enable": "是"}, 1),
+            ({"kds_name": "kb", "kms_config_str": '{"sensitive_intercept_enable": 1}'}, 1),
+        ],
+    )
+    def test_detail_echoes_the_toggle(self, detail, expected):
+        from ext_components.aidp.services import aidp_permission_service
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "get_aidp_kb_impl", return_value=detail), \
+             patch.object(aidp_mgmt_app.aidp_permission_db, "get_permission_by_kb_id",
+                          return_value=None), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=0):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["sensitive_intercept_enable"] == expected
+
+
+class TestSensitiveWordRoutes:
+    """BE-SW-002/003: per-KB proxy shape, permissions and upstream errors."""
+
+    def _permission(self, permission="EDIT"):
+        from ext_components.aidp.services import aidp_permission_service
+
+        return patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission=permission),
+        )
+
+    def test_list_forwards_the_kb_and_filters(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        result = {
+            "value": [{"id": "1", "word": "暴力", "mode": "BLACK"}],
+            "next_link": None,
+            "total_count": 1,
+        }
+        with self._permission("READ_ONLY") as mock_permission, \
+             patch.object(aidp_sensitive_word_routes, "list_sensitive_words_impl",
+                          return_value=result) as mock_list:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
+                headers=_bearer(),
+                params={"page": 2, "page_size": 20, "keyword": " 暴力 ", "mode": "BLACK"},
+            )
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert "can_manage" not in body
+        assert body["total_count"] == 1
+        assert body["next_link"] is None
+        mock_permission.assert_called_once_with(
+            "kb-1", USER_ID, TENANT_ID, required="READ"
+        )
+        mock_list.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", 2, 20, " 暴力 ", "BLACK"
+        )
+
+    def test_list_denial_does_not_call_aidp(self):
+        from ext_components.aidp.services import aidp_permission_service
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            side_effect=aidp_mgmt_app.HTTPException(
+                status_code=HTTPStatus.FORBIDDEN, detail="denied"
+            ),
+        ), patch.object(aidp_sensitive_word_routes, "list_sensitive_words_impl") as mock_list:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
+                headers=_bearer(),
+            )
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        mock_list.assert_not_called()
+
+    def test_create_requires_edit_on_the_knowledge_base(self):
+        from ext_components.aidp.services import aidp_permission_service
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            side_effect=aidp_mgmt_app.HTTPException(
+                status_code=HTTPStatus.FORBIDDEN, detail="denied"
+            ),
+        ), patch.object(aidp_sensitive_word_routes, "create_sensitive_word_impl") as mock_create:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
+                headers=_bearer(),
+                json={"word": "暴力", "mode": "BLACK", "description": "desc"},
+            )
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        mock_create.assert_not_called()
+
+    def test_create_trims_and_forwards_the_payload(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with self._permission() as mock_permission, \
+             patch.object(aidp_sensitive_word_routes, "create_sensitive_word_impl",
+                          return_value={"id": "sw-1"}) as mock_create:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
+                headers=_bearer(),
+                json={"word": "  暴力  ", "mode": "BLACK", "description": "  desc  "},
+            )
+        assert response.status_code == HTTPStatus.CREATED
+        assert response.json() == {"id": "sw-1"}
+        mock_permission.assert_called_once_with(
+            "kb-1", USER_ID, TENANT_ID, required="EDIT"
+        )
+        mock_create.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", "暴力", "BLACK", "desc"
+        )
+
+    def test_create_rejects_blank_description(self):
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
+            headers=_bearer(),
+            json={"word": "暴力", "mode": "BLACK", "description": "   "},
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_update_sends_only_supplied_fields(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with self._permission() as mock_permission, \
+             patch.object(aidp_sensitive_word_routes, "update_sensitive_word_impl",
+                          return_value={}) as mock_update:
+            response = client.patch(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words/sw-1",
+                headers=_bearer(),
+                json={"mode": "WHITE"},
+            )
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == {}
+        mock_permission.assert_called_once_with(
+            "kb-1", USER_ID, TENANT_ID, required="EDIT"
+        )
+        mock_update.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", "sw-1", {"mode": "WHITE"}
+        )
+
+    def test_update_rejects_an_empty_payload(self):
+        response = _client().patch(
+            "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words/sw-1",
+            headers=_bearer(),
+            json={},
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    @pytest.mark.parametrize(
+        "upstream_code,message",
+        [
+            ("1022", "Sensitive word already exists in this knowledge base"),
+            ("1004", "Sensitive word not found in this knowledge base"),
+            ("1008", "Built-in sensitive words are read-only"),
+            ("9999", "unexpected upstream failure"),
+        ],
+    )
+    def test_upstream_business_codes_keep_the_message_and_generic_status(
+        self, upstream_code, message
+    ):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from contracts.errors.codes import ErrorCode
+
+        with self._permission(), \
+             patch.object(aidp_sensitive_word_routes, "create_sensitive_word_impl",
+                          side_effect=AidpSensitiveWordError(
+                              message,
+                              upstream_code=upstream_code,
+                              upstream_status=500,
+                          )):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
+                headers=_bearer(),
+                json={"word": "暴力", "mode": "BLACK", "description": "desc"},
+            )
+        assert response.status_code == HTTPStatus.BAD_GATEWAY
+        body = response.json()
+        assert body["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
+        assert body["message"] == message
+        assert body["details"] == {
+            "upstream_status": 500,
+            "upstream_code": upstream_code,
+        }
+
+    def test_delete_returns_an_empty_204(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with self._permission() as mock_permission, \
+             patch.object(aidp_sensitive_word_routes, "delete_sensitive_word_impl",
+                          return_value=True) as mock_delete:
+            response = client.delete(
+                "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words/sw-1",
+                headers=_bearer(),
+            )
+        assert response.status_code == HTTPStatus.NO_CONTENT
+        assert response.content == b""
+        mock_permission.assert_called_once_with(
+            "kb-1", USER_ID, TENANT_ID, required="EDIT"
+        )
+        mock_delete.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", "sw-1")
+
+    def test_sensitive_word_routes_require_authentication(self):
+        client = _client()
+        base = "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words"
+        assert client.get(base).status_code == 401
+        assert client.post(
+            base,
+            json={"word": "w", "mode": "BLACK", "description": "d"},
+        ).status_code == 401
+        assert client.delete(f"{base}/sw-1").status_code == 401
 class TestFolderAndFilePathRoutes:
     """Folder tree/CRUD and file path operations forward the documented contract."""
 

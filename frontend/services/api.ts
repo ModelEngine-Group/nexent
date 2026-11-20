@@ -553,6 +553,11 @@ export const API_ENDPOINTS = {
       import: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/import`,
     },
+    /** Shared AIDP sensitive word dictionary, fixed to the upstream `aidp` namespace. */
+    sensitiveWords: (kdsId: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words`,
+    sensitiveWord: (kdsId: string, id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words/${encodeURIComponent(id)}`,
   },
   config: {
     frontend: `${API_BASE_URL}/frontend-config`,
