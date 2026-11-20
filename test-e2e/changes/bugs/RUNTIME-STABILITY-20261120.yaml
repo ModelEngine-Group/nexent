@@ -42,7 +42,7 @@ change:
     - Trace actual Jiuwen calls with stable identities and correct parent context, keeping returned structured errors
       separate from execution exceptions.
     - Recover eligible committed history after typed capacity rejection using one shared transaction and bounded
-      summary requests/deadline; atomically register private checkpoint sources and expose bounded native recall
+      summary requests and inherited parent/task deadlines without inventing a wallclock limit from transport timeout; atomically register private checkpoint sources and expose bounded native recall
       without rendering originals.
     reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
       required. No duplicate D1.
@@ -75,4 +75,6 @@ change:
     owner reader and internal checkpoint contracts are extended, with strict outside facts and numeric/array identity.
     No arbitrary history RPC or per-task/model exception. Row/character/depth/proof-count thresholds are not introduced;
     actual useful reduction and existing C/deadline/three-summary budget govern. Formal owned HTTP Case covers all
-    three kinds with typed checkpoint continuation; real AC-08 remains separately required.'
+    three kinds with typed checkpoint continuation; real AC-08 remains separately required. v12 deadline audit removes
+    recovery-only connection-timeout multipliers: inherit actual parent/task deadlines, retain transport timeout,
+    cancellation and three subrequests. Existing deadline/reentry UT and owned HTTP Case are reused; no new Feature.'

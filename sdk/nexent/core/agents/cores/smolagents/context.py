@@ -9,7 +9,6 @@ runtime only adapts CoreAgent lifecycle calls to the ContextManager API.
 from __future__ import annotations
 
 import inspect
-import time
 from collections.abc import Sequence
 from copy import copy, deepcopy
 from dataclasses import replace
@@ -99,11 +98,9 @@ class ManagedContextRuntime:
 
     def begin_request(self, *, model, recovery_finalize=None):
         """Start a budget only at the Core's new logical completion boundary."""
-        timeout = getattr(getattr(getattr(model, "profile", None), "connection", None), "timeout_seconds", None)
-        deadline = time.monotonic() + 3 * timeout if type(timeout) in (int, float) and timeout > 0 else None
-        model_deadline = getattr(model, "deadline", None)
-        if type(model_deadline) in (int, float):
-            deadline = min(deadline, model_deadline) if deadline is not None else model_deadline
+        deadline = getattr(model, "deadline", None)
+        if type(deadline) not in (int, float):
+            deadline = None
         self._capacity_budget = ContextRecoveryBudget(deadline=deadline)
         self._recovery_finalize = recovery_finalize
 
