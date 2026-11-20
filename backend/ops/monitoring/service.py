@@ -93,6 +93,9 @@ class Monitoring:
         return True
 
     def publish(self, tenant, kind) -> None:
+        aggregate = self.kinds[kind].aggregate
+        if aggregate is None:
+            return
         with self.store.lock("publish", tenant, kind) as publish_conn, ExitStack() as stack:
             with self.store.lock("source", tenant, kind) as source_conn, source_conn.begin():
                 batch = self.store.next_batch(source_conn, tenant, kind)
@@ -108,7 +111,7 @@ class Monitoring:
             publish_id = uuid4()
             writes = []
             target_dates = {day for day, _ in days}
-            for key, daily in self.kinds[kind].aggregate(point.documents(query)):
+            for key, daily in aggregate(point.documents(query)):
                 day = datetime.fromisoformat(daily["statistic_date"]).date()
                 if day not in target_dates:
                     raise ValueError("Monitoring reducer returned a date outside its publication")

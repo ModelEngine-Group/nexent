@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Independent Ops PostgreSQL control store."""
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import date, timedelta
 from uuid import UUID
@@ -181,6 +181,23 @@ class ControlStore:
                         )
                 )
             """), {"tenant": tenant, "kind": kind, "start": start, "end": end}).scalar_one()
+
+    def failed_batch_tenants(self, tenants: Iterable[str], kind: str, start: date, end: date) -> set[str]:
+        """Read failed tenants once, retaining the single-tenant failure predicate."""
+        selected = list(tenants)
+        if not selected:
+            return set()
+        with self.engine.connect() as conn:
+            return set(conn.execute(text(f"""
+                SELECT DISTINCT tenant_id FROM {BATCH}
+                WHERE tenant_id=ANY(:tenants) AND fact_kind=:kind AND delete_flag='N'
+                    AND last_error_code IS NOT NULL AND batch_state IN ('queued', 'pending')
+                    AND (
+                        cardinality(affected_dates)=0
+                        OR EXISTS (SELECT 1 FROM unnest(affected_dates) AS dates(day)
+                                   WHERE day BETWEEN :start AND :end)
+                    )
+            """), {"tenants": selected, "kind": kind, "start": start, "end": end}).scalars())
 
     def ensure_today(self, today: date) -> None:
         """Schedule empty daily statistics for previously observed scopes."""
