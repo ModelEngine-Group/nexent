@@ -323,8 +323,12 @@ def test_smolagents_parallel_requires_both_results_and_retries_only_failed_child
     policy = parallel_policy()
     assert not policy.validate_code(_PARALLEL_ACTION)
     assert policy.pending
+    policy.record_dispatch("other")
+    assert policy.pending
     policy.record_dispatch("smart_city_agent")
     assert policy.pending
+    assert "sentiment_therapist" in policy.instruction
+    assert "smart_city_agent" not in policy.instruction
     with pytest.raises(DelegationError, match="DELEGATION_REQUIRED"):
         policy.validate_code(_PARALLEL_ACTION)
     assert not policy.validate_code('sentiment_therapist(task="Retry B")')
@@ -372,3 +376,45 @@ def test_smolagents_parallel_enters_executor_without_delegation_regeneration(mon
     assert agent.model.call_count == 2
     assert policy.corrections == 0
     assert steps[-1].output == "Verified A and B"
+
+
+@pytest.mark.parametrize("code", [
+    "",
+    "parallel_executor(",
+    'writer = parallel_executor([(writer, {"task": "test"})])',
+    'parallel_executor([(writer, {"task": "test"})], 3, 2, 1)',
+    'parallel_executor([(writer, {"task": "test"})], unknown=True)',
+    'parallel_executor([(writer, {"task": "test"})], tasks=[])',
+    'parallel_executor(tasks=[])',
+    'parallel_executor(tasks=[writer])',
+    'parallel_executor(tasks=[(writer, {1: "invalid argument name"})])',
+    'parallel_executor(tasks=[(writer, {"task": "test"}, 1)])',
+    'parallel_executor(tasks=[(writer, {"task": "test"}, "")])',
+    'parallel_executor([(writer, {"task": "test"})], timeout="3")',
+    'parallel_executor([(writer, {"task": "test"})], timeout=0)',
+    'parallel_executor([(writer, {"task": "test"})], timeout=read_timeout())',
+    'result = parallel_executor([(writer, {"task": "test"})])\nprint(other_result)',
+    'result = parallel_executor([(writer, {"task": "test"})])\nprint(result.strip())',
+])
+def test_parallel_delegation_rejects_invalid_task_options_and_executable_result_views(code):
+    from nexent.core.agents.output.python_actions import parallel_delegation_targets
+
+    assert parallel_delegation_targets(code, {"writer"}) == ()
+
+
+@pytest.mark.parametrize("call", [
+    'parallel_executor(((writer, {"task": "test"}),), 3.0, 1)',
+    'parallel_executor(tasks=[(writer, {"task": "test"})], timeout=None, max_workers=1)',
+    'result = parallel_executor([(writer, {"task": "test"})])\nprint(result)',
+])
+def test_generic_delegation_accepts_documented_literal_parallel_call(call):
+    policy = SmolagentsDelegation("Call the subagent writer.", [worker()])
+    assert policy.validate_code(call) is False
+    assert policy.pending
+
+
+def test_unavailable_parallel_executor_does_not_admit_projected_call():
+    policy = SmolagentsDelegation("Call the subagent writer.", [worker()], parallel_executor_available=False)
+    with pytest.raises(DelegationError, match="DELEGATION_REQUIRED"):
+        policy.validate_code('parallel_executor([(writer, {"task": "test"})])')
+    assert policy.validate_code('writer(task="test")') is False
