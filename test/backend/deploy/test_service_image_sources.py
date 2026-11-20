@@ -55,6 +55,17 @@ def test_compose_uses_independent_service_images(filename):
         assert "NEXENT_IMAGE}" not in services[name]["image"]
 
 
+@pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
+def test_helm_management_launcher_matches_compose_module_entrypoint(filename):
+    compose = ROOT / "deploy/docker/compose" / filename
+    management = yaml.safe_load(compose.read_text(encoding="utf-8"))["services"]["nexent-config"]
+    helm = ROOT / "deploy/k8s/helm/nexent/charts/nexent-config/templates/_pod-spec.tpl"
+    command = helm.read_text(encoding="utf-8").split("    command:\n", 1)[1].split("    envFrom:", 1)[0]
+
+    assert yaml.safe_load(command) == management["entrypoint"]
+    assert management["entrypoint"][1:] == ["python", "-m", "backend.http.config_service"]
+
+
 @pytest.mark.parametrize("mode,tag", [("general", "fixture"), ("local-latest", "latest")])
 def test_generated_helm_values_keep_management_and_runtime_separate(mode, tag):
     from test.backend.deploy.test_gateway_image import bash_run
