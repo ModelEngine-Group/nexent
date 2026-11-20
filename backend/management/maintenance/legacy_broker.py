@@ -35,6 +35,10 @@ def _read(actor, context, *, include_result_inventory):
             result["result_metadata"] = {name: counts[name] for name in (
                 "with_index_hint", "without_index_hint", "invalid_task_key",
             )}
+            pg_references = counts["without_index_hint_pg_references"]
+            result["result_pg_references"] = {name: pg_references[name] for name in (
+                "no_file", "one_file", "multiple_files",
+            )}
         if not has_any_role(quota_identity_roles(identity, actor, context=context), {"SU"}):
             raise ScopeDenied()
         broker_counts.pop("id")
@@ -48,7 +52,7 @@ def main(argv=None):
     parser.add_argument("--legacy-quiesced", required=True, action="store_true",
                         help="Operator confirms legacy publishers and early-ack workers have stopped")
     parser.add_argument("--include-result-inventory", action="store_true",
-                        help="Scan the result backend for counts of keys with and without index hints")
+                        help="Count result index hints and correlate missing hints with historical file references")
     parser.add_argument("--output", required=True, type=Path, help="New private JSON receipt")
     parser.add_argument("--timeout", type=int, default=30, help="Total deadline in seconds, at most 300")
     args = parser.parse_args(argv)

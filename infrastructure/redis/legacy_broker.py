@@ -21,6 +21,7 @@ _PRIORITY_SUFFIXES = ("", "\x06\x163", "\x06\x166", "\x06\x169")
 
 _RESULT_PREFIX = b"celery-task-meta-"
 _MAX_METADATA_BYTES = 1024 * 1024
+_REFERENCE_BATCH = 250
 
 
 def _has_index(raw):
@@ -38,12 +39,13 @@ def _has_index(raw):
 class LegacyBrokerRecords:
     capabilities = CapabilitySet(frozenset({"record.get"}))
 
-    def __init__(self, scope, url, *, result_url=None, client_factory=None):
+    def __init__(self, scope, url, *, result_url=None, reference_counts=None, client_factory=None):
         if scope.system or scope.resource_prefix or scope.service_role != "management" or scope.namespaces != {BROKER_INVENTORY}:
             raise ScopeDenied()
         self.scope = scope
         self._config = RedisKeyValueConfig(url, BROKER_INVENTORY)
         self._result_url = result_url
+        self._reference_counts = reference_counts
         self._client = client_factory or _make_client
         self._closed = False
 
@@ -87,10 +89,14 @@ class LegacyBrokerRecords:
         }
 
     def _results(self, context):
+        if self._reference_counts is None:
+            raise CapabilityUnsupported()
         config = RedisKeyValueConfig(self._result_url, BROKER_INVENTORY)
         timeout = min(context.remaining(), config.request_timeout)
         seen, cursor = set(), 0
         counts = {"with_index_hint": 0, "without_index_hint": 0, "invalid_task_key": 0}
+        pending = []
+        references = {"no_file": 0, "one_file": 0, "multiple_files": 0}
         try:
             with self._client(
                 config.url, context=context, decode_responses=False,
@@ -113,13 +119,27 @@ class LegacyBrokerRecords:
                             raise Unavailable(operation_id=context.operation_id)
                         category = "with_index_hint" if _has_index(raw) else "without_index_hint"
                         counts[category] += 1
+                        if category == "without_index_hint":
+                            pending.append(task_id)
+                            if len(pending) == _REFERENCE_BATCH:
+                                self._count_references(pending, references, context)
+                                pending = []
                     if cursor == 0:
                         break
+            if pending:
+                self._count_references(pending, references, context)
             context.remaining()
         except (RedisError, OSError):
             context.remaining()
             raise Unavailable(operation_id=context.operation_id) from None
-        return {"id": "result_metadata", **counts}
+        return {"id": "result_metadata", **counts, "without_index_hint_pg_references": references}
+
+    def _count_references(self, task_ids, references, context):
+        matched = self._reference_counts(task_ids, context=context)
+        for task_id in task_ids:
+            count = matched.get(task_id, 0)
+            category = "no_file" if count == 0 else "one_file" if count == 1 else "multiple_files"
+            references[category] += 1
 
     def close(self):
         self._closed = True

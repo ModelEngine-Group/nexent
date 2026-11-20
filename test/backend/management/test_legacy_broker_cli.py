@@ -96,6 +96,8 @@ def test_optional_result_inventory_is_aggregate_and_keeps_queue_semantics(broker
     port.get.side_effect = [
         port.get.return_value,
         {"id": "result_metadata", "with_index_hint": 7, "without_index_hint": 2, "invalid_task_key": 1,
+         "without_index_hint_pg_references": {"one_file": 1, "multiple_files": 0, "no_file": 1,
+                                               "private_id": "must not appear"},
          "private_result": "must not appear"},
     ]
     output = tmp_path / "receipt.json"
@@ -105,6 +107,7 @@ def test_optional_result_inventory_is_aggregate_and_keeps_queue_semantics(broker
     result = json.loads(output.read_text())
     assert result["broker_empty"] is True and result["migration_ready"] is False
     assert result["result_metadata"] == {"with_index_hint": 7, "without_index_hint": 2, "invalid_task_key": 1}
+    assert result["result_pg_references"] == {"one_file": 1, "multiple_files": 0, "no_file": 1}
     assert [call.args[1] for call in port.get.call_args_list] == ["queues", "result_metadata"]
     assert roles.call_count == 2
 
@@ -114,7 +117,9 @@ def test_result_inventory_failure_or_late_revocation_prevents_receipt(broker, tm
     port, _, roles = broker
     port.get.side_effect = [
         port.get.return_value,
-        {"with_index_hint": 0, "without_index_hint": 0, "invalid_task_key": 0} if revoked else Unavailable(),
+        {"with_index_hint": 0, "without_index_hint": 0, "invalid_task_key": 0,
+         "without_index_hint_pg_references": {"no_file": 0, "one_file": 0, "multiple_files": 0}}
+        if revoked else Unavailable(),
     ]
     if revoked:
         roles.side_effect = [{"SU"}, {"ADMIN"}]
