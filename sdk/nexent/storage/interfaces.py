@@ -15,6 +15,7 @@ from .models import (
     Junction,
     KVEntry,
     Missing,
+    ObjectInventoryEntry,
     ObjectMetadata,
     ObjectRef,
     OperationContext,
@@ -143,6 +144,12 @@ class RecordStore(StoragePort, Protocol):
         self, dataset: str, query: RecordQuery, patch: FieldPatch, *, limit: int = 1, context: OperationContext
     ) -> tuple[Record, ...]:
         """Claim a bounded candidate set inside a transaction; require skip-locked capability."""
+        ...
+
+
+class ObjectInventory(StoragePort, Protocol):
+    def first_page(self, prefix: str, *, limit: int, context: OperationContext) -> tuple[ObjectInventoryEntry, ...]:
+        """Read one bounded page from an explicitly configured inventory."""
         ...
 
 

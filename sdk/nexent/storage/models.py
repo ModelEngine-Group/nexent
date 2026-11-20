@@ -3,6 +3,7 @@
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from math import isfinite
 from time import monotonic
@@ -232,6 +233,13 @@ class ObjectMetadata:
     content_type: str
     etag: str | None = None
     sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class ObjectInventoryEntry:
+    key: str
+    size: int
+    last_modified: datetime
 
 
 @dataclass(frozen=True)

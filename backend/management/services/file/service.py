@@ -6,6 +6,8 @@ import os
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from time import monotonic
+from uuid import uuid4
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -26,7 +28,6 @@ from fastapi import UploadFile
 from management.db.file.attachment import (
     generate_object_name,
     get_file_url,
-    list_files,
     upload_fileobj,
 )
 from management.db.knowledge_base.file_lifecycle import transition_file_record
@@ -41,8 +42,10 @@ from nexent import MessageObserver
 from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
-from nexent.storage.errors import OutcomeUnknown, ScopeDenied
+from nexent.storage.errors import OutcomeUnknown, ScopeDenied, StorageError
+from nexent.storage.models import OperationContext
 
+from infrastructure.attachment_inventory import attachment_inventory_port
 from infrastructure.trace.knowledge import trace_knowledge_operation
 
 # Create upload directory
@@ -641,11 +644,35 @@ async def get_file_url_impl(object_name: str, expires: int):
     return result
 
 
+def _list_attachment_files(prefix: str, limit: int | None) -> list[dict]:
+    context = OperationContext(f'attachment-list-{uuid4().hex}', monotonic() + 5)
+    try:
+        inventory = attachment_inventory_port()
+        try:
+            entries = inventory.first_page(prefix, limit=1000, context=context)
+        finally:
+            inventory.close()
+    except StorageError as error:
+        logger.warning("attachment_list_unavailable operation_id=%s error_type=%s",
+                       context.operation_id, type(error).__name__)
+        return []
+    items = []
+    for entry in entries[:limit] if limit else entries:
+        row = {
+            "key": entry.key, "size": entry.size, "last_modified": entry.last_modified,
+            "content_type": get_content_type(entry.key),
+        }
+        result = get_file_url(entry.key)
+        if result["success"]:
+            row["url"] = result["url"]
+        items.append(row)
+    return items
+
+
 async def list_files_impl(prefix: str, limit: Optional[int] = None):
-    files = list_files(prefix=prefix)
-    if limit:
-        files = files[:limit]
-    return files
+    return await run_blocking(
+        "attachment-list", _list_attachment_files, prefix, limit, lane="control-io", owner="management.file",
+    )
 
 
 

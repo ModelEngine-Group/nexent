@@ -11,6 +11,7 @@ import os
 import sys
 import types
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -125,7 +126,6 @@ def setup_patches():
         patch('management.db.file.attachment.upload_fileobj', MagicMock()),
         patch('management.db.file.attachment.get_file_url', MagicMock()),
         patch('management.db.file.attachment.delete_file', MagicMock()),
-        patch('management.db.file.attachment.list_files', MagicMock()),
         patch_import_context('management.services.file.service.admit_knowledge_uploads',
               side_effect=_stub_admit_knowledge_uploads),
         patch_import_context('management.services.file.service.transition_file_record',
@@ -1145,48 +1145,43 @@ class TestGetFileUrlImpl:
 
 
 class TestListFilesImpl:
-    """Test cases for list_files_impl function"""
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("limit", "count"), [(None, 3), (0, 3), (2, 2), (10, 3), (-1, 2)])
+    async def test_first_page_keeps_legacy_order_fields_and_limit(self, mocker, limit, count):
+        from nexent.storage.models import ObjectInventoryEntry
+
+        modified = datetime(2026, 6, 1, tzinfo=UTC)
+        entries = tuple(ObjectInventoryEntry(f"folder/{i}.txt", i, modified) for i in (1, 2, 3))
+        inventory = Mock()
+        inventory.first_page.return_value = entries
+        mocker.patch.object(file_management_service, "attachment_inventory_port", return_value=inventory)
+        sign = mocker.patch.object(file_management_service, "get_file_url", side_effect=lambda key: {
+            "success": key.endswith("1.txt"), "url": "https://example.invalid/signed",
+        })
+
+        listed = await list_files_impl(prefix="folder/", limit=limit)
+        assert len(listed) == count
+        assert listed[0] == {"key": "folder/1.txt", "size": 1, "content_type": "text/plain",
+                             "last_modified": modified, "url": "https://example.invalid/signed"}
+        assert [item["key"] for item in listed] == [entry.key for entry in entries[:count]]
+        assert all("url" not in item for item in listed[1:])
+        assert sign.call_count == count
+        assert inventory.first_page.call_args.args == ("folder/",)
+        assert inventory.first_page.call_args.kwargs["limit"] == 1000
+        inventory.close.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_list_files_impl_without_limit(self):
-        """Test file listing without limit"""
-        # Mock file list
-        mock_files = [
-            {"name": "folder/file1.txt", "size": 1024},
-            {"name": "folder/file2.txt", "size": 2048},
-            {"name": "folder/file3.txt", "size": 1536}
-        ]
+    async def test_failed_inventory_returns_empty_without_signing(self, mocker):
+        from nexent.storage.errors import Unavailable
 
-        with patch_import_context('management.services.file.service.list_files', MagicMock(return_value=mock_files)) as mock_list:
-            # Execute
-            result = await list_files_impl(prefix="folder/")
-
-            # Assertions
-            assert result == mock_files
-            assert len(result) == 3
-            mock_list.assert_called_once_with(prefix="folder/")
-
-    @pytest.mark.asyncio
-    async def test_list_files_impl_with_limit(self):
-        """Test file listing with limit"""
-        # Mock file list
-        mock_files = [
-            {"name": "folder/file1.txt", "size": 1024},
-            {"name": "folder/file2.txt", "size": 2048},
-            {"name": "folder/file3.txt", "size": 1536},
-            {"name": "folder/file4.txt", "size": 512}
-        ]
-
-        with patch_import_context('management.services.file.service.list_files', MagicMock(return_value=mock_files)) as mock_list:
-            # Execute
-            result = await list_files_impl(prefix="folder/", limit=2)
-
-            # Assertions
-            assert len(result) == 2
-            assert result == mock_files[:2]
-            assert result[0]["name"] == "folder/file1.txt"
-            assert result[1]["name"] == "folder/file2.txt"
-            mock_list.assert_called_once_with(prefix="folder/")
+        inventory = Mock()
+        inventory.first_page.side_effect = Unavailable()
+        mocker.patch.object(file_management_service, "attachment_inventory_port", return_value=inventory)
+        signer = mocker.patch.object(file_management_service, "get_file_url")
+        assert await list_files_impl(prefix="folder/", limit=1) == []
+        inventory.first_page.assert_called_once()
+        inventory.close.assert_called_once()
+        signer.assert_not_called()
 
 
 class TestCheckFileAccess:
@@ -1926,9 +1921,9 @@ class TestUploadFilesImplMinioFolderLogic:
 
 
 @pytest.fixture(autouse=True)
-def run_upload_without_live_manager():
+def run_file_io_without_live_manager():
     async def invoke(_name, fn, *args, lane, owner, **kwargs):
-        assert lane == "file-upload"
+        assert lane == ("control-io" if _name == "attachment-list" else "file-upload")
         return fn(*args, **kwargs)
     with patch("management.services.file.service.run_blocking", side_effect=invoke):
         yield
@@ -2075,44 +2070,6 @@ class TestEdgeCasesAndErrorHandling:
 
         # Assertions
         assert results == []
-
-    @pytest.mark.asyncio
-    async def test_list_files_impl_with_none_limit(self):
-        """Test list_files_impl with None limit"""
-        # Mock file list
-        mock_files = [
-            {"name": "folder/file1.txt", "size": 1024},
-            {"name": "folder/file2.txt", "size": 2048},
-            {"name": "folder/file3.txt", "size": 1536}
-        ]
-
-        with patch_import_context('management.services.file.service.list_files', MagicMock(return_value=mock_files)) as mock_list:
-            # Execute with None limit
-            result = await list_files_impl(prefix="folder/", limit=None)
-
-            # Assertions
-            assert result == mock_files
-            assert len(result) == 3
-            mock_list.assert_called_once_with(prefix="folder/")
-
-    @pytest.mark.asyncio
-    async def test_list_files_impl_with_limit_larger_than_files(self):
-        """Test list_files_impl with limit larger than available files"""
-        # Mock file list
-        mock_files = [
-            {"name": "folder/file1.txt", "size": 1024},
-            {"name": "folder/file2.txt", "size": 2048}
-        ]
-
-        with patch_import_context('management.services.file.service.list_files', MagicMock(return_value=mock_files)) as mock_list:
-            # Execute with limit larger than available files
-            result = await list_files_impl(prefix="folder/", limit=10)
-
-            # Assertions
-            assert result == mock_files
-            assert len(result) == 2
-            mock_list.assert_called_once_with(prefix="folder/")
-
 
 class TestConcurrencyAndFileTypes:
     """Test cases for concurrency control and file type handling"""

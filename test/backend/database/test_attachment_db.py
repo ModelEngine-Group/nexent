@@ -89,7 +89,6 @@ with patch('management.db.file.attachment.minio_client', minio_client_mock):
         generate_object_name,
         get_file_stream,
         get_file_url,
-        list_files,
         upload_file,
         upload_fileobj,
     )
@@ -497,63 +496,6 @@ class TestGetFileUrl:
 
         assert result['success'] is False
         assert result['error'] == 'URL generation failed'
-
-
-class TestListFiles:
-    """Test cases for list_files function"""
-
-    def test_list_files_success(self):
-        """Test successful file listing"""
-        from datetime import datetime
-        mock_files = [
-            {
-                'key': 'attachments/file1.txt',
-                'size': 100,
-                'last_modified': datetime(2024, 1, 1)
-            },
-            {
-                'key': 'attachments/file2.txt',
-                'size': 200,
-                'last_modified': datetime(2024, 1, 2)
-            }
-        ]
-        minio_client_mock.list_files.return_value = mock_files
-        minio_client_mock.get_file_url.return_value = (True, 'http://example.com/file1.txt')
-
-        files = list_files('attachments/', 'bucket')
-
-        assert len(files) == 2
-        assert files[0]['key'] == 'attachments/file1.txt'
-        assert files[0]['size'] == 100
-        assert 'content_type' in files[0]
-        assert 'url' in files[0]
-        minio_client_mock.list_files.assert_called_once_with('attachments/', 'bucket')
-
-    def test_list_files_empty(self):
-        """Test list_files with empty result"""
-        minio_client_mock.list_files.return_value = []
-
-        files = list_files('attachments/', 'bucket')
-
-        assert files == []
-
-    def test_list_files_url_generation_failure(self):
-        """Test list_files handles URL generation failure"""
-        from datetime import datetime
-        mock_files = [
-            {
-                'key': 'attachments/file1.txt',
-                'size': 100,
-                'last_modified': datetime(2024, 1, 1)
-            }
-        ]
-        minio_client_mock.list_files.return_value = mock_files
-        minio_client_mock.get_file_url.return_value = (False, 'URL generation failed')
-
-        files = list_files('attachments/', 'bucket')
-
-        assert len(files) == 1
-        assert 'url' not in files[0]
 
 
 class TestDeleteFile:

@@ -4,7 +4,7 @@ import io
 import os
 import uuid
 from datetime import datetime
-from typing import Any, BinaryIO, Dict, List, Optional
+from typing import Any, BinaryIO, Dict, Optional
 
 from contracts import file_types
 from contracts.constants.constants import S3_URL_PREFIX
@@ -277,32 +277,6 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
         return minio_client.file_exists(object_name, bucket)
     except Exception:
         return False
-
-
-def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    List files in bucket
-
-    Args:
-        prefix: Prefix filter
-        bucket: Bucket name, if not specified will use default bucket
-
-    Returns:
-        List[Dict[str, Any]]: List of file information
-    """
-    # Get file list
-    files = minio_client.list_files(prefix, bucket)
-
-    # Enhance file information
-    for file in files:
-        file["content_type"] = file_types.get_content_type(file["key"])
-
-        # Get presigned URL (valid for 24 hours)
-        success, url = minio_client.get_file_url(file["key"], bucket, 86400)
-        if success:
-            file["url"] = url
-
-    return files
 
 
 def delete_file(object_name: str, bucket: Optional[str] = None) -> Dict[str, Any]:
