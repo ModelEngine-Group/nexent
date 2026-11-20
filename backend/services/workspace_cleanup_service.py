@@ -12,10 +12,12 @@ logger = logging.getLogger("workspace_cleanup_service")
 _RUN_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
-def cleanup_orphaned_agent_workspaces(workspace_root: str = AGENT_WORKSPACE_ROOT) -> int:
+def cleanup_orphaned_agent_workspaces(workspace_root: str = AGENT_WORKSPACE_ROOT, *, strict: bool = False) -> int:
     """Remove run-scoped workspaces left behind by a previous Runtime process."""
     root = Path(workspace_root)
     if not root.exists() or not root.is_dir() or root.is_symlink():
+        if strict and (root.exists() or root.is_symlink()):
+            raise ValueError("Runtime workspace root must be a real directory")
         return 0
 
     removed_count = 0
@@ -34,6 +36,8 @@ def cleanup_orphaned_agent_workspaces(workspace_root: str = AGENT_WORKSPACE_ROOT
                 removed_count += 1
             except Exception as exc:
                 logger.error("Failed to clean orphaned run workspace %s: %s", run_dir, exc)
+                if strict:
+                    raise
         try:
             user_dir.rmdir()
         except OSError:

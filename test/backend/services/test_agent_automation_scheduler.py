@@ -36,6 +36,21 @@ def _load_scheduler_with_runner_stub(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_store_uses_batch_cutoff_without_recovering_other_pods(monkeypatch):
+    scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
+    recover = AsyncMock()
+    monkeypatch.setattr(scheduler_module, "run_blocking", recover)
+    cutoff = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    store = scheduler_module.AgentAutomationLeaseStore()
+    store.maintenance_cutoff = cutoff
+
+    await store.recover()
+
+    recover.assert_not_awaited()
+    assert store._recovery_time == cutoff
+
+
+@pytest.mark.asyncio
 async def test_store_recovers_orphans_before_releasing_all_locks(monkeypatch):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     calls = []

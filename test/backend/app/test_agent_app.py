@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from contracts.constants.constants import AGENT_PROMPTS_HIDDEN_FLAG
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, RuntimeUserMessagePersistenceError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
@@ -456,7 +456,8 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
 
 
 @pytest.mark.asyncio
-async def test_northbound_agent_run_api_uses_internal_identity(mocker):
+@pytest.mark.parametrize(("query", "skip_user_save"), [("", True), ("?persist_user_message=true", False)])
+async def test_northbound_agent_run_api_uses_internal_identity(mocker, query, skip_user_save):
     mocker.patch(
         "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
@@ -474,7 +475,7 @@ async def test_northbound_agent_run_api_uses_internal_identity(mocker):
         media_type="text/event-stream",
     )
     response = runtime_client.post(
-        "/agent/internal/northbound/run",
+        f"/agent/internal/northbound/run{query}",
         json={"agent_id": 1, "conversation_id": 123, "query": "hello"},
         headers={"Authorization": "Bearer internal-token"},
     )
@@ -483,7 +484,7 @@ async def test_northbound_agent_run_api_uses_internal_identity(mocker):
     call_kwargs = run_agent.call_args.kwargs
     assert call_kwargs["user_id"] == "user-a"
     assert call_kwargs["tenant_id"] == "tenant-a"
-    assert call_kwargs["skip_user_save"] is True
+    assert call_kwargs["skip_user_save"] is skip_user_save
     assert call_kwargs["http_request"] is None
 
 
@@ -534,7 +535,11 @@ def test_northbound_agent_run_api_maps_domain_errors(
     assert response.status_code == expected_status
 
 
-def test_northbound_agent_run_api_maps_unexpected_error(mocker):
+@pytest.mark.parametrize(("error", "detail"), [
+    (RuntimeError("unexpected"), "Agent run error."),
+    (RuntimeUserMessagePersistenceError("save failed"), "Internal Server Error"),
+])
+def test_northbound_agent_run_api_maps_unexpected_error(mocker, error, detail):
     mocker.patch(
         "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
@@ -542,7 +547,7 @@ def test_northbound_agent_run_api_maps_unexpected_error(mocker):
     mocker.patch(
         "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
-        side_effect=RuntimeError("unexpected"),
+        side_effect=error,
     )
 
     response = runtime_client.post(
@@ -552,7 +557,7 @@ def test_northbound_agent_run_api_maps_unexpected_error(mocker):
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "Agent run error."
+    assert response.json()["detail"] == detail
 
 
 @pytest.mark.asyncio

@@ -1211,14 +1211,14 @@ def update_conversation_message_status(message_id: int, status: str, user_id: Op
         )
 
 
-def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
+def fail_streaming_assistant_messages(*, db_session=None) -> List[Dict[str, Any]]:
     """Mark assistant messages left streaming by a stopped runtime as failed.
 
     Returns the affected runtime identities so the caller can finish the
     corresponding short-lived Redis state with the existing runtime-state API.
     The conditional update makes repeated startup recovery idempotent.
     """
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         rows = (
             session.query(
                 ConversationMessage.message_id,

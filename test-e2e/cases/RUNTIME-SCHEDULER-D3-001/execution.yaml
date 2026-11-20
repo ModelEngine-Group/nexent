@@ -1,0 +1,39 @@
+schema_version: '1.0'
+case_id: RUNTIME-SCHEDULER-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-SCHEDULER-D3-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-003:
+  - test_scheduler_reservation_and_peer_restart
+  AC-P1-006:
+  - test_scheduler_reservation_and_peer_restart
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  An opted-in isolated Kubernetes cluster provides two Runtime
+  workers, dynamic volumes and a disposable PostgreSQL/Redis data domain. The
+  test seeds owned tasks and identities, holds real provider requests, and makes
+  each scheduler single-slot only in the staged release. A case-owned temporary
+  lock holds a due recurring occurrence across the peer startup; the replacement
+  must execute that occurrence after unlocking. Two Pod-local claim workers
+  rendezvous using case-owned Redis keys and call the real PostgreSQL repository
+  while the application schedulers are occupied. The probe expires the winner's
+  synthetic run lease, verifies stale completion, renewal and release are fenced,
+  and lets the real scheduler execute the recovered occurrence. A separate fault
+  expires only the lease of a real scheduled Agent blocked in its provider
+  stream after observing a renewal. The peer settles that occurrence as skipped
+  before the old single-slot scheduler can renew again, without writing new
+  messages, changing the active reservation or calling the provider. The old
+  worker settles and the next regular occurrence of the same task succeeds.
+  A separate task holds the same due cycle until the expired worker releases its
+  lease and its root reservation becomes terminal. Reclaim records a skip
+  without creating any messages, a reservation or a second provider call for
+  that cycle; the next scheduled occurrence invokes the provider once.
+  Completed case records are paused and deleted through authenticated routes;
+  namespace and volume reclamation are verified separately.

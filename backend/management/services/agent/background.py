@@ -42,6 +42,7 @@ class BackgroundExecutionState:
     persisted: bool = False
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    prepare_prompt: Optional[Callable] = None
 
     def fail(self, code: str, message: str) -> None:
         self.outcome = "failed"

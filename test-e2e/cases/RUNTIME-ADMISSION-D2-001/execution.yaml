@@ -1,0 +1,38 @@
+schema_version: '1.0'
+case_id: RUNTIME-ADMISSION-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-ADMISSION-D2-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-003:
+  - test_public_web_and_northbound_admission
+  - test_public_proxies_do_not_retry_an_admitted_post_after_transport_failure
+  AC-P1-004:
+  - test_public_web_and_northbound_admission
+  - test_local_lane_rejects_without_consuming_peer_capacity
+  AC-P1-009:
+  - test_public_web_and_northbound_admission
+  - test_public_proxies_do_not_retry_an_admitted_post_after_transport_failure
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Partial binding. This case owns its opted-in Kubernetes release, two Runtime
+  Pods, PostgreSQL/Redis data domain, identities, Northbound keys and controlled
+  model. It uses loopback forwards to the deployed Web and stable Gateway
+  Services and releases those processes before namespace and volume reclamation.
+  One binding exercises public success, conflict, business quota and access
+  control. It temporarily denies Redis PING with exact ACL restoration and
+  cancels a PostgreSQL waiter observed on the case-owned conversation lock.
+  A second disposable release has one Agent worker per Pod and no queue: the
+  full Pod refuses a request that its peer can accept in a separate Agent scope.
+  A third disposable release tests a real Runtime response cut before the
+  production proxies receive headers, but after the database and SSE show the
+  request was admitted. Its relay counts marked upstream POST attempts directly,
+  and restores the original selector and Ready Pod targets in a finally block.
+  All three check reservation and stream snapshots, model calls and owned cleanup.
+  Formal execution and cleanup on a two-worker cluster remain unverified.

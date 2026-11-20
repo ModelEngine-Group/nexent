@@ -6,10 +6,12 @@ import asyncio
 import importlib.util
 import sys
 import types
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 BACKEND_DIR = Path(__file__).resolve().parents[3] / "backend"
 
@@ -60,7 +62,8 @@ class RuntimeThreadManager:
         return {"service_name": "runtime", "active_count": 0}
 
 
-def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch):
+@pytest.mark.parametrize("recovery_mode", ["startup", "maintenance", "unfinished"])
+def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch, recovery_mode):
     start_configuration = AsyncMock()
     stop_configuration = AsyncMock()
     monkeypatch.setitem(
@@ -72,10 +75,16 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
             stop_system_configuration=stop_configuration,
         ),
     )
+    epoch = "9d323186-23f6-4ab6-b0ab-8990661e6320"
     monkeypatch.setitem(
         sys.modules,
         "contracts.constants.environment",
-        _module("contracts.constants.environment", RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1),
+        _module(
+            "contracts.constants.environment",
+            RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS=1,
+            NEXENT_RECOVERY_MODE="startup" if recovery_mode == "startup" else "maintenance",
+            NEXENT_MAINTENANCE_EPOCH=epoch,
+        ),
     )
     manager = RuntimeThreadManager()
     monkeypatch.setitem(
@@ -166,8 +175,17 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     cleanup = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "management.services.agent.workspace_cleanup",
-        _module("management.services.agent.workspace_cleanup", cleanup_orphaned_agent_workspaces=cleanup),
+        "services.workspace_cleanup_service",
+        _module("services.workspace_cleanup_service", cleanup_orphaned_agent_workspaces=cleanup),
+    )
+    cutoff = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    require_completed = MagicMock(return_value=cutoff)
+    if recovery_mode == "unfinished":
+        require_completed.side_effect = RuntimeError("maintenance is unfinished")
+    monkeypatch.setitem(
+        sys.modules,
+        "management.maintenance",
+        _module("management.maintenance", require_completed_runtime_maintenance=require_completed),
     )
     shutdown_streams = AsyncMock(return_value=[])
     shutdown_creators = AsyncMock(return_value=0)
@@ -203,6 +221,18 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
         async with application.runtime_lifespan(None):
             pass
 
+    if recovery_mode == "unfinished":
+        with pytest.raises(RuntimeError, match="maintenance is unfinished"):
+            asyncio.run(exercise())
+        require_completed.assert_called_once_with(epoch)
+        recover.assert_not_called()
+        cleanup.assert_not_called()
+        start_configuration.assert_not_awaited()
+        trajectory_processor.start.assert_not_called()
+        scheduler.start.assert_not_awaited()
+        manager.shutdown.assert_awaited_once()
+        return
+
     asyncio.run(exercise())
 
     assert manager.started
@@ -218,8 +248,16 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch)
     )
     trajectory_processor.request_stop.assert_called_once_with()
     trajectory_processor.shutdown.assert_called_once_with()
-    scheduler.start.assert_awaited_once_with()
-    cleanup.assert_called_once_with()
+    if recovery_mode == "startup":
+        scheduler.start.assert_awaited_once_with()
+        recover.assert_called_once_with()
+        cleanup.assert_called_once_with()
+        require_completed.assert_not_called()
+    else:
+        scheduler.start.assert_awaited_once_with(maintenance_cutoff=cutoff)
+        require_completed.assert_called_once_with(epoch)
+        recover.assert_not_called()
+        cleanup.assert_not_called()
     scheduler.stop.assert_awaited_once_with()
     shutdown_creators.assert_awaited_once()
     assert 0 <= shutdown_creators.await_args.kwargs["timeout"] <= 1

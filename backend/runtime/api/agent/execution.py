@@ -8,13 +8,15 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, NL2AgentRunRequest
-from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, RuntimeUserMessagePersistenceError, WorkbenchConfigVersionConflict, WorkbenchError
 from permissions.depends import require
 from permissions.models import CurrentUser
 from management.services.agent.service import run_agent_stream, stop_agent_tasks
+from management.services.agent.admission import uses_durable_agent_admission
+from management.services.agent.run import stop_shared_agent_tasks
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
-from contracts.errors.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError, RuntimeCoordinationUnavailableError
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from management.services.conversation.creator_execution import start_creation_turn
@@ -30,6 +32,13 @@ logger = logging.getLogger("agent_app")
 
 
 def _runtime_overload_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, RuntimeCoordinationUnavailableError):
+        return JSONResponse(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            content={"code": "RUNTIME_COORDINATION_UNAVAILABLE", "message": "Runtime coordination is unavailable.",
+                     "retryable": True},
+            headers={"Retry-After": "1"},
+        )
     if isinstance(exc, RuntimeQueueTimeoutError):
         code = "RUNTIME_QUEUE_TIMEOUT"
         retry_after = exc.retry_after_seconds
@@ -77,7 +86,7 @@ async def agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
-    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError, RuntimeCoordinationUnavailableError) as exc:
         return _runtime_overload_response(exc)
     except WorkbenchConfigVersionConflict as e:
         raise HTTPException(
@@ -105,6 +114,7 @@ async def northbound_agent_run_api(
     agent_request: AgentRequest,
     authorization: Optional[str] = Header(None),
     final_answer_mode: Literal["complete", "delta"] = Query("complete"),
+    persist_user_message: bool = Query(False),
 ):
     """Run a northbound-prepared agent request inside the runtime service."""
     try:
@@ -114,7 +124,7 @@ async def northbound_agent_run_api(
             http_request=None,
             user_id=user_id,
             tenant_id=tenant_id,
-            skip_user_save=True,
+            skip_user_save=not persist_user_message,
             final_answer_mode=final_answer_mode,
         )
     except UnauthorizedError as exc:
@@ -135,8 +145,11 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError, RuntimeCoordinationUnavailableError) as exc:
         return _runtime_overload_response(exc)
+    except RuntimeUserMessagePersistenceError as exc:
+        logger.exception("Northbound user message persistence failed")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error") from exc
     except AppException:
         raise
     except Exception as exc:
@@ -175,9 +188,9 @@ async def nl2agent_run_api(
                                         if "_creator_generation" in nl2agent_request.__dict__ else {})})
     except AgentRunAlreadyActiveError as exc:
         raise HTTPException(status_code=409, detail={"code": "CREATOR_RUN_ACTIVE"}) from exc
-    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError, RuntimeCoordinationUnavailableError) as exc:
         return _runtime_overload_response(exc)
-    except PermissionError as exc:
+    except (PermissionError, ForbiddenError) as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
@@ -226,7 +239,13 @@ async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None
     Stop an agent run by conversation ID or ephemeral debug run ID.
     """
     user_id, tenant_id = get_current_user_id(authorization)
-    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id,
+    identifier = int(run_id) if run_id.isdigit() else run_id
+    if uses_durable_agent_admission():
+        try:
+            return await stop_shared_agent_tasks(identifier, user_id, tenant_id, generation)
+        except RuntimeCoordinationUnavailableError as exc:
+            return _runtime_overload_response(exc)
+    return stop_agent_tasks(identifier, user_id,
                             **({"expected_generation": generation} if generation else {}))
 
 
@@ -241,7 +260,11 @@ async def northbound_agent_stop_api(
     """Stop a northbound agent run inside the runtime service."""
     try:
         user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+        if uses_durable_agent_admission():
+            return await stop_shared_agent_tasks(conversation_id, user_id, tenant_id)
         return stop_agent_tasks(conversation_id, user_id)
+    except RuntimeCoordinationUnavailableError as exc:
+        return _runtime_overload_response(exc)
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,

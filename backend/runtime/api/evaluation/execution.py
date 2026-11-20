@@ -1,22 +1,19 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Internal runtime endpoints for agent-evaluation execution."""
 
-from contracts.evaluation import EvalRunStatus
-from contracts.errors.exceptions import AppException
-from contracts.evaluation import EvaluationRunRequest, RuntimeEvaluationTrialRunRequest as TrialRunRequest
 import logging
 from http import HTTPStatus
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
-from nexent.core.concurrency import ManagedTaskSpec
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from nexent.core.concurrency import ThreadCapacityExceeded, ThreadManagerDraining, ThreadManagerNotRunning, ThreadQueueTimedOut
 
-from contracts.evaluation import EvalRunStatus
+from contracts.evaluation import EvalRunStatus, EvaluationRunRequest, RuntimeEvaluationTrialRunRequest as TrialRunRequest
 from contracts.errors.exceptions import AppException
-from management.db.evaluation.runs import claim_agent_evaluation_run, get_agent_evaluation
-from runtime.thread_management import runtime_thread_manager
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
+from management.services.evaluation.dispatch import read_evaluation_for_dispatch, start_pending_evaluation
+from management.services.execution_coordination import ExecutionAlreadyActiveError, RuntimeCoordinationUnavailableError
 
 
 logger = logging.getLogger("agent_evaluation_runtime_app")
@@ -35,6 +32,14 @@ def _load_trial_executor():
     from management.services.evaluation.runs import trial_run_evaluator_impl
 
     return trial_run_evaluator_impl
+
+
+def _existing_dispatch_result(evaluation_id: int, status: str | None) -> dict | None:
+    if status in (EvalRunStatus.COMPLETED, EvalRunStatus.FAILED):
+        return {"accepted": False, "already_finished": True, "status": status, "agent_evaluation_id": evaluation_id}
+    if status == EvalRunStatus.RUNNING:
+        return {"accepted": True, "already_running": True, "agent_evaluation_id": evaluation_id}
+    return None
 
 
 @router.post("/trial-run", include_in_schema=False)
@@ -85,80 +90,45 @@ async def dispatch_evaluation_run_api(
             detail="Invalid internal runtime authorization",
         ) from exc
 
+    evaluation_id = payload.agent_evaluation_id
     try:
-        run = get_agent_evaluation(
-            agent_evaluation_id=payload.agent_evaluation_id,
-            tenant_id=tenant_id,
-        )
-    except AppException as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail=str(exc),
-        ) from exc
-    if not run:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail="Agent evaluation run not found",
-        )
+        run = await read_evaluation_for_dispatch(evaluation_id, tenant_id)
+        if not run:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent evaluation run not found")
+        status = run.get("status")
+        existing = _existing_dispatch_result(evaluation_id, status)
+        if existing is not None:
+            return existing
+        if status != EvalRunStatus.PENDING:
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"Unsupported evaluation status: {status}")
 
-    status = run.get("status")
-    if status in (EvalRunStatus.COMPLETED, EvalRunStatus.FAILED):
-        return {
-            "accepted": False,
-            "already_finished": True,
-            "status": status,
-            "agent_evaluation_id": payload.agent_evaluation_id,
-        }
-
-    if status == EvalRunStatus.PENDING:
-        claimed = claim_agent_evaluation_run(
-            agent_evaluation_id=payload.agent_evaluation_id,
-            tenant_id=tenant_id,
-            updated_by=user_id,
-        )
-        if not claimed:
-            # Another runtime request won the conditional update.  It owns the
-            # run, so this request is an idempotent success rather than a 409.
-            latest = get_agent_evaluation(
-                agent_evaluation_id=payload.agent_evaluation_id,
-                tenant_id=tenant_id,
-            )
-            if latest and latest.get("status") == EvalRunStatus.RUNNING:
-                return {
-                    "accepted": True,
-                    "already_running": True,
-                    "agent_evaluation_id": payload.agent_evaluation_id,
-                }
+        try:
+            await start_pending_evaluation(evaluation_id, tenant_id, user_id, run.get("judge_model_id"), _load_evaluation_executor())
+        except ExecutionAlreadyActiveError as exc:
+            latest = await read_evaluation_for_dispatch(evaluation_id, tenant_id)
+            existing = _existing_dispatch_result(evaluation_id, latest.get("status") if latest else None)
+            if existing is not None:
+                return existing
             raise HTTPException(
                 status_code=HTTPStatus.CONFLICT,
                 detail="Agent evaluation run is no longer pending",
-            )
-    elif status == EvalRunStatus.RUNNING:
-        return {
-            "accepted": True,
-            "already_running": True,
-            "agent_evaluation_id": payload.agent_evaluation_id,
-        }
-    else:
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT,
-            detail=f"Unsupported evaluation status: {status}",
+            ) from exc
+    except AppException as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except (RuntimeCoordinationUnavailableError, ThreadManagerDraining, ThreadManagerNotRunning):
+        return JSONResponse(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            content={"code": "RUNTIME_COORDINATION_UNAVAILABLE", "message": "Runtime coordination is unavailable.",
+                     "retryable": True}, headers={"Retry-After": "1"},
         )
-
-    try:
-        execute_agent_evaluation_run = _load_evaluation_executor()
-        runtime_thread_manager.submit(
-            "evaluation",
-            ManagedTaskSpec(
-                task_name="agent-evaluation-dispatch",
-                owner="runtime",
-                run_id=str(payload.agent_evaluation_id),
-            ),
-            execute_agent_evaluation_run,
-            tenant_id,
-            user_id,
-            payload.agent_evaluation_id,
-            run.get("judge_model_id"),
+    except (ThreadCapacityExceeded, ThreadQueueTimedOut) as exc:
+        code = "RUNTIME_QUEUE_TIMEOUT" if isinstance(exc, ThreadQueueTimedOut) else "RUNTIME_CAPACITY_FULL"
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content={"code": code, "message": "Runtime evaluation capacity is unavailable.", "retryable": True},
+            headers={"Retry-After": "1"},
         )
     except Exception as exc:
         logger.exception(

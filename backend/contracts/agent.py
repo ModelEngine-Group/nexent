@@ -204,6 +204,9 @@ class AgentRequest(BaseModel):
     history: Optional[List[HistoryItem]] = None
     retry_user_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
     retry_message_index: Optional[int] = Field(default=None, ge=0, strict=True)
+    resume_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    replay_cursor: Optional[str] = Field(default=None, max_length=64)
+    stream_cursor: bool = False
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
@@ -273,6 +276,7 @@ class NL2ModelControlsRequest(BaseModel):
     """The same per-model preferences used by every Agent conversation."""
 
     model_id: Optional[StrictInt] = Field(default=None, gt=0)
+    resume_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
     model_parameter_preferences: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="before")

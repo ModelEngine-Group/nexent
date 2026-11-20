@@ -30,6 +30,29 @@ def _file_object_names(files: Any) -> list[str]:
     ]
 
 
+def create_creation_conversation(
+    *, mode, query, workbench_config, agent_id, user_id, target, selected_model_id=None,
+    model_parameter_preferences=None, retry_user_message_id=None, retry_message_index=None,
+) -> int:
+    """Allocate a Creator conversation without appending a turn."""
+    if mode not in _CREATION_MODES:
+        raise ValueError("Unsupported Workbench creation mode")
+    if retry_user_message_id is not None or retry_message_index is not None:
+        raise ValueError("Cannot retry without a creation conversation")
+    normalized_config = None
+    if workbench_config is not None:
+        normalized_config = WorkbenchSessionConfig.model_validate(workbench_config).model_dump(mode="json")
+        if normalized_config["mode"] != mode:
+            raise ValueError("Invalid creation configuration")
+    title = "新对话" if normalized_config is not None else (" ".join(query.split()) or "新对话")[:100]
+    created = create_new_conversation(
+        title=title, user_id=user_id, agent_id=agent_id, target=target, workbench_config=normalized_config,
+        **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
+        **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
+    )
+    return int(created["conversation_id"])
+
+
 def prepare_creation_history(
     *,
     conversation_id: int | None,
@@ -53,23 +76,11 @@ def prepare_creation_history(
     if mode not in _CREATION_MODES:
         raise ValueError("Unsupported Workbench creation mode")
     if conversation_id is None:
-        if retry_user_message_id is not None or retry_message_index is not None:
-            raise ValueError("Cannot retry without a creation conversation")
-        normalized_config = None
-        if workbench_config is not None:
-            normalized_config = WorkbenchSessionConfig.model_validate(workbench_config).model_dump(mode="json")
-            if normalized_config["mode"] != mode:
-                raise ValueError("Invalid creation configuration")
-        created = create_new_conversation(
-            title="新对话" if normalized_config is not None else (" ".join(query.split()) or "新对话")[:100],
-            user_id=user_id,
-            agent_id=agent_id,
-            target=target,
-            workbench_config=normalized_config,
-            **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
-            **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
+        resolved_id = create_creation_conversation(
+            mode=mode, query=query, workbench_config=workbench_config, agent_id=agent_id, user_id=user_id,
+            target=target, selected_model_id=selected_model_id, model_parameter_preferences=model_parameter_preferences,
+            retry_user_message_id=retry_user_message_id, retry_message_index=retry_message_index,
         )
-        resolved_id = int(created["conversation_id"])
         next_index = 0
     else:
         history = get_conversation_history(conversation_id, user_id)

@@ -157,12 +157,17 @@ async def forward_agent_run(
     user_id: str,
     tenant_id: str,
     final_answer_mode: Literal["complete", "delta"] = "delta",
+    *,
+    persist_user_message: bool = False,
 ) -> StreamingResponse:
     """Start a runtime agent run and proxy its response without buffering."""
+    params = {"final_answer_mode": final_answer_mode}
+    if persist_user_message:
+        params["persist_user_message"] = "true"
     return await _forward_runtime_stream(
         "POST", "/agent/internal/northbound/run", user_id, tenant_id,
         payload=agent_request.model_dump(mode="json"),
-        params={"final_answer_mode": final_answer_mode},
+        params=params,
     )
 
 

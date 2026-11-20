@@ -37,7 +37,8 @@ class AgentRunManager(LocalExecutionRegistry):
             conversation_id, user_id, status, agent_run_info
         )
         if removed:
-            generation = agent_run_info.__dict__.get("_automation_runtime_generation") if agent_run_info is not None else None
+            attrs = agent_run_info.__dict__ if agent_run_info is not None else {}
+            generation = attrs.get("_runtime_execution_generation") or attrs.get("_automation_runtime_generation")
             generation_kwargs = {"generation": generation} if generation is not None else {}
             runtime_state_service.mark_run_finished(
                 user_id=user_id, conversation_id=conversation_id, status=status, **generation_kwargs

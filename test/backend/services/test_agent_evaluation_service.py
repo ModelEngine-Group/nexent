@@ -1146,6 +1146,7 @@ def test_make_background_done_callback_failure_marks_run_failed(service_module):
         agent_evaluation_id=99,
     )
     future = MagicMock()
+    future.cancelled.return_value = False
     future.exception.return_value = RuntimeError("worker crashed")
 
     callback(future)
@@ -1153,6 +1154,7 @@ def test_make_background_done_callback_failure_marks_run_failed(service_module):
     assert captured["agent_evaluation_id"] == 99
     assert captured["tenant_id"] == "t1"
     assert captured["status"] == "FAILED"
+    assert captured["expected_status"] == "PENDING"
     assert captured["updated_by"] == "u1"
     assert "error_message" in captured
 
@@ -1172,6 +1174,7 @@ def test_make_background_done_callback_no_exception_is_noop(service_module):
         agent_evaluation_id=100,
     )
     future = MagicMock()
+    future.cancelled.return_value = False
     future.exception.return_value = None
 
     callback(future)
@@ -1194,10 +1197,25 @@ def test_make_background_done_callback_update_failure_is_logged(service_module):
         agent_evaluation_id=101,
     )
     future = MagicMock()
+    future.cancelled.return_value = False
     future.exception.return_value = RuntimeError("worker crashed")
 
     # Should not raise even though the inner update fails.
     callback(future)
+
+
+def test_runtime_dispatch_timeout_does_not_fail_a_persisted_evaluation(service_module):
+    from contracts.errors.exceptions import RuntimeServiceTimeoutError
+
+    update = MagicMock()
+    bind_import_attribute(service_module, "update_agent_evaluation_status", update)
+    future = MagicMock()
+    future.cancelled.return_value = False
+    future.exception.return_value = RuntimeServiceTimeoutError("response lost after dispatch")
+
+    service_module._make_background_done_callback("t1", "u1", 99)(future)
+
+    update.assert_not_called()
 
 
 def test_create_agent_evaluation_run_happy_path(service_module):
@@ -1357,6 +1375,22 @@ def test_execute_agent_evaluation_run_completes_with_overall_score(service_modul
     ]
     assert len(completed_calls) == 1
     assert completed_calls[0].kwargs["score_overall"] == 1.0
+
+
+def test_owned_evaluation_finalizes_before_persisting_its_terminal_status(service_module):
+    _wire_executor_dependencies(service_module, [_make_exec_case(1)])
+    writes = service_module.update_agent_evaluation_status
+
+    def begin_finalizing():
+        assert [record.kwargs["status"] for record in writes.call_args_list] == ["RUNNING"]
+
+    finalizing = MagicMock(side_effect=begin_finalizing)
+    result = service_module.execute_agent_evaluation_run("t1", "u1", 50, 99, before_finalize=finalizing)
+
+    assert result == "COMPLETED"
+    finalizing.assert_called_once_with()
+    assert writes.call_args.kwargs["status"] == "COMPLETED"
+    assert all(record.kwargs["expected_status"] == "RUNNING" for record in writes.call_args_list)
 
 
 def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module):
@@ -1989,6 +2023,22 @@ class TestScoreWithEvaluators:
         )
         assert scores == {"n1": 0.9, "c1": 1.0}
         executor.submit.assert_called_once()
+        assert executor.submit.call_args.args[0] == "evaluation-judge"
+
+    def test_partial_judge_submission_waits_for_accepted_children(self, service_module, monkeypatch):
+        executor = MagicMock()
+        first_future = MagicMock()
+        executor.submit.side_effect = [
+            types.SimpleNamespace(future=first_future),
+            RuntimeError("judge capacity full"),
+        ]
+        set_import_attribute(monkeypatch, service_module, "runtime_thread_manager", executor)
+        evaluators = {1: {"evaluator_type": "llm"}, 2: {"evaluator_type": "llm"}}
+
+        with pytest.raises(RuntimeError, match="judge capacity full"):
+            service_module._score_with_evaluators(evaluators, "sys", "t1", "q", "e", "a", 99)
+
+        first_future.result.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

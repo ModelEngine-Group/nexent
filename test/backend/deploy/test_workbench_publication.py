@@ -103,9 +103,14 @@ def test_k8s_application_hook_runs_after_skills_and_before_success():
     application = source[source.index("    # Step 8:"):source.index("    # Step 9:")]
     assert "if ! deploy_application_release;" in application
     flow = shell_function("k8s", "deploy_application_release")
-    stages = ["validate_application_release", "stop_old_business_workloads", "helm_upgrade_application_release true",
-              "run_system_agent_bootstrap", "helm_upgrade_application_release false", "wait_for_nexent_ready"]
-    assert [flow.index(stage) for stage in stages] == sorted(flow.index(stage) for stage in stages)
+    stages = ["validate_application_release", "start_runtime_deploy_lock", "require_previous_maintenance_stopped",
+              "stop_old_business_workloads",
+              "helm_upgrade_application_release true", "run_system_agent_bootstrap", "run_runtime_maintenance_job",
+              "require_paused_runtime_epoch", 'require_runtime_deploy_lock "$epoch"',
+              "helm_upgrade_application_release false", "wait_for_nexent_ready"]
+    position = 0
+    for stage in stages:
+        position = flow.index(stage, position) + len(stage)
     bootstrap = shell_function("k8s", "run_system_agent_bootstrap")
     assert bootstrap.index("sync_official_skills_to_workspace") < bootstrap.index("nexent-bootstrap-start")
     assert 'deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"' in flow

@@ -22,7 +22,7 @@ def worker(monkeypatch):
         mark_stream_completed_async=AsyncMock(),
     )
     channel = SimpleNamespace(
-        generation=None, publish=AsyncMock(), complete=MagicMock(),
+        generation=None, durable_event_count=None, publish=AsyncMock(), complete=MagicMock(),
         subscribe_with_history=MagicMock(return_value="subscription"),
     )
     channels = SimpleNamespace(

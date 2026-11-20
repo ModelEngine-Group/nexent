@@ -15,15 +15,15 @@ case:
   automation: automated
   objective: 证明实际跨节点文件路径和清理归属，不能以 hostPath 的声明代替真实共享。
   preconditions:
-  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 固定脚本已绑定隔离部署、跨节点存储探针、两个真实 Agent Run 与单 Pod 重建；完整流程仍需在专用集群执行。
   - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   - 隔离 Kubernetes namespace，Runtime A/B 强制放在至少两个不同工作节点；测试用 RWX PVC 确实由共享文件系统支持。
   test_data:
-    scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
-    model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
-    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+    scope: 为 A/B 创建不同租户、用户和 Agent；真实请求生成独立会话、执行预约和 Run 工作区。
+    model: 受控协议服务分别阻塞 A/B 的首个模型请求；单独放行后实际执行附件上传工具，再输出对应角色的终态文本。
+    preparation: 使用测试私有 profile、独占 namespace、数据库、Redis、MinIO 和动态 RWX StorageClass；用调度约束将两个真实 Runtime Pod 固定到不同 worker 主机。
   steps:
   - order: 1
     action: 在两个工作节点上分别启动 A/B，记录 nodeName、PVC 来源与实际挂载；在 A 写唯一标记，在 B 读并反向写读。
@@ -61,10 +61,9 @@ case:
     - 2
   tags:
   - phase-1
-  - design-only
   source:
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    blocked_reason: 缺独立双工作节点、真实 RWX、实际 Pod 重建和集群资源清理证据，固定脚本尚未在专用集群执行。
     primary_domain: deployment
     preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
     cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。

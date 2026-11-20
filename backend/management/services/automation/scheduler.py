@@ -62,9 +62,13 @@ class AgentAutomationLeaseStore:
     """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
     def __init__(self) -> None:
+        self.maintenance_cutoff: datetime | None = None
         self._recovery_time: datetime | None = None
 
     async def recover(self) -> None:
+        if self.maintenance_cutoff is not None:
+            self._recovery_time = self.maintenance_cutoff
+            return
         recovery_time = _utcnow()
         await run_blocking(
             "automation-recover-runs",
@@ -201,8 +205,9 @@ class AgentAutomationScheduler:
     """Application lifecycle wrapper around the reusable SDK scheduler."""
 
     def __init__(self) -> None:
+        self._store = AgentAutomationLeaseStore()
         self._scheduler = LeaseScheduler(
-            store=AgentAutomationLeaseStore(),
+            store=self._store,
             executor=execute_agent_automation,
             config=SchedulerConfig(
                 poll_interval_seconds=AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
@@ -220,10 +225,12 @@ class AgentAutomationScheduler:
     def is_running(self) -> bool:
         return self._scheduler.is_running
 
-    async def start(self) -> None:
+    async def start(self, *, maintenance_cutoff: datetime | None = None) -> None:
         if not AGENT_AUTOMATION_ENABLED:
             logger.info("Agent automation scheduler disabled")
             return
+        if not self._scheduler.is_running:
+            self._store.maintenance_cutoff = maintenance_cutoff
         await self._scheduler.start()
 
     async def stop(self) -> None:

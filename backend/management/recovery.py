@@ -13,17 +13,25 @@ UPLOAD_RECOVERY_GRACE_SECONDS = 30 * 60
 _upload_cleanup_tasks: set[asyncio.Task] = set()
 
 
-def recover_runtime_tasks() -> dict[str, int]:
+def recover_runtime_tasks(*, db_session=None) -> dict[str, int]:
     """Fail work that was owned by the previous runtime process."""
     from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
     from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
     from management.db.conversation.repository import fail_streaming_assistant_messages
     from infrastructure.redis.run_state import runtime_state_service
 
-    messages = fail_streaming_assistant_messages()
+    if db_session is None:
+        messages = fail_streaming_assistant_messages()
+    else:
+        messages = fail_streaming_assistant_messages(db_session=db_session)
     for message in messages:
         user_id = message.get("user_id")
         if user_id:
+            if db_session is not None:
+                runtime_state_service.mark_interrupted_run(
+                    str(user_id), int(message["conversation_id"]), int(message["message_id"]),
+                )
+                continue
             runtime_state_service.mark_run_finished(
                 str(user_id), int(message["conversation_id"]), "failed"
             )
@@ -33,7 +41,10 @@ def recover_runtime_tasks() -> dict[str, int]:
 
     evaluations = 0
     for tenant_id in list_evaluation_tenant_ids():
-        evaluations += reap_stale_runs(tenant_id, timeout_minutes=0)
+        if db_session is None:
+            evaluations += reap_stale_runs(tenant_id, timeout_minutes=0)
+        else:
+            evaluations += reap_stale_runs(tenant_id, timeout_minutes=0, recover_owned=True, db_session=db_session)
 
     result = {
         "conversation_messages": len(messages),

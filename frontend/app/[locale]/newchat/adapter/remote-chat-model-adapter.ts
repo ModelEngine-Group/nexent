@@ -81,6 +81,7 @@ function getRetrievalHighlightTerms(scoreDetails: unknown): string[] {
 interface SseChunk {
   type: string;
   content: string;
+  replayUnavailable?: boolean;
   unit_index?: number;
   // Unique ID shared by a tool call and its side-channel output.
   tool_call_id?: string;
@@ -320,6 +321,7 @@ interface NexentRunConfig {
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   onGenerationStopped?: (conversationId: number) => void;
+  loadPersistedReplay?: () => Promise<ChatModelRunResult | undefined>;
   onRunId?: (runId: string) => void;
   onRunStarted?: () => void;
   onMessageAccepted?: (submittedText: string) => void;
@@ -328,6 +330,7 @@ interface NexentRunConfig {
   // composer keeps the library-managed send (in-flight attachment uploads).
   messageAnnotations?: unknown;
   resume?: boolean;
+  resumeMessageId?: number;
   agentId?: number | string;
   agentVersionNo?: number;
   enablePlan?: boolean;
@@ -682,7 +685,11 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
       return parsed as unknown as SseChunk | HumanInteractionEvent;
     }
     if (typeof parsed.status === "string") {
-      return { type: "status", content: parsed.status };
+      return {
+        type: "status",
+        content: parsed.status,
+        replayUnavailable: parsed.replay_unavailable === true,
+      };
     }
     return null;
   } catch {
@@ -1456,6 +1463,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
     const isResume = !isAgentDebug && custom?.resume === true;
+    const loadPersistedReplay = async () => {
+      if (!isResume || abortSignal.aborted) return;
+      try {
+        const result = await custom?.loadPersistedReplay?.();
+        return abortSignal.aborted ? undefined : result;
+      } catch (error) {
+        log.warn("[ChatModelAdapter] Persisted replay unavailable", error);
+      }
+    };
     // Freeze the controls before draft creation or other asynchronous work.
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
@@ -1737,6 +1753,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           version_no: custom?.agentVersionNo,
           is_debug: isAgentDebug,
           is_resume: isResume,
+          resume_message_id: isResume ? custom?.resumeMessageId : undefined,
           enable_plan: custom?.enablePlan === true,
           knowledge_scope: requestBody.knowledge_scope as
             | import("@/types/knowledgeScope").ConversationKnowledgeScope
@@ -1853,6 +1870,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     if ("type" in agentResponse) {
       cleanupAbortHandler();
+      const payload = agentResponse.data;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        "replay_unavailable" in payload &&
+        payload.replay_unavailable === true
+      ) {
+        const saved = await loadPersistedReplay();
+        if (saved) yield saved;
+      }
       log.log(
         "[ChatModelAdapter] JSON response (resume finished):",
         agentResponse.data
@@ -1879,6 +1906,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const contentParts: any[] = [];
     const streamTokenCounts = new Map<string, StepTokenCount>();
     let terminalOutcome: string | undefined;
+    let replayUnavailable = false;
+    const updateResumeStatus = (chunk: SseChunk) => {
+      replayUnavailable ||= chunk.replayUnavailable === true;
+      if (["completed", "failed", "stopped"].includes(chunk.content)) {
+        terminalOutcome = chunk.content;
+      }
+    };
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
     let nl2SkillSummaryPartIndex: number | null = null;
@@ -2439,7 +2473,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
           if (chunk.type === "status") {
-            if (["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+            updateResumeStatus(chunk);
             continue;
           }
           if (chunk.type === "final_answer") {
@@ -2979,7 +3013,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Process any remaining buffered line
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
-        if (chunk?.type === "status" && ["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+        if (chunk?.type === "status") updateResumeStatus(chunk);
         if (chunk?.type === "token_count") {
           storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
         }
@@ -3455,6 +3489,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
 
       streamFinished = true;
+      if (replayUnavailable) {
+        const saved = await loadPersistedReplay();
+        if (saved) {
+          yield saved;
+          return;
+        }
+      }
       const finalResult = buildStreamResult(
         collapseSubAgentParts(contentParts)
       );

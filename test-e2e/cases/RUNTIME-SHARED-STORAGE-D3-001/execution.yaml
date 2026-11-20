@@ -1,0 +1,25 @@
+schema_version: '1.0'
+case_id: RUNTIME-SHARED-STORAGE-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-SHARED-STORAGE-D3-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-007:
+  - test_runtime_storage_paths_on_separate_workers
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained storage preparation in the enabled machine-local cluster:
+  the case creates and removes its own namespace, product services, data domain,
+  and dynamically provisioned volumes, without switching the default test stack.
+  The case also owns a secretless model Pod and an internal Service. Independent
+  barriers hold two real Agent Runs. The test lets A finish and remove its own
+  workspace, checks B and the unrelated files, then replaces A while B remains
+  active. Both Runs must produce the correct artifact, enforce download access,
+  and clean up their own objects and conversations. Multi-worker verification
+  still requires the enabled dedicated cluster.

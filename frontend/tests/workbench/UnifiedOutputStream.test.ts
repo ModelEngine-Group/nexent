@@ -22,22 +22,31 @@ import {
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 
 async function consume(
-  events: Record<string, unknown>[],
-  bufferedTail = false
+  events: Record<string, unknown>[] | null,
+  bufferedTail = false,
+  custom: Record<string, unknown> = {}
 ) {
-  runAgent.mockImplementationOnce(async () =>
-    new ReadableStream<Uint8Array>({
-      start(c) {
-        for (const [index, e] of events.entries())
-          c.enqueue(
-            new TextEncoder().encode(
-              `data: ${JSON.stringify(e)}${bufferedTail && index === events.length - 1 ? "" : "\n\n"}`
-            )
-          );
-        c.close();
-      },
-    }).getReader()
-  );
+  if (events === null) {
+    runAgent.mockResolvedValueOnce({
+      type: "json",
+      data: { status: "completed", replay_unavailable: true },
+    });
+  } else {
+    runAgent.mockImplementationOnce(async () =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const [index, event] of events.entries()) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify(event)}${bufferedTail && index === events.length - 1 ? "" : "\n\n"}`
+              )
+            );
+          }
+          controller.close();
+        },
+      }).getReader()
+    );
+  }
   const options = {
     messages: [
       {
@@ -48,7 +57,7 @@ async function consume(
     ],
     abortSignal: new AbortController().signal,
     context: {},
-    runConfig: {},
+    runConfig: { custom },
     unstable_threadId: "local",
   } as unknown as ChatModelRunOptions;
   const run = remoteChatModelAdapter.run(options);
@@ -58,6 +67,33 @@ async function consume(
   else results.push(await run);
   return results;
 }
+
+it.each(["json", "sse", "sse-tail"])(
+  "replaces incomplete %s replay with the persisted answer exactly once",
+  async (transport) => {
+    const loadPersistedReplay = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "persisted prefix and tail" }],
+    });
+    const results = await consume(
+      transport === "json"
+        ? null
+        : [
+            { type: "final_answer", content: "partial stream" },
+            { status: "completed", replay_unavailable: true },
+          ],
+      transport === "sse-tail",
+      { resume: true, threadId: "42", resumeMessageId: 100, loadPersistedReplay }
+    );
+    expect(runAgent.mock.lastCall?.[0]).toMatchObject({
+      is_resume: true,
+      resume_message_id: 100,
+    });
+    expect(loadPersistedReplay).toHaveBeenCalledTimes(1);
+    expect(results.at(-1)?.content).toEqual([
+      { type: "text", text: "persisted prefix and tail" },
+    ]);
+  }
+);
 
 it.each([false, true])(
   "replaces complete-mode previews once while retaining real reasoning (tail=%s)",

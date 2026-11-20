@@ -68,6 +68,30 @@ def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
     )
 
 
+def test_maintenance_redis_failure_leaves_conversation_update_for_transaction_rollback(monkeypatch):
+    session = object()
+    fail_messages = MagicMock(return_value=[{"message_id": 123, "conversation_id": 10, "user_id": "user-1"}])
+    runtime_state = MagicMock()
+    runtime_state.mark_interrupted_run.side_effect = ConnectionError("Redis offline")
+    _install_module(monkeypatch, "management.db.conversation.repository", fail_streaming_assistant_messages=fail_messages)
+    automation = _install_module(
+        monkeypatch, "management.db.automation.repository",
+        recover_orphaned_runs=MagicMock(), release_all_task_locks=MagicMock(),
+    )
+    _install_module(
+        monkeypatch, "management.db.evaluation.runs",
+        list_evaluation_tenant_ids=MagicMock(), reap_stale_runs=MagicMock(),
+    )
+    _install_module(monkeypatch, "infrastructure.redis.run_state", runtime_state_service=runtime_state)
+
+    with pytest.raises(ConnectionError, match="Redis offline"):
+        startup_recovery_service.recover_runtime_tasks(db_session=session)
+
+    fail_messages.assert_called_once_with(db_session=session)
+    runtime_state.mark_interrupted_run.assert_called_once_with("user-1", 10, 123)
+    automation.release_all_task_locks.assert_not_called()
+
+
 def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     _install_module(
         monkeypatch,

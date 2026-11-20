@@ -270,7 +270,8 @@ async def test_forward_agent_evaluation_trial_run_rejects_invalid_success_payloa
 @pytest.mark.asyncio
 @pytest.mark.parametrize("metadata", [None, {}, {"source": "a2a-regression"}])
 @pytest.mark.parametrize("mode", [None, "complete", "delta"])
-async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, metadata, mode):
+@pytest.mark.parametrize("persist_user_message", [False, True])
+async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, metadata, mode, persist_user_message):
     stream = TrackingStream([b"data: one\n\n", b"data: two\n\n"])
     captured = {}
 
@@ -312,14 +313,17 @@ async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, 
         ),
         user_id="user-a",
         tenant_id="tenant-a",
+        persist_user_message=persist_user_message,
         **({} if mode is None else {"final_answer_mode": mode}),
     )
     chunks = [chunk async for chunk in response.body_iterator]
 
     request = captured["request"]
-    assert str(request.url) == (
-        f"http://runtime:5014/api/agent/internal/northbound/run?final_answer_mode={mode or 'delta'}"
-    )
+    assert request.url.path == "/api/agent/internal/northbound/run"
+    assert dict(request.url.params) == {
+        "final_answer_mode": mode or "delta",
+        **({"persist_user_message": "true"} if persist_user_message else {}),
+    }
     assert request.headers["authorization"] == "Bearer jwt"
     request_payload = json.loads(request.content)
     assert request_payload["agent_id"] == 7

@@ -70,6 +70,9 @@ class RuntimeStateService:
     def _cancel_key(self, user_id: str, conversation_id: int) -> str:
         return f"runtime:cancel:{user_id}:{conversation_id}"
 
+    def _execution_cancel_key(self, user_id: str, conversation_id: int, execution_id: int) -> str:
+        return f"runtime:execution:cancel:{user_id}:{conversation_id}:{execution_id}"
+
     def _stream_key(self, user_id: str, conversation_id: int) -> str:
         return f"runtime:stream:{user_id}:{conversation_id}"
 
@@ -97,23 +100,51 @@ class RuntimeStateService:
         ):
             self.client.expire(key, ttl)
 
-    def reset_stream(self, user_id: str, conversation_id: int, generation: Optional[str] = None) -> None:
+    def mark_interrupted_run(self, user_id: str, conversation_id: int, message_id: int) -> None:
+        """Finish the abandoned message's stream, not a newer turn of the same conversation."""
+        self.client.eval("""
+            local bound = redis.call('HGET', KEYS[1], 'message_id')
+            if bound and bound ~= ARGV[1] then return 0 end
+            if not bound and redis.call('HEXISTS', KEYS[1], 'execution_id') == 1 then return 0 end
+            redis.call('HSET', KEYS[1], 'status', 'failed', 'updated_at', ARGV[2])
+            redis.call('HSET', KEYS[2], 'status', 'failed', 'updated_at', ARGV[2])
+            for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ARGV[3]) end
+            return 1
+        """, 5, self._run_key(user_id, conversation_id), self._stream_done_key(user_id, conversation_id),
+            self._cancel_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
+            self._replay_key(user_id, conversation_id), str(message_id), str(int(time.time())),
+            max(1, RUNTIME_COMPLETED_TTL_SECONDS))
+
+    def reset_stream(
+        self, user_id: str, conversation_id: int, generation: Optional[str] = None, *, required: bool = False,
+        execution_id: Optional[int] = None,
+    ) -> None:
         """Initialize an admitted new turn before its cancellation polls start."""
         if not self.enabled:
+            if required:
+                raise RuntimeError("Runtime stream coordination requires Redis")
             return
         try:
             if generation is not None:
                 self.client.eval("""
                     redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[5])
                     redis.call('HSET', KEYS[4], 'generation', ARGV[1])
+                    redis.call('HDEL', KEYS[4], 'replay_incomplete')
+                    if ARGV[3] ~= '' then
+                        redis.call('HSET', KEYS[4], 'execution_id', ARGV[3], 'status', 'preparing')
+                        redis.call('HDEL', KEYS[4], 'message_id', 'owner_pod', 'started_at')
+                    else
+                        redis.call('HDEL', KEYS[4], 'execution_id')
+                    end
                     redis.call('EXPIRE', KEYS[4], ARGV[2])
                     return 1
                 """, 5, self._stream_key(user_id, conversation_id),
                     self._stream_done_key(user_id, conversation_id),
                     self._cancel_key(user_id, conversation_id), self._run_key(user_id, conversation_id),
-                    self._replay_key(user_id, conversation_id), generation, RUNTIME_RUN_TTL_SECONDS)
+                    self._replay_key(user_id, conversation_id), generation, RUNTIME_RUN_TTL_SECONDS,
+                    str(execution_id) if execution_id is not None else "")
                 return
-            self.client.hdel(self._run_key(user_id, conversation_id), "generation")
+            self.client.hdel(self._run_key(user_id, conversation_id), "generation", "execution_id", "replay_incomplete")
             self.client.delete(
                 self._stream_key(user_id, conversation_id),
                 self._stream_done_key(user_id, conversation_id),
@@ -121,23 +152,42 @@ class RuntimeStateService:
                 self._replay_key(user_id, conversation_id),
             )
         except Exception as exc:
+            if required:
+                raise
             logger.warning("Failed to reset runtime stream state: %s", exc)
 
-    async def reset_stream_async(self, user_id: str, conversation_id: int, generation: Optional[str] = None) -> None:
-        if generation is None:
+    async def reset_stream_async(
+        self, user_id: str, conversation_id: int, generation: Optional[str] = None, *, required: bool = False,
+        execution_id: Optional[int] = None,
+    ) -> None:
+        if required or execution_id is not None:
+            await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id,
+                                    generation, required=required,
+                                    **({"execution_id": execution_id} if execution_id is not None else {}))
+        elif generation is None:
             await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
         else:
             await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id, generation)
 
-    def claim_creator_run(self, user_id: str, conversation_id: int, generation: str) -> bool:
-        """Atomically claim an idle creator conversation across runtime replicas."""
+    def claim_creator_run(
+        self, user_id: str, conversation_id: int, generation: str, *, execution_id: Optional[int] = None,
+    ) -> bool:
+        """Fence Redis writes; an established database owner can replace an obsolete lease."""
         if not self.enabled:
             return True
         return bool(self.client.eval("""
-            if redis.call('HGET', KEYS[1], 'status') == 'running' and redis.call('EXISTS', KEYS[5]) == 1 then return 0 end
+            if ARGV[6] == '' and redis.call('HGET', KEYS[1], 'status') == 'running'
+                and redis.call('EXISTS', KEYS[5]) == 1 then return 0 end
             redis.call('DEL', KEYS[2], KEYS[3], KEYS[4], KEYS[6])
             redis.call('HSET', KEYS[1], 'generation', ARGV[1], 'status', 'running',
                 'owner_pod', ARGV[2], 'updated_at', ARGV[3])
+            redis.call('HDEL', KEYS[1], 'replay_incomplete')
+            if ARGV[6] ~= '' then
+                redis.call('HSET', KEYS[1], 'execution_id', ARGV[6])
+                redis.call('HDEL', KEYS[1], 'message_id', 'started_at')
+            else
+                redis.call('HDEL', KEYS[1], 'execution_id')
+            end
             redis.call('EXPIRE', KEYS[1], ARGV[4])
             redis.call('SET', KEYS[5], ARGV[1], 'EX', ARGV[5])
             return 1
@@ -145,10 +195,16 @@ class RuntimeStateService:
             self._stream_done_key(user_id, conversation_id), self._cancel_key(user_id, conversation_id),
             self._run_key(user_id, conversation_id) + ":creator-lease",
             self._replay_key(user_id, conversation_id),
-            generation, self._pod_name, str(int(time.time())), RUNTIME_RUN_TTL_SECONDS, max(1, RUNTIME_CREATOR_LEASE_SECONDS)))
+            generation, self._pod_name, str(int(time.time())), RUNTIME_RUN_TTL_SECONDS,
+            max(1, RUNTIME_CREATOR_LEASE_SECONDS), str(execution_id) if execution_id is not None else ""))
 
-    async def claim_creator_run_async(self, user_id: str, conversation_id: int, generation: str) -> bool:
-        return await self._run_managed("creator-claim", self.claim_creator_run, user_id, conversation_id, generation)
+    async def claim_creator_run_async(
+        self, user_id: str, conversation_id: int, generation: str, *, execution_id: Optional[int] = None,
+    ) -> bool:
+        return await self._run_managed(
+            "creator-claim", self.claim_creator_run, user_id, conversation_id, generation,
+            **({"execution_id": execution_id} if execution_id is not None else {}),
+        )
 
     def creator_lease(self, user_id, conversation_id, generation, renew=False):
         if not self.enabled:
@@ -252,6 +308,42 @@ class RuntimeStateService:
     async def is_cancelled_async(self, user_id: str, conversation_id: int) -> bool:
         return await self._run_managed("runtime-state-is-cancelled", self.is_cancelled, user_id, conversation_id)
 
+    def request_execution_cancel(
+        self, user_id: str, conversation_id: int | str, execution_id: int, expected_generation: Optional[str] = None,
+    ) -> bool:
+        """Record a stop against an authorized database execution, not a reusable conversation key."""
+        return bool(self.client.eval("""
+            if ARGV[2] ~= '' then
+                if redis.call('HGET', KEYS[1], 'execution_id') ~= ARGV[1]
+                    or redis.call('HGET', KEYS[1], 'generation') ~= ARGV[2] then return 0 end
+            end
+            redis.call('SET', KEYS[2], '1', 'EX', ARGV[3])
+            return 1
+        """, 2, self._run_key(user_id, conversation_id), self._execution_cancel_key(user_id, conversation_id, execution_id),
+            str(execution_id), expected_generation or "", RUNTIME_CANCEL_TTL_SECONDS))
+
+    async def request_execution_cancel_async(self, user_id, conversation_id, execution_id, expected_generation=None):
+        return await self._run_managed(
+            "runtime-execution-request-cancel", self.request_execution_cancel,
+            user_id, conversation_id, execution_id, expected_generation,
+        )
+
+    def is_execution_cancelled(self, user_id, conversation_id, execution_id, generation) -> bool:
+        try:
+            owned, occurrence = self.client.mget(
+                self._execution_cancel_key(user_id, conversation_id, execution_id), self._cancel_key(user_id, conversation_id),
+            )
+            return bool(owned or (generation and occurrence == generation))
+        except Exception as exc:
+            logger.warning("Failed to read Runtime execution cancel signal: %s", exc)
+            return False
+
+    async def is_execution_cancelled_async(self, user_id, conversation_id, execution_id, generation):
+        return await self._run_managed(
+            "runtime-execution-is-cancelled", self.is_execution_cancelled,
+            user_id, conversation_id, execution_id, generation,
+        )
+
     def append_stream_event(
         self, user_id: str, conversation_id: int, chunk: str, generation: Optional[str] = None,
         replay_update: Optional[dict] = None,
@@ -262,6 +354,13 @@ class RuntimeStateService:
             if replay_update is not None:
                 return self.client.eval("""
                     if ARGV[1] ~= '' and redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
+                    if ARGV[8] ~= '' then
+                        local previous = tonumber(redis.call('HGET', KEYS[3], 'sequence') or '0')
+                        if previous + 1 ~= tonumber(ARGV[8]) then
+                            redis.call('HSET', KEYS[1], 'replay_incomplete', '1')
+                            return false
+                        end
+                    end
                     local payload = cjson.decode(ARGV[6])
                     local field = 'part:' .. ARGV[5]
                     if ARGV[7] == '1' then
@@ -273,13 +372,15 @@ class RuntimeStateService:
                     local id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', 'chunk', ARGV[3])
                     redis.call('HSET', KEYS[3], field, cjson.encode(payload), 'cursor', id,
                         'count', tonumber(ARGV[5]) + 1, 'generation', ARGV[1])
+                    if ARGV[8] ~= '' then redis.call('HSET', KEYS[3], 'sequence', ARGV[8]) end
                     redis.call('EXPIRE', KEYS[2], ARGV[4])
                     redis.call('EXPIRE', KEYS[3], ARGV[4])
                     return id
                 """, 3, self._run_key(user_id, conversation_id), self._stream_key(user_id, conversation_id),
                     self._replay_key(user_id, conversation_id), generation or "", max(1, RUNTIME_STREAM_MAX_LEN),
                     chunk, RUNTIME_STREAM_TTL_SECONDS, replay_update["slot"],
-                    json.dumps(replay_update["payload"], ensure_ascii=False), "1" if replay_update["append"] else "0") or None
+                    json.dumps(replay_update["payload"], ensure_ascii=False), "1" if replay_update["append"] else "0",
+                    str(replay_update.get("sequence", ""))) or None
             if generation is not None:
                 return self.client.eval("""
                     if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return false end
@@ -320,6 +421,10 @@ class RuntimeStateService:
         if not self.enabled:
             return None
         data = self.client.hgetall(self._replay_key(user_id, conversation_id))
+        return self._decode_checkpoint(data)
+
+    @staticmethod
+    def _decode_checkpoint(data):
         if not data:
             return None
         return {
@@ -330,6 +435,49 @@ class RuntimeStateService:
     async def read_replay_checkpoint_async(self, user_id: str, conversation_id: int) -> Optional[dict]:
         return await self._run_managed("runtime-state-read-replay", self.read_replay_checkpoint, user_id, conversation_id)
 
+    def bind_execution_message(self, user_id, conversation_id, execution_id, message_id) -> bool:
+        return bool(self.client.eval("""
+            if redis.call('HGET', KEYS[1], 'execution_id') ~= ARGV[1] then return 0 end
+            redis.call('HSET', KEYS[1], 'message_id', ARGV[2])
+            return 1
+        """, 1, self._run_key(user_id, conversation_id), str(execution_id), str(message_id)))
+
+    async def bind_execution_message_async(self, user_id, conversation_id, execution_id, message_id):
+        return await self._run_managed(
+            "runtime-execution-bind-message", self.bind_execution_message,
+            user_id, conversation_id, execution_id, message_id,
+        )
+
+    def read_execution_stream(self, user_id, conversation_id, execution_id):
+        """Snapshot one bound generation, including its last output and terminal marker."""
+        snapshot = self.client.eval("""
+            if redis.call('HGET', KEYS[1], 'execution_id') ~= ARGV[1] then return {} end
+            local generation = redis.call('HGET', KEYS[1], 'generation')
+            if not generation then return {} end
+            return {generation, redis.call('HGET', KEYS[2], 'status') or '',
+                redis.call('HGET', KEYS[1], 'message_id') or '', redis.call('HGETALL', KEYS[3]),
+                redis.call('EXISTS', KEYS[4]), redis.call('HGET', KEYS[2], 'event_count') or '',
+                redis.call('HGET', KEYS[1], 'replay_incomplete') or ''}
+        """, 4, self._run_key(user_id, conversation_id), self._stream_done_key(user_id, conversation_id),
+            self._replay_key(user_id, conversation_id), self._stream_key(user_id, conversation_id), str(execution_id))
+        if not snapshot:
+            return None
+        generation, status, message_id, entries, raw_exists, event_count, invalid = snapshot
+        data = dict(zip(entries[::2], entries[1::2]))
+        try:
+            checkpoint = self._decode_checkpoint(data) if data.get("generation") == generation else None
+        except (KeyError, TypeError, ValueError):
+            checkpoint = None
+        return {"generation": generation, "terminal_status": status or None, "checkpoint": checkpoint,
+                "message_id": int(message_id) if message_id else None,
+                "incomplete": bool(invalid or (event_count and data.get("sequence", "0") != event_count)
+                                   or (checkpoint is None and (data or raw_exists)))}
+
+    async def read_execution_stream_async(self, user_id, conversation_id, execution_id):
+        return await self._run_managed(
+            "runtime-execution-read-stream", self.read_execution_stream, user_id, conversation_id, execution_id,
+        )
+
     def mark_stream_completed(
         self,
         user_id: str,
@@ -337,6 +485,7 @@ class RuntimeStateService:
         status: str,
         error: Optional[str] = None,
         generation: Optional[str] = None,
+        event_count: Optional[int] = None,
     ) -> None:
         if not self.enabled:
             return
@@ -352,10 +501,12 @@ class RuntimeStateService:
                 self.client.eval("""
                     if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
                     redis.call('HSET', KEYS[2], 'status', ARGV[2], 'updated_at', ARGV[3])
+                    if ARGV[5] ~= '' then redis.call('HSET', KEYS[2], 'event_count', ARGV[5]) end
                     redis.call('EXPIRE', KEYS[2], ARGV[4])
                     return 1
                 """, 2, self._run_key(user_id, conversation_id), done_key, generation,
-                    status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS))
+                    status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS),
+                    str(event_count) if event_count is not None else "")
                 return
             self.client.hset(done_key, mapping=payload)
             self._expire_completed_runtime_keys(user_id, conversation_id)
@@ -369,6 +520,7 @@ class RuntimeStateService:
         status: str,
         error: Optional[str] = None,
         generation: Optional[str] = None,
+        event_count: Optional[int] = None,
     ) -> None:
         await self._run_managed(
             "runtime-state-mark-stream-completed",
@@ -378,6 +530,7 @@ class RuntimeStateService:
             status,
             error,
             **({"generation": generation} if generation is not None else {}),
+            **({"event_count": event_count} if event_count is not None else {}),
         )
 
     def get_stream_status(self, user_id: str, conversation_id: int) -> Dict[str, str]:

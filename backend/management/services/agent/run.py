@@ -11,6 +11,10 @@ from typing import (
     Optional,
 )
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from management.services.agent.admission import reserve_agent_execution, reset_agent_stream, uses_durable_agent_admission
+from management.services.agent.control import request_owned_stop
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
@@ -23,7 +27,7 @@ from management.services.agent.preprocessing import (
 )
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MESSAGE_ROLE
-from contracts.errors.exceptions import MemoryPreparationException
+from contracts.errors.exceptions import MemoryPreparationException, RuntimeCapacityExceededError, RuntimeCoordinationUnavailableError, RuntimeQueueTimeoutError
 from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError
 from contracts.conversation import (
@@ -48,6 +52,10 @@ from runtime.adapters.nexent.runner import (
 )
 from nexent.core.concurrency import (
     ManagedExecution,
+    ManagedTaskSpec,
+    ThreadCapacityExceeded,
+    ThreadManagerError,
+    ThreadQueueTimedOut,
     run_blocking,
 )
 from nexent.monitor import (
@@ -55,6 +63,7 @@ from nexent.monitor import (
 )
 from management.services.conversation.model_preferences import read_model_preferences as _read_model_preferences
 from management.services.conversation.service import (
+    get_conversation_service,
     get_current_run_user_message_id,
     load_historical_context,
     persist_history_summary_candidate,
@@ -261,6 +270,7 @@ async def prepare_agent_run(
             else None
         )
     agent_run_info.__dict__["_automation_runtime_generation"] = agent_request.__dict__.get("_runtime_automation_generation")
+    agent_run_info.__dict__["_runtime_execution_generation"] = agent_request.__dict__.get("_runtime_execution_generation")
     register_kwargs = {}
     if reservation_token is not None:
         register_kwargs["reservation_token"] = reservation_token
@@ -322,10 +332,13 @@ async def generate_stream(
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
     _outer_task = asyncio.current_task()
+    durable = agent_request.__dict__.get("_runtime_execution_reservation")
     cancel_poll_task = (
         asyncio.create_task(
             _cancel_task_on_runtime_signal(
-                agent_request.conversation_id, user_id, _outer_task
+                _agent_run_identifier(agent_request) if durable is not None else agent_request.conversation_id,
+                user_id, _outer_task, reservation=durable,
+                generation=agent_request.__dict__.get("_runtime_execution_generation"),
             )
         )
         if _outer_task
@@ -335,13 +348,17 @@ async def generate_stream(
     # Lazily open the streaming channel. Recursive fallback below needs to
     # reuse the same channel so subscribers stay connected.
     if channel is None and enable_memory:
+        execution_generation = agent_request.__dict__.get("_runtime_execution_generation")
         channel = await streaming_channel_manager.get_or_create_channel(
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
+            **({"generation": execution_generation} if execution_generation is not None else {}),
         )
 
     memory_enabled_runtime = False
     agent_run_info = None
+    durable_admission = agent_request.__dict__.get("_runtime_execution_reservation")
+    stream_started = False
     try:
         if enable_memory:
             # Resolve the user-level switch for tool loading only.
@@ -374,7 +391,10 @@ async def generate_stream(
             # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
 
+        if durable_admission is not None:
+            await durable_admission.running()
         background_kwargs = {"execution_state": execution_state} if execution_state is not None else {}
+        stream_started = True
         async with aclosing(_stream_agent_chunks(
             agent_request=agent_request,
             user_id=user_id,
@@ -391,6 +411,8 @@ async def generate_stream(
                 yield data_chunk
 
     except (asyncio.CancelledError, GeneratorExit):
+        if durable_admission is not None and durable_admission.outcome != "completed":
+            durable_admission.outcome = "stopped"
         if agent_run_info is not None:
             run_identifier = _agent_run_identifier(agent_request)
             agent_run_manager.stop_agent_run(run_identifier, user_id)
@@ -452,7 +474,7 @@ async def generate_stream(
     except Exception as stream_exc:
         if execution_state is not None and execution_state.outcome != "failed":
             execution_state.fail("AUTOMATION_EXECUTION_FAILED", "Agent execution failed.")
-        if execution_state is not None and agent_run_info is not None:
+        if (execution_state is not None or durable_admission is not None) and agent_run_info is not None:
             _unregister_agent_run_after_execution(
                 _agent_run_identifier(agent_request), user_id,
                 status="failed", agent_run_info=agent_run_info,
@@ -473,7 +495,7 @@ async def generate_stream(
         if cancel_poll_task is not None:
             await asyncio.gather(cancel_poll_task, return_exceptions=True)
         if (
-            agent_run_info is None
+            (agent_run_info is None or (durable_admission is not None and not stream_started))
             and deferred_run is not None
             and execution is not None
             and not execution.future.done()
@@ -512,15 +534,53 @@ async def run_agent_background(
         raise ValueError("conversation_id is required for background agent runs")
 
     execution_state = execution_state or BackgroundExecutionState()
-    reservation = agent_run_manager.reserve_agent_run(agent_request.conversation_id, user_id)
+    reservation = None
+    execution = None
+    deferred_run = None
+    durable_admission = None
     try:
+        if uses_durable_agent_admission():
+            deferred_run = DeferredAgentRun()
+            try:
+                execution = runtime_thread_manager.submit(
+                    "agent-run",
+                    ManagedTaskSpec(
+                        task_name="automation-agent-run", owner=__name__, run_id=str(agent_request.conversation_id),
+                        close_hook=deferred_run.cancel, pass_cancel_event=True,
+                    ),
+                    deferred_run.run,
+                )
+                await runtime_thread_manager.wait_until_started(execution)
+            except ThreadCapacityExceeded as exc:
+                raise RuntimeCapacityExceededError() from exc
+            except ThreadQueueTimedOut as exc:
+                raise RuntimeQueueTimeoutError(exc.timeout_seconds) from exc
+        reservation = agent_run_manager.reserve_agent_run(agent_request.conversation_id, user_id)
+        if execution is not None:
+            durable_admission = await reserve_agent_execution(
+                agent_request, agent_request.conversation_id, user_id, tenant_id, execution.future,
+            )
         agent_request.__dict__["_runtime_automation_generation"] = execution_state.runtime_generation
-        await runtime_state_service.reset_stream_async(
-            user_id, agent_request.conversation_id, generation=execution_state.runtime_generation,
-        )
+        if durable_admission is not None:
+            generation = execution_state.runtime_generation or f"execution:{durable_admission.execution_id}"
+            agent_request.__dict__["_runtime_execution_generation"] = generation
+            agent_request.__dict__["_runtime_execution_reservation"] = durable_admission
+            await reset_agent_stream(
+                user_id, agent_request.conversation_id, generation, execution_id=durable_admission.execution_id,
+            )
+            if await runtime_state_service.is_execution_cancelled_async(
+                user_id, agent_request.conversation_id, durable_admission.execution_id, generation,
+            ):
+                raise asyncio.CancelledError()
+        else:
+            await runtime_state_service.reset_stream_async(
+                user_id, agent_request.conversation_id, generation=execution_state.runtime_generation,
+            )
         # A user cancellation may have committed before reset or during preparation.
         if execution_state.is_active is not None and not execution_state.is_active():
             raise asyncio.CancelledError()
+        if execution_state.prepare_prompt is not None:
+            agent_request.history = execution_state.prepare_prompt()["history"]
         # Background automation provenance is server-owned, including run-now.
         agent_request._message_source = "AUTOMATION"
 
@@ -540,6 +600,7 @@ async def run_agent_background(
             extra_metadata={"background": True, "skip_user_save": skip_user_save},
         )
         agent_metadata = run_context.metadata
+        worker_kwargs = {"execution": execution, "deferred_run": deferred_run} if execution is not None else {}
         stream_gen = generate_stream(
             agent_request,
             user_id=user_id,
@@ -548,6 +609,7 @@ async def run_agent_background(
             enable_memory=run_context.enable_memory,
             execution_state=execution_state,
             reservation_token=reservation,
+            **worker_kwargs,
         )
 
         chunks = 0
@@ -560,8 +622,19 @@ async def run_agent_background(
             **execution_state.result(),
             "chunks": chunks,
         }
+    except asyncio.CancelledError:
+        if durable_admission is not None and durable_admission.outcome != "completed":
+            durable_admission.outcome = "stopped"
+        raise
     finally:
-        agent_run_manager.release_agent_run_reservation(agent_request.conversation_id, user_id, reservation)
+        if reservation is not None:
+            agent_run_manager.release_agent_run_reservation(agent_request.conversation_id, user_id, reservation)
+        if execution is not None and not execution.future.done():
+            deferred_run.cancel()
+            runtime_thread_manager.cancel(execution.execution_id, reason="automation producer ended", wait_timeout=0,
+                                          mark_stuck_on_timeout=False)
+        if durable_admission is not None:
+            durable_admission.close()
 
 
 def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generation: Optional[str] = None):
@@ -581,7 +654,26 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generati
         if isinstance(conversation_id, int) and expected_generation is None
         else False
     )
+    return _stop_result(conversation_id, user_id, agent_stopped, preprocess_stopped)
 
+
+async def stop_shared_agent_tasks(conversation_id, user_id, tenant_id, expected_generation=None):
+    agent_stopped = await request_owned_stop(tenant_id, user_id, conversation_id, expected_generation)
+    preprocess_stopped = False
+    if not agent_stopped and isinstance(conversation_id, int) and expected_generation is None:
+        try:
+            owned = await run_blocking(
+                "runtime-stop-preprocess-ownership", get_conversation_service,
+                conversation_id, user_id, tenant_id, lane="control-io", owner=__name__,
+            )
+        except (SQLAlchemyError, ThreadManagerError) as exc:
+            raise RuntimeCoordinationUnavailableError("Conversation ownership is unavailable") from exc
+        if owned is not None:
+            preprocess_stopped = preprocess_manager.stop_preprocess_tasks(conversation_id)
+    return _stop_result(conversation_id, user_id, agent_stopped, preprocess_stopped)
+
+
+def _stop_result(conversation_id, user_id, agent_stopped, preprocess_stopped):
     if agent_stopped or preprocess_stopped:
         message_parts = []
         if agent_stopped:

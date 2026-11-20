@@ -15,7 +15,7 @@ case:
   automation: automated
   objective: 证明第一阶段普通 Pod 生命周期隔离及无自动失联接管的可观察边界。
   preconditions:
-  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 使用本次测试拥有的独立应用实例、专属 PostgreSQL/Redis 数据域和支持两个工作节点的真实动态 RWX。
   - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
@@ -23,7 +23,7 @@ case:
   test_data:
     scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
     model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
-    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+    preparation: 两个子场景各自准备独占 release 和定向 Gateway。正常重启场景用受控模型同时阻塞真实会话、评测和自动任务，失联场景缩短真实 Redis 运行键 TTL，不人工删除键。
   steps:
   - order: 1
     action: 在 A 建立上述长运行，记录状态、消息、目录和租约快照及正常续租变化范围，然后只重启 B。
@@ -67,13 +67,12 @@ case:
     - 3
   tags:
   - phase-1
-  - design-only
   source:
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    blocked_reason: 正常同伴重启和失联恢复路径均已绑定且隔离双进程验证通过；仍欠获准双工作节点和真实动态 RWX 上的正式执行和清理。
     primary_domain: runtime
-    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
-    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+    preparation_plan: 基于实际部署入口准备独占实例、数据库/Redis 数据域、身份和模型协议服务。正常重启校验健康 owner 容器标识不变；失联验证校验 Pod UID 后以短宽限期删除 owner，验证原流中断且接替 Pod 不接管。
+    cleanup_plan: 关闭定向 Gateway 端口转发，回收本次 namespace、数据和动态卷；确认外部 PVC 及其他实例未被改动。
   risk_type: RELIABILITY
   risk: Pod 启动误恢复健康实例；丢失 owner 后预约自动过期导致重复外部副作用。
   condition:

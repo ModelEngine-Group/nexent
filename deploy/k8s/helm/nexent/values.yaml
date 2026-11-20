@@ -1,7 +1,10 @@
 # Default values for nexent helm chart.
 global:
-  # Deployment scripts keep business Pods stopped until the bootstrap Job succeeds.
+  # Deployment scripts keep business Pods stopped until bootstrap and Runtime maintenance succeed.
   businessPaused: false
+  maintenanceEpoch: ""
+  renderRuntimeMaintenanceJob: false
+  runtimeMaintenanceTimeoutSeconds: 600
   systemBootstrapTimeoutSeconds: 1800
   namespace: nexent
   dataDir: "/var/lib/nexent-data"

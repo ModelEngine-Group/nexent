@@ -5,13 +5,14 @@ from typing import Any
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from contracts.errors.exceptions import AppException
+from contracts.errors.exceptions import AppException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.agent import AgentRequest
 
 import asyncio
 import json
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime
 from statistics import mean
 
@@ -84,8 +85,15 @@ def _make_background_done_callback(
     tenant_id: str, user_id: str, agent_evaluation_id: int, language: str = "zh"
 ):
     def callback(future):
+        if future.cancelled():
+            return
         exc = future.exception()
         if exc is not None:
+            if isinstance(exc, (RuntimeServiceUnavailableError, RuntimeServiceTimeoutError)) or (
+                isinstance(exc, RuntimeUpstreamError) and exc.status_code in (429, 503, 504)
+            ):
+                logger.warning("Evaluation %s dispatch will be reconciled from its persisted status", agent_evaluation_id)
+                return
             logger.exception(
                 "Background evaluation run failed (id=%s): %r", agent_evaluation_id, exc
             )
@@ -99,6 +107,7 @@ def _make_background_done_callback(
                     status=EvalRunStatus.FAILED,
                     updated_by=user_id,
                     error_message=friendly_msg,
+                    expected_status=EvalRunStatus.PENDING,
                 )
             except Exception as update_exc:
                 logger.error(
@@ -450,13 +459,6 @@ def _setup_no_set_and_execute(
             created_by=user_id,
         )
 
-        # Execute in the runtime process, which owns the shared workspace
-        # volume mounted by the sandbox container.
-        _dispatch_agent_evaluation_run(
-            agent_evaluation_id=agent_evaluation_id,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
     except Exception:
         logger.exception("No-set setup failed for run %d", agent_evaluation_id)
         update_agent_evaluation_status(
@@ -465,7 +467,15 @@ def _setup_no_set_and_execute(
             status=EvalRunStatus.FAILED,
             error_message="Failed to generate test queries",
             updated_by=user_id,
+            expected_status=EvalRunStatus.PENDING,
         )
+        return
+
+    _dispatch_agent_evaluation_run(
+        agent_evaluation_id=agent_evaluation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
 
 
 def _preload_evaluators_for_run(run: dict, tenant_id: str) -> dict[int, dict[str, Any]]:
@@ -532,15 +542,19 @@ def execute_agent_evaluation_run(
     user_id: str,
     agent_evaluation_id: int,
     judge_model_id: int | None = None,
-):
+    *,
+    before_finalize: Callable[[], None] | None = None,
+) -> str:
     run: dict[str, Any] = {}
+    status_guard = {} if before_finalize is None else {"expected_status": EvalRunStatus.RUNNING}
     try:
-        update_agent_evaluation_status(
-            agent_evaluation_id=agent_evaluation_id,
-            tenant_id=tenant_id,
-            status=EvalRunStatus.RUNNING,
-            updated_by=user_id,
-        )
+        if before_finalize is None:
+            update_agent_evaluation_status(
+                agent_evaluation_id=agent_evaluation_id,
+                tenant_id=tenant_id,
+                status=EvalRunStatus.RUNNING,
+                updated_by=user_id,
+            )
         run = get_agent_evaluation(
             agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
         )
@@ -613,6 +627,7 @@ def execute_agent_evaluation_run(
                     status=EvalRunStatus.RUNNING,
                     updated_by=user_id,
                     progress_done=done_count,
+                    **status_guard,
                 )
 
         overall = float(mean(scores)) if scores else 0.0
@@ -622,11 +637,8 @@ def execute_agent_evaluation_run(
         # DEFAULT_PASS_THRESHOLD is consistent with run-level UI display while
         # not double-counting evaluators.
         pass_count = sum(1 for s in scores if s >= DEFAULT_PASS_THRESHOLD)
-        update_agent_evaluation_status(
-            agent_evaluation_id=agent_evaluation_id,
-            tenant_id=tenant_id,
-            status=EvalRunStatus.COMPLETED,
-            updated_by=user_id,
+        outcome = EvalRunStatus.COMPLETED
+        result_fields = dict(
             score_overall=overall,
             progress_done=done_count,
             pass_count=pass_count,
@@ -641,13 +653,20 @@ def execute_agent_evaluation_run(
             tenant_id=tenant_id,
             language=run.get("language", "zh"),
         )
-        update_agent_evaluation_status(
-            agent_evaluation_id=agent_evaluation_id,
-            tenant_id=tenant_id,
-            status=EvalRunStatus.FAILED,
-            updated_by=user_id,
-            error_message=friendly_msg,
-        )
+        outcome = EvalRunStatus.FAILED
+        result_fields = {"error_message": friendly_msg}
+
+    if before_finalize is not None:
+        before_finalize()
+    update_agent_evaluation_status(
+        agent_evaluation_id=agent_evaluation_id,
+        tenant_id=tenant_id,
+        status=outcome,
+        updated_by=user_id,
+        **result_fields,
+        **status_guard,
+    )
+    return outcome
 
 
 from typing import Any

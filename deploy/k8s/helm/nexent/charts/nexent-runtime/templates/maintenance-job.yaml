@@ -1,0 +1,58 @@
+{{- if .Values.global.renderRuntimeMaintenanceJob }}
+{{- if not .Values.global.businessPaused }}
+{{- fail "Runtime maintenance Job requires a paused release" }}
+{{- end }}
+{{- $epoch := required "Runtime maintenance Job requires a maintenance epoch" .Values.global.maintenanceEpoch }}
+{{- $workspaceStorage := dig "sharedStorage" "workspace" (dict) .Values.global }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nexent-runtime-maintenance-{{ $epoch }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-runtime-maintenance
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    nexent.io/maintenance-epoch: {{ $epoch | quote }}
+spec:
+  activeDeadlineSeconds: {{ .Values.global.runtimeMaintenanceTimeoutSeconds }}
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: nexent-runtime-maintenance
+        app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: nexent-runtime-maintenance
+      automountServiceAccountToken: true
+      containers:
+        - name: maintenance
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          workingDir: /opt/backend
+          command: [python, -m, management.maintenance]
+          args:
+            - --namespace
+            - {{ .Values.global.namespace | quote }}
+            - --release
+            - {{ .Release.Name | quote }}
+            - --epoch
+            - {{ $epoch | quote }}
+          envFrom:
+            - configMapRef:
+                name: nexent-config
+            - secretRef:
+                name: nexent-env
+            - secretRef:
+                name: nexent-monitoring-env
+            - secretRef:
+                name: nexent-secrets
+          volumeMounts:
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
+      volumes:
+        - name: nexent-workspace
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
+{{- end }}

@@ -16,14 +16,15 @@ case:
   automation: automated
   objective: 在真实 PostgreSQL/Redis 下证明跨进程原子预约、全局配额及所有入口接入。
   preconditions:
-  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 固定脚本已绑定普通 Agent、Workbench 和 Northbound 的同会话竞争和配额；用例仍阻塞，正式执行使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 评测分支用两个定向内部入口访问同一 PENDING 评测；事务屏障仅锁住本次种子的评测执行键和记录，可观察实际等待者。
   - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
   test_data:
     scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
     model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
-    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+    preparation: 专用 Kubernetes profile、新建独占 namespace/数据域、两个可定向的 Runtime、配额为 2 及受控模型；结束后核验 namespace 和动态 PV 回收。
     entrypoints:
     - 普通 Agent
     - Workbench
@@ -84,13 +85,12 @@ case:
     - 3
   tags:
   - phase-1
-  - design-only
   source:
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    blocked_reason: 已绑定跨副本接纳和配额、评测竞争与真实满池拒绝、准备和收尾占额、Workbench 旧终态写入、Agent 本地排队、预约前依赖故障和预约后准备故障。手动/自动互斥由 RUNTIME-SCHEDULER-D3-001 证明。仍缺实集群验收和清理；满池证据不涵盖任意内部提交异常。
     primary_domain: runtime
     preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
-    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+    cleanup_plan: finally 释放受控模型，恢复测试独占 Runtime Service 后回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
   integration_boundary:
   - 两个独立 Runtime 进程→Management 协调→真实 PostgreSQL 事务与 Redis→真实执行器→受控模型协议。
   observations:

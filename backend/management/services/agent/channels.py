@@ -45,6 +45,7 @@ class StreamingChannel:
         self._history_buffer: Deque[Tuple[int, str, int]] = deque()
         self._history_bytes = 0
         self._replay = CompactReplay()
+        self._replay_cursor_invalid = False
         self._next_event_index = 0
         self._lock: asyncio.Lock = asyncio.Lock()
         self._data_event: asyncio.Event = asyncio.Event()
@@ -91,6 +92,10 @@ class StreamingChannel:
             return self._history_buffer[0][0]
         return self._next_event_index
 
+    @property
+    def durable_event_count(self) -> int | None:
+        return self._next_event_index if self.generation and self.generation.startswith("execution:") else None
+
     def _snapshot_from(self, start_index: int) -> Tuple[List[str], int]:
         """Copy retained chunks at or after an absolute index."""
         effective_start = max(start_index, self.history_start_index)
@@ -106,10 +111,9 @@ class StreamingChannel:
         Signals the data event to wake up waiting subscribers.
         Only publishes if not completed.
         """
-        if self._completed:
-            return
-
         async with self._lock:
+            if self._completed:
+                return
             chunk_bytes = len(chunk.encode("utf-8"))
             event_index = self._next_event_index
             self._next_event_index += 1
@@ -122,17 +126,23 @@ class StreamingChannel:
             ):
                 _, _, removed_bytes = self._history_buffer.popleft()
                 self._history_bytes -= removed_bytes
+            if self.durable_event_count is not None:
+                replay_update["sequence"] = self._next_event_index
+                event_id = await self._append_shared(chunk, replay_update)
+                self._replay_cursor_invalid |= event_id is None
 
-        await runtime_state_service.append_stream_event_async(
+        if self.durable_event_count is None:
+            await self._append_shared(chunk, replay_update)
+        self._data_event.set()
+
+    async def _append_shared(self, chunk, replay_update):
+        return await runtime_state_service.append_stream_event_async(
             user_id=self.user_id,
             conversation_id=self.conversation_id,
             chunk=chunk,
             replay_update=replay_update,
             **({"generation": self.generation} if self.generation is not None else {}),
         )
-
-        # Wake up waiting subscribers immediately
-        self._data_event.set()
 
     def complete(self, status: str = 'completed'):
         """
@@ -172,7 +182,7 @@ class StreamingChannel:
         return self._error
 
     async def subscribe_with_history(
-        self, start_from_index: int = 0, *, include_replay_checkpoint: bool = False,
+        self, start_from_index: int = 0, *, include_replay_checkpoint: bool = False, include_event_ids: bool = False,
     ) -> AsyncIterator[str]:
         """
         Subscribe with history: yields historical chunks from start_from_index,
@@ -183,8 +193,8 @@ class StreamingChannel:
             start_from_index: Index to start yielding historical chunks from.
                               Pass resume_from_unit_index to skip already-received chunks.
         """
-        if include_replay_checkpoint:
-            async for chunk in self._subscribe_checkpoint():
+        if include_replay_checkpoint or include_event_ids:
+            async for chunk in self._subscribe_checkpoint(include_event_ids=include_event_ids):
                 yield chunk
             return
         self.add_subscriber()
@@ -234,16 +244,22 @@ class StreamingChannel:
         finally:
             self.remove_subscriber()
 
-    async def _subscribe_checkpoint(self) -> AsyncIterator[str]:
+    async def _subscribe_checkpoint(self, *, include_event_ids: bool = False) -> AsyncIterator[str]:
         """Slow reconnecting readers must not lose updates to a trimmed raw tail."""
         self.add_subscriber()
         cursor = (0, 0)
         try:
             while True:
                 async with self._lock:
-                    chunks, cursor = self._replay.read_after(cursor)
+                    replay_unavailable = include_event_ids and self._replay_cursor_invalid
+                    chunks, cursor = self._replay.read_after(
+                        cursor, wire_generation=self.generation if include_event_ids else None,
+                    )
                     completed = self._completed
                     self._data_event.clear()
+                if replay_unavailable:
+                    yield 'event: stream_status\ndata: {"status":"streaming","replay_unavailable":true}\n\n'
+                    return
                 for chunk in chunks:
                     yield chunk
                 if completed:
@@ -325,7 +341,8 @@ class StreamingChannelManager:
         self,
         conversation_id: int,
         user_id: str,
-        history_size: int = DEFAULT_HISTORY_SIZE
+        history_size: int = DEFAULT_HISTORY_SIZE,
+        *, generation: Optional[str] = None,
     ) -> StreamingChannel:
         """
         Get an existing channel or create a new one.
@@ -333,12 +350,13 @@ class StreamingChannelManager:
         key = self.get_channel_key(conversation_id, user_id)
         async with self._lock:
             existing = self._channels.get(key)
-            if existing is None or existing.is_completed:
+            if existing is None or existing.is_completed or (generation is not None and existing.generation != generation):
                 self._channels[key] = StreamingChannel(
                     conversation_id=conversation_id,
                     user_id=user_id,
                     history_size=history_size
                 )
+                self._channels[key].generation = generation
                 logger.debug(f"Created new channel: {key}")
             return self._channels[key]
 
@@ -355,16 +373,22 @@ class StreamingChannelManager:
         self,
         conversation_id: int,
         user_id: str,
-        status: str = 'completed'
+        status: str = 'completed',
+        *, generation: Optional[str] = None,
     ):
         """Mark a channel as completed."""
         channel = self.get_channel(conversation_id, user_id)
-        if channel:
+        event_count = None
+        if channel and (generation is None or channel.generation == generation):
             channel.complete(status)
+            if generation is not None:
+                event_count = channel.durable_event_count
         await runtime_state_service.mark_stream_completed_async(
             user_id=user_id,
             conversation_id=conversation_id,
             status=status,
+            **({"generation": generation} if generation is not None else {}),
+            **({"event_count": event_count} if event_count is not None else {}),
         )
 
     async def remove_channel(

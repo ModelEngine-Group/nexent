@@ -1,12 +1,29 @@
-{{- if ne (int .Values.replicaCount) 1 -}}
-{{- fail "nexent-runtime must remain single-replica for startup task recovery" -}}
-{{- end -}}
 {{- if ne .Values.strategy.type "Recreate" -}}
-{{- fail "nexent-runtime strategy.type must be Recreate for startup task recovery" -}}
+{{- fail "nexent-runtime strategy.type must be Recreate for offline maintenance" -}}
 {{- end -}}
 {{- $global := default dict .Values.global -}}
+{{- $epoch := default "" $global.maintenanceEpoch -}}
+{{- if and $epoch (not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $epoch)) -}}
+{{- fail "global.maintenanceEpoch must be a canonical UUID" -}}
+{{- end -}}
 {{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- if gt (int .Values.replicaCount) 1 -}}
+  {{- if not $epoch -}}
+    {{- fail "nexent-runtime multi-replica deployment requires global.maintenanceEpoch" -}}
+  {{- end -}}
+  {{- if not (has $sharedStorage.mode (list "dynamic" "existing")) -}}
+    {{- fail "nexent-runtime multi-replica deployment requires dynamic or existing shared RWX storage" -}}
+  {{- end -}}
+  {{- if eq $sharedStorage.mode "dynamic" -}}
+    {{- if or (not $sharedStorage.storageClassName) (eq $sharedStorage.storageClassName "nexent-local") -}}
+      {{- fail "nexent-runtime multi-replica deployment requires an explicit RWX StorageClass in dynamic mode" -}}
+    {{- end -}}
+    {{- if not (has "ReadWriteMany" (default (list "ReadWriteMany") $sharedStorage.accessModes)) -}}
+      {{- fail "nexent-runtime multi-replica deployment requires ReadWriteMany shared volume access" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
 {{- $memoryPluginsStorage := default dict $sharedStorage.memoryPlugins -}}
@@ -20,6 +37,10 @@ metadata:
     app: nexent-runtime
   annotations:
     "helm.sh/hook-weight": "20"
+    nexent.io/maintenance-epoch: {{ $epoch | quote }}
+    {{- if .Values.global.businessPaused }}
+    nexent.io/maintenance-target-replicas: {{ .Values.replicaCount | quote }}
+    {{- end }}
 spec:
   replicas: {{ ternary 0 .Values.replicaCount (default false .Values.global.businessPaused) }}
   strategy:
@@ -59,11 +80,21 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LOG_DIR
+              value: "/mnt/nexent-data/logs/$(POD_NAME)"
             - name: GATEWAY_AUTH_ENABLED
               value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "wait"
+            - name: NEXENT_RECOVERY_MODE
+              value: "maintenance"
+            - name: NEXENT_MAINTENANCE_EPOCH
+              value: {{ $epoch | quote }}
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy

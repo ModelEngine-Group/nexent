@@ -5,12 +5,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import Float, func, select
+from sqlalchemy.orm import Session
 
 from contracts.errors.codes import ErrorCode
 from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
+from management.db.execution.models import ExecutionReservation
+from management.db.execution.repository import ACTIVE_STATES
 from management.db.models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
 
 
@@ -81,6 +84,9 @@ def update_agent_evaluation_status(
     progress_done: int | None = None,
     pass_count: int | None = None,
     fail_count: int | None = None,
+    *,
+    expected_status: str | None = None,
+    db_session: Session | None = None,
 ) -> None:
     optional_fields = {
         "error_message": error_message,
@@ -95,17 +101,22 @@ def update_agent_evaluation_status(
         **{k: v for k, v in optional_fields.items() if v is not None},
     }
 
-    with get_db_session() as session:
-        session.query(AgentEvaluation).filter(
+    with get_db_session(db_session) as session:
+        query = session.query(AgentEvaluation).filter(
             AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
             AgentEvaluation.tenant_id == tenant_id,
-        ).update(updates, synchronize_session=False)
+        )
+        if expected_status is not None:
+            query = query.filter(AgentEvaluation.status == expected_status, AgentEvaluation.delete_flag == "N")
+        query.update(updates, synchronize_session=False)
 
 
 def claim_agent_evaluation_run(
     agent_evaluation_id: int,
     tenant_id: str,
     updated_by: str | None = None,
+    *,
+    db_session: Session | None = None,
 ) -> bool:
     """Atomically claim a pending evaluation for runtime execution.
 
@@ -113,13 +124,14 @@ def claim_agent_evaluation_run(
     retries an internal runtime request: only one runtime request can move a
     run from ``PENDING`` to ``RUNNING``.
     """
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         updated = (
             session.query(AgentEvaluation)
             .filter(
                 AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
                 AgentEvaluation.tenant_id == tenant_id,
                 AgentEvaluation.status == EvalRunStatus.PENDING,
+                AgentEvaluation.delete_flag == "N",
             )
             .update(
                 {
@@ -129,7 +141,6 @@ def claim_agent_evaluation_run(
                 synchronize_session=False,
             )
         )
-        session.commit()
         return updated == 1
 
 
@@ -668,8 +679,20 @@ def hard_delete_agent_evaluation(
         session.commit()
 
 
+def _unowned_evaluation():
+    owned = select(ExecutionReservation.execution_id).where(
+        ExecutionReservation.tenant_id == AgentEvaluation.tenant_id,
+        ExecutionReservation.execution_key == func.concat("evaluation:", AgentEvaluation.agent_evaluation_id),
+        ExecutionReservation.service_role == "runtime",
+        ExecutionReservation.execution_kind == "evaluation",
+        ExecutionReservation.status.in_(ACTIVE_STATES),
+        ExecutionReservation.delete_flag == "N",
+    )
+    return ~owned.exists()
+
+
 def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
-    """Hard-delete evaluation runs older than retention_days. Returns count of deleted runs."""
+    """Hard-delete old terminal evaluations that have no active Runtime owner."""
     from management.db.evaluation.sets import hard_delete_evaluation_set
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
@@ -684,6 +707,8 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
             .filter(
                 AgentEvaluation.tenant_id == tenant_id,
                 AgentEvaluation.create_time < cutoff,
+                AgentEvaluation.status.in_((EvalRunStatus.COMPLETED, EvalRunStatus.FAILED)),
+                _unowned_evaluation(),
             )
             .all()
         )
@@ -737,24 +762,22 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
     return deleted
 
 
-def reap_stale_runs(tenant_id: str, timeout_minutes: int = 10) -> int:
-    """Mark RUNNING evaluations as FAILED if they haven't been updated recently.
-
-    Handles the case where a server restart loses an in-flight managed task
-    tasks, leaving zombie RUNNING records.  Called on startup and periodically.
-    """
+def reap_stale_runs(
+    tenant_id: str, timeout_minutes: int = 10, *, recover_owned: bool = False, db_session: Session | None = None,
+) -> int:
+    """Fail stale evaluations, including Runtime-owned work only during offline maintenance."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
     count = 0
-    with get_db_session() as session:
-        stale = (
-            session.query(AgentEvaluation.agent_evaluation_id)
-            .filter(
-                AgentEvaluation.tenant_id == tenant_id,
-                AgentEvaluation.status == EvalRunStatus.RUNNING,
-                AgentEvaluation.update_time < cutoff,
-            )
-            .all()
+    with get_db_session(db_session) as session:
+        query = session.query(AgentEvaluation.agent_evaluation_id).filter(
+            AgentEvaluation.tenant_id == tenant_id,
+            AgentEvaluation.status == EvalRunStatus.RUNNING,
+            AgentEvaluation.update_time < cutoff,
+            AgentEvaluation.delete_flag == "N",
         )
+        if not recover_owned:
+            query = query.filter(_unowned_evaluation())
+        stale = query.all()
         stale_ids = [eid for (eid,) in stale]
         if stale_ids:
             error_message = "Server restarted — evaluation was interrupted"
@@ -783,7 +806,6 @@ def reap_stale_runs(tenant_id: str, timeout_minutes: int = 10) -> int:
                 synchronize_session=False,
             )
             count = len(stale_ids)
-        session.commit()
     if count:
         logger.info("Reaped %d stale RUNNING evaluations for tenant %s", count, tenant_id)
     return count
@@ -857,6 +879,11 @@ def fail_interrupted_no_set_runs_on_startup() -> int:
 
 def list_dispatchable_pending_runs() -> list[dict[str, Any]]:
     """Return pending evaluations that already have a durable case set."""
+    prepared = select(AgentEvaluationCase.agent_evaluation_case_id).where(
+        AgentEvaluationCase.tenant_id == AgentEvaluation.tenant_id,
+        AgentEvaluationCase.agent_evaluation_id == AgentEvaluation.agent_evaluation_id,
+        AgentEvaluationCase.delete_flag == "N",
+    )
     with get_db_session() as session:
         rows = (
             session.query(AgentEvaluation)
@@ -864,6 +891,7 @@ def list_dispatchable_pending_runs() -> list[dict[str, Any]]:
                 AgentEvaluation.status == EvalRunStatus.PENDING,
                 AgentEvaluation.evaluation_set_id > 0,
                 AgentEvaluation.delete_flag == "N",
+                prepared.exists(),
             )
             .order_by(AgentEvaluation.create_time.asc())
             .all()

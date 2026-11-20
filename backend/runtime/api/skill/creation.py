@@ -4,7 +4,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import NL2SkillRunRequest
 from permissions.depends import require
@@ -14,7 +14,7 @@ from services.nl2skill_service import create_nl2skill_stream
 from management.services.permission.identity.session import get_current_user_info
 from management.services.conversation.creator_execution import start_creation_turn
 from management.services.agent.lifecycle import AgentRunAlreadyActiveError
-from contracts.errors.exceptions import RuntimeCapacityExceededError, RuntimeQueueTimeoutError
+from contracts.errors.exceptions import ForbiddenError, RuntimeCapacityExceededError, RuntimeCoordinationUnavailableError, RuntimeQueueTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,18 @@ async def nl2skill_run_api(
     except AgentRunAlreadyActiveError as exc:
         raise HTTPException(status_code=409, detail={"code": "CREATOR_RUN_ACTIVE"}) from exc
     except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
-        raise HTTPException(status_code=429, detail={"code": "RUNTIME_CAPACITY_EXCEEDED", "retryable": True},
-                            headers={"Retry-After": str(exc.retry_after_seconds)}) from exc
-    except PermissionError as exc:
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content={"message": {"code": "RUNTIME_CAPACITY_EXCEEDED", "retryable": True}},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except RuntimeCoordinationUnavailableError:
+        return JSONResponse(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            content={"code": "RUNTIME_COORDINATION_UNAVAILABLE", "message": "Runtime coordination is unavailable.",
+                     "retryable": True}, headers={"Retry-After": "1"},
+        )
+    except (PermissionError, ForbiddenError) as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
 
     except WorkbenchError as exc:

@@ -23,7 +23,11 @@ from management.api.conversation.conversation_share import (
 from management.api.conversation.workbench_pins import router as workbench_pins_router
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
-from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import (
+    NEXENT_MAINTENANCE_EPOCH,
+    NEXENT_RECOVERY_MODE,
+    RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+)
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.identity_routes import is_runtime_service_request
 from management.configuration.runtime import (
@@ -43,10 +47,28 @@ from infrastructure.redis.run_state import runtime_state_service
 logger = logging.getLogger("runtime_app")
 
 
-async def start_agent_automation_scheduler():
-    from management.recovery import recover_runtime_tasks
+async def _require_runtime_maintenance():
+    from management.maintenance import require_completed_runtime_maintenance
+
+    return await runtime_thread_manager.run(
+        "control-io",
+        ManagedTaskSpec(task_name="verify-runtime-maintenance", owner="runtime.api.application"),
+        require_completed_runtime_maintenance,
+        NEXENT_MAINTENANCE_EPOCH,
+    )
+
+
+async def start_agent_automation_scheduler(*, maintenance_cutoff=None):
     from management.services.automation.scheduler import agent_automation_scheduler
-    from management.services.agent.workspace_cleanup import cleanup_orphaned_agent_workspaces
+
+    if NEXENT_RECOVERY_MODE == "maintenance":
+        if maintenance_cutoff is None:
+            raise RuntimeError("Runtime scheduling requires a verified maintenance batch")
+        await agent_automation_scheduler.start(maintenance_cutoff=maintenance_cutoff)
+        return
+
+    from management.recovery import recover_runtime_tasks
+    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
         "control-io",
@@ -86,6 +108,7 @@ async def runtime_lifespan(_app):
     from infrastructure.trace.bootstrap import local_trajectory_processor
 
     try:
+        maintenance_cutoff = await _require_runtime_maintenance() if NEXENT_RECOVERY_MODE == "maintenance" else None
         configuration_runtime = await start_system_configuration(run_configuration_io)
         if _app is not None:
             _app.state.configuration_runtime = configuration_runtime
@@ -103,7 +126,10 @@ async def runtime_lifespan(_app):
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
-        await start_agent_automation_scheduler()
+        if maintenance_cutoff is None:
+            await start_agent_automation_scheduler()
+        else:
+            await start_agent_automation_scheduler(maintenance_cutoff=maintenance_cutoff)
         yield
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS

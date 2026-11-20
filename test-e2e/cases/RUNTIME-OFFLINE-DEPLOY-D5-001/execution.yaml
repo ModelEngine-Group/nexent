@@ -1,0 +1,38 @@
+schema_version: '1.0'
+case_id: RUNTIME-OFFLINE-DEPLOY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: RUNTIME-OFFLINE-DEPLOY-D5-001
+timeout_seconds: 7200
+acceptance_bindings:
+  AC-P1-001:
+  - test_fixed_replica_chart_boundaries
+  - test_offline_replica_sequence
+  AC-P1-002:
+  - test_offline_replica_sequence
+  - test_completed_maintenance_without_deployment_lock_cannot_activate
+  - test_unfinished_maintenance_job_does_not_pause_the_running_release
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained deployment preparation: the live test requires a dedicated
+  opted-in cluster and unused dynamic RWX StorageClass in the machine-local
+  profile. It stages deployment sources and creates its own namespace, product
+  database, Redis, volumes and fixture Pods. Both the failure/retry and rollback
+  interrupt real Agent streams with distinct tags on one case-owned model
+  endpoint. Versioning in the isolated embedded MinIO bucket records actual
+  upload-tool writes, including repeated writes to the same key. Both receipts
+  are checked before owner interruption, across failed and repeated maintenance,
+  after activation, and after the explicit new request. The case-owned storage
+  and its versions are reclaimed with the namespace and volumes. A separate
+  owned release gates a successful maintenance Job result and terminates only
+  the uniquely tagged PostgreSQL deployment lock session. Helm activation must
+  not be requested; the old batch stays committed and a fresh window recovers.
+  A separate case deployment leaves a suspended, owned maintenance Job with
+  no Pod. It must block a new deployment without altering the live release or
+  removing the fixture Job; namespace teardown reclaims the fixture.
+  Live cluster execution and cleanup still require the dedicated profile.

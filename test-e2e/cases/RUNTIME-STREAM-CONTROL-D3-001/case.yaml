@@ -16,7 +16,7 @@ case:
   automation: automated
   objective: 证明跨实例状态控制、Redis 回放及稳定代理兼容；断开订阅不等于取消。
   preconditions:
-  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 固定脚本已绑定普通 Agent 及稳定 Web/Northbound 断流续订、跨实例停止、附件隔离和语音 WebSocket；正式执行使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
   - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
   - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
   - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
@@ -24,7 +24,7 @@ case:
   test_data:
     scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
     model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
-    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+    preparation: 本用例自行准备获准的隔离集群 release、定向 Gateway 或限定本次 release 的 Runtime Service 中继、身份、模型和语音协议服务；附件经真实对象存储，回收测试输入、产物和会话；关闭语音连接，还原 Service 并清理本次拥有的命名空间和动态卷。
   steps:
   - order: 1
     action: 在 A 通过正常业务入口启动带有递增序列的长流，B 查询状态并订阅；记录 A/B 身份及同一 execution 代次。
@@ -90,10 +90,9 @@ case:
     - 4
   tags:
   - phase-1
-  - design-only
   source:
     spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
-    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    blocked_reason: 缺少获准的隔离双工作节点集群和动态 RWX；单主机双 Runtime 组件结果不能代替实际 Kubernetes Pod、Service 和资源清理验证。
     primary_domain: runtime
     preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
     cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。

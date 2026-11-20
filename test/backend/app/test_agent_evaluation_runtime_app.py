@@ -12,6 +12,9 @@ from contracts.evaluation import EvaluationRunRequest, RuntimeEvaluationTrialRun
 from runtime.api.evaluation.execution import dispatch_evaluation_run_api, trial_run_evaluation_api
 from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
+from management.services.evaluation import dispatch as dispatch_service
+from management.services.execution_coordination import ExecutionAlreadyActiveError, RuntimeCoordinationUnavailableError
+from nexent.core.concurrency import ThreadCapacityExceeded, ThreadManagerDraining, ThreadManagerNotRunning, ThreadQueueTimedOut
 
 
 @pytest.mark.asyncio
@@ -69,8 +72,8 @@ async def test_dispatch_claims_pending_run_and_submits_runtime_worker(monkeypatc
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        MagicMock(
+        "read_evaluation_for_dispatch",
+        AsyncMock(
             return_value={
                 "agent_evaluation_id": 7,
                 "status": EvalRunStatus.PENDING,
@@ -78,30 +81,17 @@ async def test_dispatch_claims_pending_run_and_submits_runtime_worker(monkeypatc
             }
         ),
     )
-    claim = MagicMock(return_value=True)
-    monkeypatch.setattr(runtime_app, "claim_agent_evaluation_run", claim)
     executor = MagicMock()
     monkeypatch.setattr(runtime_app, "_load_evaluation_executor", lambda: executor)
-    submit = MagicMock()
-    monkeypatch.setattr(runtime_app.runtime_thread_manager, "submit", submit)
+    start = AsyncMock()
+    monkeypatch.setattr(runtime_app, "start_pending_evaluation", start)
 
     result = await dispatch_evaluation_run_api(
         EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
     )
 
     assert result == {"accepted": True, "agent_evaluation_id": 7}
-    claim.assert_called_once_with(agent_evaluation_id=7, tenant_id="t1", updated_by="u1")
-    submitted = submit.call_args.args
-    assert submitted[0] == "evaluation"
-    assert submitted[1].task_name == "agent-evaluation-dispatch"
-    assert submitted[1].run_id == "7"
-    assert submitted[2:] == (
-        executor,
-        "t1",
-        "u1",
-        7,
-        7782,
-    )
+    start.assert_awaited_once_with(7, "t1", "u1", 7782, executor)
 
 
 @pytest.mark.asyncio
@@ -109,12 +99,12 @@ async def test_dispatch_is_idempotent_when_run_is_already_running(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        MagicMock(return_value={"agent_evaluation_id": 7, "status": EvalRunStatus.RUNNING}),
+        "read_evaluation_for_dispatch",
+        AsyncMock(return_value={"agent_evaluation_id": 7, "status": EvalRunStatus.RUNNING}),
     )
     monkeypatch.setattr(runtime_app, "_load_evaluation_executor", lambda: MagicMock())
-    submit = MagicMock()
-    monkeypatch.setattr(runtime_app.runtime_thread_manager, "submit", submit)
+    start = AsyncMock()
+    monkeypatch.setattr(runtime_app, "start_pending_evaluation", start)
 
     result = await dispatch_evaluation_run_api(
         EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
@@ -125,7 +115,7 @@ async def test_dispatch_is_idempotent_when_run_is_already_running(monkeypatch):
         "already_running": True,
         "agent_evaluation_id": 7,
     }
-    submit.assert_not_called()
+    start.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -146,7 +136,7 @@ async def test_dispatch_rejects_missing_internal_token(monkeypatch):
 @pytest.mark.asyncio
 async def test_dispatch_returns_not_found_for_missing_run(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
-    monkeypatch.setattr(runtime_app, "get_agent_evaluation", lambda **_: None)
+    monkeypatch.setattr(runtime_app, "read_evaluation_for_dispatch", AsyncMock(return_value=None))
 
     payload = EvaluationRunRequest(agent_evaluation_id=7)
     with pytest.raises(HTTPException) as exc_info:
@@ -160,8 +150,8 @@ async def test_dispatch_maps_database_exception_to_not_found(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        MagicMock(side_effect=AppException("missing", "run missing")),
+        "read_evaluation_for_dispatch",
+        AsyncMock(side_effect=AppException("missing", "run missing")),
     )
     payload = EvaluationRunRequest(agent_evaluation_id=7)
 
@@ -177,17 +167,17 @@ async def test_dispatch_is_idempotent_when_pending_claim_is_lost(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        MagicMock(
+        "read_evaluation_for_dispatch",
+        AsyncMock(
             side_effect=[
                 {"agent_evaluation_id": 7, "status": EvalRunStatus.PENDING},
                 {"agent_evaluation_id": 7, "status": EvalRunStatus.RUNNING},
             ]
         ),
     )
-    monkeypatch.setattr(runtime_app, "claim_agent_evaluation_run", lambda **_: False)
-    submit = MagicMock()
-    monkeypatch.setattr(runtime_app.runtime_thread_manager, "submit", submit)
+    start = AsyncMock(side_effect=ExecutionAlreadyActiveError("another Pod owns the claim"))
+    monkeypatch.setattr(runtime_app, "start_pending_evaluation", start)
+    monkeypatch.setattr(runtime_app, "_load_evaluation_executor", MagicMock())
 
     result = await dispatch_evaluation_run_api(
         EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
@@ -198,7 +188,7 @@ async def test_dispatch_is_idempotent_when_pending_claim_is_lost(monkeypatch):
         "already_running": True,
         "agent_evaluation_id": 7,
     }
-    submit.assert_not_called()
+    start.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -206,15 +196,16 @@ async def test_dispatch_rejects_pending_claim_conflict(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        MagicMock(
+        "read_evaluation_for_dispatch",
+        AsyncMock(
             side_effect=[
                 {"agent_evaluation_id": 7, "status": EvalRunStatus.PENDING},
                 {"agent_evaluation_id": 7, "status": EvalRunStatus.PENDING},
             ]
         ),
     )
-    monkeypatch.setattr(runtime_app, "claim_agent_evaluation_run", lambda **_: False)
+    monkeypatch.setattr(runtime_app, "start_pending_evaluation", AsyncMock(side_effect=ExecutionAlreadyActiveError()))
+    monkeypatch.setattr(runtime_app, "_load_evaluation_executor", MagicMock())
     payload = EvaluationRunRequest(agent_evaluation_id=7)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -228,8 +219,8 @@ async def test_dispatch_rejects_unknown_status(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        lambda **_: {"agent_evaluation_id": 7, "status": "CANCELLED"},
+        "read_evaluation_for_dispatch",
+        AsyncMock(return_value={"agent_evaluation_id": 7, "status": "CANCELLED"}),
     )
     payload = EvaluationRunRequest(agent_evaluation_id=7)
 
@@ -244,17 +235,18 @@ async def test_dispatch_maps_runtime_pool_submission_failure(monkeypatch):
     monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
     monkeypatch.setattr(
         runtime_app,
-        "get_agent_evaluation",
-        lambda **_: {
+        "read_evaluation_for_dispatch",
+        AsyncMock(return_value={
             "agent_evaluation_id": 7,
             "status": EvalRunStatus.PENDING,
             "judge_model_id": 7782,
-        },
+        }),
     )
-    monkeypatch.setattr(runtime_app, "claim_agent_evaluation_run", lambda **_: True)
+    claim = MagicMock(return_value=True)
+    monkeypatch.setattr(dispatch_service, "claim_agent_evaluation_run", claim)
     monkeypatch.setattr(runtime_app, "_load_evaluation_executor", MagicMock())
     monkeypatch.setattr(
-        runtime_app.runtime_thread_manager,
+        dispatch_service.runtime_thread_manager,
         "submit",
         MagicMock(side_effect=RuntimeError("pool closed")),
     )
@@ -264,3 +256,26 @@ async def test_dispatch_maps_runtime_pool_submission_failure(monkeypatch):
         await dispatch_evaluation_run_api(payload, "internal-token")
 
     assert exc_info.value.status_code == 500
+    claim.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "status", "code"), [
+    (RuntimeCoordinationUnavailableError(), 503, "RUNTIME_COORDINATION_UNAVAILABLE"),
+    (ThreadManagerDraining(), 503, "RUNTIME_COORDINATION_UNAVAILABLE"),
+    (ThreadManagerNotRunning(), 503, "RUNTIME_COORDINATION_UNAVAILABLE"),
+    (ThreadCapacityExceeded("evaluation", 1, 0), 429, "RUNTIME_CAPACITY_FULL"),
+    (ThreadQueueTimedOut("evaluation", 1), 429, "RUNTIME_QUEUE_TIMEOUT"),
+])
+async def test_dispatch_maps_admission_rejections_to_retryable_responses(monkeypatch, failure, status, code):
+    monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
+    monkeypatch.setattr(runtime_app, "read_evaluation_for_dispatch", AsyncMock(return_value={"status": "PENDING"}))
+    monkeypatch.setattr(runtime_app, "_load_evaluation_executor", MagicMock())
+    monkeypatch.setattr(runtime_app, "start_pending_evaluation", AsyncMock(side_effect=failure))
+
+    response = await dispatch_evaluation_run_api(EvaluationRunRequest(agent_evaluation_id=7), "internal-token")
+
+    assert response.status_code == status
+    assert response.headers["retry-after"] == "1"
+    payload = response.body.decode()
+    assert code in payload and '"retryable":true' in payload

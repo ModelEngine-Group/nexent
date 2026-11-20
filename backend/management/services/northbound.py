@@ -37,7 +37,6 @@ from management.services.knowledge_base.scope import (
 from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model.resolver import get_model_descriptor
 from management.services.conversation.service import (
-    save_conversation_user,
     create_new_conversation,
     generate_conversation_title_service,
     get_conversation_service,
@@ -376,6 +375,7 @@ async def start_streaming_chat(
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None,
     final_answer_mode: Literal["complete", "delta"] = "complete",
+    stream_cursor: bool = False,
 ) -> StreamingResponse:
     new_conversation_data: Optional[Dict[str, Any]] = None
     try:
@@ -441,25 +441,9 @@ async def start_streaming_chat(
             version_no=latest_version_no,
             metadata=metadata,
             enable_automation_tool=False,
+            stream_cursor=stream_cursor,
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
-
-        # Persist before starting the stream. External callers may not reconnect,
-        # so the managed control-I/O task preserves synchronous commit semantics.
-        try:
-            await config_thread_manager.run(
-                "control-io",
-                ManagedTaskSpec(
-                    task_name="northbound-save-user-message",
-                    owner="management.services.northbound",
-                ),
-                save_conversation_user,
-                agent_request,
-                ctx.user_id,
-                ctx.tenant_id,
-            )
-        except Exception as e:
-            raise Exception(f"Failed to persist user message: {str(e)}")
 
     except LimitExceededError as exc:
         raise LimitExceededError(str(exc))
@@ -478,6 +462,7 @@ async def start_streaming_chat(
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
             final_answer_mode=final_answer_mode,
+            persist_user_message=True,
         )
     finally:
         if composed_key:
@@ -511,6 +496,18 @@ async def start_streaming_chat(
 
         response.body_iterator = body_iterator_with_conversation_created()
 
+    return response
+
+
+async def resume_streaming_chat(ctx: NorthboundContext, conversation_id: int | None, replay_cursor: str):
+    if conversation_id is None or conversation_id <= 0:
+        raise ValueError("Replay requires an existing conversation ID")
+    await check_and_consume_rate_limit(ctx.tenant_id)
+    request = AgentRequest(conversation_id=conversation_id, query="", replay_cursor=replay_cursor)
+    response = await forward_agent_run(request, ctx.user_id, ctx.tenant_id)
+    response.headers["X-Request-Id"] = ctx.request_id
+    response.headers["conversation_id"] = str(conversation_id)
+    response.headers["X-Accel-Buffering"] = "no"
     return response
 
 

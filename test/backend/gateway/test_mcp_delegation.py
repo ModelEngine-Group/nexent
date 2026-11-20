@@ -129,3 +129,21 @@ async def test_mcp_router_uses_delegated_identity_and_restores_context(monkeypat
         assert resolver.await_count == (0 if variant == "duplicate" else 1)
     finally:
         identity_context.reset(parent)
+
+
+@pytest.mark.asyncio
+async def test_mcp_service_binds_gateway_origin_and_signing_key(monkeypatch):
+    from backend.http import mcp_service as service
+
+    delegate = AsyncMock(return_value=PRINCIPAL)
+    tenant_app = AsyncMock()
+    monkeypatch.setattr(service, "gateway_identity_enabled", lambda: True)
+    monkeypatch.setattr(service, "GATEWAY_SERVICE_URL", "http://gateway-fixture")
+    monkeypatch.setattr(service, "signing_key", lambda: KEY)
+    monkeypatch.setattr(service, "resolve_mcp_identity", delegate)
+    monkeypatch.setattr(service, "_tenant_app", lambda tenant: tenant_app if tenant == "t1" else None)
+    scope = {**SCOPE, "headers": [(b"authorization", b"Bearer test")]}
+    await service.TenantMCPRouter()(scope, AsyncMock(), AsyncMock())
+
+    delegate.assert_awaited_once_with(scope, "Bearer test", gateway_url="http://gateway-fixture", key=KEY)
+    assert tenant_app.await_args.args[0]["path"] == "/sse"

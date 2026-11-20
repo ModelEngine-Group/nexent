@@ -169,15 +169,74 @@ exit 0
         mock_bin / "kubectl",
         """#!/bin/bash
 printf 'kubectl %s\\n' "$*" >> "$MOCK_LOG"
+if [[ "$*" == *"deployment/nexent-postgresql"*"migration psql"* ]]; then
+  cat >/dev/null
+  printf '{"legacy":false}\\n'
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then exit 1; fi
+if [ "$1" = "get" ] && [ "$2" = "pvc" ]; then
+  if [ "${MOCK_RUNTIME_STORAGE:-}" = "missing" ]; then exit 1; fi
+  if [ "${MOCK_RUNTIME_STORAGE:-}" = "pending" ]; then printf 'Pending::ReadWriteMany,'; exit 0; fi
+  if [ "${MOCK_RUNTIME_STORAGE:-}" = "rwo" ]; then printf 'Bound:pv-%s:ReadWriteOnce,' "$3"; exit 0; fi
+  printf 'Bound:pv-%s:ReadWriteMany,' "$3"
+  exit 0
+fi
+if [ "$1" = "get" ] && [ "$2" = "pv" ] && [[ "$3" == pv-* ]]; then
+  case "${MOCK_RUNTIME_STORAGE:-}" in
+    hostpath) printf 'Bound:ReadWriteMany,:/var/lib/nexent:' ;;
+    local) printf 'Bound:ReadWriteMany,::/var/lib/nexent' ;;
+    wrong-pv-mode) printf 'Bound:ReadWriteOnce,::' ;;
+    unavailable) exit 1 ;;
+    *) printf 'Bound:ReadWriteMany,::' ;;
+  esac
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "pv" ]; then exit 1; fi
 if [ "$1" = "get" ] && [ "$2" = "deployment" ]; then
+  if [[ "$*" == *observedGeneration* ]]; then
+    printf '2:2:0:'
+    exit 0
+  fi
+  if [[ "$*" == *maintenance-epoch* ]]; then
+    upgrade=$(sed -n '/^helm upgrade --install nexent /p' "$MOCK_LOG" | tail -1)
+    if [ -z "$upgrade" ]; then exit 0; fi
+    epoch=$(sed -n 's/.*global.maintenanceEpoch=\\([^ ]*\\).*/\\1/p' <<< "$upgrade")
+    replicas=$(sed -n 's/.*nexent-runtime.replicaCount=\\([^ ]*\\).*/\\1/p' <<< "$upgrade")
+    if [ "${MOCK_FAIL_EPOCH:-false}" = "true" ]; then epoch=stale; fi
+    if [[ "$upgrade" == *global.businessPaused=true* ]]; then
+      printf 'nexent:%s:0:%s' "$epoch" "$replicas"
+    else
+      printf 'nexent:%s:%s:' "$epoch" "$replicas"
+    fi
+    exit 0
+  fi
   if [ "${MOCK_APP_EXISTS:-false}" = "true" ]; then printf 'deployment/%s\\n' "$3"; fi
   exit 0
 fi
 if [ "$1" = "scale" ] && [ "${MOCK_FAIL_SCALE:-false}" = "true" ]; then exit 1; fi
-if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then printf 'nexent-system-bootstrap-test\\n'; exit 0; fi
+if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then
+  if [[ "$*" == *'app in (nexent-system-bootstrap,nexent-runtime-maintenance)'* ]]; then
+    if [ "${MOCK_FAIL_PREVIOUS_WRITER:-false}" = "true" ]; then printf 'nexent-runtime-maintenance-prior::\\n'; fi
+  else
+    printf 'nexent-system-bootstrap-test\\n'
+  fi
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "job" ]; then
+  if [[ "$3" == nexent-runtime-maintenance-* ]]; then
+    if [[ "$*" == *--ignore-not-found* ]]; then
+      epoch=${3#nexent-runtime-maintenance-}
+      case "${MOCK_RETRY_JOB_STATE:-absent}" in
+        failed) printf 'nexent:%s:True' "$epoch" ;;
+        running) printf 'nexent:%s:' "$epoch" ;;
+        foreign) printf 'unrelated:%s:True' "$epoch" ;;
+      esac
+      exit 0
+    fi
+    if [ "${MOCK_FAIL_MAINTENANCE:-false}" = "true" ]; then printf ':1'; else printf '1:'; fi
+    exit 0
+  fi
   if [ "${MOCK_FAIL_BOOTSTRAP:-false}" = "true" ]; then printf '1';
   elif [[ "$*" == *succeeded* ]]; then printf '1:'; fi
   exit 0
@@ -206,6 +265,21 @@ if [ "$1" = "rollout" ]; then
   exit 0
 fi
 if [ "$1" = "exec" ]; then
+  if [[ "$*" == *"deployment/nexent-postgresql"*"runtime-deploy-lock psql"* ]]; then
+    IFS= read -r postgres_password || exit 1
+    while IFS= read -r query; do
+      printf 'db %s\\n' "$query" >> "$MOCK_LOG"
+      case "$query" in
+        *pg_try_advisory_lock*)
+          if [ "${MOCK_FAIL_LOCK:-false}" = "true" ]; then printf 'busy\\n'; else printf '123\\n'; fi ;;
+        *execution_reservation_t*)
+          if [ "${MOCK_FAIL_LOCK_LOSS:-false}" = "true" ]; then exit 1; fi
+          if [ "${MOCK_FAIL_COMPLETION:-false}" = "true" ]; then printf 'missing\\n'; else printf '123\\n'; fi ;;
+        *pg_locks*) printf '123\\n' ;;
+      esac
+    done
+    exit 0
+  fi
   if [[ "$*" == *"sha256sum ./*.zip"* ]]; then
     if [ "${MOCK_FAIL_OFFICIAL_CHECKSUM:-false}" = "true" ]; then
       printf 'invalid-checksum  ./invalid.zip\n'
@@ -552,7 +626,7 @@ def test_infrastructure_components_cannot_be_scaled(
     assert f"{component} must remain single-replica" in rendered.stderr
 
 
-def test_startup_recovery_deployments_use_single_replica_recreate(
+def test_startup_recovery_deployments_default_to_single_replica_recreate(
     chart_dirs: dict[str, Path],
 ) -> None:
     rendered = _template(
@@ -573,8 +647,8 @@ def test_startup_recovery_deployments_use_single_replica_recreate(
         assert spec["strategy"] == {"type": "Recreate"}
 
 
-@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS))
-def test_startup_recovery_deployments_cannot_be_scaled(
+@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS - {"nexent-runtime"}))
+def test_other_startup_recovery_deployments_cannot_be_scaled(
     chart_dirs: dict[str, Path],
     component: str,
 ) -> None:

@@ -499,6 +499,26 @@ def task_run_transaction(task_id: int, tenant_id: str, user_id: str, run_id=None
         yield session, as_dict(task) if task else None, as_dict(run) if run else None
 
 
+def lease_is_unexpired(session, lock_until: datetime) -> bool:
+    """Check the database clock after the caller has acquired the task locks."""
+    return session.scalar(select(func.clock_timestamp() < lock_until)) is True
+
+
+def has_started_scheduled_occurrence(
+    session, task_id: int, tenant_id: str, user_id: str, scheduled_fire_at: datetime,
+) -> bool:
+    """Check the committed prompt marker, even when the run was hidden from history."""
+    occurrence = select(AgentAutomationRun.run_id).where(
+        AgentAutomationRun.task_id == task_id,
+        AgentAutomationRun.tenant_id == tenant_id,
+        AgentAutomationRun.user_id == user_id,
+        AgentAutomationRun.scheduled_fire_at == scheduled_fire_at,
+        AgentAutomationRun.trigger_type == "SCHEDULED",
+        AgentAutomationRun.user_message_id.is_not(None),
+    )
+    return session.scalar(select(occurrence.exists())) is True
+
+
 def _run_history_order():
     return (
         func.coalesce(AgentAutomationRun.actual_fire_at, AgentAutomationRun.started_at,

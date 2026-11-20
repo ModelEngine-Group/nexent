@@ -113,6 +113,20 @@ class TestCreateApp:
 
         assert app.router.lifespan_context is lifespan
 
+    def test_create_app_wires_gateway_identity_middleware(self):
+        from gateway.downstream.middleware import GatewayIdentityMiddleware
+        from runtime.api.identity_routes import is_runtime_service_request
+
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=is_runtime_service_request,
+        )
+
+        middleware = next(item for item in app.user_middleware if item.cls is GatewayIdentityMiddleware)
+        assert middleware.kwargs["audience"] == "runtime"
+        assert middleware.kwargs["internal_runtime_request"] is is_runtime_service_request
+
 
 class TestRegisterExceptionHandlers:
     """Test class for register_exception_handlers function."""

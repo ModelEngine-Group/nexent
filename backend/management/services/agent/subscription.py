@@ -4,10 +4,10 @@
 
 import asyncio
 import json
+from contextlib import aclosing
 from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
-from management.services.agent.replay import subscribe_shared_checkpoint
 from copy import (
     deepcopy,
 )
@@ -19,17 +19,21 @@ from typing import (
     Dict,
 )
 
+from redis.exceptions import RedisError
+
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
     agent_run_manager,
 )
+from management.services.agent.admission import reserve_agent_execution, reset_agent_stream, uses_durable_agent_admission
+from management.services.agent.control import get_owned_execution, read_owned_stream
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, MESSAGE_ROLE
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import STREAM_STATUS_EVENT
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, RuntimeCapacityExceededError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, RuntimeQueueTimeoutError, ValidationError, WorkbenchError
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, RuntimeCapacityExceededError, RuntimeCoordinationUnavailableError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, RuntimeQueueTimeoutError, RuntimeUserMessagePersistenceError, ValidationError, WorkbenchError
 from contracts.agent import AgentRequest
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -53,6 +57,10 @@ from management.services.agent.execution import (
 from management.services.agent.preparation.run import (
     preflight_mcp_header_passthrough,
 )
+from management.services.agent.replay import (
+    ExecutionReplayUnavailable, follow_execution_replay, parse_execution_cursor, subscribe_shared_checkpoint,
+    validate_replay_position,
+)
 from management.services.agent.run import (
     apply_workbench_runtime_plan,
     generate_stream,
@@ -67,6 +75,7 @@ from runtime.adapters.nexent.runner import (
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ThreadCapacityExceeded,
+    ThreadManagerError,
     ThreadQueueTimedOut,
     run_blocking,
 )
@@ -115,6 +124,103 @@ def _resolve_user_tenant_language(
     if not user_id or not tenant_id:
         raise UnauthorizedError("Authenticated user and tenant are required")
     return user_id, tenant_id, get_user_language(http_request)
+
+
+_SHARED_TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "STOPPED"})
+
+
+def unavailable_agent_replay(status=None):
+    return JSONResponse({"status": status, "message": "Shared replay unavailable; use persisted history",
+                         "replay_unavailable": True})
+
+
+async def _resume_owned_agent_stream(
+    conversation_id, user_id, tenant_id, *, replay_cursor=None, resume_message_id=None, stream_cursor=False,
+):
+    owned = await get_owned_execution(tenant_id, user_id, conversation_id)
+    if owned is None:
+        if replay_cursor is not None or resume_message_id is not None:
+            return unavailable_agent_replay()
+        info = _detect_resume_position(conversation_id, user_id)
+        return unavailable_agent_replay(info["message_status"])
+
+    execution_id, state, _scope = owned
+    expected_generation = f"execution:{execution_id}"
+    position = (0, 0)
+    if replay_cursor is not None:
+        try:
+            generation, position = parse_execution_cursor(replay_cursor)
+        except ValueError:
+            return unavailable_agent_replay()
+        if generation != expected_generation:
+            return unavailable_agent_replay("stopped")
+    snapshot = await read_owned_stream(user_id, conversation_id, execution_id)
+
+    def public_status(current):
+        return current.lower() if current in _SHARED_TERMINAL_STATES else "streaming"
+
+    if (snapshot is None or snapshot.get("incomplete")
+            or (state in _SHARED_TERMINAL_STATES and (
+                not snapshot["terminal_status"] or snapshot["checkpoint"] is None
+            ))):
+        return unavailable_agent_replay(public_status(state))
+    if resume_message_id is not None and snapshot.get("message_id") != resume_message_id:
+        return unavailable_agent_replay(public_status(state))
+    checkpoint = snapshot["checkpoint"]
+    if replay_cursor is not None:
+        if snapshot["generation"] != expected_generation:
+            return unavailable_agent_replay("stopped")
+        try:
+            validate_replay_position(checkpoint["entries"] if checkpoint else [], position)
+        except ValueError:
+            return unavailable_agent_replay(public_status(state))
+
+    if resume_message_id is not None or replay_cursor is not None:
+        bound_message_id = snapshot.get("message_id")
+        last_unit = await run_blocking(
+            "agent-resume-bound-message", get_last_unit_for_message, bound_message_id, lane="control-io",
+        ) if bound_message_id is not None else None
+        resume_index = last_unit["unit_index"] + 1 if last_unit else 0
+    else:
+        resume_index = _detect_resume_position(conversation_id, user_id)["resume_from_unit_index"] or 0
+
+    async def is_active():
+        current = await get_owned_execution(tenant_id, user_id, conversation_id, active_only=True)
+        return current is not None and current[0] == execution_id
+
+    async def stream():
+        def status_chunk(status, **fields):
+            data = {"status": status, "last_unit_index": resume_index - 1, **fields}
+            return f"data: {json.dumps(data)}\n\n"
+
+        yield STREAM_STATUS_EVENT
+        yield status_chunk("resumed", replay_chunk_count=len(checkpoint["entries"]) if checkpoint else 0)
+        try:
+            async for chunk, outcome in follow_execution_replay(
+                runtime_state_service, user_id, conversation_id, execution_id, snapshot, is_active=is_active,
+                position=position, include_event_ids=(stream_cursor or replay_cursor is not None)
+                and snapshot["generation"] == expected_generation,
+            ):
+                if outcome is not None:
+                    yield STREAM_STATUS_EVENT
+                    yield status_chunk(outcome)
+                else:
+                    yield chunk
+        except (ExecutionReplayUnavailable, RedisError, ThreadManagerError, RuntimeCoordinationUnavailableError):
+            try:
+                current = await get_owned_execution(tenant_id, user_id, conversation_id)
+                status = public_status(current[1]) if current is not None and current[0] == execution_id else "stopped"
+            except RuntimeCoordinationUnavailableError:
+                status = "streaming"
+            yield STREAM_STATUS_EVENT
+            yield status_chunk(status, replay_unavailable=True)
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+                 "X-Stream-Status": "resumed", "X-Last-Unit-Index": str(resume_index),
+                 "conversation_id": str(conversation_id)},
+    )
 
 
 def _detect_resume_position(
@@ -207,6 +313,10 @@ async def run_agent_stream(
     Args:
         resume: If True, check for existing streaming message and continue from where it left off
     """
+    supplied_fields = agent_request.model_fields_set
+    replay_cursor = agent_request.replay_cursor if "replay_cursor" in supplied_fields else None
+    resume_message_id = agent_request.resume_message_id if "resume_message_id" in supplied_fields else None
+    resume = resume or replay_cursor is not None or resume_message_id is not None
     if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
         raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
 
@@ -253,6 +363,14 @@ async def run_agent_stream(
                 raise ForbiddenError(
                     "Conversation belongs to a different chat entrypoint"
                 )
+
+    if resume and (uses_durable_agent_admission() or replay_cursor is not None):
+        if agent_request.is_debug or agent_request.conversation_id is None or not uses_durable_agent_admission():
+            return unavailable_agent_replay()
+        return await _resume_owned_agent_stream(
+            agent_request.conversation_id, resolved_user_id, resolved_tenant_id,
+            replay_cursor=replay_cursor, resume_message_id=resume_message_id, stream_cursor=agent_request.stream_cursor,
+        )
 
     if not resume:
         from management.services.model import run_controls
@@ -484,141 +602,146 @@ async def run_agent_stream(
             resolved_user_id,
         )
 
-    if not resume:
-        joint_runtime_state = None
-        if (
-            canonical_workbench is not None
-            and not is_new_conversation
-            and metadata_update_requested
-            and not agent_request.is_debug
-        ):
-            try:
-                joint_runtime_state = update_conversation_workbench_and_metadata_service(
+    def persist_existing_turn_options():
+        nonlocal conversation
+        if not resume:
+            joint_runtime_state = None
+            if (
+                canonical_workbench is not None
+                and not is_new_conversation
+                and metadata_update_requested
+                and not agent_request.is_debug
+            ):
+                try:
+                    joint_runtime_state = update_conversation_workbench_and_metadata_service(
+                        conversation_id=agent_request.conversation_id,
+                        user_id=resolved_user_id,
+                        config=canonical_workbench.model_dump(mode="json"),
+                        expected_config_version=agent_request.expected_workbench_config_version,
+                        metadata=clean_metadata,
+                        expected_metadata_version=agent_request.expected_metadata_version,
+                    )
+                except RuntimeMetadataVersionConflict as exc:
+                    raise AppException(
+                        ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                        details={"current_version": exc.current_version},
+                    ) from exc
+                conversation = {**(conversation or {}), **joint_runtime_state}
+            elif (
+                canonical_workbench is not None
+                and not is_new_conversation
+                and not agent_request.is_debug
+            ):
+                updated = update_conversation_workbench_config_service(
                     conversation_id=agent_request.conversation_id,
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
-                    expected_config_version=agent_request.expected_workbench_config_version,
-                    metadata=clean_metadata,
-                    expected_metadata_version=agent_request.expected_metadata_version,
+                    expected_version=agent_request.expected_workbench_config_version,
+                    only_if_changed=True,
                 )
-            except RuntimeMetadataVersionConflict as exc:
-                raise AppException(
-                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
-                    details={"current_version": exc.current_version},
-                ) from exc
-            conversation = {**(conversation or {}), **joint_runtime_state}
-        elif (
-            canonical_workbench is not None
+                conversation = {**(conversation or {}), **updated}
+
+            if canonical_workbench is not None and not agent_request.is_debug:
+                workbench_state = (
+                    conversation_data if is_new_conversation else (conversation or {})
+                )
+                agent_request.__dict__["_workbench_config_version"] = int(
+                    workbench_state.get("workbench_config_version") or 0
+                )
+
+            if agent_request.is_debug:
+                metadata_snapshot = clean_metadata
+                metadata_version = None
+            elif is_new_conversation:
+                metadata_snapshot = dict(
+                    conversation_data.get(
+                        "runtime_metadata",
+                        clean_metadata if metadata_update_requested else {},
+                    )
+                    or {}
+                )
+                metadata_version = int(
+                    conversation_data.get(
+                        "runtime_metadata_version",
+                        1 if metadata_update_requested else 0,
+                    )
+                    or 0
+                )
+            elif joint_runtime_state is not None:
+                metadata_snapshot = dict(joint_runtime_state["runtime_metadata"] or {})
+                metadata_version = int(joint_runtime_state["runtime_metadata_version"])
+            elif not metadata_update_requested:
+                metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
+                metadata_version = int(
+                    (conversation or {}).get("runtime_metadata_version") or 0
+                )
+            else:
+                try:
+                    resolved_metadata = resolve_conversation_runtime_metadata(
+                        conversation_id=agent_request.conversation_id,
+                        user_id=resolved_user_id,
+                        request_metadata=clean_metadata if metadata_update_requested else None,
+                        update_requested=metadata_update_requested,
+                        expected_version=agent_request.expected_metadata_version,
+                    )
+                except ConversationNotFoundError as exc:
+                    raise AppException(
+                        ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
+                    ) from exc
+                except RuntimeMetadataVersionConflict as exc:
+                    raise AppException(
+                        ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                        details={"current_version": exc.current_version},
+                    ) from exc
+                metadata_snapshot = resolved_metadata["runtime_metadata"]
+                metadata_version = resolved_metadata["runtime_metadata_version"]
+
+            agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
+            agent_request.__dict__["_runtime_metadata_version"] = metadata_version
+
+        if (
+            not agent_request.is_debug
             and not is_new_conversation
-            and not agent_request.is_debug
+            and agent_request.conversation_id is not None
         ):
-            updated = update_conversation_workbench_config_service(
+            update_conversation_chat_mode_service(
                 conversation_id=agent_request.conversation_id,
+                chat_mode="planning" if agent_request.enable_plan else "execution",
                 user_id=resolved_user_id,
-                config=canonical_workbench.model_dump(mode="json"),
-                expected_version=agent_request.expected_workbench_config_version,
-                only_if_changed=True,
-            )
-            conversation = {**(conversation or {}), **updated}
-
-        if canonical_workbench is not None and not agent_request.is_debug:
-            workbench_state = (
-                conversation_data if is_new_conversation else (conversation or {})
-            )
-            agent_request.__dict__["_workbench_config_version"] = int(
-                workbench_state.get("workbench_config_version") or 0
             )
 
-        if agent_request.is_debug:
-            metadata_snapshot = clean_metadata
-            metadata_version = None
-        elif is_new_conversation:
-            metadata_snapshot = dict(
-                conversation_data.get(
-                    "runtime_metadata",
-                    clean_metadata if metadata_update_requested else {},
-                )
-                or {}
+        if (
+            request_scope is not None
+            and resolved_scope is not None
+            and not agent_request.is_debug
+            and not resume
+            and not is_new_conversation
+            and agent_request.conversation_id is not None
+            and agent_request.entrypoint != "workbench"
+        ):
+            update_conversation_knowledge_scope_service(
+                conversation_id=agent_request.conversation_id,
+                knowledge_scope=resolved_scope.desired_scope,
+                user_id=resolved_user_id,
+                tenant_id=resolved_tenant_id,
             )
-            metadata_version = int(
-                conversation_data.get(
-                    "runtime_metadata_version",
-                    1 if metadata_update_requested else 0,
-                )
-                or 0
+
+        if (
+            not agent_request.is_debug
+            and not resume
+            and not is_new_conversation
+            and agent_request.conversation_id is not None
+            and agent_request.agent_id is not None
+            and agent_request.entrypoint != "workbench"
+        ):
+            update_conversation_agent_id_service(
+                conversation_id=agent_request.conversation_id,
+                agent_id=agent_request.agent_id,
+                user_id=resolved_user_id,
             )
-        elif joint_runtime_state is not None:
-            metadata_snapshot = dict(joint_runtime_state["runtime_metadata"] or {})
-            metadata_version = int(joint_runtime_state["runtime_metadata_version"])
-        elif not metadata_update_requested:
-            metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
-            metadata_version = int(
-                (conversation or {}).get("runtime_metadata_version") or 0
-            )
-        else:
-            try:
-                resolved_metadata = resolve_conversation_runtime_metadata(
-                    conversation_id=agent_request.conversation_id,
-                    user_id=resolved_user_id,
-                    request_metadata=clean_metadata if metadata_update_requested else None,
-                    update_requested=metadata_update_requested,
-                    expected_version=agent_request.expected_metadata_version,
-                )
-            except ConversationNotFoundError as exc:
-                raise AppException(
-                    ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
-                ) from exc
-            except RuntimeMetadataVersionConflict as exc:
-                raise AppException(
-                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
-                    details={"current_version": exc.current_version},
-                ) from exc
-            metadata_snapshot = resolved_metadata["runtime_metadata"]
-            metadata_version = resolved_metadata["runtime_metadata_version"]
 
-        agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
-        agent_request.__dict__["_runtime_metadata_version"] = metadata_version
-
-    if (
-        not agent_request.is_debug
-        and not is_new_conversation
-        and agent_request.conversation_id is not None
-    ):
-        update_conversation_chat_mode_service(
-            conversation_id=agent_request.conversation_id,
-            chat_mode="planning" if agent_request.enable_plan else "execution",
-            user_id=resolved_user_id,
-        )
-
-    if (
-        request_scope is not None
-        and resolved_scope is not None
-        and not agent_request.is_debug
-        and not resume
-        and not is_new_conversation
-        and agent_request.conversation_id is not None
-        and agent_request.entrypoint != "workbench"
-    ):
-        update_conversation_knowledge_scope_service(
-            conversation_id=agent_request.conversation_id,
-            knowledge_scope=resolved_scope.desired_scope,
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-        )
-
-    if (
-        not agent_request.is_debug
-        and not resume
-        and not is_new_conversation
-        and agent_request.conversation_id is not None
-        and agent_request.agent_id is not None
-        and agent_request.entrypoint != "workbench"
-    ):
-        update_conversation_agent_id_service(
-            conversation_id=agent_request.conversation_id,
-            agent_id=agent_request.agent_id,
-            user_id=resolved_user_id,
-        )
+    if not uses_durable_agent_admission():
+        persist_existing_turn_options()
 
     # Resume mode: check for existing streaming message
     if resume:
@@ -626,6 +749,8 @@ async def run_agent_stream(
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id,
         )
+        if resume_message_id is not None and resume_info.get("message_id") != resume_message_id:
+            return unavailable_agent_replay()
 
         if not resume_info["should_resume"]:
             # Backend already finished
@@ -823,10 +948,11 @@ async def run_agent_stream(
         else agent_request.agent_id
     )
     try:
-        agent_capacity_token = agent_run_manager.reserve_agent_capacity(
-            capacity_key,
-            RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
-        )
+        if not uses_durable_agent_admission():
+            agent_capacity_token = agent_run_manager.reserve_agent_capacity(
+                capacity_key,
+                RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
+            )
         execution = runtime_thread_manager.submit(
             "agent-run",
             ManagedTaskSpec(
@@ -838,11 +964,10 @@ async def run_agent_stream(
             ),
             deferred_run.run,
         )
-        execution.future.add_done_callback(
-            lambda _future: agent_run_manager.release_agent_capacity(
-                agent_capacity_token
+        if agent_capacity_token is not None:
+            execution.future.add_done_callback(
+                lambda _future: agent_run_manager.release_agent_capacity(agent_capacity_token)
             )
-        )
         await runtime_thread_manager.wait_until_started(execution)
     except AgentRunConcurrencyExceededError as exc:
         raise RuntimeCapacityExceededError() from exc
@@ -866,19 +991,41 @@ async def run_agent_stream(
             agent_run_manager.release_agent_capacity(agent_capacity_token)
         raise
 
+    reservation_token = None
+    durable_admission = None
+    managed_user_save = None
+
+    def release_preparation(finished_save=None):
+        if finished_save is not None and not finished_save.cancelled():
+            finished_save.exception()
+        if reservation_token is not None:
+            agent_run_manager.release_agent_run_reservation(run_identifier, resolved_user_id, reservation_token)
+        if durable_admission is not None:
+            durable_admission.close()
+
+    def abort_preparation():
+        deferred_run.cancel()
+        runtime_thread_manager.cancel(
+            execution.execution_id,
+            reason="agent stream admission or preparation failed",
+            wait_timeout=0,
+            mark_stuck_on_timeout=False,
+        )
+        if managed_user_save is not None and not managed_user_save.done():
+            managed_user_save.add_done_callback(release_preparation)
+        else:
+            release_preparation(managed_user_save)
+
     try:
         reservation_token = agent_run_manager.reserve_agent_run(
             run_identifier,
             resolved_user_id,
         )
-    except AgentRunAlreadyActiveError:
-        deferred_run.cancel()
-        runtime_thread_manager.cancel(
-            execution.execution_id,
-            reason="agent run already active",
-            wait_timeout=0,
-            mark_stuck_on_timeout=False,
+        durable_admission = await reserve_agent_execution(
+            agent_request, run_identifier, resolved_user_id, resolved_tenant_id, execution.future,
         )
+    except AgentRunAlreadyActiveError:
+        abort_preparation()
         logger.warning(
             "Rejected concurrent agent run, user_id=%s, conversation_id=%s",
             resolved_user_id,
@@ -907,22 +1054,48 @@ async def run_agent_stream(
                 "X-Stream-Status": "conflict",
             },
         )
+    except BaseException:
+        abort_preparation()
+        raise
 
     try:
-        stream_generation = uuid.uuid4().hex
-        await runtime_state_service.reset_stream_async(
-            user_id=resolved_user_id,
-            conversation_id=agent_request.conversation_id,
-            generation=stream_generation,
-        )
+        if durable_admission is not None:
+            stream_generation = f"execution:{durable_admission.execution_id}"
+            agent_request.__dict__["_runtime_execution_reservation"] = durable_admission
+            agent_request.__dict__["_runtime_execution_generation"] = stream_generation
+            await reset_agent_stream(
+                resolved_user_id, run_identifier, stream_generation, execution_id=durable_admission.execution_id,
+            )
+            if await runtime_state_service.is_execution_cancelled_async(
+                resolved_user_id, run_identifier, durable_admission.execution_id, stream_generation,
+            ):
+                durable_admission.outcome = "stopped"
+                raise asyncio.CancelledError()
+            persist_existing_turn_options()
+        else:
+            stream_generation = uuid.uuid4().hex
+            await runtime_state_service.reset_stream_async(
+                user_id=resolved_user_id,
+                conversation_id=agent_request.conversation_id,
+                generation=stream_generation,
+            )
 
         if not agent_request.is_debug and not skip_user_save:
-            save_messages(
-                agent_request,
-                target=MESSAGE_ROLE["USER"],
-                user_id=resolved_user_id,
-                tenant_id=resolved_tenant_id,
-            )
+            save_options = {"target": MESSAGE_ROLE["USER"], "user_id": resolved_user_id, "tenant_id": resolved_tenant_id}
+            if http_request is None:
+                managed_user_save = asyncio.create_task(runtime_thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec(task_name="northbound-save-user-message", owner=__name__),
+                    save_messages,
+                    agent_request,
+                    **save_options,
+                ))
+                try:
+                    await asyncio.shield(managed_user_save)
+                except Exception as exc:
+                    raise RuntimeUserMessagePersistenceError("Failed to persist the user message") from exc
+            else:
+                save_messages(agent_request, **save_options)
 
         run_context = build_agent_run_context(
             agent_request,
@@ -944,21 +1117,11 @@ async def run_agent_stream(
             channel = await streaming_channel_manager.get_or_create_channel(
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
+                **({"generation": stream_generation} if durable_admission is not None else {}),
             )
             channel.generation = stream_generation
-    except Exception:
-        deferred_run.cancel()
-        runtime_thread_manager.cancel(
-            execution.execution_id,
-            reason="agent stream setup failed",
-            wait_timeout=0,
-            mark_stuck_on_timeout=False,
-        )
-        agent_run_manager.release_agent_run_reservation(
-            _agent_run_identifier(agent_request),
-            resolved_user_id,
-            reservation_token,
-        )
+    except BaseException:
+        abort_preparation()
         raise
 
     stream_kwargs = {
@@ -999,6 +1162,7 @@ async def run_agent_stream(
                 if _inspect.isawaitable(_pf):
                     await _pf
         except Exception as exc:
+            abort_preparation()
             # AppException propagates as HTTP 400 — this is the desired
             # northbound contract.  Anything else here is a code bug; reraise
             # so FastAPI surfaces 500.
@@ -1008,6 +1172,9 @@ async def run_agent_stream(
                 "preflight_mcp_header_passthrough raised unexpected exception",
                 exc_info=True,
             )
+            raise
+        except BaseException:
+            abort_preparation()
             raise
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
@@ -1065,14 +1232,20 @@ async def run_agent_stream(
                 )
 
             if channel is not None:
-                async for data_chunk in channel.subscribe_with_history(0):
+                cursor_options = {"include_event_ids": True} if durable_admission and agent_request.stream_cursor else {}
+                async for data_chunk in channel.subscribe_with_history(0, **cursor_options):
                     yield data_chunk
             else:
                 # Debug/A2A streams intentionally retain the direct execution
                 # path and its existing disconnect semantics.
                 with agent_monitoring_context(agent_metadata):
-                    async for data_chunk in stream_gen:
-                        yield data_chunk
+                    if durable_admission is None:
+                        async for data_chunk in stream_gen:
+                            yield data_chunk
+                    else:
+                        async with aclosing(stream_gen):
+                            async for data_chunk in stream_gen:
+                                yield data_chunk
         except Exception as stream_exc:
             logger.error(
                 "Agent stream response error: %r",
@@ -1095,6 +1268,8 @@ async def run_agent_stream(
                     resolved_user_id,
                     reservation_token,
                 )
+                if durable_admission is not None:
+                    durable_admission.close()
 
     headers = {
         "Cache-Control": "no-cache",
@@ -1137,7 +1312,7 @@ async def run_agent_stream(
             # generator's finally block to release the deferred worker.
             # A consumed/released reservation belongs to generate_stream;
             # let its bound worker finish its own cleanup.
-            if reservation_released and not execution.future.done():
+            if (reservation_released or durable_admission is not None) and not execution.future.done():
                 deferred_run.cancel()
                 runtime_thread_manager.cancel(
                     execution.execution_id,
@@ -1145,6 +1320,8 @@ async def run_agent_stream(
                     wait_timeout=0,
                     mark_stuck_on_timeout=False,
                 )
+            if durable_admission is not None:
+                durable_admission.close()
 
         # Start independently of response-body iteration so clients may close
         # the connection as soon as they receive the conversation ID header.
@@ -1155,6 +1332,7 @@ async def run_agent_stream(
                 agent_metadata=agent_metadata,
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
+                **({"generation": stream_generation} if durable_admission is not None else {}),
             )
         )
         _agent_stream_producer_tasks.add(producer_task)

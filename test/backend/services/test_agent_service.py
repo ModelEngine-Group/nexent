@@ -123,11 +123,15 @@ class _ManagedTaskSpec:
         self.__dict__.update(kwargs)
 
 
-class _ThreadCapacityExceeded(RuntimeError):
+class _ThreadManagerError(RuntimeError):
     pass
 
 
-class _ThreadQueueTimedOut(RuntimeError):
+class _ThreadCapacityExceeded(_ThreadManagerError):
+    pass
+
+
+class _ThreadQueueTimedOut(_ThreadManagerError):
     def __init__(self, timeout_seconds=1):
         self.timeout_seconds = timeout_seconds
 
@@ -159,6 +163,7 @@ _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
 _concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
+_concurrency_module.ThreadManagerError = _ThreadManagerError
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
@@ -425,8 +430,8 @@ agent_run_manager_module.AgentRunConcurrencyExceededError = (
 # answers attribute access lazily but monkeypatch.setattr needs a real entry,
 # so newer pytest versions reject attributes that were never set.
 _agent_run_manager_mock = MagicMock()
-_agent_run_manager_mock.reserve_agent_capacity.return_value = "agent-capacity-test"
-_agent_run_manager_mock.reserve_agent_run.return_value = "agent-run-reservation"
+_agent_run_manager_mock.reserve_agent_capacity = MagicMock(return_value="agent-capacity-test")
+_agent_run_manager_mock.reserve_agent_run = MagicMock(return_value="agent-run-reservation")
 for _method in (
     "register_agent_run",
     "unregister_agent_run",

@@ -224,7 +224,7 @@ class TestClaimAgentEvaluationRun:
             "status": "RUNNING",
             "updated_by": "u1",
         }
-        session.commit.assert_called_once_with()
+        session.commit.assert_not_called()
 
     def test_returns_false_when_run_was_claimed(self, session_factory):
         from management.db.evaluation import runs as agent_evaluation_db
@@ -233,7 +233,19 @@ class TestClaimAgentEvaluationRun:
         self._wire_chain(session, 0)
 
         assert agent_evaluation_db.claim_agent_evaluation_run(7, "t1") is False
-        session.commit.assert_called_once_with()
+        session.commit.assert_not_called()
+
+    def test_claim_uses_transaction_owned_by_the_caller(self, session_factory):
+        from management.db.evaluation import runs as agent_evaluation_db
+
+        session, open_session = session_factory
+        query = self._wire_chain(session, 1)
+
+        assert agent_evaluation_db.claim_agent_evaluation_run(7, "t1", "u1", db_session=session)
+        open_session.assert_called_once_with(session)
+        filters = [str(condition) for condition in query.filter.call_args.args]
+        assert any("delete_flag" in condition for condition in filters)
+        session.commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1072,6 +1084,9 @@ class TestCleanupAgedEvaluations:
 
         deleted = agent_evaluation_db.cleanup_aged_evaluations("t1", retention_days=30)
         assert deleted == 2
+        _, _, terminal_status, unowned = queries[0].filter.call_args.args
+        assert terminal_status.right.value == ["COMPLETED", "FAILED"]
+        assert "execution_reservation_t" in str(unowned)
         hard_delete.assert_called_once_with(10, "t1")
         session.commit.assert_called_once()
 
@@ -1101,7 +1116,8 @@ class TestCleanupAgedEvaluations:
 
 
 class TestReapStaleRuns:
-    def test_reaps_stale_runs(self, session_factory):
+    @pytest.mark.parametrize("recover_owned", [False, True])
+    def test_reaps_stale_runs(self, session_factory, recover_owned):
         from management.db.evaluation import runs as agent_evaluation_db
 
         session, _ = session_factory
@@ -1112,11 +1128,13 @@ class TestReapStaleRuns:
         it = iter(queries)
         session.query.side_effect = lambda *a, **k: next(it)
 
-        n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10)
+        n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10, recover_owned=recover_owned)
         assert n == 2
         assert queries[1].update.called
         assert queries[2].update.called
-        session.commit.assert_called_once()
+        guards = [str(condition) for invocation in queries[0].filter.call_args_list for condition in invocation.args]
+        assert any("NOT (EXISTS" in condition and "execution_reservation_t" in condition for condition in guards) is not recover_owned
+        session.commit.assert_not_called()
 
     def test_no_stale_runs(self, session_factory):
         from management.db.evaluation import runs as agent_evaluation_db

@@ -556,6 +556,14 @@ class RuntimeCapacityExceededError(RuntimeError):
     retry_after_seconds = 1
 
 
+class RuntimeCoordinationUnavailableError(RuntimeError):
+    """The authoritative execution state could not be read or written."""
+
+
+class RuntimeUserMessagePersistenceError(RuntimeError):
+    """An admitted Runtime turn could not persist the user message."""
+
+
 class ModelOutletConflictError(ValueError):
     """An absent, stale or unavailable outlet cannot be overwritten."""
 

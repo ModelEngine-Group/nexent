@@ -244,8 +244,9 @@ def _system_config_snapshot(**changes):
     return system_config_snapshot(**changes)
 
 
+@pytest.mark.parametrize("use_maintenance_transaction", [False, True])
 def test_fail_streaming_assistant_messages_returns_runtime_identities(
-    monkeypatch, mock_session_ctx
+    monkeypatch, mock_session_ctx, use_maintenance_transaction,
 ):
     """Startup recovery fails only the rows it locked as streaming."""
     from types import SimpleNamespace
@@ -260,10 +261,13 @@ def test_fail_streaming_assistant_messages_returns_runtime_identities(
     ]
     query.update.return_value = 2
     session.query.return_value = query
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    transaction = session if use_maintenance_transaction else None
+    get_session = MagicMock(return_value=ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", get_session)
 
-    rows = fail_streaming_assistant_messages()
+    rows = fail_streaming_assistant_messages(db_session=transaction)
 
+    get_session.assert_called_once_with(transaction)
     assert rows == [
         {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
         {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
@@ -282,7 +286,7 @@ def test_fail_streaming_assistant_messages_returns_empty_without_rows(
     query.with_for_update.return_value = query
     query.all.return_value = []
     session.query.return_value = query
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda db_session: ctx)
 
     assert fail_streaming_assistant_messages() == []
     query.update.assert_not_called()

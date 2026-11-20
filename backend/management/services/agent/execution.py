@@ -23,6 +23,7 @@ from contracts.constants.environment import RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from contracts.constants.constants import STREAM_STATUS_EVENT
 from contracts.agent import AgentRequest
 from contracts.conversation import MessageRequest
+from contracts.errors.exceptions import RuntimeCoordinationUnavailableError
 from management.db.conversation.repository import get_units_by_message
 from management.services.agent.artifacts import (
     enrich_file_uploads_with_presigned_urls as _enrich_file_uploads_with_presigned_urls,
@@ -200,6 +201,7 @@ async def _consume_agent_stream_producer(
     agent_metadata,
     conversation_id: int,
     user_id: str,
+    generation: Optional[str] = None,
 ) -> None:
     """Consume a non-debug agent stream independently from its SSE subscriber."""
     producer_error = False
@@ -260,6 +262,7 @@ async def _consume_agent_stream_producer(
                     conversation_id=conversation_id,
                     user_id=user_id,
                     status="failed",
+                    **({"generation": generation} if generation is not None else {}),
                 )
             except Exception:
                 logger.exception(
@@ -287,14 +290,20 @@ async def _consume_agent_stream_producer(
         )
 
 
+async def _is_runtime_cancelled(conversation_id, user_id, reservation, generation) -> bool:
+    if reservation is not None:
+        return await runtime_state_service.is_execution_cancelled_async(
+            user_id, conversation_id, reservation.execution_id, generation,
+        )
+    return await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id)
+
+
 async def _poll_runtime_cancel_signal(
-    conversation_id: int, user_id: str, stop_event, cancellation_scope=None
+    conversation_id: int, user_id: str, stop_event, cancellation_scope=None, *, reservation=None, generation=None,
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
-        if await runtime_state_service.is_cancelled_async(
-            user_id=user_id, conversation_id=conversation_id
-        ):
+        if await _is_runtime_cancelled(conversation_id, user_id, reservation, generation):
             stop_event.set()
             if cancellation_scope is not None:
                 cancellation_scope.cancel()
@@ -308,13 +317,11 @@ async def _poll_runtime_cancel_signal(
 
 
 async def _cancel_task_on_runtime_signal(
-    conversation_id: int, user_id: str, task: asyncio.Task
+    conversation_id: int, user_id: str, task: asyncio.Task, *, reservation=None, generation=None,
 ) -> None:
     """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
     while not task.done():
-        if await runtime_state_service.is_cancelled_async(
-            user_id=user_id, conversation_id=conversation_id
-        ):
+        if await _is_runtime_cancelled(conversation_id, user_id, reservation, generation):
             task.cancel()
             logger.info(
                 "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
@@ -402,9 +409,11 @@ async def _stream_agent_chunks(
 
     # Resolve the channel before committing the placeholder. Cancellation or a
     # channel failure here must not leave an assistant outside finalization.
+    execution_generation = agent_request.__dict__.get("_runtime_execution_generation")
+    generation_kwargs = {"generation": execution_generation} if execution_generation is not None else {}
     if channel is None:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id, user_id=user_id
+            conversation_id=agent_request.conversation_id, user_id=user_id, **generation_kwargs,
         )
 
     # Persist the parent ConversationMessage row up front with status='streaming'
@@ -465,10 +474,12 @@ async def _stream_agent_chunks(
         )
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
-            conversation_id=agent_request.conversation_id,
+            conversation_id=_agent_run_identifier(agent_request) if execution_generation is not None else agent_request.conversation_id,
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
             cancellation_scope=agent_run_info.cancellation_scope,
+            reservation=agent_request.__dict__.get("_runtime_execution_reservation"),
+            generation=execution_generation,
         )
     )
 
@@ -500,6 +511,12 @@ async def _stream_agent_chunks(
             yield agent_chunk
 
     try:
+        reservation = agent_request.__dict__.get("_runtime_execution_reservation")
+        if reservation is not None and streaming_message_id is not None:
+            if not await runtime_state_service.bind_execution_message_async(
+                user_id, _agent_run_identifier(agent_request), reservation.execution_id, streaming_message_id,
+            ):
+                raise RuntimeCoordinationUnavailableError("Runtime execution could not bind its assistant message")
         async for chunk in _iter_run_chunks():
             chunk_type: Optional[str] = None
             chunk_content: Any = ""
@@ -899,6 +916,16 @@ async def _stream_agent_chunks(
             if outcome in {"failed", "stopped"}:
                 terminal_status = outcome
 
+        durable_admission = agent_request.__dict__.get("_runtime_execution_reservation")
+        coordination_failed = False
+        if durable_admission is not None:
+            try:
+                await durable_admission.finalizing()
+            except Exception:
+                coordination_failed = True
+                terminal_status = "failed"
+                logger.exception("Could not enter Runtime finalization for execution %s", durable_admission.execution_id)
+
         artifact_interruption = None
         try:
             try:
@@ -1111,6 +1138,7 @@ async def _stream_agent_chunks(
                 conversation_id=agent_request.conversation_id,
                 user_id=user_id,
                 status=terminal_status,
+                **generation_kwargs,
             )
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
@@ -1123,6 +1151,8 @@ async def _stream_agent_chunks(
             cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
         if artifact_interruption is not None:
             raise artifact_interruption
+        if durable_admission is not None:
+            durable_admission.outcome = "failed" if coordination_failed else terminal_status
 
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy
