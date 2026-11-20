@@ -346,7 +346,17 @@ async def create_ontology_entity(
             raise _bad_request("所属 Type 不存在于当前本体库")
         payload["type_id"] = int(body.type_id)
     if body.kind == "entity" and body.parent_entities:
-        payload["parent_entities"] = [int(item) for item in body.parent_entities]
+        parent_ids = [int(item) for item in body.parent_entities]
+        # type_id already creates the is-a to the assigned type; never send the
+        # same endpoint twice through both fields.
+        if body.type_id:
+            parent_ids = [
+                parent_id
+                for parent_id in parent_ids
+                if str(parent_id) != str(body.type_id)
+            ]
+        if parent_ids:
+            payload["parent_entities"] = parent_ids
     if body.kind == "entity" and body.synonym_entities:
         payload["synonym_entities"] = [int(item) for item in body.synonym_entities]
 
@@ -362,26 +372,35 @@ async def create_ontology_entity(
     )
     entity_id = result.get("entity_id") or result.get("id") or result.get("type_id")
     # The create contract has no child list; children are inherited links that
-    # must be written as Relations after the entity exists.
+    # must be written as Relations after the entity exists. A failed writeback
+    # must not hide the fact that the entity itself was created.
+    relation_error: str | None = None
     if body.kind == "entity" and body.child_entities and entity_id is not None:
-        await _reconcile_entity_relations(
-            server_url,
-            api_key,
-            domain_id,
-            str(entity_id),
-            "entity",
-            parent_ids=None,
-            child_ids=body.child_entities,
-        )
-    return JSONResponse(
-        status_code=HTTPStatus.OK,
-        content=_entity_summary(
-            result,
-            await _binding_count(domain_id),
-            entity_id=str(entity_id) if entity_id is not None else None,
-            kind=body.kind,
-        ),
+        try:
+            await _reconcile_entity_relations(
+                server_url,
+                api_key,
+                domain_id,
+                str(entity_id),
+                "entity",
+                parent_ids=None,
+                child_ids=body.child_entities,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface a partial success
+            logger.warning(
+                "AIDP child relation writeback failed for entity %s: %s",
+                entity_id,
+                exc,
+            )
+            relation_error = str(exc)
+    summary = _entity_summary(
+        result,
+        await _binding_count(domain_id),
+        entity_id=str(entity_id) if entity_id is not None else None,
+        kind=body.kind,
     )
+    summary["relation_error"] = relation_error
+    return JSONResponse(status_code=HTTPStatus.OK, content=summary)
 
 
 @aidp_ontology_domain_router.get("/domains/{domain_id}/entities/{entity_id}")

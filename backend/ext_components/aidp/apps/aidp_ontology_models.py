@@ -89,9 +89,12 @@ class OntologyEntityCreateRequest(BaseModel):
         api_name = _clean_required(value, "API 名称不能为空")
         if len(api_name) > _ENTITY_NAME_MAX_CHARS:
             raise ValueError(f"API 名称不能超过 {_ENTITY_NAME_MAX_CHARS} 个字符")
-        # Confirmed AIDP rule: letter first, then letters/digits/underscores.
-        if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", api_name):
-            raise ValueError("API 名称必须以字母开头，且只能包含字母、数字、下划线")
+        # Confirmed AIDP rule: letter first, then letters/digits/underscores,
+        # and the name must not end with an underscore.
+        if not re.match(r"^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$", api_name):
+            raise ValueError(
+                "API 名称需字母开头，只能包含字母、数字、下划线，且不能以下划线结尾"
+            )
         return api_name
 
     @field_validator("description")
@@ -108,6 +111,8 @@ class OntologyEntityCreateRequest(BaseModel):
     def validate_kind_rules(self):
         if self.kind == "type" and self.type_id:
             raise ValueError("Type 不能选择所属实体类型")
+        if self.kind == "type" and self.parent_entities:
+            raise ValueError("类型不能设置上位实体")
         property_names = [item.api_name.strip() for item in self.properties]
         if len(set(property_names)) != len(property_names):
             raise ValueError("属性 api_name 不能重复")

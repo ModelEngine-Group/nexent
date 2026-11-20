@@ -29,6 +29,8 @@ export interface AidpOntologyDomainListResponse {
 export interface AidpOntologyEntityProperty {
   api_name: string;
   display_name?: string;
+  /** AIDP storage type: str/string/float/datetime/list[str]. */
+  data_type?: string;
   value?: string;
 }
 
@@ -52,6 +54,8 @@ export interface AidpOntologyEntity {
   extended_properties?: Array<{ key: string; value: string }>;
   /** Count of knowledge bases bound to the owning ontology domain. */
   bound_kb_count: number | null;
+  /** Create-only: child relations failed after the entity itself was created. */
+  relation_error?: string | null;
 }
 
 export interface AidpOntologyEntityListResponse {

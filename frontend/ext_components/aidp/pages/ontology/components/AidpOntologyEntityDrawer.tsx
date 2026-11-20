@@ -13,6 +13,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Segmented,
   Select,
 } from "antd";
 import {
@@ -46,17 +47,21 @@ interface AidpOntologyEntityDrawerProps {
   onSaved: () => void;
 }
 
-type PropertyValueType = "text" | "multitext" | "date" | "number";
+type PropertyDataType = "string" | "float" | "datetime" | "list[str]";
 
 interface PropertyFormValue {
   name: string;
-  value_type: PropertyValueType;
+  data_type: PropertyDataType;
   value?: string | string[] | number | Dayjs | null;
 }
 
 interface EntityFormValues {
-  entity_name: string;
+  kind: "entity" | "type";
+  display_name: string;
+  api_name: string;
   description?: string;
+  type_id?: string;
+  primary_properties?: string[];
   properties?: PropertyFormValue[];
   demo_parents?: string[];
   demo_synonyms?: string[];
@@ -65,6 +70,17 @@ interface EntityFormValues {
 
 const PROPERTY_LIMIT = 32;
 const RELATION_LIMIT = { parent: 9, synonym: 9, child: 100 } as const;
+
+/** AIDP api_name rule: letter first, then letters/digits/underscores, no trailing underscore. */
+const API_NAME_PATTERN = /^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$/;
+const API_NAME_HINT_KEY = "aidpKnowledge.ontologyEntityApiNameHint";
+
+const DATA_TYPE_OPTIONS: PropertyDataType[] = [
+  "string",
+  "float",
+  "datetime",
+  "list[str]",
+];
 
 const relationName = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -104,13 +120,18 @@ const propertyValueToText = (
   return String(value);
 };
 
-/** Value control follows the property type; the type itself is UI-only. */
+const toDataType = (value: unknown): PropertyDataType =>
+  DATA_TYPE_OPTIONS.includes(value as PropertyDataType)
+    ? (value as PropertyDataType)
+    : "string";
+
+/** Value control follows the property data_type. */
 const PropertyValueInput: React.FC<{ name: number }> = ({ name }) => {
   const { t } = useTranslation();
-  const valueType = Form.useWatch(["properties", name, "value_type"]) as
-    PropertyValueType | undefined;
-  switch (valueType) {
-    case "multitext":
+  const dataType = Form.useWatch(["properties", name, "data_type"]) as
+    PropertyDataType | undefined;
+  switch (dataType) {
+    case "list[str]":
       return (
         <Select
           mode="tags"
@@ -120,7 +141,7 @@ const PropertyValueInput: React.FC<{ name: number }> = ({ name }) => {
           )}
         />
       );
-    case "date":
+    case "datetime":
       return (
         <DatePicker
           showTime
@@ -128,7 +149,7 @@ const PropertyValueInput: React.FC<{ name: number }> = ({ name }) => {
           placeholder={t("aidpKnowledge.ontologyEntityPropertyDatePlaceholder")}
         />
       );
-    case "number":
+    case "float":
       return (
         <InputNumber
           className={styles.valueControl}
@@ -161,7 +182,15 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [relationSearch, setRelationSearch] = useState("");
   const [relationKeyword, setRelationKeyword] = useState("");
+  const [typeSearch, setTypeSearch] = useState("");
+  const [typeKeyword, setTypeKeyword] = useState("");
   const editing = !!entity;
+
+  const kind = (Form.useWatch("kind", form) as "entity" | "type") ?? "entity";
+  const displayName = Form.useWatch("display_name", form) as string | undefined;
+  const assignedTypeId = Form.useWatch("type_id", form) as string | undefined;
+  const propertyRows = Form.useWatch("properties", form) as
+    PropertyFormValue[] | undefined;
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -170,6 +199,14 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     );
     return () => window.clearTimeout(timer);
   }, [relationSearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setTypeKeyword(typeSearch.trim()),
+      300
+    );
+    return () => window.clearTimeout(timer);
+  }, [typeSearch]);
 
   const handleClose = () => {
     setErrorMessage(null);
@@ -197,6 +234,21 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     retry: false,
   });
 
+  const typesQuery = useQuery({
+    queryKey: [...scope.key, "ontology-type-options", domainId, typeKeyword],
+    queryFn: () =>
+      aidpOntologyService.listEntities(
+        domainId,
+        1,
+        100,
+        typeKeyword || undefined,
+        "type"
+      ),
+    enabled: scope.enabled && open && !editing && kind === "entity",
+    staleTime: 30_000,
+    retry: false,
+  });
+
   const relationOptions = useMemo(
     () =>
       (allEntitiesQuery.data?.value ?? [])
@@ -212,6 +264,11 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     [allEntitiesQuery.data?.value, entity?.api_name, entity?.kind]
   );
 
+  const parentOptions = useMemo(
+    () => relationOptions.filter((option) => option.value !== assignedTypeId),
+    [assignedTypeId, relationOptions]
+  );
+
   const synonymOptions = useMemo(
     () =>
       (allEntitiesQuery.data?.value ?? [])
@@ -222,6 +279,24 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         }))
         .filter((item) => item.value),
     [allEntitiesQuery.data?.value]
+  );
+
+  const typeOptions = useMemo(
+    () =>
+      (typesQuery.data?.value ?? []).map((item) => ({
+        value: relationId(item.entity_id),
+        label: item.display_name || item.api_name,
+      })),
+    [typesQuery.data?.value]
+  );
+
+  const primaryOptions = useMemo(
+    () =>
+      (propertyRows ?? [])
+        .map((property) => (property?.name ?? "").trim())
+        .filter(Boolean)
+        .map((name) => ({ value: name, label: name })),
+    [propertyRows]
   );
 
   const initialParentIds = useMemo(
@@ -252,11 +327,27 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         .filter((property) => property.api_name !== "synonym")
         .map((property) => ({
           name: property.display_name || property.api_name,
-          value_type: "text",
+          data_type: toDataType(property.data_type),
           value: property.value ?? "",
         })),
     [entity?.properties]
   );
+
+  const suggestApiName = () => {
+    const raw = (displayName ?? "").trim();
+    if (!raw) return;
+    if (/[^\x00-\x7F]/.test(raw)) {
+      message.warning(t("aidpKnowledge.ontologyEntityApiNameNeedsAscii"));
+      return;
+    }
+    let slug = raw
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (!/^[a-z]/.test(slug)) slug = `entity_${slug}`;
+    slug = slug.slice(0, ENTITY_API_NAME_MAX_CHARS).replace(/_+$/g, "");
+    form.setFieldsValue({ api_name: slug });
+  };
 
   const handleSubmit = async () => {
     let values: EntityFormValues;
@@ -265,12 +356,15 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     } catch {
       return;
     }
-    const name = values.entity_name.trim();
+    const entityKind: "entity" | "type" = values.kind ?? "entity";
+    const displayNameValue = values.display_name.trim();
+    const apiNameValue = values.api_name.trim();
     const properties: AidpOntologyEntityProperty[] = (values.properties ?? [])
       .filter((property) => property?.name?.trim())
       .map((property) => ({
         api_name: property.name.trim(),
         display_name: property.name.trim(),
+        data_type: toDataType(property.data_type),
         value: propertyValueToText(property.value) || "",
       }));
     // Synonyms are a `synonym` property in the confirmed AIDP contract, not a
@@ -287,6 +381,9 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     }
     const parentIds = (values.demo_parents ?? []).filter(Boolean);
     const childIds = (values.demo_children ?? []).filter(Boolean);
+    const primary = (values.primary_properties ?? []).filter((name) =>
+      properties.some((property) => property.api_name === name)
+    );
 
     setSaving(true);
     setErrorMessage(null);
@@ -299,10 +396,10 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           JSON.stringify([...childIds].sort()) !==
           JSON.stringify(initialChildIds);
         await aidpOntologyService.updateEntity(domainId, entity.entity_id, {
-          display_name: name,
+          display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           properties,
-          primary_properties: properties.map((item) => item.api_name),
+          primary_properties: primary,
           // Only send relation fields that actually changed so a plain edit
           // does not trigger an extra Relations read/write round trip.
           ...(parentIdsChanged ? { parent_entities: parentIds } : {}),
@@ -310,20 +407,32 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         });
         message.success(t("aidpKnowledge.ontologyEntityUpdated"));
       } else {
-        await aidpOntologyService.createEntity(domainId, {
-          // AIDP requires api_name and kind but the new UCD only draws one
-          // entity name. Use the entered name for both and create a plain
-          // entity; the red note explains that AIDP validation may reject it.
-          kind: "entity",
-          api_name: name,
-          display_name: name,
+        const typeId = entityKind === "entity" ? values.type_id : undefined;
+        const parentIdsWithoutType = parentIds.filter((id) => id !== typeId);
+        const created = await aidpOntologyService.createEntity(domainId, {
+          kind: entityKind,
+          api_name: apiNameValue,
+          display_name: displayNameValue,
           description: values.description?.trim() ?? "",
           properties,
-          primary_properties: properties.map((item) => item.api_name),
-          parent_entities: parentIds,
-          child_entities: childIds,
+          primary_properties: primary,
+          ...(typeId ? { type_id: typeId } : {}),
+          ...(entityKind === "entity" && parentIdsWithoutType.length
+            ? { parent_entities: parentIdsWithoutType }
+            : {}),
+          ...(entityKind === "entity" && childIds.length
+            ? { child_entities: childIds }
+            : {}),
         });
-        message.success(t("aidpKnowledge.ontologyEntityCreated"));
+        if (created.relation_error) {
+          message.warning(
+            t("aidpKnowledge.ontologyEntityRelationPartial", {
+              reason: created.relation_error,
+            })
+          );
+        } else {
+          message.success(t("aidpKnowledge.ontologyEntityCreated"));
+        }
       }
       onSaved();
     } catch (error) {
@@ -372,8 +481,11 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         layout="vertical"
         className={drawerStyles.form}
         initialValues={{
-          entity_name: entity?.display_name ?? "",
+          kind: entity?.kind ?? "entity",
+          display_name: entity?.display_name ?? "",
+          api_name: entity?.api_name ?? "",
           description: entity?.description ?? "",
+          primary_properties: entity?.primary_properties ?? [],
           properties: initialProperties,
           demo_parents: (entity?.parent_entities ?? [])
             .map(relationId)
@@ -387,7 +499,27 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         }}
       >
         <Form.Item
-          name="entity_name"
+          name="kind"
+          label={t("aidpKnowledge.ontologyEntityObjectKind")}
+          extra={t("aidpKnowledge.ontologyEntityKindHint")}
+        >
+          <Segmented
+            disabled={editing}
+            options={[
+              {
+                value: "entity",
+                label: t("aidpKnowledge.ontologyEntityKindEntity"),
+              },
+              {
+                value: "type",
+                label: t("aidpKnowledge.ontologyEntityKindType"),
+              },
+            ]}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="display_name"
           label={t("aidpKnowledge.ontologyEntityNameLabel")}
           rules={[
             { required: true, whitespace: true },
@@ -410,9 +542,45 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             placeholder={t("aidpKnowledge.ontologyEntityNamePlaceholder")}
           />
         </Form.Item>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyEntityNameMappingGap")}
-        </AidpOntologyGapNote>
+
+        <Form.Item
+          name="api_name"
+          label={t("aidpKnowledge.ontologyEntityApiName")}
+          extra={t(API_NAME_HINT_KEY)}
+          rules={[
+            { required: true, whitespace: true },
+            {
+              validator: async (_rule, value: string) => {
+                const apiName = (value ?? "").trim();
+                if (apiName.length > ENTITY_API_NAME_MAX_CHARS) {
+                  throw new Error(
+                    t("aidpKnowledge.ontologyEntityNameTooLong", {
+                      max: ENTITY_API_NAME_MAX_CHARS,
+                    })
+                  );
+                }
+                if (!API_NAME_PATTERN.test(apiName)) {
+                  throw new Error(
+                    t("aidpKnowledge.ontologyEntityApiNameInvalid")
+                  );
+                }
+              },
+            },
+          ]}
+        >
+          <Input
+            maxLength={ENTITY_API_NAME_MAX_CHARS}
+            disabled={editing}
+            placeholder={t("aidpKnowledge.ontologyEntityApiNamePlaceholder")}
+            addonAfter={
+              editing ? undefined : (
+                <Button type="link" size="small" onClick={suggestApiName}>
+                  {t("aidpKnowledge.ontologyEntityApiNameGenerate")}
+                </Button>
+              )
+            }
+          />
+        </Form.Item>
 
         <Form.Item
           name="description"
@@ -443,58 +611,86 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           />
         </Form.Item>
 
-        <section className={styles.relationPanel}>
-          <div className={styles.sectionTitle}>
-            {t("aidpKnowledge.ontologyEntityRelations")}
-          </div>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyEntityRelationGap")}
-          </AidpOntologyGapNote>
+        {!editing && kind === "entity" && (
           <Form.Item
-            name="demo_parents"
-            label={t("aidpKnowledge.ontologyEntityParent")}
-            rules={[relationConflictRule("demo_children")]}
+            name="type_id"
+            label={t("aidpKnowledge.ontologyEntityAssignedType")}
+            extra={t("aidpKnowledge.ontologyEntityAssignedTypeHint")}
           >
             <Select
-              mode="multiple"
               allowClear
-              maxCount={RELATION_LIMIT.parent}
-              options={relationOptions}
-              placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
+              showSearch
               filterOption={false}
-              onSearch={setRelationSearch}
+              loading={typesQuery.isLoading}
+              options={typeOptions}
+              placeholder={t(
+                "aidpKnowledge.ontologyEntityAssignedTypePlaceholder"
+              )}
+              onSearch={setTypeSearch}
             />
           </Form.Item>
-          <Form.Item
-            name="demo_synonyms"
-            label={t("aidpKnowledge.ontologyEntitySynonym")}
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              maxCount={RELATION_LIMIT.synonym}
-              options={synonymOptions}
-              placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
-              filterOption={false}
-              onSearch={setRelationSearch}
-            />
-          </Form.Item>
-          <Form.Item
-            name="demo_children"
-            label={t("aidpKnowledge.ontologyEntityChild")}
-            rules={[relationConflictRule("demo_parents")]}
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              maxCount={RELATION_LIMIT.child}
-              options={relationOptions}
-              placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
-              filterOption={false}
-              onSearch={setRelationSearch}
-            />
-          </Form.Item>
-        </section>
+        )}
+
+        {kind === "entity" && (
+          <section className={styles.relationPanel}>
+            <div className={styles.sectionTitle}>
+              {t("aidpKnowledge.ontologyEntityRelations")}
+            </div>
+            <AidpOntologyGapNote>
+              {t("aidpKnowledge.ontologyEntityRelationGap")}
+            </AidpOntologyGapNote>
+            <Form.Item
+              name="demo_parents"
+              label={t("aidpKnowledge.ontologyEntityParent")}
+              rules={[relationConflictRule("demo_children")]}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                maxCount={RELATION_LIMIT.parent}
+                options={parentOptions}
+                placeholder={t(
+                  "aidpKnowledge.ontologyEntityRelationPlaceholder"
+                )}
+                filterOption={false}
+                onSearch={setRelationSearch}
+              />
+            </Form.Item>
+            <Form.Item
+              name="demo_synonyms"
+              label={t("aidpKnowledge.ontologyEntitySynonym")}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                maxCount={RELATION_LIMIT.synonym}
+                options={synonymOptions}
+                placeholder={t(
+                  "aidpKnowledge.ontologyEntityRelationPlaceholder"
+                )}
+                filterOption={false}
+                onSearch={setRelationSearch}
+              />
+            </Form.Item>
+            <Form.Item
+              name="demo_children"
+              label={t("aidpKnowledge.ontologyEntityChild")}
+              rules={[relationConflictRule("demo_parents")]}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                maxCount={RELATION_LIMIT.child}
+                options={relationOptions}
+                placeholder={t(
+                  "aidpKnowledge.ontologyEntityRelationPlaceholder"
+                )}
+                filterOption={false}
+                onSearch={setRelationSearch}
+              />
+            </Form.Item>
+          </section>
+        )}
 
         <section className={styles.propertyPanel}>
           <button
@@ -506,9 +702,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             <span>{t("aidpKnowledge.ontologyEntityPropertiesOptional")}</span>
             {propertiesOpen ? <UpOutlined /> : <DownOutlined />}
           </button>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyEntityPropertyTypeGap")}
-          </AidpOntologyGapNote>
           <Form.List name="properties">
             {(fields, { add, remove }) => (
               <div className={styles.propertyList} hidden={!propertiesOpen}>
@@ -524,7 +717,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                     </span>
                     <span>
                       {t("aidpKnowledge.ontologyEntityPropertyValue")}
-                      <em>*</em>
                     </span>
                     <span aria-hidden="true" />
                   </div>
@@ -557,27 +749,27 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                     </Form.Item>
                     <Form.Item
                       {...field}
-                      name={[field.name, "value_type"]}
+                      name={[field.name, "data_type"]}
                       className={styles.propertyDense}
                     >
                       <Select
                         options={[
                           {
-                            value: "text",
+                            value: "string",
                             label: t("aidpKnowledge.ontologyMetadataTypeText"),
                           },
                           {
-                            value: "multitext",
+                            value: "list[str]",
                             label: t(
                               "aidpKnowledge.ontologyEntityPropertyTypeMultiText"
                             ),
                           },
                           {
-                            value: "date",
+                            value: "datetime",
                             label: t("aidpKnowledge.ontologyMetadataTypeDate"),
                           },
                           {
-                            value: "number",
+                            value: "float",
                             label: t(
                               "aidpKnowledge.ontologyMetadataTypeNumber"
                             ),
@@ -608,7 +800,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                   onClick={() =>
                     add({
                       name: "",
-                      value_type: "text",
+                      data_type: "string",
                       value: "",
                     })
                   }
@@ -619,6 +811,21 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               </div>
             )}
           </Form.List>
+          <Form.Item
+            name="primary_properties"
+            label={t("aidpKnowledge.ontologyEntityPrimaryProperties")}
+            extra={t("aidpKnowledge.ontologyEntityPrimaryPropertiesHint")}
+            className={styles.primaryProperties}
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              options={primaryOptions}
+              placeholder={t(
+                "aidpKnowledge.ontologyEntityPrimaryPropertiesPlaceholder"
+              )}
+            />
+          </Form.Item>
         </section>
         {errorMessage && (
           <div className={drawerStyles.error} role="alert">

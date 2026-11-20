@@ -92,6 +92,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [visibleColumns, setVisibleColumns] = useState({
+    kind: true,
     description: true,
     extended: true,
     parent: true,
@@ -319,6 +320,25 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         </button>
       ),
     },
+    ...(visibleColumns.kind
+      ? [
+          {
+            title: t("aidpKnowledge.ontologyEntityObjectKind"),
+            key: "kind",
+            width: 100,
+            render: (_value: unknown, record: AidpOntologyEntity) => (
+              <Tag
+                className={entityStyles.kindTag}
+                color={record.kind === "type" ? "blue" : "default"}
+              >
+                {record.kind === "type"
+                  ? t("aidpKnowledge.ontologyEntityKindType")
+                  : t("aidpKnowledge.ontologyEntityKindEntity")}
+              </Tag>
+            ),
+          },
+        ]
+      : []),
     ...(visibleColumns.description
       ? [
           {
@@ -592,6 +612,22 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             trigger={["click"]}
             menu={{
               items: [
+                {
+                  key: "kind",
+                  label: (
+                    <Checkbox
+                      checked={visibleColumns.kind}
+                      onChange={(event) =>
+                        setVisibleColumns((previous) => ({
+                          ...previous,
+                          kind: event.target.checked,
+                        }))
+                      }
+                    >
+                      {t("aidpKnowledge.ontologyEntityObjectKind")}
+                    </Checkbox>
+                  ),
+                },
                 {
                   key: "description",
                   label: (
