@@ -1248,7 +1248,7 @@
       "method": "POST",
       "path": "/api/conversation/branch",
       "transport": "http",
-      "target": "management",
+      "target": "runtime",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-9dde36faeae0f9ec",
       "credential_kinds": [
@@ -1262,6 +1262,17 @@
       "target": "runtime",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-0e2fec25c52d0f9d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/creator_histories",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-creator-histories",
       "credential_kinds": [
         "session"
       ]
@@ -1377,6 +1388,17 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/conversation/{conversation_id}/creation_mode_responses",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-creation-mode-responses",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "PUT",
       "path": "/api/conversation/{conversation_id}/knowledge-scope",
       "transport": "http",
@@ -1391,7 +1413,7 @@
       "method": "GET",
       "path": "/api/conversation/{conversation_id}/model_preferences",
       "transport": "http",
-      "target": "management",
+      "target": "runtime",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-73f7a5098f260d29",
       "credential_kinds": [
@@ -1402,7 +1424,7 @@
       "method": "PATCH",
       "path": "/api/conversation/{conversation_id}/model_preferences",
       "transport": "http",
-      "target": "management",
+      "target": "runtime",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-fc6aeaef483b9aa5",
       "credential_kinds": [
@@ -1413,7 +1435,7 @@
       "method": "GET",
       "path": "/api/conversation/{conversation_id}/model_preferences/{model_id}",
       "transport": "http",
-      "target": "management",
+      "target": "runtime",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-5463f198ffb741b2",
       "credential_kinds": [
@@ -1424,9 +1446,20 @@
       "method": "PATCH",
       "path": "/api/conversation/{conversation_id}/model_preferences/{model_id}",
       "transport": "http",
-      "target": "management",
+      "target": "runtime",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-1cfa509729cfba5f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/conversation/{conversation_id}/target",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-target",
       "credential_kinds": [
         "session"
       ]
@@ -5669,6 +5702,17 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/api/users/{user_id}/assignable_roles",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user.py",
+      "route_id": "web-user-assignable-roles",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/api/voice/connectivity",
       "transport": "http",
@@ -6482,5 +6526,5 @@
       ]
     }
   ],
-  "revision": "2026-11-19.ops-agent-monitoring"
+  "revision": "2026-11-20.ops-agent-web-route-sync"
 }

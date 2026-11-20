@@ -26,9 +26,12 @@ case:
   - order: 1
     action: Start Gateway and separate Management/Runtime recording servers; invoke
       declared ordinary Management HTTP and Runtime streaming APIs plus declared Northbound
-      API.
+      API. Exercise existing Web role choices, creator histories, creation confirmation
+      and target binding on their precise registered paths; verify conversation branching
+      and both conversation-level and per-model preference reads/updates reach Runtime.
     expected: Each request reaches the intended upstream with body and repeated query
-      preserved; Runtime SSE arrives incrementally.
+      preserved; Runtime SSE arrives incrementally. All nine Web operations reach
+      their intended Management or Runtime listener.
   - order: 2
     action: Call unknown route, method mismatch, reserved internal endpoint and unregistered
       WebSocket; then exercise a declared Runtime WebSocket.
