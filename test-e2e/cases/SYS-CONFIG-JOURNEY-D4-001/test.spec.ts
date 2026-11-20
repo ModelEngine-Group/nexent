@@ -197,7 +197,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
         page.getByRole("heading", { name: "系统配置", exact: true }),
       ).toBeVisible();
       await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(
-        19,
+        10,
       );
     },
   );
@@ -214,25 +214,46 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByRole("heading", { name: "系统配置", exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByText(
+        "统一管理租户、资源、文件上传、模型与 MCP 的运行时参数。",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("运维中心", { exact: true })).toHaveCount(0);
     await expect(page.getByText("推荐", { exact: true })).toHaveCount(0);
     await expect(page.getByText("应用详情", { exact: true })).toHaveCount(0);
     await expect(page.getByText("当前版本", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("自动刷新", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("config-summary")).toHaveCount(0);
+    await expect(page.getByTestId("config-table")).toBeVisible();
+    await expect(
+      page.getByTestId("config-row-MAX_TENANT_COUNT"),
+    ).not.toContainText("MAX_TENANT_COUNT");
+    await expect(page.getByText("共 19 条", { exact: true })).toBeVisible();
+    await page.locator(".ant-pagination-next").click();
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(9);
+    await expect(
+      page.getByTestId("config-row-MAX_CONVERSATIONS_PER_USER"),
+    ).toBeVisible();
     await page
       .getByPlaceholder("搜索参数名称或环境变量键")
       .fill("MAX_TENANT_COUNT");
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(1);
     await page.getByPlaceholder("搜索参数名称或环境变量键").fill("");
-    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(19);
-    await page.getByText("文件与上传 3", { exact: true }).click();
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(10);
+    await page.getByText("文件上传 3", { exact: true }).click();
     await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(3);
+    await page.getByText("模型与MCP 4", { exact: true }).click();
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(4);
     await page.getByText("全部 19", { exact: true }).click();
-    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(19);
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(10);
 
     await page.goto("/en/ops/configuration");
     await expect(
       page.getByRole("heading", { name: "System Configuration", exact: true }),
     ).toBeVisible();
-    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(19);
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(10);
     await page
       .getByPlaceholder("Search by setting name or environment key")
       .fill("Tenant limit");
@@ -259,7 +280,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByRole("heading", { name: "系统配置", exact: true }),
     ).toBeVisible();
-    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(19);
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(10);
   });
 
   await contract.step(contract.expectedIds("steps")[1], async () => {
@@ -267,16 +288,26 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
       name: "租户数量上限",
       exact: true,
     });
+    const rowBox = await page
+      .getByTestId("config-row-MAX_TENANT_COUNT")
+      .boundingBox();
+    const inputBox = await input.boundingBox();
+    expect(rowBox).not.toBeNull();
+    expect(inputBox).not.toBeNull();
+    if (!rowBox || !inputBox)
+      throw new Error("Value alignment requires visible layout boxes");
+    expect(
+      Math.abs(
+        inputBox.y + inputBox.height / 2 - (rowBox.y + rowBox.height / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
     const otherInput = page.getByRole("spinbutton", {
       name: "单租户用户上限",
       exact: true,
     });
     await otherInput.fill("123");
     const filterBox = await page.getByTestId("config-filter").boundingBox();
-    const saveBarBox = await page
-      .getByRole("button", { name: "保存修改", exact: true })
-      .locator("xpath=../..")
-      .boundingBox();
+    const saveBarBox = await page.getByTestId("config-save-bar").boundingBox();
     expect(filterBox).not.toBeNull();
     expect(saveBarBox).not.toBeNull();
     if (!filterBox || !saveBarBox)
@@ -295,12 +326,14 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toHaveCount(0);
 
     await page
-      .getByTestId("config-row-MAX_TENANT_COUNT")
       .getByRole("button", {
         name: "展开租户数量上限详情",
         exact: true,
       })
       .click();
+    await expect(
+      page.getByTestId("config-detail-MAX_TENANT_COUNT"),
+    ).toContainText("MAX_TENANT_COUNT");
     await page
       .getByRole("button", {
         name: "将租户数量上限恢复为默认值",
@@ -361,7 +394,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
 
     savedValues.MAX_TENANT_COUNT = 50;
     delayQuery = true;
-    await page.getByRole("button", { name: "刷新状态", exact: true }).click();
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
     await expect.poll(() => Boolean(releaseQuery)).toBe(true);
     await input.fill("10");
     releaseQuery?.();
@@ -429,7 +462,7 @@ journey("SYS-CONFIG-JOURNEY-D4-001", async ({ page, contract }) => {
   const assertionIds = contract.expectedIds("assertions");
   await contract.assertion(assertionIds[0], async () => {
     expect(deniedActorChecked).toBe(true);
-    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(19);
+    await expect(page.locator("[data-testid^='config-row-']")).toHaveCount(10);
     await expect(page.getByText("推荐", { exact: true })).toHaveCount(0);
     await expect(page.getByText("应用详情", { exact: true })).toHaveCount(0);
   });
