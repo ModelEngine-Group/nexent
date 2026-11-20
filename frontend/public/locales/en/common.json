@@ -2035,7 +2035,6 @@
   "aidpKnowledge.ontologyEntityChildHint": "Child entity: a narrower concept that belongs to this entity.",
   "aidpKnowledge.ontologyEntityColumnApiName": "API name",
   "aidpKnowledge.ontologyEntityColumnBindings": "Bound knowledge bases of the ontology",
-  "aidpKnowledge.ontologyEntityColumnChunkCount": "Linked chunks",
   "aidpKnowledge.ontologyEntityColumnDescription": "Description",
   "aidpKnowledge.ontologyEntityColumnDisplayName": "Display name",
   "aidpKnowledge.ontologyEntityColumnKind": "Type",

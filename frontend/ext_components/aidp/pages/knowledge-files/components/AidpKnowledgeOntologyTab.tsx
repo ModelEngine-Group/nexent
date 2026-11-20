@@ -257,13 +257,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
       render: (_value, record) =>
         (record.child_entities ?? []).map(relationName).join("、") || "—",
     },
-    {
-      title: t("aidpKnowledge.ontologyEntityColumnChunkCount"),
-      key: "chunk",
-      width: 130,
-      render: (_value, record) =>
-        demo && record.chunk_count != null ? record.chunk_count : "—",
-    },
   ];
 
   const ruleColumns: TableColumnsType<AidpOntologyRule> = [

@@ -2035,7 +2035,6 @@
   "aidpKnowledge.ontologyEntityChildHint": "下位实体：隶属于当前实体的下级概念。",
   "aidpKnowledge.ontologyEntityColumnApiName": "API 名称",
   "aidpKnowledge.ontologyEntityColumnBindings": "所属本体库关联知识库数",
-  "aidpKnowledge.ontologyEntityColumnChunkCount": "关联 Chunk 数",
   "aidpKnowledge.ontologyEntityColumnDescription": "描述",
   "aidpKnowledge.ontologyEntityColumnDisplayName": "显示名称",
   "aidpKnowledge.ontologyEntityColumnKind": "类型",
