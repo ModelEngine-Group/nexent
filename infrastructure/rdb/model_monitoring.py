@@ -1,5 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import time
+from typing import Optional
+
 from sqlalchemy import (
     TIMESTAMP,
     Boolean,
@@ -10,6 +13,9 @@ from sqlalchemy import (
     Sequence,
     String,
     Text,
+    and_,
+    or_,
+    select,
 )
 
 
@@ -20,6 +26,7 @@ from sqlalchemy.sql import func
 
 
 from infrastructure.rdb.base import SCHEMA, SimpleTableBase
+from infrastructure.rdb.model_record import ModelRecord
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -178,5 +185,95 @@ def write_model_monitoring_record(record: dict) -> None:
     from infrastructure.rdb.client import get_monitoring_db_session
 
     with get_monitoring_db_session() as session:
+        record = dict(record)
+        record["model_id"] = resolve_model_id(session, record)
         session.add(ModelMonitoringRecord(**record))
         session.flush()
+
+
+# The SDK only knows the model names used on the wire, not the configuration
+# row that produced them, so monitoring records arrive without ``model_id``.
+# Resolving it here keeps every producer (LLM, embedding, client wrappers)
+# consistent without pushing database ids through the SDK.
+_MODEL_ID_CACHE_TTL_SECONDS = 60.0
+_MODEL_ID_CACHE_MAX_ENTRIES = 512
+_model_id_cache: dict[tuple, tuple[float, Optional[int]]] = {}
+
+# ``multi_embedding`` is the SDK-side name of an embedding config that also
+# accepts multimodal input; the configuration row still stores ``embedding``.
+_MODEL_TYPE_ALIASES = {"multi_embedding": ("multi_embedding", "embedding")}
+
+
+def resolve_model_id(session, record: dict) -> Optional[int]:
+    """Return the model configuration id that produced this record, if known.
+
+    Matching prefers the configured ``display_name``. When the producer only
+    reported the provider model path (``display_name`` is missing or equal to
+    ``model_name``, as embedding models do), the unique
+    ``model_repo/model_name`` row is used instead. Ambiguous matches stay
+    ``None`` rather than attributing traffic to the wrong configuration.
+    """
+    explicit = record.get("model_id")
+    if explicit is not None:
+        return explicit
+
+    tenant_id = record.get("tenant_id")
+    display_name = record.get("display_name") or ""
+    model_name = record.get("model_name") or ""
+    if not tenant_id or not (display_name or model_name):
+        return None
+
+    model_type = record.get("model_type") or ""
+    model_types = _MODEL_TYPE_ALIASES.get(
+        model_type, (model_type,) if model_type else ())
+    cache_key = (tenant_id, model_types, display_name, model_name)
+    now = time.monotonic()
+    cached = _model_id_cache.get(cache_key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
+    model_id = None
+    if display_name:
+        model_id = _unique_model_id(
+            session,
+            tenant_id,
+            model_types,
+            ModelRecord.display_name == display_name,
+        )
+    if model_id is None and model_name and display_name in ("", model_name):
+        model_path = ModelRecord.model_repo + "/" + ModelRecord.model_name
+        model_id = _unique_model_id(
+            session,
+            tenant_id,
+            model_types,
+            or_(
+                model_path == model_name,
+                and_(
+                    or_(
+                        ModelRecord.model_repo.is_(None),
+                        ModelRecord.model_repo == "",
+                    ),
+                    ModelRecord.model_name == model_name,
+                ),
+            ),
+        )
+
+    if len(_model_id_cache) >= _MODEL_ID_CACHE_MAX_ENTRIES:
+        _model_id_cache.clear()
+    _model_id_cache[cache_key] = (
+        now + _MODEL_ID_CACHE_TTL_SECONDS, model_id)
+    return model_id
+
+
+def _unique_model_id(session, tenant_id, model_types, condition):
+    stmt = select(ModelRecord.model_id).where(
+        ModelRecord.tenant_id == tenant_id,
+        ModelRecord.delete_flag == "N",
+        condition,
+    )
+    if model_types:
+        stmt = stmt.where(ModelRecord.model_type.in_(model_types))
+    rows = session.execute(stmt.order_by(ModelRecord.model_id).limit(2)).all()
+    if len(rows) != 1:
+        return None
+    return rows[0][0]
