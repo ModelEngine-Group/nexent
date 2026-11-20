@@ -10,6 +10,9 @@ import sys
 from io import BytesIO
 from unittest.mock import MagicMock, call, patch
 
+import pytest
+from nexent.storage.errors import Unavailable
+
 from test.common.contract_stubs import install_business_constant_stubs
 
 # Add project root to Python path
@@ -51,6 +54,7 @@ nexent_mock.storage = nexent_storage_mock
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
+sys.modules["infrastructure.attachment_upload"] = MagicMock()
 
 # Mock infrastructure.rdb.client
 minio_client_mock = MagicMock()
@@ -79,7 +83,6 @@ install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 with patch('management.db.file.attachment.minio_client', minio_client_mock):
     from management.db.file.attachment import (
         build_s3_url,
-        copy_file,
         delete_file,
         download_file,
         file_exists,
@@ -272,12 +275,18 @@ class TestUploadFile:
 class TestUploadFileobj:
     """Test cases for upload_fileobj function"""
 
+    @pytest.fixture(autouse=True)
+    def mock_put_attachment(self):
+        with patch("management.db.file.attachment.put_attachment", return_value="/bucket/selection") as mock:
+            self.put = mock
+            yield
+
     @patch('management.db.file.attachment.generate_object_name')
     @patch('management.db.file.attachment.get_file_url')
     def test_upload_fileobj_success(self, mock_get_file_url, mock_generate):
         """Test successful file object upload with presigned URL"""
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
-        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/20240101120000_abc123.txt')
+        self.put.return_value = '/bucket/attachments/20240101120000_abc123.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url?signature=xxx'}
 
         file_obj = BytesIO(b'test data')
@@ -293,20 +302,22 @@ class TestUploadFileobj:
         assert 'presigned-url' in result['presigned_url']
         assert 'upload_time' in result
         mock_generate.assert_called_once_with('test.txt', prefix='attachments')
-        minio_client_mock.upload_fileobj.assert_called_once()
+        self.put.assert_called_once_with(
+            file_obj, result['object_name'], 'bucket', content_type='application/octet-stream', size=9,
+        )
         mock_get_file_url.assert_called_once()
 
     @patch('management.db.file.attachment.generate_object_name')
     def test_upload_fileobj_failure(self, mock_generate):
         """Test upload_fileobj handles upload failure"""
         mock_generate.return_value = 'attachments/20240101120000_abc123.txt'
-        minio_client_mock.upload_fileobj.return_value = (False, 'Upload failed')
+        self.put.side_effect = Unavailable()
 
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket')
 
         assert result['success'] is False
-        assert result['error'] == 'Upload failed'
+        assert result['error'] == 'Storage is unavailable'
         assert 'url' not in result
         assert 'presigned_url' not in result
 
@@ -322,11 +333,11 @@ class TestUploadFileobj:
         file_obj.seek(original_pos)
 
         captured_data = {}
-        def capture_upload(file_obj_arg, object_name, bucket):
+        def capture_upload(file_obj_arg, object_name, bucket, **_kwargs):
             captured_data['position_before_read'] = file_obj_arg.tell()
             captured_data['content'] = file_obj_arg.read()
-            return (True, '/bucket/attachments/test.txt')
-        minio_client_mock.upload_fileobj.side_effect = capture_upload
+            return '/bucket/attachments/test.txt'
+        self.put.side_effect = capture_upload
 
         result = upload_fileobj(file_obj, 'test.txt', 'bucket')
 
@@ -338,7 +349,7 @@ class TestUploadFileobj:
     def test_upload_fileobj_without_presigned_url(self, mock_get_file_url, mock_generate):
         """Test upload_fileobj when generate_presigned_url is False"""
         mock_generate.return_value = 'attachments/test.txt'
-        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        self.put.return_value = '/bucket/attachments/test.txt'
 
         file_obj = BytesIO(b'test data')
         result = upload_fileobj(file_obj, 'test.txt', 'bucket', generate_presigned_url=False)
@@ -353,7 +364,7 @@ class TestUploadFileobj:
     def test_upload_fileobj_custom_presigned_url_expires(self, mock_get_file_url, mock_generate):
         """Test upload_fileobj with custom presigned URL expiration"""
         mock_generate.return_value = 'attachments/test.txt'
-        minio_client_mock.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        self.put.return_value = '/bucket/attachments/test.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
 
         file_obj = BytesIO(b'test data')
@@ -364,12 +375,11 @@ class TestUploadFileobj:
 
     @patch('management.db.file.attachment.generate_object_name')
     @patch('management.db.file.attachment.get_file_url')
-    @patch('management.db.file.attachment.minio_client')
-    def test_upload_fileobj_file_size_calculation_valueerror_sets_zero(self, mock_client, mock_get_file_url, mock_generate):
+    def test_upload_fileobj_file_size_calculation_valueerror_sets_zero(self, mock_get_file_url, mock_generate):
         """Test upload_fileobj handles ValueError during file size calculation by setting file_size=0"""
         mock_generate.return_value = 'attachments/test.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        self.put.return_value = '/bucket/attachments/test.txt'
 
         file_obj = MagicMock()
         file_obj.tell.side_effect = ValueError("Not a valid file")
@@ -383,12 +393,11 @@ class TestUploadFileobj:
 
     @patch('management.db.file.attachment.generate_object_name')
     @patch('management.db.file.attachment.get_file_url')
-    @patch('management.db.file.attachment.minio_client')
-    def test_upload_fileobj_file_size_calculation_ioerror_sets_zero(self, mock_client, mock_get_file_url, mock_generate):
+    def test_upload_fileobj_file_size_calculation_ioerror_sets_zero(self, mock_get_file_url, mock_generate):
         """Test upload_fileobj handles IOError during file size calculation by setting file_size=0"""
         mock_generate.return_value = 'attachments/test.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        self.put.return_value = '/bucket/attachments/test.txt'
 
         file_obj = MagicMock()
         file_obj.tell.side_effect = IOError("IO error")
@@ -402,12 +411,11 @@ class TestUploadFileobj:
 
     @patch('management.db.file.attachment.generate_object_name')
     @patch('management.db.file.attachment.get_file_url')
-    @patch('management.db.file.attachment.minio_client')
-    def test_upload_fileobj_restore_position_valueerror_ignored(self, mock_client, mock_get_file_url, mock_generate):
+    def test_upload_fileobj_restore_position_valueerror_ignored(self, mock_get_file_url, mock_generate):
         """Test upload_fileobj ignores ValueError when restoring file position after upload"""
         mock_generate.return_value = 'attachments/test.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        self.put.return_value = '/bucket/attachments/test.txt'
 
         file_obj = MagicMock()
         file_obj.tell.return_value = 0
@@ -420,12 +428,11 @@ class TestUploadFileobj:
 
     @patch('management.db.file.attachment.generate_object_name')
     @patch('management.db.file.attachment.get_file_url')
-    @patch('management.db.file.attachment.minio_client')
-    def test_upload_fileobj_restore_position_ioerror_ignored(self, mock_client, mock_get_file_url, mock_generate):
+    def test_upload_fileobj_restore_position_ioerror_ignored(self, mock_get_file_url, mock_generate):
         """Test upload_fileobj ignores IOError when restoring file position after upload"""
         mock_generate.return_value = 'attachments/test.txt'
         mock_get_file_url.return_value = {'success': True, 'url': 'http://minio:9000/presigned-url'}
-        mock_client.upload_fileobj.return_value = (True, '/bucket/attachments/test.txt')
+        self.put.return_value = '/bucket/attachments/test.txt'
 
         file_obj = MagicMock()
         file_obj.tell.return_value = 0
@@ -734,43 +741,6 @@ class TestFileExists:
 
             assert result is False
             mock_client.file_exists.assert_called_once_with('test/file.txt', None)
-
-
-class TestCopyFile:
-    """Test cases for copy_file function"""
-
-    def test_copy_file_success(self):
-        """Test successful file copy"""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_client.copy_file.return_value = (True, 'dest/file.pdf')
-
-            result = copy_file('source/file.pdf', 'dest/file.pdf')
-
-            assert result['success'] is True
-            assert result['object_name'] == 'dest/file.pdf'
-            mock_client.copy_file.assert_called_once_with('source/file.pdf', 'dest/file.pdf', None)
-
-    def test_copy_file_with_custom_bucket(self):
-        """Test copy_file with custom bucket"""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_client.copy_file.return_value = (True, 'dest/file.pdf')
-
-            result = copy_file('source/file.pdf', 'dest/file.pdf', bucket='custom-bucket')
-
-            assert result['success'] is True
-            mock_client.copy_file.assert_called_once_with('source/file.pdf', 'dest/file.pdf', 'custom-bucket')
-
-    def test_copy_file_failure(self):
-        """Test copy_file handles errors"""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_client.copy_file.return_value = (False, 'Copy failed')
-
-            result = copy_file('source/file.pdf', 'dest/file.pdf')
-
-            assert result['success'] is False
-            assert 'Copy failed' in result['error']
-
-
 
 
 class TestS3UrlHelpers:

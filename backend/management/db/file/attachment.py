@@ -9,7 +9,9 @@ from typing import Any, BinaryIO, Dict, List, Optional
 from contracts import file_types
 from contracts.constants.constants import S3_URL_PREFIX
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
+from nexent.storage.errors import StorageError
 
+from infrastructure.attachment_upload import put_attachment
 from infrastructure.object_storage.client import minio_client
 from infrastructure.object_storage.read_access import (
     build_attachment_proxy_url,
@@ -171,7 +173,12 @@ def upload_fileobj(
             file_obj.seek(0)  # Try to seek to beginning anyway
 
     # Upload file
-    success, result = minio_client.upload_fileobj(file_obj, object_name, bucket)
+    content_type = file_types.get_content_type(file_name)
+    try:
+        result = put_attachment(file_obj, object_name, bucket, content_type="application/octet-stream", size=file_size)
+        success = True
+    except StorageError as error:
+        success, result = False, str(error)
     set_span_attributes(file_size_bytes=file_size, stage="minio.upload")
 
     # Restore original position (if file is still open)
@@ -186,7 +193,7 @@ def upload_fileobj(
         "object_name": object_name,
         "file_name": file_name,
         "file_size": file_size,
-        "content_type": file_types.get_content_type(file_name),
+        "content_type": content_type,
         "upload_time": datetime.now().isoformat(),
     }
 
@@ -270,27 +277,6 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
         return minio_client.file_exists(object_name, bucket)
     except Exception:
         return False
-
-
-def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Copy a file within the same bucket (atomic operation in MinIO).
-
-    Args:
-        source_object: Source object name
-        dest_object: Destination object name
-        bucket: Bucket name, if not specified will use default bucket
-
-    Returns:
-        Dict[str, Any]: Result containing success flag and error message (if any)
-    """
-    source_object, bucket = normalize_object_location(source_object, bucket)
-    dest_object, bucket = normalize_object_location(dest_object, bucket)
-    success, result = minio_client.copy_file(source_object, dest_object, bucket)
-    if success:
-        return {"success": True, "object_name": result}
-    else:
-        return {"success": False, "error": result}
 
 
 def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str, Any]]:

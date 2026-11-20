@@ -185,7 +185,7 @@ class S3ObjectStore:
         try:
             response = getattr(client, operation)(**kwargs)
         except (BotoCoreError, ClientError, OSError) as error:
-            code = getattr(error, "response", {}).get("Error", {}).get("Code", "")
+            code = (getattr(error, "response", None) or {}).get("Error", {}).get("Code", "")
             if code in {"NoSuchKey", "NoSuchVersion", "404", "NotFound"}:
                 raise NotFound(operation_id=context.operation_id) from None
             if code in {"PreconditionFailed", "412", "ConditionalRequestConflict"}:

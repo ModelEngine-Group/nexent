@@ -1925,6 +1925,15 @@ class TestUploadFilesImplMinioFolderLogic:
             assert call_kwargs["folder"] == "attachments"
 
 
+@pytest.fixture(autouse=True)
+def run_upload_without_live_manager():
+    async def invoke(_name, fn, *args, lane, owner, **kwargs):
+        assert lane == "file-upload"
+        return fn(*args, **kwargs)
+    with patch("management.services.file.service.run_blocking", side_effect=invoke):
+        yield
+
+
 class TestUploadToMinioFolderLogic:
     """Test cases for MinIO folder logic in upload_to_minio (lines 265-296)"""
 

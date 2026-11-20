@@ -24,7 +24,6 @@ from contracts.errors.exceptions import (
 from contracts.errors.ingestion import ingestion_error_fields
 from fastapi import UploadFile
 from management.db.file.attachment import (
-    copy_file,
     generate_object_name,
     get_file_url,
     list_files,
@@ -39,6 +38,7 @@ from management.services.file.upload_context import resolve_upload_context
 from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 from nexent.storage.errors import OutcomeUnknown, ScopeDenied
@@ -598,8 +598,10 @@ async def upload_to_minio(
                     "url": f"/{lifecycle_record['bucket_name']}/{lifecycle_record['object_name']}",
                 }
             else:
-                result = upload_fileobj(file_obj=BytesIO(file_content), file_name=original_filename,
-                                        prefix=actual_folder, file_size=len(file_content))
+                result = await run_blocking(
+                    "attachment-upload", upload_fileobj, file_obj=BytesIO(file_content), file_name=original_filename,
+                    prefix=actual_folder, file_size=len(file_content), lane="file-upload", owner="management.file",
+                )
 
             # Preserve original filename in result (upload_fileobj uses it for object name generation)
             result["original_file_name"] = original_filename

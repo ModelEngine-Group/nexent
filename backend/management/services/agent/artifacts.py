@@ -6,8 +6,13 @@ import json
 import logging
 import os
 
-from management.db.file.attachment import _build_mcp_presigned_url, get_file_url, upload_fileobj
+from management.db.file.attachment import (
+    _build_mcp_presigned_url,
+    get_file_url,
+    upload_fileobj,
+)
 from management.services.file.service import is_allowed_skill_upload_path
+from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,12 @@ def enrich_file_uploads_with_presigned_urls(
     return enriched_results
 
 
+def _upload_skill_file(path: str, file_name: str, prefix: str, size: int) -> dict:
+    with open(path, "rb") as file_obj:
+        return upload_fileobj(file_obj=file_obj, file_name=file_name, prefix=prefix,
+                              generate_presigned_url=False, file_size=size)
+
+
 async def process_skill_file_uploads(
     payloads: list[dict] | str,
     user_id: str,
@@ -150,14 +161,10 @@ async def process_skill_file_uploads(
         try:
             file_size = os.path.getsize(absolute_path)
             actual_prefix = f"skill-files/{user_id}" if user_id else "skill-files"
-            with open(absolute_path, "rb") as file_obj:
-                upload_result = upload_fileobj(
-                    file_obj=file_obj,
-                    file_name=file_name,
-                    prefix=actual_prefix,
-                    generate_presigned_url=False,
-                    file_size=file_size,
-                )
+            upload_result = await run_blocking(
+                "skill-artifact-upload", _upload_skill_file, absolute_path, file_name, actual_prefix, file_size,
+                lane="file-upload", owner="management.skill",
+            )
 
             if upload_result.get("success"):
                 upload_results.append(

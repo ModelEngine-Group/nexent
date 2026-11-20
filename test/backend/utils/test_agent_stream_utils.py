@@ -27,6 +27,15 @@ from management.services.agent import stream as agent_stream_utils
 from management.services.agent import artifacts as agent_artifacts
 
 
+@pytest.fixture(autouse=True)
+def run_skill_upload_without_live_manager():
+    async def invoke(_name, fn, *args, lane, owner, **kwargs):
+        assert lane == "file-upload"
+        return fn(*args, **kwargs)
+    with patch.object(agent_artifacts, "run_blocking", side_effect=invoke):
+        yield
+
+
 def test_rollback_removes_only_failed_attempt_and_preserves_list_identity():
     accepted = {"type": "final_answer", "_attempt_id": "accepted", "content": "Result"}
     sibling = {"type": "model_output_thinking", "content": "Unrelated"}
