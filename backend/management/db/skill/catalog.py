@@ -382,6 +382,7 @@ def list_skill_repository_by_skill_ids(
                 SkillRepository.skill_id,
                 SkillRepository.status,
                 SkillRepository.content,
+                SkillRepository.downloads,
                 SkillRepository.create_time,
             )
             .filter(
@@ -403,6 +404,7 @@ def list_skill_repository_by_skill_ids(
             "skill_id": row.skill_id,
             "status": row.status,
             "content": row.content,
+            "downloads": row.downloads,
             "create_time": row.create_time,
         }
         for row in rows

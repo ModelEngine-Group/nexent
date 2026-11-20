@@ -294,6 +294,7 @@ def test_list_repository_by_skill_ids_maps_rows(monkeypatch, mock_session):
         skill_repository_id=1,
         skill_id=8,
         status="shared",
+        downloads=3,
         create_time=created_at,
     )
     query.filter.return_value.order_by.return_value.all.return_value = [row]
@@ -308,5 +309,6 @@ def test_list_repository_by_skill_ids_maps_rows(monkeypatch, mock_session):
         "skill_id": 8,
         "status": "shared",
         "content": row.content,
+        "downloads": 3,
         "create_time": created_at,
     }]

@@ -1083,7 +1083,13 @@ def test_copy_name_and_install_error_edges():
             )
 
 
-def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows():
+@pytest.mark.parametrize(
+    ("status", "downloads", "expected_downloads"),
+    [("shared", 3, 3), ("shared", None, 0), ("pending_review", 3, 0)],
+)
+def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows(
+    status, downloads, expected_downloads
+):
     class ListSkillService(_SkillServiceMock):
         def list_skills(self, tenant_id=None):
             return [{
@@ -1096,8 +1102,9 @@ def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows():
             }]
 
     _skill_repo_db_mock.list_skill_repository_by_skill_ids.return_value = [
-        {"skill_id": None, "skill_repository_id": 99, "status": "shared"},
-        {"skill_id": 1, "skill_repository_id": 1, "status": "shared"},
+        {"skill_id": None, "skill_repository_id": 99, "status": "shared", "downloads": 99},
+        {"skill_id": 1, "skill_repository_id": 2, "status": "rejected", "downloads": 5},
+        {"skill_id": 1, "skill_repository_id": 1, "status": status, "downloads": downloads},
     ]
     with patch.object(srs, "SkillService", ListSkillService):
         result = srs.list_my_editable_skills_impl(
@@ -1105,12 +1112,12 @@ def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows():
             user_id="user-1",
         )
 
-    assert result["items"][0]["repository_info"] == [{
-        "skill_repository_id": 1,
-        "status": "shared",
-        "content": None,
-        "create_time": None,
-    }]
+    item = result["items"][0]
+    assert item["downloads"] == expected_downloads
+    assert item["repository_info"] == [
+        {"skill_repository_id": 2, "status": "rejected", "content": None, "create_time": None},
+        {"skill_repository_id": 1, "status": status, "content": None, "create_time": None},
+    ]
 
 
 def test_repository_detail_not_found():

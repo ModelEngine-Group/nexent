@@ -893,9 +893,7 @@ def _list_repository_info_by_skill_id(
         skill_id = record.get("skill_id")
         if skill_id is None:
             continue
-        repository_by_skill_id.setdefault(int(skill_id), []).append(
-            _to_repository_info_item(record)
-        )
+        repository_by_skill_id.setdefault(int(skill_id), []).append(record)
     return repository_by_skill_id
 
 
@@ -916,10 +914,15 @@ def _to_mine_skill_item(
         if skill_id is not None
         else []
     )
-    repository_info = (
+    repository_records = (
         repository_by_skill_id.get(int(skill_id), [])
         if skill_id is not None
         else []
+    )
+    # Repository rows are ordered newest first, matching the card's shared listing.
+    shared_listing = next(
+        (record for record in repository_records if record.get("status") == STATUS_SHARED),
+        {},
     )
     return {
         "skill_id": skill_id,
@@ -938,7 +941,8 @@ def _to_mine_skill_item(
             user_id=user_id,
             user_role=user_role,
         ),
-        "repository_info": repository_info,
+        "downloads": shared_listing.get("downloads") or 0,
+        "repository_info": [_to_repository_info_item(record) for record in repository_records],
     }
 
 
