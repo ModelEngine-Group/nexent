@@ -112,7 +112,7 @@ def _collect_checkpoint(checkpoints, content):
         candidate = HistoryCheckpointCandidate.model_validate({
             name: content[name] for name in HistoryCheckpointCandidate.model_fields if name in content
         })
-        checkpoints.append(candidate.model_dump(exclude_none=True))
+        checkpoints.append(candidate.model_dump(exclude_none=True, exclude_unset=True))
     except (TypeError, ValueError):
         logger.warning("Ignoring invalid AgentOS history checkpoint")
 

@@ -2,6 +2,7 @@
 """Run-local execution records with backend-assigned unit references."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -45,6 +46,18 @@ class ExecutionRecord:
         return payload
 
 
+@dataclass(frozen=True)
+class HistoricalSource:
+    owner: str
+    reference: str
+    text: str
+    source_kind: str
+    parts: tuple[str, ...]
+    tool_call_id: str | None = None
+    fields: dict[str, str] | None = None
+    persisted: bool = False
+
+
 class ExecutionHistory:
     """One trusted run scope; ownership cannot be supplied by model arguments."""
 
@@ -53,7 +66,8 @@ class ExecutionHistory:
         self._read_persisted = read_persisted
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
-        self._restored: dict[tuple[str, str], ExecutionRecord] = {}
+        self._restored: dict[tuple[str, str], HistoricalSource] = {}
+        self._source_indices = {}
         self._read_chars: dict[str, int] = {}
         self._rendered_budget: dict[str, int | None] = {}
 
@@ -68,24 +82,88 @@ class ExecutionHistory:
         self.restore_many(owner, [(message_id, unit_index, fields)])
 
     def restore_many(self, owner: str, sources) -> None:
-        """Validate the full private source batch before publishing any reference."""
+        """Compatibility entry for canonical CodeAgent originals."""
+        self.restore_sources(owner, [{"message_id": message, "unit_index": index,
+            "source_kind": "execution_result", "text": result_text(fields),
+            "parts": tuple(fields.values()), "fields": dict(fields)} for message, index, fields in sources])
+
+    def restore_sources(self, owner: str, sources, *, expected_proofs=()) -> None:
+        """Validate and publish one owner-bound batch, without fetching model-supplied IDs."""
         pending = {}
-        for message_id, unit_index, fields in sources:
-            if type(message_id) is not int or message_id <= 0 or type(unit_index) is not int or unit_index < 0:
-                raise ValueError("Invalid persisted execution reference")
-            reference = f"message:{message_id}/unit-index:{unit_index}"
-            if reference in pending and pending[reference] != fields:
+        for source in sources:
+            message, index, kind = source["message_id"], source.get("unit_index"), source["source_kind"]
+            if type(message) is not int or message <= 0:
+                raise ValueError("Invalid historical message reference")
+            if kind == "user_message":
+                if index is not None or source.get("tool_call_id") is not None:
+                    raise ValueError("User sources cannot impersonate execution units")
+                reference = f"message:{message}/user-message"
+            elif kind in {"execution_result", "tool_result"}:
+                if type(index) is not int or index < 0:
+                    raise ValueError("Invalid persisted execution reference")
+                if kind == "tool_result" and not source.get("tool_call_id"):
+                    raise ValueError("Native result requires a bound call")
+                reference = f"message:{message}/unit-index:{index}"
+            else:
+                raise ValueError("Unsupported historical source kind")
+            fields = dict(source["fields"]) if source.get("fields") is not None else None
+            if kind == "execution_result":
+                if fields is None or result_text(fields) != source["text"]:
+                    raise ValueError("Execution source does not match its original fields")
+                parts = tuple(fields.values())
+            else:
+                parts = (source["text"],)
+            if tuple(source["parts"]) != parts:
+                raise ValueError("Historical proof parts must match readable original content")
+            record = HistoricalSource(owner, reference, source["text"], kind,
+                parts, source.get("tool_call_id"), fields)
+            if not isinstance(record.text, str) or any(not isinstance(p, str) for p in record.parts):
+                raise ValueError("Invalid historical source content")
+            if reference in pending and pending[reference] != record:
                 raise PermissionError("Conflicting persisted execution reference")
-            pending[reference] = dict(fields)
+            pending[reference] = record
         with self._lock:
-            for reference, fields in pending.items():
+            for reference, record in pending.items():
                 existing = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
-                if existing is not None and existing.fields != fields:
+                if existing is not None and (
+                    existing.text != record.text
+                    or getattr(existing, "source_kind", "execution_result") != record.source_kind
+                    or getattr(existing, "tool_call_id", None) != record.tool_call_id
+                ):
                     raise PermissionError("Conflicting persisted execution reference")
-            for reference, fields in pending.items():
-                record = ExecutionRecord(owner, fields, reference=reference)
-                record.ready.set()
-                self._restored[owner, reference] = record
+            verified = {}
+            for proof in expected_proofs:
+                from types import SimpleNamespace
+
+                from .structured_sources import StructuredSourceIndex
+                if (not isinstance(proof, dict) or not isinstance(proof.get("source_ref"), str)
+                        or type(proof.get("part")) is not int or type(proof.get("row_count")) is not int):
+                    raise PermissionError("Invalid historical coverage proof")
+                ref = proof["source_ref"]
+                record = pending.get(ref) or self._restored.get((owner, ref))
+                if (record is None or record.source_kind != proof.get("source_kind")
+                        or hashlib.sha256(record.text.encode()).hexdigest() != proof.get("source_sha256")):
+                    raise PermissionError("Stale or unauthorized historical coverage proof")
+                if ref not in verified:
+                    snapshot = SimpleNamespace(authorized_sources=lambda selected: (record,) if selected == owner else ())
+                    verified[ref] = StructuredSourceIndex(snapshot, owner).collections
+                if verified[ref].get(proof.get("sha256")) != proof:
+                    raise PermissionError("Historical coverage no longer matches its original")
+            if any(self._restored.get((owner, ref)) != record for ref, record in pending.items()):
+                self._source_indices.pop(owner, None)
+            self._restored.update({(owner, ref): record for ref, record in pending.items()})
+
+    def authorized_sources(self, owner: str) -> tuple[HistoricalSource, ...]:
+        """Expose originals only to the trusted summary projector, never as a model tool."""
+        with self._lock:
+            return tuple(source for (selected, _), source in self._restored.items() if selected == owner)
+
+    def structured_source_index(self, owner):
+        from .structured_sources import StructuredSourceIndex
+        with self._lock:
+            if owner not in self._source_indices:
+                self._source_indices[owner] = StructuredSourceIndex(self, owner)
+            return self._source_indices[owner]
 
     def get(self, key: str) -> ExecutionRecord | None:
         with self._lock:
@@ -130,7 +208,7 @@ class ExecutionHistory:
             self._rendered_budget[owner] = None if max_rendered_chars is None else max(0, max_rendered_chars)
 
     def read(self, owner: str, reference: str, offset: int = 0, max_chars: int = 4000) -> str:
-        if not re.fullmatch(r"(?:message:[1-9]\d*/unit-index:\d+|run:[0-9a-f]{32}/execution:[1-9]\d*)", reference):
+        if not re.fullmatch(r"(?:message:[1-9]\d*/(?:unit-index:\d+|user-message)|run:[0-9a-f]{32}/execution:[1-9]\d*)", reference):
             raise ValueError("Invalid execution reference")
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("Invalid character offset")
@@ -183,6 +261,7 @@ class ExecutionHistory:
 def summarize_record(record: ExecutionRecord, model: Any, input_limit: int) -> str | None:
     """Generate at most once per record; never summarize truncated input."""
     from nexent.core.agents.contracts.context import ContextMessage
+
     from .llm_summary import _summary_model_call_context
 
     with record.summary_lock:

@@ -11,6 +11,8 @@ acceptance_bindings:
   - test_usage_calibrates_post_response_maintenance
   AC-CAPACITY-RECOVERY:
   - test_rejected_capacity_recovers_transactionally_over_http
+  AC-STRUCTURED-SOURCES:
+  - test_source_backed_bulk_and_checkpoint_restore_over_http
 preparation:
   families: []
   anchors: false

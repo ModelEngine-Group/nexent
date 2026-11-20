@@ -168,9 +168,9 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
             compaction_trigger_threshold_tokens=16000, compaction_target_tokens=12000,
             history_summary_sink=committed.append,
             policy_layers={"platform": {"processing_mode": "adaptive_compact"}})), items=[
-                ContextItemInput(id="old", type="conversation_turn", content={"user_message": "h" * 24000,
+                ContextItemInput(id="old", type="conversation_turn", content={"user_message": "h" * 14000,
                     "assistant_final_answer": "old fact", "user_message_id": 1, "assistant_message_id": 2})])
-        memory = SimpleNamespace(steps=[TaskStep(task="NEW_CURRENT_TASK")])
+        memory = SimpleNamespace(steps=[TaskStep(task="NEW_CURRENT_TASK" + "n" * 8000)])
         runtime.prepare_run(memory=memory, fallback_system_prompt="MANDATORY_SYSTEM")
         if outcome == "invalid_summary":
             with pytest.raises(ValueError, match="combined context window"):
@@ -200,6 +200,291 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
         assert 1 <= runtime._capacity_budget.summary_calls <= 3
         assert model.service is original_service
         assert all(not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(body) for body in requests)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+
+
+@pytest.mark.parametrize(
+    "source_kind", ["user_message", "tool_result", "execution_result"]
+)
+def test_source_backed_bulk_and_checkpoint_restore_over_http(source_kind):
+    from contracts.agentos import PreparedHistoryCheckpoint
+    from nexent.core.agents.context import ContextItem
+    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.execution_history import (
+        ExecutionHistory,
+        result_text,
+    )
+
+    bodies = []
+    summary = "# Compact Result of History\n\n" + "\n\n".join(
+        "## "
+        + heading
+        + "\n\ncritical-business-001 = Keep-123. The old task remains recoverable."
+        for heading in [
+            "Task Overview",
+            "Completed Work",
+            "Key Decisions",
+            "Unresolved Issues",
+            "Pending Items",
+            "Next Steps",
+            "Context To Preserve",
+        ]
+    )
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            bodies.append(request)
+            content = "MAIN_OK" if "NEW_TASK" in str(request["messages"]) else summary
+            chunk = {
+                "id": "owned-source",
+                "model": "qwen3.5-plus",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            usage = {
+                "id": "owned-source",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 100,
+                    "total_tokens": 1100,
+                },
+            }
+            payload = (
+                "data: "
+                + json.dumps(chunk)
+                + "\n\ndata: "
+                + json.dumps(usage)
+                + "\n\ndata: [DONE]\n\n"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        data = resolved_profile_for_test(
+            f"http://127.0.0.1:{server.server_port}/v1"
+        ).model_dump(mode="json")
+        data["capabilities"]["context"] = {
+            "combined_window": 20000,
+            "input_limit": 1000,
+            "output_limit": 5000,
+        }
+        model = LegacyChatModel.from_profile(
+            ResolvedModelProfile.model_validate(data), "owned-key"
+        )
+        raw = json.dumps(
+            {
+                "rows": [
+                    {
+                        "record": f"business-record-{i:05d}",
+                        "amount": 100000 + i,
+                        "credit": 100 + i,
+                        "detail": "original value " * 30,
+                    }
+                    for i in range(60)
+                ]
+            },
+            separators=(",", ":"),
+        )
+        user = "OLD_TASK. Explicit critical-business-001 = Keep-123." + (
+            ("\n" + raw) if source_kind == "user_message" else ""
+        )
+        turn = {
+            "user_message": user,
+            "assistant_final_answer": "Old accepted work.",
+            "user_message_id": 1,
+            "assistant_message_id": 2,
+            "execution_records": [],
+        }
+        sources = [
+            {
+                "record_type": "user_message",
+                "message_id": 1,
+                "unit_index": None,
+                "content": user,
+            }
+        ]
+        reference = "message:1/user-message"
+        readable = user
+        if source_kind == "tool_result":
+            common = {
+                "schema_version": 1,
+                "runtime_mode": "native_agent",
+                "agent_core": "jiuwen",
+                "local_call_id": "native-local",
+                "tool_call_id": "native-local",
+                "provider_call_id": "native-provider",
+                "turn_id": "native-turn",
+                "invocation_id": None,
+                "parent_call_id": None,
+            }
+            call = {
+                **common,
+                "type": "tool",
+                "call_group_id": "native-group",
+                "call_index": 0,
+                "call_count": 1,
+                "tool_name": "lookup",
+                "tool_arguments": {},
+                "raw_arguments": "{}",
+                "source_protocol": "model_native_fc",
+            }
+            result = {**common, "type": "tool_result", "result": raw, "is_error": False}
+            turn["execution_records"] = [
+                {
+                    "record_type": "tool",
+                    "unit_index": 1,
+                    "tool_call_id": "native-local",
+                    "content": json.dumps(call),
+                },
+                {
+                    "record_type": "tool_result",
+                    "unit_index": 2,
+                    "tool_call_id": "native-local",
+                    "content": json.dumps(result),
+                },
+            ]
+            sources.append({**turn["execution_records"][1], "message_id": 2})
+            reference = "message:2/unit-index:2"
+            readable = raw
+        elif source_kind == "execution_result":
+            body = {
+                "content": result_text({"STDOUT": raw}),
+                "covered_unit_indices": [],
+                "model_action": {
+                    "schema_version": 1,
+                    "agent_core": "smolagents",
+                    "dispatch_state": "dispatched",
+                    "step_number": 1,
+                    "tool_calls": [
+                        {
+                            "id": "code-call",
+                            "name": "python_interpreter",
+                            "arguments": "load_rows()",
+                        }
+                    ],
+                },
+            }
+            turn["execution_records"] = [
+                {
+                    "record_type": "execution_result",
+                    "unit_index": 2,
+                    "content": json.dumps(body),
+                }
+            ]
+            sources.append({**turn["execution_records"][0], "message_id": 2})
+            reference = "message:2/unit-index:2"
+            readable = body["content"]
+        history = ExecutionHistory()
+        items = register_authorized_sources(
+            [
+                ContextItem.from_input(
+                    ContextItemInput(id="old", type="conversation_turn", content=turn)
+                )
+            ],
+            history,
+            "old-owner",
+        )
+
+        def runtime(store, owner, items):
+            return ManagedContextRuntime(
+                ContextManager(
+                    ContextManagerConfig(
+                        context_window_tokens=20000,
+                        effective_input_limit_tokens=20000,
+                        chars_per_token=1,
+                        compaction_trigger_threshold_tokens=16000,
+                        compaction_target_tokens=12000,
+                        execution_history=store,
+                        execution_owner=owner,
+                        policy_layers={
+                            "platform": {"processing_mode": "adaptive_compact"}
+                        },
+                    )
+                ),
+                items,
+            )
+
+        managed = runtime(history, "old-owner", items)
+        memory = SimpleNamespace(steps=[TaskStep(task="NEW_TASK")])
+        managed.prepare_run(
+            memory=memory, fallback_system_prompt="Mandatory instructions"
+        )
+        recovered = managed.prepare_step(
+            model=model, memory=memory, current_run_start_idx=0
+        )
+        assert recovered.evidence.maintenance_phase == "local_capacity_recovery"
+        assert managed._estimate(recovered.messages, recovered.tools) < 20000
+        assert "business-record-00059" not in str(
+            recovered.messages
+        ) and reference in str(recovered.messages)
+        assert "critical-business-001" in str(recovered.messages) and "Keep-123" in str(
+            recovered.messages
+        )
+        assert model.generate(recovered.messages).content == "MAIN_OK"
+        candidate = managed.context_manager._history_candidate
+        checkpoint = PreparedHistoryCheckpoint.model_validate(
+            {"unit_id": 99, **candidate.as_item().content, "execution_sources": sources}
+        )
+        checkpoint_item = ContextItem.from_input(
+            ContextItemInput(
+                id="checkpoint",
+                type="history_summary",
+                content=checkpoint.model_dump(mode="json"),
+            )
+        )
+        next_history = ExecutionHistory()
+        restored = register_authorized_sources(
+            [checkpoint_item], next_history, "new-owner"
+        )
+        offset = readable.index("business-record-00030")
+        assert (
+            json.loads(next_history.read("new-owner", reference, offset, 100))["text"]
+            == readable[offset : offset + 100]
+        )
+        with pytest.raises(PermissionError):
+            next_history.read("old-owner", reference)
+        continued = runtime(next_history, "new-owner", restored)
+        next_memory = SimpleNamespace(
+            steps=[TaskStep(task="NEW_TASK_AFTER_CHECKPOINT")]
+        )
+        continued.prepare_run(
+            memory=next_memory, fallback_system_prompt="Mandatory instructions"
+        )
+        before = len(bodies)
+        final = continued.prepare_step(
+            model=model, memory=next_memory, current_run_start_idx=0
+        )
+        assert len(bodies) == before and final.evidence.maintenance_phase == "prepare"
+        assert model.generate(final.messages).content == "MAIN_OK"
+        assert all(
+            not {
+                "max_tokens",
+                "max_completion_tokens",
+                "max_output_tokens",
+            }.intersection(body)
+            for body in bodies
+        )
+        assert len(bodies) == 3
     finally:
         server.shutdown()
         server.server_close()

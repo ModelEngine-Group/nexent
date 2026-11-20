@@ -22,30 +22,64 @@ def decode_execution_fields(payload):
         return None
 
 
+def _historical_source(source):
+    kind = source.get("record_type", "execution_result")
+    common = {"message_id": source["message_id"], "unit_index": source.get("unit_index"),
+              "source_kind": kind, "tool_call_id": source.get("tool_call_id")}
+    if kind == "user_message":
+        text = source["content"]
+        return {**common, "text": text, "parts": (text,)}
+    if kind == "execution_result":
+        fields = decode_execution_fields(json.loads(source["content"]))
+        if fields is not None:
+            return {**common, "text": result_text(fields), "parts": tuple(fields.values()), "fields": fields}
+    if kind == "tool_result":
+        from .native_history import decode_history_event
+
+        event = decode_history_event({**source, "record_type": "tool_result", "invocation_id": None})
+        if event is not None and isinstance(event.get("call_id"), str) and event["call_id"]:
+            return {**common, "text": event["result"], "parts": (event["result"],)}
+    raise PermissionError("Invalid historical source provenance")
+
+
 def register_authorized_sources(items, history, owner):
-    """Restore private checkpoint sources without rendering their original bodies."""
-    sources, refs_by_item = [], {}
+    """Restore only authorized private sources; never authorize model-provided references."""
+    sources, refs_by_item, expected_proofs = [], {}, []
     for item in items:
-        refs = []
+        selected = []
         if item.type == "history_summary":
-            for source in item.content.get("execution_sources", []):
-                fields = decode_execution_fields(json.loads(source["content"]))
-                if fields is None:
-                    raise PermissionError("Invalid historical execution source")
-                sources.append((source["message_id"], source["unit_index"], fields))
-                refs.append(f"message:{source['message_id']}/unit-index:{source['unit_index']}")
+            selected.extend(item.content.get("execution_sources", []))
+            expected_proofs.extend(item.content.get("structured_source_proofs", []))
         elif item.type == "conversation_turn":
-            for record, _, fields in persisted_actions(item.content.get("execution_records") or []):
-                message_id = item.content["assistant_message_id"]
-                sources.append((message_id, record["unit_index"], fields))
-                refs.append(f"message:{message_id}/unit-index:{record['unit_index']}")
-        refs_by_item[item.id] = refs
-    history.restore_many(owner, sources)
+            content = item.content
+            if type(content.get("user_message_id")) is int and content["user_message_id"] > 0:
+                selected.append({"record_type": "user_message", "message_id": content["user_message_id"],
+                                 "unit_index": None, "content": content.get("user_source_content") if isinstance(content.get("user_source_content"), str) else content["user_message"]})
+            records = content.get("execution_records") or []
+            for record, _, _ in persisted_actions(records):
+                selected.append({**record, "message_id": content["assistant_message_id"]})
+            from .native_history import decode_history_event
+            for record in records:
+                event = decode_history_event(record) if record.get("record_type") == "tool_result" else None
+                if event is not None and isinstance(event.get("call_id"), str) and event["call_id"]:
+                    selected.append({**record, "message_id": content["assistant_message_id"]})
+        refs = []
+        for source in selected:
+            sources.append(_historical_source(source))
+            suffix = "user-message" if source.get("record_type") == "user_message" else f"unit-index:{source['unit_index']}"
+            refs.append(f"message:{source['message_id']}/{suffix}")
+        refs_by_item[item.id] = list(dict.fromkeys(refs))
+    history.restore_sources(owner, sources, expected_proofs=expected_proofs)
+    index = history.structured_source_index(owner)
     authorized = []
     for item in items:
-        metadata = {key: value for key, value in item.metadata.items() if key != "execution_source_refs"}
+        metadata = {key: value for key, value in item.metadata.items()
+                    if key not in {"execution_source_refs", "structured_source_proofs"}}
         if refs_by_item[item.id]:
             metadata["execution_source_refs"] = refs_by_item[item.id]
+            proofs = [proof for proof in index.collections.values() if proof["source_ref"] in refs_by_item[item.id]]
+            if proofs:
+                metadata["structured_source_proofs"] = proofs
         authorized.append(item if metadata == item.metadata else item.model_copy(update={"metadata": metadata}))
     return authorized
 
