@@ -25,10 +25,18 @@ logger = logging.getLogger(__name__)
 
 
 def _with_ops_monitoring(lifespan):
+    try:
+        from ops.monitoring.runtime import producer_lifespan
+    except ImportError:
+        # Slim service images (e.g. the Runtime image target) ship without the
+        # ops package; degrade to no fact production instead of failing startup.
+        logger.warning(
+            "event=ops_monitoring_producer_unavailable "
+            "detail=ops.monitoring package absent; monitoring fact production disabled in this process")
+        return lifespan
+
     @asynccontextmanager
     async def combined(app):
-        from ops.monitoring.runtime import producer_lifespan
-
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(producer_lifespan())
             state = await stack.enter_async_context(lifespan(app)) if lifespan is not None else None
