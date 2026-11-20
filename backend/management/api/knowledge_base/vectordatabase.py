@@ -41,7 +41,6 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from management.db.knowledge_base.repository import (
-    get_index_name_by_knowledge_name,
     get_knowledge_record,
 )
 from management.db.model.repository import get_model_by_model_id
@@ -67,7 +66,7 @@ from management.services.knowledge_base.listing import (
     merge_list_indices_results,
     merge_paginated_list_indices_results,
 )
-from management.services.knowledge_base.names import check_knowledge_name
+from management.services.knowledge_base.names import check_knowledge_name, resolve_search_index_names
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
@@ -948,21 +947,10 @@ async def hybrid_search(
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        resolved_index_names: List[str] = []
-        for requested_name in payload.index_names:
-            try:
-                resolved_name = get_index_name_by_knowledge_name(requested_name, tenant_id)
-            except Exception:
-                resolved_name = requested_name
-            # Enforce per-KB read permission before searching. The permission layer
-            # maps ValueError (KB not found) -> 404 and PermissionError (no access) -> 403.
-            require_knowledge_base_read_permission(
-                index_name=resolved_name,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-            resolved_index_names.append(resolved_name)
         actor = ServicePrincipal(user_id, tenant_id)
+        resolved_index_names = await resolve_search_index_names(payload.index_names, actor)
+        for index_name in resolved_index_names:
+            require_knowledge_base_read_permission(index_name=index_name, user_id=user_id, tenant_id=tenant_id)
         if KNOWLEDGE_RUNTIME_HYBRID_ENABLED:
             from management.services.knowledge_base.hybrid import search_runtime_hybrid
 

@@ -1101,7 +1101,6 @@ async def test_create_chunk_error(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.create_manual_chunk", new_callable=AsyncMock) as mock_create:
 
         mock_create.side_effect = Exception("Create failed")
@@ -1130,7 +1129,6 @@ async def test_update_chunk_success(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock) as mock_update:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
@@ -1174,7 +1172,6 @@ async def test_update_chunk_value_error(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock) as mock_update:
 
         mock_update.side_effect = ValueError("Invalid update payload")
@@ -1203,7 +1200,6 @@ async def test_update_chunk_exception(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.update_manual_chunk", new_callable=AsyncMock) as mock_update:
 
         mock_update.side_effect = Exception("Update failed")
@@ -1231,7 +1227,6 @@ async def test_delete_chunk_success(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock) as mock_delete:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
@@ -1270,7 +1265,6 @@ async def test_delete_chunk_not_found(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock) as mock_delete:
 
         mock_delete.side_effect = ValueError("Chunk not found")
@@ -1293,7 +1287,6 @@ async def test_delete_chunk_exception(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("management.api.knowledge_base.vectordatabase.delete_manual_chunk", new_callable=AsyncMock) as mock_delete:
 
         mock_delete.side_effect = Exception("Delete failed")
@@ -2001,7 +1994,7 @@ async def test_hybrid_search_success(vdb_core_mock, auth_data):
     Verifies that the endpoint returns the expected response when hybrid search succeeds.
     """
     # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", side_effect=lambda name, _tenant: name), \
+    with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search_hybrid:
@@ -2051,8 +2044,8 @@ def test_hybrid_cutover_uses_runtime_without_legacy_provider(auth_data):
     with patch("management.api.knowledge_base.vectordatabase.KNOWLEDGE_RUNTIME_HYBRID_ENABLED", True), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name",
-                  return_value="actual-index"), \
+            patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names",
+                  return_value=["actual-index"]), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core") as legacy, \
             patch("management.services.knowledge_base.hybrid.search_runtime_hybrid", new_callable=AsyncMock) as runtime:
         runtime.return_value = {"results": [], "total": 0, "query_time_ms": 10}
@@ -2071,7 +2064,8 @@ async def test_hybrid_search_value_error(vdb_core_mock, auth_data):
     Verifies that the endpoint returns 400 BAD_REQUEST when validation fails.
     """
     # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
+    with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
+            patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search_hybrid:
 
@@ -2130,7 +2124,6 @@ async def test_create_chunk_value_error(vdb_core_mock, auth_data):
     """
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
         patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-        patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
         patch("management.api.knowledge_base.vectordatabase.create_manual_chunk", new_callable=AsyncMock) as mock_create:
 
         mock_create.side_effect = ValueError("Invalid chunk payload")
@@ -2158,7 +2151,8 @@ async def test_hybrid_search_exception(vdb_core_mock, auth_data):
     Verifies that the endpoint returns 500 INTERNAL_SERVER_ERROR when search fails.
     """
     # Setup mocks
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
+    with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
+            patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search_hybrid:
 
@@ -2537,7 +2531,7 @@ async def test_hybrid_search_forbidden_without_read_permission(vdb_core_mock, au
     Test hybrid_search returns 403 when user lacks read permission on knowledge base.
     The permission check happens BEFORE the search is executed.
     """
-    with patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", side_effect=lambda name, _tenant: name), \
+    with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=403, detail="No permission to access this knowledge base")) as mock_perm, \
@@ -2570,7 +2564,8 @@ async def test_hybrid_search_not_found_when_kb_missing(vdb_core_mock, auth_data)
     """
     Test hybrid_search returns 404 when knowledge base does not exist.
     """
-    with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
+    with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
+            patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=404, detail="Knowledge base 'missing_kb' not found")) as mock_perm, \
             patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search:
@@ -2606,7 +2601,7 @@ async def test_hybrid_search_checks_all_indices(vdb_core_mock, auth_data):
         if index_name == "forbidden_kb":
             raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
 
-    with patch("management.api.knowledge_base.vectordatabase.get_index_name_by_knowledge_name", side_effect=lambda name, _tenant: name), \
+    with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission", side_effect=mock_permission_check), \

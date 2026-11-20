@@ -158,3 +158,33 @@ async def test_async_owner_uses_one_bounded_managed_task_and_releases_signal(moc
     assert worker.await_count == 1 and len(contexts) == 1 and contexts[0].cancelled.is_set()
     assert ('knowledge_name_check_timeout' in caplog.text) == (outcome == 'timeout')
     assert all(record.levelname != 'ERROR' for record in caplog.records)
+
+
+def test_hybrid_aliases_keep_request_order_and_only_match_the_current_tenant(catalog):
+    s = catalog
+    requested = ['private', 'foreign', 'deleted', 'external', 'kb-1', 'Private', 'duplicate', 'private']
+    assert module.search_indices(requested, s.actor, context=context(), ports=s.ports) == [
+        'kb-1', 'foreign', 'deleted', 'kb-2', 'kb-1', 'Private', 'kb-5', 'kb-1',
+    ]
+    assert len(s.opened) == 1
+
+
+def test_hybrid_aliases_paginate_the_catalog_without_changing_request_order(catalog):
+    s = catalog
+    with s.engine.begin() as conn:
+        conn.execute(knowledge.insert(), [
+            {'knowledge_id': key, 'knowledge_name': 'duplicate', 'tenant_id': s.actor.tenant_id,
+             'index_name': f'repeated-{key}', 'created_by': s.actor.user_id, 'delete_flag': 'N', 'version': 1}
+            for key in range(10, 1010)
+        ])
+    assert module.search_indices(['duplicate', 'kb-1'], s.actor, context=context(), ports=s.ports) == [
+        'kb-5', 'kb-1',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_resolution_propagates_storage_timeout_without_searching(mocker):
+    worker = mocker.patch.object(module, 'run_blocking', side_effect=DeadlineExceeded())
+    with pytest.raises(DeadlineExceeded):
+        await module.resolve_search_index_names(['display', 'raw'], ServicePrincipal('operator', 'tenant-a'))
+    assert worker.await_count == 1 and worker.await_args.kwargs['context'].cancelled.is_set()

@@ -105,12 +105,11 @@ async def test_runtime_hybrid_redacts_remote_errors_without_legacy_replay(runtim
 
 async def test_northbound_cutover_uses_agentos_without_constructing_elasticsearch(monkeypatch):
     from contracts.constants import environment
-    from management.db.knowledge_base import repository
-    from management.services.knowledge_base import common
+    from management.services.knowledge_base import common, names
     from management.services.northbound import search_hybrid_for_northbound
 
     monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", True)
-    monkeypatch.setattr(repository, "get_index_name_by_knowledge_name", lambda name, tenant: "resolved")
+    monkeypatch.setattr(names, "resolve_search_index_names", AsyncMock(return_value=["resolved"]))
     legacy = Mock()
     monkeypatch.setattr(common, "get_vector_db_core", legacy)
     runtime = AsyncMock(return_value={"results": [], "total": 0})
@@ -196,12 +195,11 @@ async def test_elasticsearch_failure_does_not_reinvoke_model(query_search):
 
 async def test_northbound_passes_original_actor_and_handles_unresolved_name(monkeypatch):
     from contracts.knowledge import HybridSearchRequest
-    from management.db.knowledge_base import repository
-    from management.services.knowledge_base import common
+    from management.services.knowledge_base import common, names
     from management.services.northbound import search_hybrid_for_northbound
 
-    lookup = Mock(side_effect=["mapped", RuntimeError("lookup failed")])
-    monkeypatch.setattr(repository, "get_index_name_by_knowledge_name", lookup)
+    lookup = AsyncMock(return_value=["mapped", "raw"])
+    monkeypatch.setattr(names, "resolve_search_index_names", lookup)
     vectors = object()
     monkeypatch.setattr(common, "get_vector_db_core", Mock(return_value=vectors))
     search = AsyncMock(return_value={"results": [], "total": 0})
@@ -210,5 +208,6 @@ async def test_northbound_passes_original_actor_and_handles_unresolved_name(monk
     ctx = SimpleNamespace(user_id="key-user", tenant_id="asset-tenant")
 
     assert await search_hybrid_for_northbound(ctx, payload) == {"results": [], "total": 0}
+    lookup.assert_awaited_once_with(["name", "raw"], ServicePrincipal("key-user", "asset-tenant"))
     search.assert_awaited_once_with(["mapped", "raw"], "query", ServicePrincipal("key-user", "asset-tenant"),
                                     top_k=5, weight_accurate=payload.weight_accurate, vdb_core=vectors)
