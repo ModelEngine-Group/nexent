@@ -151,6 +151,11 @@ COPY backend/ext_components /opt/backend/ext_components
 COPY backend/adapters /opt/backend/adapters
 COPY backend/http/runtime_service.py backend/http/client.py backend/http/logging.py /opt/backend/http/
 COPY backend/http/server /opt/backend/http/server
+# Agent runs execute in the Runtime process, so monitoring facts originate here.
+# ops.monitoring has no Management dependencies; the ops API and trajectory
+# modules stay excluded because they import Management business code.
+COPY backend/ops/__init__.py /opt/backend/ops/__init__.py
+COPY backend/ops/monitoring /opt/backend/ops/monitoring
 COPY backend/gateway/__init__.py /opt/backend/gateway/
 COPY backend/gateway/downstream /opt/backend/gateway/downstream
 COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
