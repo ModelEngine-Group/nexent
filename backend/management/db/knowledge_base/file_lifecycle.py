@@ -4,15 +4,15 @@
 
 from __future__ import annotations
 
-from contracts.constants.constants import ACTIVE_STATUSES, HIDDEN_STATUSES
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
+from contracts.constants.constants import HIDDEN_STATUSES
+from management.db.models import KnowledgeFileLifecycle
 from sqlalchemy import and_, or_
 
-from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
-from management.db.models import KnowledgeFileLifecycle
+from infrastructure.rdb.orm import as_dict
 
 
 def get_file_record(
@@ -94,29 +94,6 @@ def fail_interrupted_file_tasks() -> List[Dict[str, Any]]:
             row.failed_at = failed_at
             row.version = int(row.version or 0) + 1
         return recovered
-
-
-def list_uploading_files_created_before(
-    cutoff: datetime,
-    upload_owner_service: str,
-) -> List[Dict[str, Any]]:
-    """Return old uploads owned by the service that is being restarted."""
-    if not upload_owner_service:
-        raise ValueError("upload_owner_service is required for upload recovery")
-
-    with get_db_session() as session:
-        rows = (
-            session.query(KnowledgeFileLifecycle)
-            .filter(
-                KnowledgeFileLifecycle.status == "UPLOADING",
-                KnowledgeFileLifecycle.delete_flag == "N",
-                KnowledgeFileLifecycle.upload_owner_service == upload_owner_service,
-                KnowledgeFileLifecycle.create_time < cutoff,
-            )
-            .order_by(KnowledgeFileLifecycle.create_time.asc())
-            .all()
-        )
-        return [as_dict(row) for row in rows]
 
 
 def transition_file_record(

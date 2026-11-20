@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import asyncio
 import sys
 import types
 from contextlib import nullcontext
@@ -7,8 +6,8 @@ from datetime import datetime
 from unittest.mock import MagicMock, call
 
 import pytest
-
 from management import recovery as startup_recovery_service
+from nexent.storage.models import Page, Revision, WriteReceipt
 
 
 def _install_module(monkeypatch, name, **attributes):
@@ -79,6 +78,17 @@ def test_recover_northbound_tasks_fails_active_a2a_tasks(monkeypatch):
     fail_active.assert_called_once_with()
 
 
+def _recovery_storage(monkeypatch, records, receipts=()):
+    reader, writer = MagicMock(), MagicMock()
+    reader.query.return_value = Page(tuple(records), None)
+    writer.patch.side_effect = receipts
+    ports = MagicMock(side_effect=lambda owner, *, record=None, **kwargs: nullcontext(
+        reader if record is None else writer
+    ))
+    monkeypatch.setattr(startup_recovery_service, "interrupted_upload_ports", ports)
+    return reader, writer, ports
+
+
 def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypatch):
     cutoff = datetime(2026, 9, 1, 12, 0)
     records = [
@@ -97,57 +107,51 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
             "bucket_name": "files",
         },
     ]
-    transition = MagicMock(side_effect=[{"file_id": "claimed", "version": 3}, None])
+    reader, writer, records_ports = _recovery_storage(monkeypatch, records, [
+        WriteReceipt("op", True, Revision("3")), WriteReceipt("op", False),
+    ])
     from nexent.storage.models import DeleteReceipt, ObjectRef
 
     store = MagicMock()
     def delete(ref, *, context):
-        transition.assert_called_once()
+        writer.patch.assert_called_once()
         assert ref == ObjectRef("files", "knowledge/a.pdf")
         return DeleteReceipt(context.operation_id, True)
     store.delete.side_effect = delete
     ports = MagicMock(return_value=nullcontext(store))
     _install_module(monkeypatch, "infrastructure.file_objects", file_object_ports=ports)
-    _install_module(
-        monkeypatch,
-        "management.db.knowledge_base.file_lifecycle",
-        list_uploading_files_created_before=MagicMock(return_value=records),
-        transition_file_record=transition,
-    )
 
-    assert startup_recovery_service.fail_interrupted_uploads(
-        cutoff,
-        "nexent-config",
-    ) == 1
-    list_uploads = sys.modules[
-        "management.db.knowledge_base.file_lifecycle"
-    ].list_uploading_files_created_before
-    list_uploads.assert_called_once_with(cutoff, "nexent-config")
+    assert startup_recovery_service.fail_interrupted_uploads(cutoff, "nexent-config") == 1
+    assert records_ports.call_args_list[0].args == ("nexent-config",)
+    query = reader.query.call_args.args[1]
+    assert (query.where.field, query.where.operator, query.where.value) == (
+        "create_time", "lt", "2026-09-01T12:00:00+00:00",
+    )
     assert store.delete.call_count == 1
     actor, target = ports.call_args.args
     assert (actor.user_id, actor.tenant_id) == ("upload-recovery", "tenant")
     assert (target.bucket_name, target.object_name) == ("files", "knowledge/a.pdf")
-    first_update = transition.call_args_list[0]
-    assert first_update.args == ("claimed",)
-    assert first_update.kwargs["status"] == "FAILED"
-    assert first_update.kwargs["stage"] == "UPLOAD"
-    assert first_update.kwargs["expected_statuses"] == ("UPLOADING",)
-    assert first_update.kwargs["expected_version"] == 2
-    assert first_update.kwargs["error_code"] == "CONTAINER_RESTARTED"
+    first_update = writer.patch.call_args_list[0]
+    assert first_update.args[1] == "claimed"
+    assert first_update.args[2].set_values["status"] == "FAILED"
+    assert first_update.args[2].set_values["stage"] == "UPLOAD"
+    assert first_update.args[2].set_values["error_code"] == "CONTAINER_RESTARTED"
+    assert first_update.kwargs["expected"] == Revision("2")
+    assert records_ports.call_args_list[1].kwargs["expected_status"] == "UPLOADING"
 
 
 def test_new_source_intents_are_not_deleted_by_legacy_recovery(monkeypatch):
-    transition, delete_object = MagicMock(), MagicMock()
+    delete_object = MagicMock()
     monkeypatch.setattr(startup_recovery_service, "_delete_interrupted_object", delete_object)
-    _install_module(monkeypatch, "management.db.knowledge_base.file_lifecycle",
-                    list_uploading_files_created_before=MagicMock(return_value=[
-                        {"file_id": "pending", "stage": "SOURCE_UPLOAD"},
-                        {"file_id": "pinned", "source_revision": "etag:known"},
-                        {"file_id": "review", "stage": "SOURCE_REVIEW", "source_upload_sha256": "1" * 64},
-                    ]), transition_file_record=transition)
-    assert startup_recovery_service.fail_interrupted_uploads(MagicMock(), "management") == 0
-    transition.assert_not_called()
+    _, writer, _ = _recovery_storage(monkeypatch, [
+        {"file_id": "pending", "stage": "SOURCE_UPLOAD"},
+        {"file_id": "pinned", "source_revision": "etag:known"},
+        {"file_id": "review", "stage": "SOURCE_REVIEW", "source_upload_sha256": "1" * 64},
+    ])
+    assert startup_recovery_service.fail_interrupted_uploads(datetime(2026, 9, 1), "management") == 0
+    writer.patch.assert_not_called()
     delete_object.assert_not_called()
+
 
 
 @pytest.mark.parametrize("physical_state", ["present", "absent", "unknown"])
@@ -157,7 +161,9 @@ def test_failed_legacy_delete_only_accepts_confirmed_absence(monkeypatch, physic
 
     record = {"file_id": "failed", "tenant_id": "tenant", "version": 3,
               "object_name": "s3://files/knowledge/a:legacy.pdf", "bucket_name": "files"}
-    transition = MagicMock(side_effect=[{"version": 4}, {"version": 5}])
+    _, writer, records_ports = _recovery_storage(monkeypatch, [record], [
+        WriteReceipt("op", True, Revision("4")), WriteReceipt("op", True, Revision("5")),
+    ])
     store = MagicMock()
     store.delete.side_effect = OutcomeUnknown()
     inspection = MagicMock()
@@ -169,12 +175,6 @@ def test_failed_legacy_delete_only_accepts_confirmed_absence(monkeypatch, physic
     reads = MagicMock(return_value=nullcontext(inspection))
     _install_module(monkeypatch, "infrastructure.file_objects", file_object_ports=ports)
     _install_module(monkeypatch, "infrastructure.file_reads", file_read_ports=reads)
-    _install_module(
-        monkeypatch, "management.db.knowledge_base.file_lifecycle",
-        list_uploading_files_created_before=MagicMock(return_value=[record]),
-        transition_file_record=transition,
-    )
-
     assert startup_recovery_service.fail_interrupted_uploads(datetime(2026, 9, 1), "nexent-northbound") == 1
     context = ports.call_args.kwargs["context"]
     ref = ObjectRef("files", "knowledge/a:legacy.pdf")
@@ -182,17 +182,18 @@ def test_failed_legacy_delete_only_accepts_confirmed_absence(monkeypatch, physic
     reads.assert_called_once_with(ref.key, bucket="files", context=context)
     inspection.stat.assert_called_once_with(ref, context=context)
     if physical_state == "absent":
-        assert transition.call_count == 1
+        assert writer.patch.call_count == 1
     else:
-        assert transition.call_count == 2
-        failure = transition.call_args_list[1]
-        assert failure.args == ("failed",)
-        assert failure.kwargs["status"] == "FAILED"
-        assert failure.kwargs["expected_statuses"] == ("FAILED",)
-        assert failure.kwargs["expected_version"] == 4
-        assert failure.kwargs["error_code"] == "UPLOAD_RECOVERY_FAILED"
+        assert writer.patch.call_count == 2
+        failure = writer.patch.call_args_list[1]
+        assert failure.args[1] == "failed"
+        fields = failure.args[2].set_values
+        assert fields["status"] == "FAILED"
+        assert failure.kwargs["expected"] == Revision("4")
+        assert records_ports.call_args_list[-1].kwargs["expected_status"] == "FAILED"
+        assert fields["error_code"] == "UPLOAD_RECOVERY_FAILED"
         expected = str(Unavailable() if physical_state == "unknown" else OutcomeUnknown())
-        assert failure.kwargs["error_message"] == expected
+        assert fields["error_message"] == expected
 
 
 @pytest.mark.asyncio
@@ -219,9 +220,9 @@ async def test_upload_recovery_uses_management_lane_and_returns_owned_task(monke
 
 def test_durable_recovery_retries_failed_redis_write_without_clearing_repair(monkeypatch):
     from redis.exceptions import ConnectionError
+    from runtime import recovery
 
     from infrastructure.rdb.agent_execution import RunIdentity
-    from runtime import recovery
 
     identity = RunIdentity("tenant", "user", 42, "a" * 32)
     renew = MagicMock()

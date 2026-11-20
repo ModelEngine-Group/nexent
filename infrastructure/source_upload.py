@@ -7,6 +7,7 @@ from nexent.storage.models import StorageScope
 
 from infrastructure.object_storage.composition import bind_source_objects
 from infrastructure.rdb.composition import close_owned, record_engine
+from infrastructure.rdb.interrupted_uploads import bind_interrupted_uploads
 from infrastructure.rdb.source_binding import DATASET
 from infrastructure.rdb.source_candidates import bind_source_candidates
 from infrastructure.rdb.upload_records import LEDGER, QUOTA, bind_upload_records
@@ -65,3 +66,14 @@ def source_candidate_ports(owner_service, *, context):
         if candidates is not None:
             callbacks.insert(0, candidates.close)
         close_owned(context, callbacks)
+
+
+@contextmanager
+def interrupted_upload_ports(owner, *, context, record=None, expected_status="UPLOADING"):
+    engine = record_engine(context)
+    records = None
+    try:
+        records = bind_interrupted_uploads(owner, engine, record=record, expected_status=expected_status)
+        yield records
+    finally:
+        close_owned(context, ([records.close] if records is not None else []) + [engine.dispose])
