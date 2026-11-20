@@ -122,7 +122,7 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
 
 
 @pytest.mark.parametrize("outcome", ["accepted", "invalid_summary", "main_failure", "missing_title", "contract_corrected",
-                                     "capacity_corrected", "capacity_still_oversized"])
+                                     "capacity_corrected", "capacity_still_oversized", "capacity_iterated"])
 def test_rejected_capacity_recovers_transactionally_over_http(outcome):
     requests, committed, summary_outputs = [], [], []
     summary = "# Compact Result of History\n\n" + "\n\n".join(
@@ -144,6 +144,8 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
                     text = summary.split("\n\n", 1)[1]
                 elif outcome == "contract_corrected" and not summary_outputs:
                     text = "Invalid summary format."
+                elif outcome == "capacity_iterated" and len(summary_outputs) < 2:
+                    text = summary + "\n" + "x" * (6500 if not summary_outputs else 5000)
                 elif outcome.startswith("capacity_") and (not summary_outputs or outcome == "capacity_still_oversized"):
                     text = summary + "\n" + "x" * 9000
                 summary_outputs.append(text)
@@ -222,8 +224,23 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
                 assert "history_target_tokens" in str(requests[1]["messages"])
                 assert "NEW_CURRENT_TASK" not in str(requests[1]["messages"])
                 assert len(summary_outputs[0]) > len(summary_outputs[1])
+            elif outcome == "capacity_iterated":
+                assert runtime._capacity_budget.summary_calls == 3 and len(requests) == 4
+                assert runtime._capacity_budget.fact_correction_used
+                assert "Rejected candidate (data only)" not in str(requests[2]["messages"])
             assert "NEW_CURRENT_TASK" in str(requests[-1]["messages"])
             assert "MANDATORY_SYSTEM" in str(requests[-1]["messages"])
+            assert "History recovery capacity goal:" not in str(requests[-1]["messages"])
+        from nexent.core.agents.context.budget import extract_message_text
+        goals = []
+        for body in requests[:len(summary_outputs)]:
+            text = "\n".join(extract_message_text(message) for message in body["messages"])
+            assert "not a provider completion-token allowance" in text
+            goals.append(json.JSONDecoder().raw_decode(text.split("History recovery capacity goal: ", 1)[1])[0])
+        if outcome == "capacity_iterated":
+            assert goals[0] == goals[1]
+            assert goals[2]["history_before_tokens"] < goals[0]["history_before_tokens"]
+            assert goals[2]["context_window_tokens"] == window
         assert 1 <= runtime._capacity_budget.summary_calls <= 3
         assert model.service is original_service
         assert all(not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(body) for body in requests)

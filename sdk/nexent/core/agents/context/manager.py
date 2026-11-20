@@ -286,6 +286,8 @@ class ContextManager:
                                       if self.config.execution_history is not None and self.config.execution_owner else {})
                     if history_only_recovery:
                         source_options["allow_fact_correction"] = True
+                        source_options["capacity_goal"] = self._history_capacity_feedback(
+                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
                         source_options["candidate_feedback"] = lambda candidate: self._history_capacity_feedback(
                             final_items, purpose_stable, purpose_dynamic, canonical_tools, candidate)
                     result = self._history_compressor.compress(current_summary, current_turns, model, **source_options)
@@ -681,16 +683,22 @@ class ContextManager:
             ],
         )
 
-    def _history_capacity_feedback(self, items, stable, dynamic, tools, candidate):
+    def _history_capacity_feedback(self, items, stable, dynamic, tools, candidate=None):
         before = self._history_token_cost(items, stable, dynamic, tools)
-        replacement = [item for item in items if item.type not in {
-            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate.as_item()]
-        after = self._history_token_cost(replacement, stable, dynamic, tools)
-        full = self._estimate_items(replacement, stable, dynamic, tools)
         fixed = self._estimate_items(items, stable, dynamic, tools) - before
         limit = self.config.effective_input_limit_tokens or self.config.context_window_tokens
         required = max(self.config.minimum_history_reduction_tokens,
                        math.ceil(before * self.config.minimum_history_reduction_ratio))
+        target = max(0, min(before - required, limit - fixed - 1))
+        goal = {"context_window_tokens": limit, "protected_frame_tokens": fixed,
+                "history_before_tokens": before, "current_full_tokens": before + fixed,
+                "history_target_tokens": target, "history_tokens_to_reclaim": max(0, before - target)}
+        if candidate is None:
+            return goal
+        replacement = [item for item in items if item.type not in {
+            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate.as_item()]
+        after = self._history_token_cost(replacement, stable, dynamic, tools)
+        full = self._estimate_items(replacement, stable, dynamic, tools)
         reason = ("insufficient_candidate_reduction" if before - after < required
                   else "input_window_exceeded" if full >= limit else "accepted")
         logger.info(
@@ -699,10 +707,7 @@ class ContextManager:
         )
         if reason == "accepted":
             return None
-        return {"reason": reason, "history_before_tokens": before, "candidate_history_tokens": after,
-                "candidate_full_tokens": full, "context_window_tokens": limit,
-                "protected_frame_tokens": fixed,
-                "history_target_tokens": max(0, min(before - required, limit - fixed - 1))}
+        return {**goal, "reason": reason, "candidate_history_tokens": after, "candidate_full_tokens": full}
 
     def _estimate_items(self, items, stable, dynamic, tools):
         return self.estimate_request_tokens([*self.build_context_messages(items), *stable, *dynamic], tools)
