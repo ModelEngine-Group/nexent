@@ -6491,7 +6491,95 @@
       "credential_kinds": [
         "session"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-list",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/summary",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-summary",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/rankings",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-rankings",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/trends",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-trends",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/v1/monitoring/mcp-tools/refresh",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-refresh",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/refreshes/{refresh_id}",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-refresh-status",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/catalog",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-catalog",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/v1/monitoring/mcp-tools/overview",
+      "transport": "http",
+      "target": "ops",
+      "source": "backend/ops/api/monitoring.py",
+      "route_id": "ops-mcp-tool-monitoring-overview",
+      "credential_kinds": [
+        "session"
+      ]
     }
   ],
-  "revision": "2026-11-19.web-route-coverage"
+  "revision": "2026-11-20.ops-mcp-tool-monitoring-routes"
 }

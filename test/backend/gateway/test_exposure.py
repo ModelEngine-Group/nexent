@@ -176,6 +176,30 @@ def test_trajectory_archives_are_routed_to_ops_only_for_sessions(method, path):
     assert default_registry().match("PATCH", path) is None
 
 
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/ops/v1/monitoring/models"),
+    ("GET", "/api/ops/v1/monitoring/models/summary"),
+    ("GET", "/api/ops/v1/monitoring/models/trends"),
+    ("GET", "/api/ops/v1/monitoring/models/rankings"),
+    ("POST", "/api/ops/v1/monitoring/models/refresh"),
+    ("GET", "/api/ops/v1/monitoring/models/refreshes/r-1"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/summary"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/rankings"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/trends"),
+    ("POST", "/api/ops/v1/monitoring/mcp-tools/refresh"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/refreshes/r-1"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/catalog"),
+    ("GET", "/api/ops/v1/monitoring/mcp-tools/overview"),
+])
+def test_ops_monitoring_routes_reach_ops_only_for_sessions(method, path):
+    match = default_registry().match(method, path)
+    assert match is not None
+    assert match.target == "ops"
+    assert match.credential_kinds == ("session",)
+    assert default_registry().match("PATCH", path) is None
+
+
 def test_http_and_websocket_do_not_share_an_implicit_get_grant():
     assert select_upstream("GET", "/api/voice/stt/ws") is None
     assert select_upstream("GET", "/api/voice/stt/ws", transport="websocket") == "runtime"
