@@ -41,7 +41,7 @@ from infrastructure.knowledge_ingestion import knowledge_ingestion_ports
 from infrastructure.legacy_tasks import legacy_task_records
 
 SOURCE_BINDING_ISSUES = frozenset({'SOURCE_SPACE_UNPINNED', 'SOURCE_KEY_UNPINNED', 'SOURCE_REVISION_UNPINNED',
-    'SOURCE_HASH_UNPINNED', 'SOURCE_SIZE_UNPINNED', 'LEDGER_LINK_UNBOUND'})
+    'SOURCE_HASH_UNPINNED', 'SOURCE_SIZE_UNPINNED', 'LEDGER_LINK_UNBOUND', 'SOURCE_ALIAS_PROVEN'})
 
 
 @asynccontextmanager
@@ -140,7 +140,9 @@ class LegacyMigrationService:
             finding = await self._blocking(self._source_evidence, row, resource.revision, actor, context,
                 bind_observed_source, archive_hash is not None)
             binding = LegacySourceBinding(previous=LegacySourceState.capture(row), storage_object_id=finding.candidate_storage_object_id,
-                file_size=finding.observed_size) if bind_observed_source else None
+                file_size=finding.observed_size,
+                previous_object_name=row['object_name'] if 'SOURCE_ALIAS_PROVEN' in finding.issues else None,
+            ) if bind_observed_source else None
             plan = KnowledgeIngestionIntent(knowledge_id=knowledge_id, file_id=file_id, file_version=row['source_generation'],
                 user_id=actor.user_id, attempt=row['processing_attempt']+1, filename=row['original_filename'], parser_version=self.parser_version,
                 source=finding.candidate_source,
@@ -204,9 +206,15 @@ class LegacyMigrationService:
             binding = plan.legacy_snapshot.source_binding
             finding = await self._blocking(self._source_evidence, row, resource.revision, actor, context,
                 binding is not None, plan.legacy_snapshot.task_archive_sha256 is not None)
-            if (finding.candidate_source != plan.source or row['version'] != plan.legacy_snapshot.lifecycle_revision
-                or binding is not None and (finding.candidate_storage_object_id != binding.storage_object_id
-                    or finding.observed_size != binding.file_size)): raise Conflict()
+            if finding.candidate_source != plan.source or row['version'] != plan.legacy_snapshot.lifecycle_revision:
+                raise Conflict()
+            alias = row['object_name'] if 'SOURCE_ALIAS_PROVEN' in finding.issues else None
+            if binding is not None and (
+                finding.candidate_storage_object_id != binding.storage_object_id
+                or finding.observed_size != binding.file_size
+                or alias != binding.previous_object_name
+            ):
+                raise Conflict()
             await self._empty_runtime(plan, actor)
             return await self._blocking(self._change, plan, actor, context, 'admit_legacy')
 

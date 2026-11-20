@@ -86,9 +86,16 @@ class IngestionJournal:
 
     def _legacy_source(self, row, intent):
         binding = intent.legacy_snapshot.source_binding
-        if binding is not None and row['ingestion_request'] is None:
-            if LegacySourceState.capture(row) != binding.previous: raise Conflict()
-            row = {**row, **binding.bound_values(intent.source)}
+        if binding is not None:
+            if binding.previous_object_name is not None:
+                expected_alias = f"s3://{row['bucket_name']}/{intent.source.key}"
+                expected_name = expected_alias if row['ingestion_request'] is None else intent.source.key
+                if (binding.previous_object_name != expected_alias or row['object_name'] != expected_name
+                    or row['storage_object_id'] != binding.storage_object_id):
+                    raise Conflict()
+            if row['ingestion_request'] is None:
+                if LegacySourceState.capture(row) != binding.previous: raise Conflict()
+                row = {**row, **binding.bound_values(intent.source)}
         self._source(row, intent)
 
     def _patch(self, row, values, context):
@@ -184,7 +191,7 @@ class IngestionJournal:
             raise Conflict()
         return self._patch(row, {**snapshot.previous.model_dump(), 'ingestion_request': None,
             'process_task_id': None, 'forward_task_id': None, 'parent_task_id': None, **snapshot.task_references,
-            **(snapshot.source_binding.previous.model_dump() if snapshot.source_binding is not None else {})}, context)
+            **(snapshot.source_binding.restore_values() if snapshot.source_binding is not None else {})}, context)
 
     def _accept(self, intent, row, context):
         return self._patch(

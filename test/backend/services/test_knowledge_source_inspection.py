@@ -155,6 +155,57 @@ def test_ambiguous_source_is_not_opened_or_leaked(inspection, change, code):
     s.factory.assert_not_called()
 
 
+def test_same_bucket_url_is_proved_using_linked_ledger_and_exact_object(inspection):
+    s = inspection
+    s.update(object_name='s3://bucket/tenant-a/source.txt', source_key=None)
+
+    item, = inspect(s).files
+
+    assert sorted(item.issues) == ['SOURCE_ALIAS_PROVEN', 'SOURCE_KEY_UNPINNED']
+    assert item.candidate_source.key == s.row['object_name']
+    assert item.candidate_source.sha256 == s.digest
+    assert item.candidate_storage_object_id == 1
+    s.factory.assert_called_once_with('tenant-a', 'user-a', s.row['object_name'], 'bucket', writable=False)
+
+
+@pytest.mark.parametrize('alias', [
+    's3://other/tenant-a/source.txt',
+    's3://bucket/tenant-a/source.txt?q=1',
+    's3://bucket/tenant-a/%73ource.txt',
+    's3://bucket/tenant-a/../source.txt',
+])
+def test_ambiguous_s3_aliases_are_not_mapped(inspection, alias):
+    s = inspection
+    s.update(object_name=alias, source_key=None)
+
+    item, = inspect(s).files
+
+    assert 'SOURCE_ALIAS_UNRESOLVED' in item.issues and item.candidate_source is None
+    s.factory.assert_not_called()
+
+
+def test_s3_alias_requires_the_existing_ledger_link(inspection):
+    s = inspection
+    s.update(object_name='s3://bucket/tenant-a/source.txt', source_key=None, storage_object_id=None)
+
+    item, = inspect(s).files
+
+    assert 'SOURCE_ALIAS_UNRESOLVED' in item.issues and item.candidate_source is None
+    s.factory.assert_not_called()
+
+
+def test_s3_alias_cannot_rebind_to_another_active_file(inspection):
+    s = inspection
+    s.update(object_name='s3://bucket/tenant-a/source.txt', source_key=None)
+    with s.engine.begin() as connection:
+        connection.execute(s.tables[INSPECTION_FILES].insert(), {**s.row, 'file_id': 'c'*32})
+
+    item, = inspect(s, file_id=s.row['file_id']).files
+
+    assert 'SOURCE_ALIAS_CONFLICT' in item.issues and item.candidate_source is None
+    s.factory.assert_not_called()
+
+
 @pytest.mark.parametrize('change,code', [({'tenant_id': 'tenant-b'}, 'LEDGER_UNPROVEN'),
     ({'knowledge_id': 2}, 'LEDGER_UNPROVEN'), ({'status': 'DELETED'}, 'LEDGER_INACTIVE')])
 def test_foreign_or_inactive_ledger_never_authorizes_object_reads(inspection, change, code):

@@ -41,6 +41,17 @@ def _number(value):
     return value if type(value) is int and value >= 0 else None
 
 
+def _legacy_s3_key(row, bucket):
+    prefix = f's3://{bucket}/'
+    alias = row['object_name'] or ''
+    if row['bucket_name'] != bucket or not alias.startswith(prefix):
+        return None
+    key = alias[len(prefix):]
+    if not key or any(char in key for char in '\\:%?#\x00') or any(part in {'', '.', '..'} for part in key.split('/')):
+        return None
+    return key
+
+
 class KnowledgeSourceInspector:
     def __init__(self, *, bucket=None, max_bytes=None, ports=source_inspection_ports, objects=bind_source_objects, cancellation_scope=None):
         self.bucket = environment.MINIO_DEFAULT_BUCKET if bucket is None else bucket
@@ -50,23 +61,40 @@ class KnowledgeSourceInspector:
         self.ports, self.objects = ports, objects
         self.cancellation_scope = cancellation_scope
 
-    @staticmethod
-    def _ledger(records, row, context):
+    def _ledger(self, records, row, context):
+        key = _legacy_s3_key(row, self.bucket) or row['object_name']
         page = records.query(INSPECTION_LEDGER, RecordQuery(where=Junction('and', (
-            Comparison('bucket_name', 'eq', row['bucket_name']), Comparison('object_name', 'eq', row['object_name'])))),
+            Comparison('bucket_name', 'eq', row['bucket_name']), Comparison('object_name', 'eq', key)))),
             PageRequest(limit=2), context=context)
         if len(page.items) > 1 or page.next_cursor:
             raise Conflict()
         return page.items[0] if page.items else None
 
-    def _source(self, row, ledger, item, actor, context):
-        key = row['source_key'] or row['object_name']
+    def _alias_conflict(self, records, row, context):
+        key = _legacy_s3_key(row, self.bucket)
+        if key is None or row['storage_object_id'] is None:
+            return False
+        matches = records.query(INSPECTION_FILES, RecordQuery(where=Junction('or', (
+            Comparison('object_name', 'eq', key), Comparison('source_key', 'eq', key),
+            Comparison('storage_object_id', 'eq', row['storage_object_id'])))),
+            PageRequest(limit=2), context=context)
+        return bool(matches.next_cursor or any(item['file_id'] != row['file_id'] for item in matches.items))
+
+    def _source(self, row, ledger, item, actor, context, *, alias_conflict):
+        alias_key = _legacy_s3_key(row, self.bucket)
+        key = alias_key or row['source_key'] or row['object_name']
         if row['bucket_name'] != self.bucket:
             item.issues.append('SOURCE_BUCKET_UNSUPPORTED')
+        elif (row['object_name'] or '').startswith('s3://') and alias_key is None:
+            item.issues.append('SOURCE_ALIAS_UNRESOLVED')
         elif not key or '://' in key or '\\' in key or ':' in key or any(part in {'', '.', '..'} for part in key.split('/')):
             item.issues.append('SOURCE_ALIAS_UNRESOLVED' if key else 'LOCAL_SOURCE_UNBOUND' if row['local_source_path'] else 'SOURCE_UNBOUND')
-        elif row['source_key'] and row['object_name'] and row['source_key'] != row['object_name']:
+        elif row['source_key'] and row['object_name'] and row['source_key'] != (alias_key or row['object_name']):
             item.issues.append('SOURCE_KEY_CONFLICT')
+        elif alias_conflict:
+            item.issues.append('SOURCE_ALIAS_CONFLICT')
+        elif alias_key is not None and row['storage_object_id'] is None:
+            item.issues.append('SOURCE_ALIAS_UNRESOLVED')
         elif row['source_space'] not in {None, 'files'}:
             item.issues.append('SOURCE_SPACE_UNSUPPORTED')
         elif ledger is None:
@@ -122,6 +150,8 @@ class KnowledgeSourceInspector:
                         break
                 item.candidate_source = ObjectReference(space='files', key=key, version=metadata.ref.version.value, sha256=digest.hexdigest())
                 item.candidate_storage_object_id = ledger['storage_object_id']
+                if alias_key is not None and not {'SOURCE_SIZE_MISMATCH', 'SOURCE_HASH_MISMATCH'}.intersection(item.issues):
+                    item.issues.append('SOURCE_ALIAS_PROVEN')
             except NotFound:
                 item.issues.append('SOURCE_MISSING')
             except Conflict:
@@ -163,16 +193,19 @@ class KnowledgeSourceInspector:
                     and any(row[name] for name in ('process_task_id', 'forward_task_id', 'parent_task_id'))):
                     item.issues.append('LEGACY_TASK_UNVERIFIED')
                 ledger = self._ledger(records, row, context)
-                evidence.append((row, ledger))
+                alias_conflict = self._alias_conflict(records, row, context)
+                evidence.append((row, ledger, alias_conflict))
                 if row['deletion_request'] is not None:
                     item.issues.append('DELETION_PENDING')
                 else:
-                    self._source(row, ledger, item, actor, context)
+                    self._source(row, ledger, item, actor, context, alias_conflict=alias_conflict)
                 findings.append(item)
             if authorize.resolve_knowledge(knowledge_id, edit=True, context=context) != resource:
                 raise Conflict()
-            for row, ledger in evidence:
-                if records.get(INSPECTION_FILES, row['file_id'], context=context) != row or self._ledger(records, row, context) != ledger:
+            for row, ledger, alias_conflict in evidence:
+                if (records.get(INSPECTION_FILES, row['file_id'], context=context) != row
+                    or self._ledger(records, row, context) != ledger
+                    or self._alias_conflict(records, row, context) != alias_conflict):
                     raise Conflict()
             context.remaining()
             return SourceInspectionPage(knowledge_id=knowledge_id, index_name=resource['index_name'], tenant_id=actor.tenant_id,

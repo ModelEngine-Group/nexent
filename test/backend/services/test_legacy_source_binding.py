@@ -110,3 +110,33 @@ async def test_child_reservation_forbids_restoring_unbound_source_fields(unpinne
     with pytest.raises(Conflict): await u.m.service.restore(plan, u.s.actor, context=context())
     assert u.s.row()['source_revision'] == plan.source.version
     assert u.s.row()['stage'] == 'CLEANSE_SUBMITTING'
+
+
+async def test_proven_s3_alias_is_normalized_atomically_and_restored_before_execution(unpinned):
+    u = unpinned
+    key = u.s.value.source.key
+    alias = f's3://owned-bucket/{key}'
+    await run_blocking('fixture', u.s.port.patch, 'knowledge_ingestion_files', u.s.value.file_id,
+        FieldPatch(set_values={'object_name': alias, 'bucket_name': 'owned-bucket', 'storage_object_id': 1}),
+        context=context(), lane='control-io')
+    original = u.m.source.page.side_effect
+
+    def proven_alias(*args, **kwargs):
+        page = original(*args, **kwargs)
+        page.files[0].issues.append('SOURCE_ALIAS_PROVEN')
+        return page
+
+    u.m.source.page.side_effect = proven_alias
+    before = u.s.row()
+    plan = await u.m.service.plan(1, u.s.value.file_id, u.s.actor, legacy_quiesced=True,
+        bind_observed_source=True, context=context())
+    assert plan.legacy_snapshot.source_binding.previous_object_name == alias
+    assert u.s.row() == before
+    row = await u.m.service.admit(plan, u.s.actor, context=context())
+    assert row['source_key'] == row['object_name'] == key
+    assert row['version'] == before['version']+1
+    assert row['storage_object_id'] == before['storage_object_id'] == 1
+    u.s.update('cleanse_files', **{name: row[name] for name in FIELDS[:4]})
+    restored = await u.m.service.restore(plan, u.s.actor, context=context())
+    assert restored['object_name'] == alias and restored['source_key'] is None
+    assert restored['version'] == before['version']+2

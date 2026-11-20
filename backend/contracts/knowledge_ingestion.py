@@ -59,10 +59,27 @@ class LegacySourceBinding(Contract):
     previous: LegacySourceState
     storage_object_id: int = Field(gt=0)
     file_size: int = Field(ge=0)
+    previous_object_name: str | None = Field(default=None, max_length=1024)
+
+    @model_serializer(mode='wrap')
+    def serialize_binding(self, handler):
+        value = handler(self)
+        if self.previous_object_name is None:
+            value.pop('previous_object_name', None)
+        return value
 
     def bound_values(self, source):
-        return {'source_space': source.space, 'source_key': source.key, 'source_revision': source.version,
+        values = {'source_space': source.space, 'source_key': source.key, 'source_revision': source.version,
             'source_sha256': source.sha256, 'storage_object_id': self.storage_object_id, 'file_size': self.file_size}
+        if self.previous_object_name is not None:
+            values['object_name'] = source.key
+        return values
+
+    def restore_values(self):
+        values = self.previous.model_dump()
+        if self.previous_object_name is not None:
+            values['object_name'] = self.previous_object_name
+        return values
 
 
 class LegacyIngestionSnapshot(Contract):

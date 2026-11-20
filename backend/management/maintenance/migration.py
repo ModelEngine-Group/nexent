@@ -98,7 +98,7 @@ def main(argv=None):
     parser.add_argument('--knowledge-id',required=True,type=int);parser.add_argument('--file-id',required=True)
     parser.add_argument('--output',required=True,type=Path);parser.add_argument('--plan',type=Path)
     parser.add_argument('--task-archive',type=Path,help='Complete private archive-tasks report for original PG task references')
-    parser.add_argument('--bind-observed-source',action='store_true',help='Explicitly pin a proven historical source in the plan')
+    parser.add_argument('--bind-observed-source',action='store_true',help='Explicitly pin a proven historical source or same-bucket S3 alias in the plan')
     parser.add_argument('--legacy-quiesced',action='store_true',help='Operator confirms old admission and workers are stopped and drained')
     parser.add_argument('--timeout',type=int,default=300)
     args = parser.parse_args(argv)
