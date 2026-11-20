@@ -354,11 +354,19 @@ the latest published snapshot on every request. The Web proxy adds `/api`.
 | `GET /ops/v1/monitoring/agents/trends` | Daily metrics in ascending date order, with per-day `coverage_state` |
 | `GET /ops/v1/monitoring/agents/rankings` | Exact top five Agents by `execution_count`, descending |
 
-Directory parameters are `search`, `sort_by` (`execution_count` or
-`avg_duration_ms`), `descending` (default true), `page` (default 1) and
+Directory parameters are `search`, `sort_by` (`execution_count`,
+`avg_duration_ms`, `avg_ttft_ms`, `total_tokens` or `success_rate`),
+`descending` (default true), `page` (default 1) and
 `page_size` (default 20, maximum 100). Search matches either current name or
 display name, case-insensitively. Sort precedes pagination, ties use tenant
-and Agent ID, and unknown metrics sort last in both directions.
+and Agent ID, and unknown metrics sort last in both directions. Ordering uses
+authorized, filtered per-resource aggregates before pagination. Total Tokens
+are compared as exact integers; success rates use merged result counts across
+the selected dates. Missing values remain null and are distinct from zero.
+
+The [Agent frontend handoff](agent-monitoring-api.md) lists the three current
+page integration routes, field mappings and request/response examples. The
+existing rankings route is outside this handoff's scope.
 
 Each resource includes `tenant_id`, `agent_id`, `is_current` and `metrics`.
 Current metadata includes `name`, `display_name`, `model_ids`,
