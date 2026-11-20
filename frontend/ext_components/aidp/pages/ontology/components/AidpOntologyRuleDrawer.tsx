@@ -29,7 +29,6 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
   AidpOntologyRuleActionValue,
@@ -507,9 +506,6 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
               {t("aidpKnowledge.ontologyRulesFilterRules")}
               {question(t("aidpKnowledge.ontologyRulesFilterHint"))}
             </div>
-            <AidpOntologyGapNote>
-              {t("aidpKnowledge.ontologyRulesOperatorGap")}
-            </AidpOntologyGapNote>
             <div className={styles.conditionHeader}>
               <span>{t("aidpKnowledge.ontologyRulesMetadataName")}</span>
               <span>{t("aidpKnowledge.ontologyRulesFieldTypeColumn")}</span>
@@ -779,9 +775,6 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             )}
           </section>
 
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyRulesDrawerGap")}
-          </AidpOntologyGapNote>
           {errorMessage && (
             <div className={drawerStyles.error} role="alert">
               {errorMessage}

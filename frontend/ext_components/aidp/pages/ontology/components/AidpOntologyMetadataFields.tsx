@@ -25,7 +25,10 @@ import {
   type TableColumnsType,
 } from "antd";
 import {
+  DeleteOutlined,
+  EditOutlined,
   QuestionCircleOutlined,
+  ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -38,6 +41,11 @@ import {
   validateFieldName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpResizableTitle, {
+  type AidpResizableTitleProps,
+} from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
   AidpMetadataFieldType,
@@ -95,8 +103,6 @@ const formatAuditTime = (value?: string | null): string => {
   return text || "—";
 };
 
-const nowText = () => new Date().toISOString().slice(0, 16).replace("T", " ");
-
 const FieldLabel: React.FC<{ label: string; help: string }> = ({
   label,
   help,
@@ -124,9 +130,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
   const [editForm] = Form.useForm<FieldFormValues>();
   const [createForm] = Form.useForm<CreateFormValues>();
-  const editFieldType =
-    (Form.useWatch("field_type", editForm) as
-      AidpMetadataFieldType | undefined) ?? "string";
   const [createOpen, setCreateOpen] = useState(autoOpenCreate);
   const [editing, setEditing] = useState<AidpOntologyMetadataField | null>(
     null
@@ -188,9 +191,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const hasMore = query.data?.has_more ?? false;
   const totalReliable = query.data?.total_reliable !== false;
   const atLimit = allCount >= limit;
-  const missingIds = fields.filter(
-    (field) => field.id === undefined || field.id === null
-  );
   const selectedFields = fields.filter((field) =>
     selectedKeys.includes(fieldKey(field))
   );
@@ -246,7 +246,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     setSaving(true);
     setCreateError(null);
     try {
-      const created = await aidpOntologyService.createMetadataField(domainId, {
+      await aidpOntologyService.createMetadataField(domainId, {
         field_name: values.field_name.trim(),
         field_type: values.field_type,
       });
@@ -603,6 +603,36 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     },
   ];
 
+  const columnKeys = columns.map((column) => String(column.key));
+  const { tableContainer, columnWidths, totalWidth, handleResize } =
+    useAidpOntologyColumnWidths(columnKeys, {
+      field_name: 1.4,
+      field_type: 1,
+      create_time: 1.2,
+      update_time: 1.2,
+      actions: 0.9,
+    });
+  const resizableColumns = columns.map((column, index) => {
+    const key = columnKeys[index];
+    const nextKey = columnKeys[index + 1];
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          width: columnWidths[key],
+          maxWidth: nextKey
+            ? columnWidths[key] + columnWidths[nextKey] - AIDP_MIN_COLUMN_WIDTH
+            : undefined,
+          "data-column-key": key,
+          onResize: nextKey
+            ? (delta: number, rendered: Record<string, number>) =>
+                handleResize(key, nextKey, delta, rendered)
+            : undefined,
+        }) as AidpResizableTitleProps,
+    };
+  });
+
   const detailItems = detailField
     ? [
         {
@@ -648,34 +678,11 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         />
         <div className={tableStyles.toolbarActions}>
           <Button
-            loading={saving}
-            disabled={!canManage || selectedFields.length === 0}
-            onClick={handleBatchUnbind}
-          >
-            {t("aidpKnowledge.ontologyMetadataUnbind")}
-          </Button>
-          <Button
-            loading={saving}
-            disabled={!canManage || selectedFields.length === 0}
-            onClick={handleBatchDelete}
-          >
-            {t("aidpKnowledge.ontologyMetadataDelete")}
-          </Button>
-          <Tooltip
-            title={
-              atLimit
-                ? t("aidpKnowledge.ontologyMetadataFieldLimitReached")
-                : undefined
-            }
-          >
-            <Button
-              type="primary"
-              disabled={!canManage || atLimit}
-              onClick={openCreate}
-            >
-              {t("aidpKnowledge.ontologyMetadataFieldCreate")}
-            </Button>
-          </Tooltip>
+            type="text"
+            aria-label={t("aidpKnowledge.refresh")}
+            icon={<ReloadOutlined spin={query.isFetching} />}
+            onClick={() => void query.refetch()}
+          />
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -720,6 +727,35 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               icon={<SettingOutlined />}
             />
           </Dropdown>
+          <Button
+            loading={saving}
+            disabled={!canManage || selectedFields.length === 0}
+            onClick={handleBatchUnbind}
+          >
+            {t("aidpKnowledge.ontologyMetadataUnbind")}
+          </Button>
+          <Button
+            loading={saving}
+            disabled={!canManage || selectedFields.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyMetadataDelete")}
+          </Button>
+          <Tooltip
+            title={
+              atLimit
+                ? t("aidpKnowledge.ontologyMetadataFieldLimitReached")
+                : undefined
+            }
+          >
+            <Button
+              type="primary"
+              disabled={!canManage || atLimit}
+              onClick={openCreate}
+            >
+              {t("aidpKnowledge.ontologyMetadataFieldCreate")}
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -728,21 +764,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       >
         {t("aidpKnowledge.ontologyMetadataLengthGap")}
       </AidpOntologyGapNote>
-      {missingIds.length > 0 && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyMetadataMissingIdGap", {
-            count: missingIds.length,
-          })}
-        </AidpOntologyGapNote>
-      )}
-      {!canManage && (
-        <AidpOntologyGapNote
-          title={t("aidpKnowledge.ontologyMetadataNoPermission")}
-        >
-          {t("aidpKnowledge.ontologyMetadataNoPermissionHint")}
-        </AidpOntologyGapNote>
-      )}
-      <div className={tableStyles.tableArea}>
+      <div className={tableStyles.tableArea} ref={tableContainer}>
         {query.isLoading ? (
           <div className={tableStyles.stateBlock}>
             <Skeleton active title={false} paragraph={{ rows: 4 }} />
@@ -761,11 +783,12 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             rowKey={fieldKey}
             size="middle"
             className={tableStyles.table}
-            columns={columns}
+            columns={resizableColumns}
             dataSource={fields}
             pagination={false}
             tableLayout="fixed"
-            scroll={{ x: 920 }}
+            components={{ header: { cell: AidpResizableTitle } }}
+            scroll={{ x: totalWidth }}
             rowSelection={
               canManage
                 ? {
@@ -792,7 +815,13 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             total={total}
             totalReliable={totalReliable}
             hasMore={hasMore}
-            selectedCount={selectedKeys.length}
+            selectionHint={
+              selectedKeys.length
+                ? t("aidpKnowledge.selectedCount", {
+                    count: selectedKeys.length,
+                  })
+                : undefined
+            }
             onPageChange={setPage}
             onPageSizeChange={(nextSize) => {
               setPageSize(nextSize);
@@ -968,12 +997,45 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       <Drawer
         rootClassName={drawerStyles.drawer}
         open={!!detailField}
-        width={520}
+        width={560}
+        mask={false}
         onClose={() => setDetailField(null)}
         destroyOnHidden
         title={
           detailField?.field_name ??
           t("aidpKnowledge.ontologyMetadataDetailTitle")
+        }
+        extra={
+          detailField ? (
+            <div className={styles.headerActions}>
+              <Tooltip title={t("aidpKnowledge.ontologyMetadataEdit")}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("aidpKnowledge.ontologyMetadataEdit")}
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    const target = detailField;
+                    setDetailField(null);
+                    openEdit(target);
+                  }}
+                />
+              </Tooltip>
+              <Tooltip title={t("aidpKnowledge.ontologyMetadataDelete")}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("aidpKnowledge.ontologyMetadataDelete")}
+                  icon={<DeleteOutlined />}
+                  onClick={() => {
+                    const target = detailField;
+                    setDetailField(null);
+                    handleDelete(target);
+                  }}
+                />
+              </Tooltip>
+            </div>
+          ) : null
         }
       >
         {detailField && (

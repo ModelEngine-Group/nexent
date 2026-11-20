@@ -29,7 +29,6 @@ import {
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
@@ -142,14 +141,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
       content: (
         <div className={styles.confirmBody}>
           <p>{t("aidpKnowledge.ontologyKbUnbindContent")}</p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyUnbindGap")}
-          </AidpOntologyGapNote>
-          {change && (
-            <AidpOntologyGapNote>
-              {t("aidpKnowledge.ontologyKbChangeGap")}
-            </AidpOntologyGapNote>
-          )}
         </div>
       ),
       width: 520,
@@ -403,9 +394,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   if (!binding) {
     return (
       <div className={styles.emptyBlock}>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyKbLookupGap")}
-        </AidpOntologyGapNote>
         <Empty
           image={
             <ApartmentOutlined
@@ -419,9 +407,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
             {t("aidpKnowledge.ontologyKbAdd")}
           </Button>
         </Empty>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyKbUnbindStateGap")}
-        </AidpOntologyGapNote>
         <AidpKnowledgeOntologyPicker
           open={pickerOpen}
           kdsId={kdsId}
@@ -468,20 +453,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
         </div>
       </section>
 
-      <AidpOntologyGapNote>
-        {demo
-          ? t("aidpKnowledge.ontologyKbDemoGap")
-          : t("aidpKnowledge.ontologyKbRealGap")}
-      </AidpOntologyGapNote>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyKbUnbindStateGap")}
-      </AidpOntologyGapNote>
-      {!binding.binding_id && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyKbMissingBindingId")}
-        </AidpOntologyGapNote>
-      )}
-
       <Segmented<ReadonlyView>
         value={view}
         onChange={(next) => {
@@ -501,9 +472,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           { value: "rules", label: t("aidpKnowledge.ontologyTabRules") },
         ]}
       />
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyKbReadonlyGap")}
-      </AidpOntologyGapNote>
       <div className={styles.contentToolbar}>
         <Input
           allowClear
@@ -565,7 +533,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
           total={activeTotal}
           totalReliable
           hasMore={page * pageSize < activeTotal}
-          selectedCount={0}
           onPageChange={setPage}
           onPageSizeChange={() => undefined}
         />

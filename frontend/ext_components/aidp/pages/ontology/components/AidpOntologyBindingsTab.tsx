@@ -14,13 +14,16 @@ import {
   Table,
   type TableColumnsType,
 } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import AidpResizableTitle, {
+  type AidpResizableTitleProps,
+} from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyBinding } from "@/ext_components/aidp/shared/types/ontology";
@@ -53,7 +56,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
   const { modal, message } = App.useApp();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
-  const demo = useAidpOntologyDemoMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -168,9 +170,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
             ))}
           </div>
           <p>{t("aidpKnowledge.ontologyBindingCancelBody")}</p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyUnbindGap")}
-          </AidpOntologyGapNote>
         </div>
       ),
       width: 560,
@@ -231,6 +230,35 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
     },
   ];
 
+  const columnKeys = columns.map((column) => String(column.key));
+  const { tableContainer, columnWidths, totalWidth, handleResize } =
+    useAidpOntologyColumnWidths(columnKeys, {
+      kds_name: 1.5,
+      description: 1.9,
+      create_time: 1.2,
+      actions: 0.9,
+    });
+  const resizableColumns = columns.map((column, index) => {
+    const key = columnKeys[index];
+    const nextKey = columnKeys[index + 1];
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          width: columnWidths[key],
+          maxWidth: nextKey
+            ? columnWidths[key] + columnWidths[nextKey] - AIDP_MIN_COLUMN_WIDTH
+            : undefined,
+          "data-column-key": key,
+          onResize: nextKey
+            ? (delta: number, rendered: Record<string, number>) =>
+                handleResize(key, nextKey, delta, rendered)
+            : undefined,
+        }) as AidpResizableTitleProps,
+    };
+  });
+
   const renderBody = () => {
     if (query.isLoading) {
       return (
@@ -264,21 +292,24 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
       );
     }
     return (
-      <Table<AidpOntologyBinding>
-        rowKey={(record) => record.kds_id}
-        size="middle"
-        className={styles.table}
-        columns={columns}
-        dataSource={pagedBindings}
-        pagination={false}
-        tableLayout="fixed"
-        scroll={{ x: 900 }}
-        rowSelection={{
-          selectedRowKeys: selectedKeys,
-          onChange: setSelectedKeys,
-        }}
-        locale={{ emptyText: t("aidpKnowledge.ontologyBindingSearchEmpty") }}
-      />
+      <div className={styles.tableArea} ref={tableContainer}>
+        <Table<AidpOntologyBinding>
+          rowKey={(record) => record.kds_id}
+          size="middle"
+          className={styles.table}
+          columns={resizableColumns}
+          dataSource={pagedBindings}
+          pagination={false}
+          tableLayout="fixed"
+          components={{ header: { cell: AidpResizableTitle } }}
+          scroll={{ x: totalWidth }}
+          rowSelection={{
+            selectedRowKeys: selectedKeys,
+            onChange: setSelectedKeys,
+          }}
+          locale={{ emptyText: t("aidpKnowledge.ontologyBindingSearchEmpty") }}
+        />
+      </div>
     );
   };
 
@@ -298,6 +329,12 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
         />
         <div className={styles.toolbarActions}>
           <Button
+            type="text"
+            aria-label={t("aidpKnowledge.refresh")}
+            icon={<ReloadOutlined spin={query.isFetching} />}
+            onClick={refresh}
+          />
+          <Button
             disabled={selectedKeys.length === 0}
             onClick={handleBatchCancel}
           >
@@ -308,33 +345,29 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
           </Button>
         </div>
       </div>
-      <AidpOntologyGapNote>
-        {demo
-          ? t("aidpKnowledge.ontologyBindingDemoGap")
-          : t("aidpKnowledge.ontologyBindingRealGap")}
-      </AidpOntologyGapNote>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyBindingDescriptionGap")}
-      </AidpOntologyGapNote>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyBindingStatusGap")}
-      </AidpOntologyGapNote>
+
       {query.isError && bindings.length > 0 && (
         <div className={styles.inlineError} role="alert">
           {errorMessage}
         </div>
       )}
-      <div className={styles.tableArea}>{renderBody()}</div>
+      {renderBody()}
       {filteredBindings.length > 0 && (
         <div className={styles.paginationRow}>
           <AidpPagination
             currentPage={page}
             pageSize={pageSize}
-            pageSizeOptions={[10, 20, 50]}
+            pageSizeOptions={[10, 20, 50, 100]}
             total={search.trim() ? filteredBindings.length : total}
             totalReliable
             hasMore={page * pageSize < filteredBindings.length}
-            selectedCount={selectedKeys.length}
+            selectionHint={
+              selectedKeys.length
+                ? t("aidpKnowledge.selectedCount", {
+                    count: selectedKeys.length,
+                  })
+                : undefined
+            }
             onPageChange={setPage}
             onPageSizeChange={(nextSize) => {
               setPageSize(nextSize);

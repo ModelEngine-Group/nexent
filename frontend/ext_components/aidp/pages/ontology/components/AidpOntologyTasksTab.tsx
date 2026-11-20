@@ -5,15 +5,19 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Popover, Table, type TableColumnsType } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyTask } from "@/ext_components/aidp/shared/types/ontology";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpResizableTitle, {
+  type AidpResizableTitleProps,
+} from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 import AidpOntologyAsyncTaskModal, {
   type AidpOntologyTaskState,
@@ -152,10 +156,10 @@ const AidpOntologyTasksTab: React.FC = () => {
   const [search, setSearch] = useState("");
   const [activeTask, setActiveTask] = useState<DemoTaskRow | null>(null);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
 
   const tasksQuery = useQuery({
-    queryKey: [...scope.key, "ontology-tasks", page],
+    queryKey: [...scope.key, "ontology-tasks", page, pageSize],
     queryFn: () => aidpOntologyService.listTasks(page, pageSize),
     enabled: scope.enabled && !demo,
     retry: false,
@@ -305,6 +309,38 @@ const AidpOntologyTasksTab: React.FC = () => {
     },
   ];
 
+  const columnKeys = columns.map((column) => String(column.key));
+  const { tableContainer, columnWidths, totalWidth, handleResize } =
+    useAidpOntologyColumnWidths(columnKeys, {
+      name: 1.2,
+      id: 1,
+      description: 1.5,
+      status: 2.0,
+      startTime: 1.2,
+      endTime: 1.2,
+      actions: 0.8,
+    });
+  const resizableColumns = columns.map((column, index) => {
+    const key = columnKeys[index];
+    const nextKey = columnKeys[index + 1];
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          width: columnWidths[key],
+          maxWidth: nextKey
+            ? columnWidths[key] + columnWidths[nextKey] - AIDP_MIN_COLUMN_WIDTH
+            : undefined,
+          "data-column-key": key,
+          onResize: nextKey
+            ? (delta: number, rendered: Record<string, number>) =>
+                handleResize(key, nextKey, delta, rendered)
+            : undefined,
+        }) as AidpResizableTitleProps,
+    };
+  });
+
   const modalState: AidpOntologyTaskState =
     activeTask?.status === "success"
       ? "success"
@@ -347,24 +383,27 @@ const AidpOntologyTasksTab: React.FC = () => {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        {demo && <div className={tableStyles.toolbarActions}> </div>}
+        <div className={tableStyles.toolbarActions}>
+          <Button
+            type="text"
+            aria-label={t("aidpKnowledge.refresh")}
+            icon={<ReloadOutlined spin={!demo && tasksQuery.isFetching} />}
+            onClick={() => void tasksQuery.refetch()}
+          />
+        </div>
       </div>
-      <AidpOntologyGapNote>
-        {demo
-          ? t("aidpKnowledge.ontologyTaskDemoGap")
-          : t("aidpKnowledge.ontologyTaskRealGap")}
-      </AidpOntologyGapNote>
-      <div className={tableStyles.tableArea}>
+      <div className={tableStyles.tableArea} ref={tableContainer}>
         <Table<DemoTaskRow>
           rowKey="id"
           size="middle"
           className={tableStyles.table}
-          columns={columns}
+          columns={resizableColumns}
           dataSource={filteredRows}
           loading={!demo && tasksQuery.isLoading}
           pagination={false}
           tableLayout="fixed"
-          scroll={{ x: 1100 }}
+          components={{ header: { cell: AidpResizableTitle } }}
+          scroll={{ x: totalWidth }}
           locale={{
             emptyText: search
               ? t("aidpKnowledge.ontologyTaskSearchEmpty")
@@ -376,14 +415,17 @@ const AidpOntologyTasksTab: React.FC = () => {
         <AidpPagination
           currentPage={demo ? 1 : page}
           pageSize={demo ? 10 : pageSize}
-          pageSizeOptions={[10]}
+          pageSizeOptions={[10, 20, 50, 100]}
           total={
             demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)
           }
           totalReliable
           hasMore={demo ? false : Boolean(tasksQuery.data?.has_more)}
-          selectedCount={0}
           onPageChange={(nextPage) => setPage(nextPage)}
+          onPageSizeChange={(nextSize) => {
+            setPageSize(nextSize);
+            setPage(1);
+          }}
         />
       )}
 

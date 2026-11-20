@@ -19,14 +19,22 @@ import {
   Tooltip,
   type TableColumnsType,
 } from "antd";
-import { SearchOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+  ReloadOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import AidpResizableTitle, {
+  type AidpResizableTitleProps,
+} from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
   AidpOntologyRule,
@@ -243,9 +251,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       content: (
         <div className={ruleStyles.confirmBody}>
           <p>{t("aidpKnowledge.ontologyRulesBatchDeleteContent")}</p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyRulesBatchDeleteGap")}
-          </AidpOntologyGapNote>
         </div>
       ),
       width: 520,
@@ -421,6 +426,40 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
     },
   ];
 
+  const columnKeys = columns.map((column) => String(column.key));
+  const { tableContainer, columnWidths, totalWidth, handleResize } =
+    useAidpOntologyColumnWidths(columnKeys, {
+      name: 1.3,
+      description: 1.8,
+      enabled: 0.8,
+      conditions: 1.4,
+      aggregation: 0.8,
+      coefficient: 0.8,
+      created_at: 1.8,
+      updated_at: 1.8,
+      actions: 1.0,
+    });
+  const resizableColumns = columns.map((column, index) => {
+    const key = columnKeys[index];
+    const nextKey = columnKeys[index + 1];
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          width: columnWidths[key],
+          maxWidth: nextKey
+            ? columnWidths[key] + columnWidths[nextKey] - AIDP_MIN_COLUMN_WIDTH
+            : undefined,
+          "data-column-key": key,
+          onResize: nextKey
+            ? (delta: number, rendered: Record<string, number>) =>
+                handleResize(key, nextKey, delta, rendered)
+            : undefined,
+        }) as AidpResizableTitleProps,
+    };
+  });
+
   const renderBody = () => {
     if (query.isLoading) {
       return (
@@ -456,32 +495,35 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       );
     }
     return (
-      <Table<AidpOntologyRule>
-        rowKey="rule_id"
-        size="middle"
-        className={styles.table}
-        columns={columns}
-        dataSource={filteredRules}
-        pagination={false}
-        tableLayout="fixed"
-        scroll={{ x: 1180 }}
-        rowSelection={
-          canManage
-            ? {
-                selectedRowKeys: selectedKeys,
-                onChange: setSelectedKeys,
-              }
-            : undefined
-        }
-        locale={{
-          emptyText: (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_DEFAULT}
-              description={t("aidpKnowledge.ontologyRulesSearchEmpty")}
-            />
-          ),
-        }}
-      />
+      <div className={styles.tableArea} ref={tableContainer}>
+        <Table<AidpOntologyRule>
+          rowKey="rule_id"
+          size="middle"
+          className={styles.table}
+          columns={resizableColumns}
+          dataSource={filteredRules}
+          pagination={false}
+          tableLayout="fixed"
+          components={{ header: { cell: AidpResizableTitle } }}
+          scroll={{ x: totalWidth }}
+          rowSelection={
+            canManage
+              ? {
+                  selectedRowKeys: selectedKeys,
+                  onChange: setSelectedKeys,
+                }
+              : undefined
+          }
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_DEFAULT}
+                description={t("aidpKnowledge.ontologyRulesSearchEmpty")}
+              />
+            ),
+          }}
+        />
+      </div>
     );
   };
 
@@ -501,24 +543,11 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
         />
         <div className={styles.toolbarActions}>
           <Button
-            disabled={!canManage || selectedKeys.length === 0}
-            onClick={handleBatchDelete}
-          >
-            {t("aidpKnowledge.ontologyDelete")}
-          </Button>
-          <Tooltip
-            title={
-              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached") : undefined
-            }
-          >
-            <Button
-              type="primary"
-              disabled={!canManage || atLimit}
-              onClick={openCreate}
-            >
-              {t("aidpKnowledge.ontologyRulesCreateAction")}
-            </Button>
-          </Tooltip>
+            type="text"
+            aria-label={t("aidpKnowledge.refresh")}
+            icon={<ReloadOutlined spin={query.isFetching} />}
+            onClick={refresh}
+          />
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -579,26 +608,29 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
               icon={<SettingOutlined />}
             />
           </Dropdown>
+          <Button
+            disabled={!canManage || selectedKeys.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyDelete")}
+          </Button>
+          <Tooltip
+            title={
+              atLimit ? t("aidpKnowledge.ontologyRulesLimitReached") : undefined
+            }
+          >
+            <Button
+              type="primary"
+              disabled={!canManage || atLimit}
+              onClick={openCreate}
+            >
+              {t("aidpKnowledge.ontologyRulesCreateAction")}
+            </Button>
+          </Tooltip>
         </div>
       </div>
-      <AidpOntologyGapNote title={t("aidpKnowledge.ontologyRulesGapTitle")}>
-        {demo
-          ? t("aidpKnowledge.ontologyRulesDemoGap")
-          : t("aidpKnowledge.ontologyRulesRealGap")}
-      </AidpOntologyGapNote>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyRulesSearchGap")}
-      </AidpOntologyGapNote>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyRulesEffectiveGap")}
-      </AidpOntologyGapNote>
-      {!canManage && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyMetadataNoPermissionHint")}
-        </AidpOntologyGapNote>
-      )}
 
-      <div className={styles.tableArea}>{renderBody()}</div>
+      {renderBody()}
       {rules.length > 0 && (
         <div className={styles.paginationRow}>
           <AidpPagination
@@ -608,7 +640,13 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
             total={total}
             totalReliable={totalReliable}
             hasMore={hasMore}
-            selectedCount={selectedKeys.length}
+            selectionHint={
+              selectedKeys.length
+                ? t("aidpKnowledge.selectedCount", {
+                    count: selectedKeys.length,
+                  })
+                : undefined
+            }
             onPageChange={setPage}
             onPageSizeChange={(nextSize) => {
               setPageSize(nextSize);

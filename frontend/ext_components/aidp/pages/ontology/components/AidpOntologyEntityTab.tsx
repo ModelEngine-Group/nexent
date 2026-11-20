@@ -11,7 +11,6 @@ import {
   Checkbox,
   Dropdown,
   Empty,
-  Grid,
   Input,
   Popover,
   Skeleton,
@@ -25,14 +24,17 @@ import {
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
-  SyncOutlined,
 } from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import AidpResizableTitle, {
+  type AidpResizableTitleProps,
+} from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyEntity } from "@/ext_components/aidp/shared/types/ontology";
 import styles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
@@ -105,8 +107,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   const [detailEntity, setDetailEntity] = useState<AidpOntologyEntity | null>(
     null
   );
-  const screens = Grid.useBreakpoint();
-  const isNarrow = screens.md === false;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -149,8 +149,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
   const total = query.data?.total_count ?? entities.length;
   const totalReliable = query.data?.total_reliable !== false;
   const hasMore = query.data?.has_more ?? false;
-  const filteredEntities = entities;
-  const missingIds = entities.filter((entity) => !entity.entity_id);
   const errorMessage = query.error
     ? getAidpErrorMessage(
         query.error,
@@ -487,6 +485,40 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
     },
   ];
 
+  const columnKeys = columns.map((column) => String(column.key));
+  const { tableContainer, columnWidths, totalWidth, handleResize } =
+    useAidpOntologyColumnWidths(columnKeys, {
+      display_name: 1.3,
+      kind: 1.3,
+      description: 1.8,
+      extended: 1.1,
+      parents: 1,
+      synonyms: 1,
+      children: 1,
+      create_time: 1.7,
+      actions: 1.3,
+    });
+  const resizableColumns = columns.map((column, index) => {
+    const key = columnKeys[index];
+    const nextKey = columnKeys[index + 1];
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          width: columnWidths[key],
+          maxWidth: nextKey
+            ? columnWidths[key] + columnWidths[nextKey] - AIDP_MIN_COLUMN_WIDTH
+            : undefined,
+          "data-column-key": key,
+          onResize: nextKey
+            ? (delta: number, rendered: Record<string, number>) =>
+                handleResize(key, nextKey, delta, rendered)
+            : undefined,
+        }) as AidpResizableTitleProps,
+    };
+  });
+
   const renderBody = () => {
     if (query.isLoading) {
       return (
@@ -532,37 +564,37 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       );
     }
     return (
-      <Table<AidpOntologyEntity>
-        rowKey={(record) =>
-          record.entity_id ?? `${record.api_name}-${record.kind}`
-        }
-        size="middle"
-        className={styles.table}
-        columns={columns}
-        dataSource={entities}
-        pagination={false}
-        tableLayout="fixed"
-        scroll={{ x: isNarrow ? 820 : 1240 }}
-        rowSelection={
-          canManage
-            ? {
-                selectedRowKeys: selectedKeys,
-                onChange: setSelectedKeys,
-                getCheckboxProps: (record) => ({
-                  disabled: !record.entity_id,
-                }),
-              }
-            : undefined
-        }
-      />
+      <div className={styles.tableArea} ref={tableContainer}>
+        <Table<AidpOntologyEntity>
+          rowKey={(record) =>
+            record.entity_id ?? `${record.api_name}-${record.kind}`
+          }
+          size="middle"
+          className={styles.table}
+          columns={resizableColumns}
+          dataSource={entities}
+          pagination={false}
+          tableLayout="fixed"
+          components={{ header: { cell: AidpResizableTitle } }}
+          scroll={{ x: totalWidth }}
+          rowSelection={
+            canManage
+              ? {
+                  selectedRowKeys: selectedKeys,
+                  onChange: setSelectedKeys,
+                  getCheckboxProps: (record) => ({
+                    disabled: !record.entity_id,
+                  }),
+                }
+              : undefined
+          }
+        />
+      </div>
     );
   };
 
   return (
     <div className={styles.tab}>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyEntitySyncStatusGap")}
-      </AidpOntologyGapNote>
       <div className={styles.toolbar}>
         <Input
           allowClear
@@ -573,27 +605,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
           onChange={(event) => setKeyword(event.target.value)}
         />
         <div className={styles.toolbarActions}>
-          <Button
-            disabled={!canManage || selectedKeys.length === 0}
-            onClick={handleBatchDelete}
-          >
-            {t("aidpKnowledge.ontologyDelete")}
-          </Button>
-          <Button
-            type="primary"
-            disabled={!canManage}
-            onClick={() => {
-              setEditing(null);
-              setDrawerOpen(true);
-            }}
-          >
-            {t("aidpKnowledge.ontologyEntityCreateAction")}
-          </Button>
-          <Tooltip title={t("aidpKnowledge.ontologySyncEntitiesGap")}>
-            <Button disabled icon={<SyncOutlined />}>
-              {t("aidpKnowledge.ontologySyncEntities")}
-            </Button>
-          </Tooltip>
           <Button
             type="text"
             aria-label={t("aidpKnowledge.refresh")}
@@ -724,29 +735,30 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
               icon={<SettingOutlined />}
             />
           </Dropdown>
+          <Button
+            disabled={!canManage || selectedKeys.length === 0}
+            onClick={handleBatchDelete}
+          >
+            {t("aidpKnowledge.ontologyDelete")}
+          </Button>
+          <Button
+            type="primary"
+            disabled={!canManage}
+            onClick={() => {
+              setEditing(null);
+              setDrawerOpen(true);
+            }}
+          >
+            {t("aidpKnowledge.ontologyEntityCreateAction")}
+          </Button>
         </div>
       </div>
-      <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyEntitySearchGap")}
-      </AidpOntologyGapNote>
-      {missingIds.length > 0 && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyEntityMissingIdGap", {
-            count: missingIds.length,
-          })}
-        </AidpOntologyGapNote>
-      )}
-      {!canManage && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyMetadataNoPermissionHint")}
-        </AidpOntologyGapNote>
-      )}
       {query.isError && entities.length > 0 && (
         <div className={styles.inlineError} role="alert">
           {errorMessage}
         </div>
       )}
-      <div className={styles.tableArea}>{renderBody()}</div>
+      {renderBody()}
       {entities.length > 0 && (
         <div className={styles.paginationRow}>
           <AidpPagination
@@ -756,7 +768,13 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             total={total}
             totalReliable={totalReliable}
             hasMore={hasMore}
-            selectedCount={selectedKeys.length}
+            selectionHint={
+              selectedKeys.length
+                ? t("aidpKnowledge.selectedCount", {
+                    count: selectedKeys.length,
+                  })
+                : undefined
+            }
             onPageChange={setPage}
             onPageSizeChange={(nextSize) => {
               setPageSize(nextSize);

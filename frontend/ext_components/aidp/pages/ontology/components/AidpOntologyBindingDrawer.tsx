@@ -19,7 +19,6 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
 import styles from "./AidpOntologyBindingDrawer.module.css";
@@ -166,9 +165,6 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
           <InfoCircleOutlined />
           {t("aidpKnowledge.ontologyBindingSelectHint")}
         </div>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyBindingAddGap")}
-        </AidpOntologyGapNote>
         {kbQuery.isLoading || bindingsQuery.isLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />
         ) : (

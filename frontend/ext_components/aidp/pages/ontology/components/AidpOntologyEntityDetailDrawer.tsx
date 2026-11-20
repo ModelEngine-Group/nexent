@@ -4,11 +4,9 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Drawer, Tag, Tooltip } from "antd";
+import { Button, Descriptions, Drawer, Tag, Tooltip } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import type { AidpOntologyEntity } from "@/ext_components/aidp/shared/types/ontology";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
@@ -52,7 +50,6 @@ const AidpOntologyEntityDetailDrawer: React.FC<
   AidpOntologyEntityDetailDrawerProps
 > = ({ open, entity, onClose, onEdit, onDelete }) => {
   const { t } = useTranslation();
-  const demo = useAidpOntologyDemoMode();
 
   const renderRelations = (values: unknown[] | undefined) => {
     if (!values || values.length === 0) {
@@ -104,72 +101,60 @@ const AidpOntologyEntityDetailDrawer: React.FC<
       }
     >
       {entity && (
-        <div className={styles.body}>
-          <p className={styles.description}>{entity.description || "—"}</p>
-
-          <div className={styles.auditRow}>
-            <div className={styles.auditItem}>
-              <span className={styles.auditLabel}>
-                {t("aidpKnowledge.ontologyMetadataColumnCreateTime")}
-              </span>
-              <span>{formatAuditTime(entity.create_time)}</span>
-            </div>
-            <div className={styles.auditItem}>
-              <span className={styles.auditLabel}>
-                {t("aidpKnowledge.ontologyMetadataColumnUpdateTime")}
-              </span>
-              <span>{formatAuditTime(entity.update_time)}</span>
-            </div>
-          </div>
-
-          <section>
-            <div className={styles.sectionTitle}>
-              {t("aidpKnowledge.ontologyEntityRelations")}
-            </div>
-            <div className={styles.relationGroup}>
-              <span className={styles.relationLabel}>
-                {t("aidpKnowledge.ontologyEntityParent")}
-              </span>
-              {renderRelations(entity.parent_entities)}
-            </div>
-            <div className={styles.relationGroup}>
-              <span className={styles.relationLabel}>
-                {t("aidpKnowledge.ontologyEntitySynonym")}
-              </span>
-              {renderRelations(entity.synonym_entities)}
-            </div>
-            <div className={styles.relationGroup}>
-              <span className={styles.relationLabel}>
-                {t("aidpKnowledge.ontologyEntityChild")}
-              </span>
-              {renderRelations(entity.child_entities)}
-            </div>
-          </section>
-
-          <section>
-            <div className={styles.sectionTitle}>
-              {t("aidpKnowledge.ontologyEntityExtended")}
-            </div>
-            {(entity.properties ?? []).length === 0 ? (
-              <span className={styles.muted}>—</span>
-            ) : (
-              <div className={styles.propertyTags}>
-                {(entity.properties ?? []).map((property, index) => (
-                  <Tag key={`${property.api_name}-${index}`}>
-                    {property.display_name || property.api_name}:{" "}
-                    {property.value || "—"}
-                  </Tag>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <AidpOntologyGapNote>
-            {demo
-              ? t("aidpKnowledge.ontologyEntityDetailDemoGap")
-              : t("aidpKnowledge.ontologyEntityDetailRealGap")}
-          </AidpOntologyGapNote>
-        </div>
+        <Descriptions
+          size="small"
+          column={1}
+          bordered
+          items={[
+            {
+              key: "description",
+              label: t("aidpKnowledge.ontologyEntityDescription"),
+              children: entity.description || "—",
+            },
+            {
+              key: "created",
+              label: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
+              children: formatAuditTime(entity.create_time),
+            },
+            {
+              key: "updated",
+              label: t("aidpKnowledge.ontologyMetadataColumnUpdateTime"),
+              children: formatAuditTime(entity.update_time),
+            },
+            {
+              key: "parents",
+              label: t("aidpKnowledge.ontologyEntityParent"),
+              children: renderRelations(entity.parent_entities),
+            },
+            {
+              key: "synonyms",
+              label: t("aidpKnowledge.ontologyEntitySynonym"),
+              children: renderRelations(entity.synonym_entities),
+            },
+            {
+              key: "children",
+              label: t("aidpKnowledge.ontologyEntityChild"),
+              children: renderRelations(entity.child_entities),
+            },
+            {
+              key: "properties",
+              label: t("aidpKnowledge.ontologyEntityExtended"),
+              children:
+                (entity.properties ?? []).length === 0 ? (
+                  "—"
+                ) : (
+                  <div className={styles.propertyTags}>
+                    {(entity.properties ?? []).map((property, index) => (
+                      <Tag key={`${property.api_name}-${index}`}>
+                        {property.display_name || property.api_name}:{" "}
+                        {property.value || "—"}
+                      </Tag>
+                    ))}
+                  </div>
+                ),
+            },
+          ]}
+        />
       )}
     </Drawer>
   );

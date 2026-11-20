@@ -9,7 +9,6 @@ import { Input, Modal } from "antd";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import styles from "./AidpOntologyDeleteModal.module.css";
 
@@ -87,9 +86,6 @@ const AidpOntologyDeleteModal: React.FC<AidpOntologyDeleteModalProps> = ({
             name: domain?.name ?? "",
           })}
         </p>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyDomainDeleteCascadeGap")}
-        </AidpOntologyGapNote>
         <div className={styles.confirmBlock}>
           <div className={styles.confirmLabel}>
             {t("aidpKnowledge.ontologyDomainDeleteInputLabel")}

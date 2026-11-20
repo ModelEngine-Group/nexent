@@ -30,7 +30,6 @@ import {
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
@@ -309,11 +308,6 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
                   </span>
                 </div>
               </div>
-              <AidpOntologyGapNote className={styles.overviewNote}>
-                {demo
-                  ? t("aidpKnowledge.ontologyDetailDemoStatsGap")
-                  : t("aidpKnowledge.ontologyDetailRealStatsGap")}
-              </AidpOntologyGapNote>
             </header>
 
             <Tabs

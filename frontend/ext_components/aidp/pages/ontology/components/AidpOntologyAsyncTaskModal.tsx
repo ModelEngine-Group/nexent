@@ -6,7 +6,6 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Descriptions, Modal, Progress } from "antd";
 
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import styles from "./AidpOntologyAsyncTaskModal.module.css";
 
 export type AidpOntologyTaskState = "running" | "success" | "failed";
@@ -62,12 +61,6 @@ const AidpOntologyAsyncTaskModal: React.FC<AidpOntologyAsyncTaskModalProps> = ({
       }
     >
       <div className={styles.body}>
-        <AidpOntologyGapNote>
-          {demo
-            ? t("aidpKnowledge.ontologyAsyncTaskDemoGap")
-            : t("aidpKnowledge.ontologyAsyncTaskRealGap")}
-        </AidpOntologyGapNote>
-
         <Descriptions
           size="small"
           column={1}
@@ -117,12 +110,6 @@ const AidpOntologyAsyncTaskModal: React.FC<AidpOntologyAsyncTaskModalProps> = ({
               )}
             </div>
           </>
-        )}
-
-        {demo && (
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyAsyncTaskDemoButtonsGap")}
-          </AidpOntologyGapNote>
         )}
       </div>
     </Modal>

@@ -18,7 +18,6 @@ import {
   ConfigProvider,
   Dropdown,
   Empty,
-  Grid,
   Input,
   Segmented,
   Skeleton,
@@ -120,8 +119,6 @@ const AidpOntologyListPage: React.FC = () => {
   const [editing, setEditing] = useState<AidpOntologyDomain | null>(null);
   const [deletingDomain, setDeletingDomain] =
     useState<AidpOntologyDomain | null>(null);
-  const screens = Grid.useBreakpoint();
-  const isNarrow = screens.md === false;
 
   // Column widths follow the knowledge-base list: fit the container, then let
   // each drag move one boundary without changing the total table width.

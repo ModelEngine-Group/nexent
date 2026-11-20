@@ -138,7 +138,7 @@
   min-width: 0;
   padding: 0;
   overflow: hidden;
-  color: #191919;
+  color: #0067d1;
   font: inherit;
   text-align: left;
   text-overflow: ellipsis;
@@ -219,4 +219,11 @@
   color: #8c8c8c;
   font-size: 12px;
   cursor: help;
+}
+
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
