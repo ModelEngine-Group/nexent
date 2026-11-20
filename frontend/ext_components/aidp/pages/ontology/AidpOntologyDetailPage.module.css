@@ -3,7 +3,6 @@
   --aidp-text: #191919;
   --aidp-secondary: #595959;
   --aidp-muted: #8c8c8c;
-  --aidp-outline: #dfdfdf;
 }
 
 .breadcrumb {
@@ -217,10 +216,6 @@
   margin: 0;
 }
 
-.tabs :global(.ant-tabs-nav::before) {
-  border-bottom: 1px solid var(--aidp-outline);
-}
-
 .tabs :global(.ant-tabs-tab) {
   padding: 14px 0;
   color: #777777;
@@ -254,10 +249,6 @@
   min-height: 320px;
   flex: 1;
   margin-top: 16px;
-  padding: 24px;
-  border: 1px solid var(--aidp-outline);
-  border-radius: 12px;
-  background: #ffffff;
 }
 
 .errorAlert {
@@ -292,10 +283,6 @@
   .overviewStats {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
     padding-left: 0;
-  }
-
-  .contentPanel {
-    padding: 16px;
   }
 
   .tabs :global(.ant-tabs-tab + .ant-tabs-tab) {
