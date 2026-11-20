@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from time import monotonic
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +68,39 @@ def recover_northbound_tasks() -> dict[str, int]:
     return result
 
 
+def _delete_interrupted_object(record):
+    from contracts.constants import environment
+    from contracts.knowledge import StorageObjectReference
+    from nexent.storage.errors import NotFound, OutcomeUnknown, Unavailable
+    from nexent.storage.models import ObjectRef, OperationContext, WriteOutcome
+
+    from infrastructure.agentos_identity import ServicePrincipal
+    from infrastructure.file_objects import file_object_ports
+    from infrastructure.file_reads import file_read_ports
+    from infrastructure.object_storage.read_access import normalize_object_location
+
+    key, bucket = normalize_object_location(record["object_name"], record.get("bucket_name"))
+    reference = StorageObjectReference(bucket or environment.MINIO_DEFAULT_BUCKET, key)
+    actor = ServicePrincipal("upload-recovery", record["tenant_id"])
+    context = OperationContext(f'upload-recovery-{uuid4().hex}', monotonic() + 10)
+    ref = ObjectRef("files", reference.object_name)
+    try:
+        with file_object_ports(actor, reference, context=context) as store:
+            receipt = store.delete(ref, context=context)
+            if receipt.outcome is not WriteOutcome.CONFIRMED or not receipt.deleted:
+                raise OutcomeUnknown(operation_id=context.operation_id)
+    except (OutcomeUnknown, Unavailable):
+        # Preserve the existing post-failure presence check without replaying the delete.
+        try:
+            with file_read_ports(key, bucket=reference.bucket_name, context=context) as store:
+                store.stat(ref, context=context)
+        except NotFound:
+            return
+        raise
+
+
 def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int:
     """Fail old uploads owned by a restarted service and remove partial objects."""
-    from management.db.file.attachment import delete_file
-    from infrastructure.object_storage.client import minio_client
     from management.db.knowledge_base.file_lifecycle import list_uploading_files_created_before, transition_file_record
 
     failed = 0
@@ -95,17 +126,9 @@ def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int
             continue
 
         failed += 1
-        object_name = record.get("object_name")
-        bucket_name = record.get("bucket_name")
         try:
-            if object_name:
-                delete_result = delete_file(object_name, bucket_name)
-                if not delete_result.get("success") and minio_client.file_exists(
-                    object_name, bucket_name
-                ):
-                    raise RuntimeError(
-                        delete_result.get("error") or "Failed to delete upload object"
-                    )
+            if record.get("object_name"):
+                _delete_interrupted_object(record)
         except Exception as exc:
             logger.warning(
                 "Interrupted upload cleanup failed for file_id=%s: %s",

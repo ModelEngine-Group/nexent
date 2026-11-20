@@ -197,30 +197,6 @@ def upload_fileobj(
     return response
 
 
-def download_file(object_name: str, file_path: str, bucket: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Download file from MinIO to local
-
-    Args:
-        object_name: Object name
-        file_path: Local save path
-        bucket: Bucket name, if not specified will use default bucket
-
-    Returns:
-        Dict[str, Any]: Download result, containing success flag and error message (if any)
-    """
-    # Download file
-    success, result = minio_client.download_file(object_name, file_path, bucket)
-
-    # Build response
-    response = {"success": success, "object_name": object_name, "file_path": file_path}
-
-    if not success:
-        response["error"] = result
-
-    return response
-
-
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
     """
     Check if a file exists in the bucket.

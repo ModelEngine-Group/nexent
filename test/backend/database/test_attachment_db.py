@@ -84,7 +84,6 @@ with patch('management.db.file.attachment.minio_client', minio_client_mock):
     from management.db.file.attachment import (
         build_s3_url,
         delete_file,
-        download_file,
         file_exists,
         generate_object_name,
         get_file_stream,
@@ -440,33 +439,6 @@ class TestUploadFileobj:
         result = upload_fileobj(file_obj, 'test.txt', 'bucket')
 
         assert result['success'] is True
-
-
-class TestDownloadFile:
-    """Test cases for download_file function"""
-
-    def test_download_file_success(self):
-        """Test successful file download"""
-        minio_client_mock.download_file.return_value = (True, 'Downloaded successfully')
-
-        result = download_file('attachments/test.txt', '/path/to/download.txt', 'bucket')
-
-        assert result['success'] is True
-        assert result['object_name'] == 'attachments/test.txt'
-        assert result['file_path'] == '/path/to/download.txt'
-        assert 'error' not in result
-        minio_client_mock.download_file.assert_called_once_with(
-            'attachments/test.txt', '/path/to/download.txt', 'bucket'
-        )
-
-    def test_download_file_failure(self):
-        """Test download_file handles download failure"""
-        minio_client_mock.download_file.return_value = (False, 'Download failed')
-
-        result = download_file('attachments/test.txt', '/path/to/download.txt', 'bucket')
-
-        assert result['success'] is False
-        assert result['error'] == 'Download failed'
 
 
 class TestDeleteFile:

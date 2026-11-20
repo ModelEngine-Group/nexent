@@ -2,6 +2,7 @@
 import asyncio
 import sys
 import types
+from contextlib import nullcontext
 from datetime import datetime
 from unittest.mock import MagicMock, call
 
@@ -117,12 +118,14 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
     cutoff = datetime(2026, 9, 1, 12, 0)
     records = [
         {
+            "tenant_id": "tenant",
             "file_id": "claimed",
             "version": 2,
             "object_name": "knowledge/a.pdf",
             "bucket_name": "files",
         },
         {
+            "tenant_id": "tenant",
             "file_id": "stale",
             "version": 1,
             "object_name": "knowledge/b.pdf",
@@ -130,9 +133,16 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
         },
     ]
     transition = MagicMock(side_effect=[{"file_id": "claimed", "version": 3}, None])
-    delete_object = MagicMock(return_value={"success": True})
-    _install_module(monkeypatch, "management.db.file.attachment", delete_file=delete_object)
-    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=MagicMock())
+    from nexent.storage.models import DeleteReceipt, ObjectRef
+
+    store = MagicMock()
+    def delete(ref, *, context):
+        transition.assert_called_once()
+        assert ref == ObjectRef("files", "knowledge/a.pdf")
+        return DeleteReceipt(context.operation_id, True)
+    store.delete.side_effect = delete
+    ports = MagicMock(return_value=nullcontext(store))
+    _install_module(monkeypatch, "infrastructure.file_objects", file_object_ports=ports)
     _install_module(
         monkeypatch,
         "management.db.knowledge_base.file_lifecycle",
@@ -148,7 +158,10 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
         "management.db.knowledge_base.file_lifecycle"
     ].list_uploading_files_created_before
     list_uploads.assert_called_once_with(cutoff, "nexent-config")
-    delete_object.assert_called_once_with("knowledge/a.pdf", "files")
+    assert store.delete.call_count == 1
+    actor, target = ports.call_args.args
+    assert (actor.user_id, actor.tenant_id) == ("upload-recovery", "tenant")
+    assert (target.bucket_name, target.object_name) == ("files", "knowledge/a.pdf")
     first_update = transition.call_args_list[0]
     assert first_update.args == ("claimed",)
     assert first_update.kwargs["status"] == "FAILED"
@@ -160,8 +173,7 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
 
 def test_new_source_intents_are_not_deleted_by_legacy_recovery(monkeypatch):
     transition, delete_object = MagicMock(), MagicMock()
-    _install_module(monkeypatch, "management.db.file.attachment", delete_file=delete_object)
-    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=MagicMock())
+    monkeypatch.setattr(startup_recovery_service, "_delete_interrupted_object", delete_object)
     _install_module(monkeypatch, "management.db.knowledge_base.file_lifecycle",
                     list_uploading_files_created_before=MagicMock(return_value=[
                         {"file_id": "pending", "stage": "SOURCE_UPLOAD"},
@@ -173,49 +185,49 @@ def test_new_source_intents_are_not_deleted_by_legacy_recovery(monkeypatch):
     delete_object.assert_not_called()
 
 
-def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
-    cutoff = datetime(2026, 9, 1, 12, 0)
-    record = {
-        "file_id": "failed",
-        "version": 3,
-        "object_name": "knowledge/a.pdf",
-        "bucket_name": "files",
-    }
-    transition = MagicMock(
-        side_effect=[
-            {"file_id": "failed", "version": 4},
-            {"file_id": "failed", "version": 5},
-        ]
-    )
-    minio_client = MagicMock()
-    minio_client.file_exists.return_value = True
+@pytest.mark.parametrize("physical_state", ["present", "absent", "unknown"])
+def test_failed_legacy_delete_only_accepts_confirmed_absence(monkeypatch, physical_state):
+    from nexent.storage.errors import NotFound, OutcomeUnknown, Unavailable
+    from nexent.storage.models import ObjectRef
+
+    record = {"file_id": "failed", "tenant_id": "tenant", "version": 3,
+              "object_name": "s3://files/knowledge/a:legacy.pdf", "bucket_name": "files"}
+    transition = MagicMock(side_effect=[{"version": 4}, {"version": 5}])
+    store = MagicMock()
+    store.delete.side_effect = OutcomeUnknown()
+    inspection = MagicMock()
+    if physical_state == "absent":
+        inspection.stat.side_effect = NotFound()
+    elif physical_state == "unknown":
+        inspection.stat.side_effect = Unavailable()
+    ports = MagicMock(return_value=nullcontext(store))
+    reads = MagicMock(return_value=nullcontext(inspection))
+    _install_module(monkeypatch, "infrastructure.file_objects", file_object_ports=ports)
+    _install_module(monkeypatch, "infrastructure.file_reads", file_read_ports=reads)
     _install_module(
-        monkeypatch,
-        "management.db.file.attachment",
-        delete_file=MagicMock(return_value={"success": False, "error": "storage down"}),
-    )
-    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=minio_client)
-    _install_module(
-        monkeypatch,
-        "management.db.knowledge_base.file_lifecycle",
+        monkeypatch, "management.db.knowledge_base.file_lifecycle",
         list_uploading_files_created_before=MagicMock(return_value=[record]),
         transition_file_record=transition,
     )
 
-    assert startup_recovery_service.fail_interrupted_uploads(
-        cutoff,
-        "nexent-northbound",
-    ) == 1
-    assert transition.call_count == 2
-    failure = transition.call_args_list[1]
-    assert failure.args == ("failed",)
-    assert failure.kwargs["status"] == "FAILED"
-    assert failure.kwargs["expected_statuses"] == ("FAILED",)
-    assert failure.kwargs["expected_version"] == 4
-    assert failure.kwargs["error_code"] == "UPLOAD_RECOVERY_FAILED"
-    assert failure.kwargs["error_message"] == "storage down"
-
-
+    assert startup_recovery_service.fail_interrupted_uploads(datetime(2026, 9, 1), "nexent-northbound") == 1
+    context = ports.call_args.kwargs["context"]
+    ref = ObjectRef("files", "knowledge/a:legacy.pdf")
+    store.delete.assert_called_once_with(ref, context=context)
+    reads.assert_called_once_with(ref.key, bucket="files", context=context)
+    inspection.stat.assert_called_once_with(ref, context=context)
+    if physical_state == "absent":
+        assert transition.call_count == 1
+    else:
+        assert transition.call_count == 2
+        failure = transition.call_args_list[1]
+        assert failure.args == ("failed",)
+        assert failure.kwargs["status"] == "FAILED"
+        assert failure.kwargs["expected_statuses"] == ("FAILED",)
+        assert failure.kwargs["expected_version"] == 4
+        assert failure.kwargs["error_code"] == "UPLOAD_RECOVERY_FAILED"
+        expected = str(Unavailable() if physical_state == "unknown" else OutcomeUnknown())
+        assert failure.kwargs["error_message"] == expected
 
 
 @pytest.mark.asyncio
