@@ -2104,16 +2104,18 @@ def remove_aidp_chunks_impl(
     kds_id: str,
     chunk_ids: List[int],
 ) -> Dict[str, Any]:
-    """Remove up to 2000 chunks with ``DELETE /Chunks`` and a JSON body.
+    """Remove up to 2000 chunks with ``POST /Chunks/Remove`` and a JSON body.
 
-    AIDP answers ``204 No Content`` without a body; an empty response is the
-    success contract, not a parse failure.
+    The 2026-11-20 contract run confirms the removal endpoint is the POST
+    ``Chunks/Remove`` route; the earlier ``DELETE /Chunks`` variant answered
+    405 on the real deployment. AIDP answers ``204 No Content`` either way,
+    so an empty response is the success contract, not a parse failure.
     """
     result = _request_aidp_json(
         server_url,
         api_key,
-        "DELETE",
-        _get_chunks_path(kds_id),
+        "POST",
+        f"{_get_chunks_path(kds_id)}/Remove",
         "remove-chunks",
         json_body={"chunk_ids": list(chunk_ids)},
     )
@@ -2874,7 +2876,15 @@ def search_aidp_chunks_impl(
                 if isinstance(page, int) and not isinstance(page, bool)
             ]
         metadata = hit.get("metadata")
-        chunks.append({
+        raw_tags = hit.get("tag")
+        # Ontology auto-tagging only exists on newer AIDP builds; pass the
+        # list through when present and keep it absent otherwise.
+        tags = [
+            str(tag).strip()
+            for tag in raw_tags
+            if isinstance(tag, str) and tag.strip()
+        ] if isinstance(raw_tags, list) else []
+        chunk = {
             "chunk_id": chunk_id,
             "chunk_text": str(hit.get("text") or hit.get("chunk_text") or ""),
             "chunk_type": str(hit.get("chunk_type") or "TEXT").upper(),
@@ -2887,7 +2897,10 @@ def search_aidp_chunks_impl(
                 if not key.startswith("_")
             },
             "score": hit.get("score"),
-        })
+        }
+        if tags:
+            chunk["tag"] = tags
+        chunks.append(chunk)
 
     return {
         "value": chunks,

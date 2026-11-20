@@ -640,9 +640,8 @@ def test_chunk_delete_requires_json_body_and_answers_204(mock_aidp_server):
     path = f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_CHUNK_KB}/Chunks"
     client.get(path, params={"file_uuid": _CHUNK_FILE}, headers=auth)
 
-    removed = client.request(
-        "DELETE",
-        path,
+    removed = client.post(
+        f"{path}/Remove",
         headers=auth,
         json={"chunk_ids": [1, 2]},
     )
@@ -657,9 +656,10 @@ def test_chunk_delete_requires_json_body_and_answers_204(mock_aidp_server):
     assert page["total_count"] == 3
     assert [item["chunk_id"] for item in page["value"]] == [3, 4, 5]
 
-    # The old upstream path is gone from this contract.
-    legacy = client.post(
-        f"{path}/Remove",
+    # The DELETE-with-body variant is not served by the real deployment.
+    legacy = client.request(
+        "DELETE",
+        path,
         headers=auth,
         json={"chunk_ids": [3]},
     )

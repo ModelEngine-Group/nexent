@@ -18,6 +18,11 @@ export interface AidpChunk {
   page_ids?: number[];
   /** Read-only custom metadata configured on the AIDP side. */
   metadata?: Record<string, unknown>;
+  /**
+   * Ontology entity tags produced by AIDP's auto-tagging task. Only newer
+   * AIDP builds return this field; treat it as optional and absent-as-empty.
+   */
+  tag?: string[];
   /** Only present when AIDP returns it; otherwise the detail shows "—". */
   updated_at?: string;
 }

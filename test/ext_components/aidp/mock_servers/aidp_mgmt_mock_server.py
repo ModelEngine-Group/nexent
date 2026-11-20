@@ -2052,7 +2052,7 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
         else:
             image_file_url = "null"
-        chunks.append({
+        chunk = {
             "chunk_id": _next_chunk_id(),
             "chunk_text": text,
             "chunk_type": chunk_type,
@@ -2061,7 +2061,12 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             "file_url": image_file_url,
             "page_ids": pages,
             "metadata": {"section": f"part-{index + 1}", "source": file_name},
-        })
+        }
+        # Newer AIDP builds return ontology auto-tags on `tag`; only some
+        # chunks carry them, so the page must treat the field as optional.
+        if index in (0, 2):
+            chunk["tag"] = ["示例实体", "自动打标"]
+        chunks.append(chunk)
     _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
     _save_state()
     return _file_chunks(kds_id, file_uuid)
@@ -2150,13 +2155,17 @@ def create_chunk(
     return JSONResponse(content={"chunk_id": str(chunk["chunk_id"])})
 
 
-@app.delete(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Chunks/Remove")
 def remove_chunks(
     kds_id: str,
     body: RemoveChunksBody,
     authorization: Optional[str] = Header(default=None),
 ) -> Response:
-    """Remove the requested chunks; the live contract answers 204 with no body."""
+    """Remove the requested chunks; the live contract answers 204 with no body.
+
+    The 2026-11-20 verified contract uses POST /Chunks/Remove; the earlier
+    DELETE /Chunks variant is not served by the real deployment (405).
+    """
     _check_auth(authorization)
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
@@ -2306,7 +2315,7 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
         else:
             image_file_url = "null"
-        chunks.append({
+        chunk = {
             "chunk_id": _next_chunk_id(),
             "chunk_text": text,
             "chunk_type": chunk_type,
@@ -2315,7 +2324,12 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             "file_url": image_file_url,
             "page_ids": pages,
             "metadata": {"section": f"part-{index + 1}", "source": file_name},
-        })
+        }
+        # Newer AIDP builds return ontology auto-tags on `tag`; only some
+        # chunks carry them, so the page must treat the field as optional.
+        if index in (0, 2):
+            chunk["tag"] = ["示例实体", "自动打标"]
+        chunks.append(chunk)
     _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
     _save_state()
     return _file_chunks(kds_id, file_uuid)
@@ -2404,13 +2418,17 @@ def create_chunk(
     return JSONResponse(content={"chunk_id": str(chunk["chunk_id"])})
 
 
-@app.delete(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Chunks/Remove")
 def remove_chunks(
     kds_id: str,
     body: RemoveChunksBody,
     authorization: Optional[str] = Header(default=None),
 ) -> Response:
-    """Remove the requested chunks; the live contract answers 204 with no body."""
+    """Remove the requested chunks; the live contract answers 204 with no body.
+
+    The 2026-11-20 verified contract uses POST /Chunks/Remove; the earlier
+    DELETE /Chunks variant is not served by the real deployment (405).
+    """
     _check_auth(authorization)
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")

@@ -60,6 +60,10 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
   const [textOverflowing, setTextOverflowing] = useState(false);
   const editable = isAidpChunkEditable(chunk);
   const chunkType = normalizeAidpChunkType(chunk.chunk_type);
+  // Ontology auto-tags arrive only on newer AIDP builds; absent means empty.
+  const tags = Array.isArray(chunk.tag)
+    ? chunk.tag.filter((tag) => typeof tag === "string" && tag.trim())
+    : [];
   const metadataEntries = Object.entries(chunk.metadata ?? {}).filter(
     ([key, value]) =>
       key.trim().length > 0 &&
@@ -146,6 +150,24 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
               ? t("aidpKnowledge.chunkCollapse")
               : t("aidpKnowledge.chunkExpand")}
           </button>
+        )}
+        {tags.length > 0 && (
+          <div className={styles.cardMetadataRow}>
+            <span className={styles.cardMetadataLabel}>
+              {t("aidpKnowledge.chunkTags")}
+            </span>
+            {tags.map((tag) => (
+              <Tooltip
+                key={tag}
+                color="#ffffff"
+                rootClassName={styles.whiteTooltip}
+                mouseEnterDelay={0.25}
+                title={<div className={styles.cardTooltipContent}>{tag}</div>}
+              >
+                <span className={styles.cardMetadataTag}>{tag}</span>
+              </Tooltip>
+            ))}
+          </div>
         )}
         {metadataEntries.length > 0 && (
           <div className={styles.cardMetadataRow}>

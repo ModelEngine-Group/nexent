@@ -1534,7 +1534,7 @@ async def remove_chunks(
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     body: RemoveAidpChunksRequest,
 ) -> Response:
-    """Remove up to 2000 chunks; AIDP receives a JSON body on DELETE.
+    """Remove up to 2000 chunks; AIDP receives a JSON body on POST /Chunks/Remove.
 
     AIDP answers ``204 No Content``, so this proxy mirrors the empty success
     response instead of inventing a result payload.

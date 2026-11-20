@@ -4214,9 +4214,9 @@ class TestChunkImpls:
 
         assert result == {}
 
-    def test_remove_uses_delete_with_json_body_and_204(self, aidp_service_module):
+    def test_remove_uses_post_remove_with_json_body_and_204(self, aidp_service_module):
         mock_client = MagicMock()
-        mock_client.request.return_value = self._json_response(
+        mock_client.post.return_value = self._json_response(
             {}, status_code=204, content=b""
         )
         self._install_client(aidp_service_module, mock_client)
@@ -4225,14 +4225,14 @@ class TestChunkImpls:
             "http://127.0.0.1:30081", "jwt-token", "kb-1", [1, 2, 3]
         )
 
-        assert mock_client.request.call_args.args == (
-            "DELETE",
+        # The 2026-11-20 verified contract serves removal on POST
+        # /Chunks/Remove; DELETE /Chunks answers 405 on the real deployment.
+        assert mock_client.post.call_args.args == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
-            "/KnowledgeBases/kb-1/Chunks",
+            "/KnowledgeBases/kb-1/Chunks/Remove",
         )
-        assert mock_client.request.call_args.kwargs["json"] == {"chunk_ids": [1, 2, 3]}
+        assert mock_client.post.call_args.kwargs["json"] == {"chunk_ids": [1, 2, 3]}
         assert result == {}
-        mock_client.post.assert_not_called()
 
     def test_upstream_failure_is_not_reported_as_success(self, aidp_service_module):
         response = MagicMock(status_code=500)
