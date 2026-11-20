@@ -224,7 +224,7 @@ async def test_all_views_apply_tenant_permissions(view_app, suffix, actor, targe
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("suffix,invalid", [("", {"page": 0}), ("", {"page_size": 101}),
-    ("", {"sort_by": "success_rate"}), ("", {"search": "a" * 101}),
+    ("", {"sort_by": "unsupported_metric"}), ("", {"search": "a" * 101}),
     ("/trends", {"end_date": PREVIOUS.isoformat()}), ("/rankings", {"agent_id": 0})])
 async def test_view_parameter_validation(view_app, suffix, invalid):
     app, reader = view_app

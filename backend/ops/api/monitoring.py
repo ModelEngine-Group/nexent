@@ -28,7 +28,7 @@ ops_router = APIRouter(prefix="/ops/v1/monitoring", tags=["model monitoring"])
 Metric = Literal["request_count", "total_tokens", "error_rate", "avg_duration_ms", "avg_ttft_ms",
                  "avg_generation_rate"]
 PositiveResourceId = Annotated[int, Field(gt=0, le=2**31 - 1)]
-AgentMetric = Literal["execution_count", "avg_duration_ms", "avg_ttft_ms"]
+AgentMetric = Literal["execution_count", "avg_duration_ms", "avg_ttft_ms", "total_tokens", "success_rate"]
 
 
 class MonitoringSelection(BaseModel):
@@ -185,14 +185,20 @@ def _read_agent_views(request, scope, user, *, include_tokens=True):
         raise HTTPException(503, "Agent monitoring is temporarily unavailable") from None
 
 
+def _agent_metric_value(item, metric):
+    if metric == "total_tokens":
+        return metric_value({"metrics": item.get("tokens")}, metric)
+    return metric_value(item, metric)
+
+
 def _agent_items(items, metric, search="", descending=True):
     needle = search.casefold()
     items = [item for item in items if any(needle in (item.get(name) or "").casefold()
                                          for name in ("name", "display_name"))]
     items.sort(key=lambda item: (item["tenant_id"], item["agent_id"]))
-    present = [item for item in items if metric_value(item, metric) is not None]
-    missing = [item for item in items if metric_value(item, metric) is None]
-    return sorted(present, key=lambda item: metric_value(item, metric), reverse=descending) + missing
+    present = [item for item in items if _agent_metric_value(item, metric) is not None]
+    missing = [item for item in items if _agent_metric_value(item, metric) is None]
+    return sorted(present, key=lambda item: _agent_metric_value(item, metric), reverse=descending) + missing
 
 
 @ops_router.get("/agents", tags=["agent monitoring"])

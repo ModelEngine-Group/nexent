@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09, OPS-AGENT-FACTS-RULE-10, OPS-AGENT-FACTS-RULE-11]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09, OPS-AGENT-FACTS-RULE-10, OPS-AGENT-FACTS-RULE-11, OPS-AGENT-FACTS-RULE-12]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -102,6 +102,12 @@ case:
   - order: 28
     action: Apply Jiuwen facts to real ES, publish daily rows and reconcile authorized HTTP metrics, independent model Token publication and terminal replay.
     expected: Main and child counts, confirmed outcomes, actual Token ownership, nullable usage coverage and measured durations match the actual execution, without replay inflation.
+  - order: 29
+    action: Publish multi-day Agent result and model Token samples in two owned tenants with contrasting groups, ties, known zero, missing usage and absent result denominators. Query both new list sort keys in both directions.
+    expected: Numeric ordering uses merged resource values, preserves nulls and status, and resolves ties by tenant ID and Agent ID.
+  - order: 30
+    action: Apply tenant, group, inclusive date and single-Agent filters, request successive pages and repeat unauthorized requests.
+    expected: Only authorized filtered aggregates participate; sorting precedes paging and rejected tenants are not queried.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -121,6 +127,7 @@ case:
   - Main monitoring and raw trajectory share one complete execution measurement without changing counting, actual execution dates or other metric contracts.
   - Complete child invocation timing agrees exactly between raw trajectory, source facts, daily publication and queries, with independent invocation clocks and original execution dates.
   - Real Jiuwen main and child execution reconciles through source facts, published daily metrics and Ops queries with trajectory capture on or off.
+  - Agent list Token and success-rate ordering matches exact filtered published resource aggregates before paging, with stable ties and nulls last.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -135,6 +142,7 @@ case:
   - A second main clock or terminal report, a span/monitoring timestamp mismatch, a count from preparation-only failure, a shifted statistic date or a changed main duration boundary.
   - Mixed parent or sibling clocks, duplicate child reports, changed execution dates or eligibility, or a changed success, Token or TTFT contract.
   - Replacing Jiuwen Runner or model transport with a fake, mixed main/child usage, lost execution context or metrics gated by trajectory configuration.
+  - Lexical or floating-point Token ordering, missing values coerced to zero, per-page or per-day sorting, unauthorized rows or changes to collection and ranking endpoints.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -201,3 +209,8 @@ case:
     steps: [27, 28]
     expected_results: [18]
     forbidden_side_effects: [13]
+  - id: AC-14
+    description: Agent list sorting by total Tokens and success rate preserves authorized filtered aggregation, nullable metrics and stable pagination.
+    steps: [29, 30]
+    expected_results: [19]
+    forbidden_side_effects: [14]

@@ -19,6 +19,7 @@ acceptance_bindings:
   AC-11: [test_complete_main_timing_matches_raw_trajectory_and_published_queries]
   AC-12: [test_real_parent_and_child_facts_publish_and_replay, test_child_complete_timing_outcomes_publish_and_replay]
   AC-13: [test_actual_jiuwen_agent_monitoring_pipeline]
+  AC-14: [test_agent_list_sorts_filtered_published_resource_totals]
 preparation:
   families: []
   anchors: false

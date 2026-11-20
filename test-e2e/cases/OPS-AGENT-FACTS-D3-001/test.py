@@ -1373,6 +1373,156 @@ async def test_complete_main_timing_matches_raw_trajectory_and_published_queries
 
 
 @pytest.mark.asyncio
+async def test_agent_list_sorts_filtered_published_resource_totals(isolated_monitoring, monkeypatch, record_property):
+    """Order actual multi-day publications through the authorized HTTP list before paging."""
+    from contracts.constants import environment
+    from management.db.agent.models import AgentInfo
+    from management.services.permission.identity import session as auth
+    from permissions import rbac
+
+    service, tenant = isolated_monitoring
+    peer = tenant + "-other"
+    first, last = date(2026, 11, 18), date(2026, 11, 19)
+    # Each row owns independent attempts; None represents an actual missing usage sample.
+    plans = [
+        (tenant, first, 21, 12, ["succeeded"], [4]),
+        (tenant, last, 21, 12, ["failed"] * 3, [10]),
+        (tenant, first, 22, 12, ["succeeded", "failed"], [12]),
+        (tenant, last, 23, 12, ["succeeded", "failed"], [14, None]),
+        (tenant, last, 24, 12, ["cancelled"], [None]),
+        (tenant, last, 25, 12, ["failed"], [0]),
+        (tenant, last, 26, 12, ["cancelled"], [0]),
+        (peer, last, 11, 12, ["succeeded", "failed"], [14]),
+        (tenant, last, 22, 99, ["succeeded"], [999]),
+        (tenant, last + timedelta(days=1), 22, 12, ["succeeded"], [999]),
+    ]
+    events = []
+    for scope, day, agent, group, results, usages in plans:
+        instant = datetime.combine(day, time(12), timezone.utc)
+        runs = []
+        for outcome in results:
+            _, fact = _run_across_midnight(scope)
+            fact.update(agent_id=agent, initiator_group_ids=[group], outcome=outcome,
+                        started_at=instant.isoformat(), ended_at=(instant + timedelta(milliseconds=10)).isoformat(),
+                        duration_ms=10)
+            events.append(fact)
+            runs.append(fact["fact_id"])
+        for value in usages:
+            identity = uuid4().hex
+            fact = {"tenant_id": scope, "fact_kind": "model", "fact_id": identity, "call_context_id": identity,
+                    "agent_id": agent, "agent_run_id": runs[0], "root_run_id": runs[0],
+                    "model_type": "llm", "initiator_group_ids": [group], "record_revision": 2,
+                    "started_at": instant.isoformat(), "ended_at": (instant + timedelta(milliseconds=5)).isoformat(),
+                    "outcome": "succeeded", "duration_ms": 5}
+            if value is not None:
+                fact.update(input_tokens=value, output_tokens=0, total_tokens=value)
+            events.append(fact)
+    with service.store.engine.begin() as connection:
+        for scope, numbers in ((tenant, range(21, 27)), (peer, [11])):
+            for number in numbers:
+                connection.execute(insert(AgentInfo).values(
+                    tenant_id=scope, agent_id=number, version_no=0, delete_flag="N",
+                    name=f"sort-{number}", group_ids="12,99",
+                ))
+
+    async with runtime.producer_lifespan():
+        for fact in events:
+            emit_fact(fact)
+        async with asyncio.timeout(20):
+            while True:
+                for scope in (tenant, peer):
+                    for kind in ("agent", "model"):
+                        while service.apply_batch(scope, kind):
+                            pass
+                count = service.es.count(index=f"{FACTS}-*", ignore_unavailable=True)["count"]
+                if count == len(events):
+                    break
+                await asyncio.sleep(0.1)
+        for scope in (tenant, peer):
+            for kind in ("agent", "model"):
+                service.publish(scope, kind)
+
+    monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
+    monkeypatch.setattr(environment, "MONITORING_PROVIDER", "otlp")
+    from ops.api import application
+
+    monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+    principals = {"Bearer ops": ("operator", tenant, "OPS"), "Bearer admin": ("admin", tenant, "SU")}
+    monkeypatch.setattr(auth, "get_current_user_context", principals.__getitem__)
+    monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}, "SU": {"ops.dashboard:read"}})
+    monkeypatch.setattr(rbac, "_INITIALIZED", True)
+    app = application.create_app()
+    app.state.monitoring = service
+    selection = {"start_date": first.isoformat(), "end_date": last.isoformat(), "group_ids": [12]}
+    expected = {
+        ("total_tokens", False): [25, 26, 22, 21, 23, 24],
+        ("total_tokens", True): [21, 23, 22, 25, 26, 24],
+        ("success_rate", False): [25, 21, 22, 23, 24, 26],
+        ("success_rate", True): [22, 23, 21, 25, 24, 26],
+    }
+    evidence = {}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
+        async def read(actor="ops", **params):
+            return await client.get("/ops/v1/monitoring/agents", params={**selection, **params},
+                                    headers={"Authorization": f"Bearer {actor}"})
+
+        for (metric, descending), order in expected.items():
+            response = await read(sort_by=metric, descending=descending)
+            assert response.status_code == 200
+            body = response.json()
+            rows = body["data"]["items"]
+            assert [row["agent_id"] for row in rows] == order
+            assert {row["tenant_id"] for row in rows} == {tenant}
+            assert body["data"]["total"] == body["data"]["current_agent_count"] == 6
+            lookup = {row["agent_id"]: row for row in rows}
+            assert lookup[21]["tokens"]["total_tokens"]["value"] == "14"
+            assert lookup[21]["metrics"]["success_rate"] == 0.25
+            assert lookup[22]["metrics"]["success_rate"] == 0.5
+            assert lookup[23]["tokens"]["total_tokens"]["coverage_rate"] == 0.5
+            assert lookup[24]["tokens"]["total_tokens"]["value"] is None
+            assert lookup[24]["tokens"]["total_tokens"]["known_count"] == 0
+            assert lookup[24]["tokens"]["total_tokens"]["eligible_count"] == 1
+            assert lookup[24]["metrics"]["success_rate"] is None
+            assert lookup[25]["tokens"]["total_tokens"]["value"] == "0"
+            assert lookup[25]["metrics"]["success_rate"] == 0
+            paged = []
+            for page in (1, 2):
+                part = await read(sort_by=metric, descending=descending, page=page, page_size=3)
+                assert part.status_code == 200
+                assert part.json() == (await read(
+                    sort_by=metric, descending=descending, page=page, page_size=3,
+                )).json()
+                paged.extend(part.json()["data"]["items"])
+            assert paged == rows
+            evidence[f"{metric}:{descending}"] = body
+
+        # Date and group changes must select statistics before computing the sort key.
+        prior = (await read(sort_by="total_tokens", end_date=first.isoformat())).json()["data"]["items"]
+        assert [row["agent_id"] for row in prior][:2] == [22, 21]
+        prior_rates = (await read(sort_by="success_rate", end_date=first.isoformat())).json()["data"]["items"]
+        assert [row["agent_id"] for row in prior_rates][:2] == [21, 22]
+        group = (await read(sort_by="total_tokens", group_ids=[99])).json()["data"]["items"]
+        assert group[0]["agent_id"] == 22 and group[0]["tokens"]["total_tokens"]["value"] == "999"
+        for metric in ("total_tokens", "success_rate"):
+            single = await read(sort_by=metric, agent_id=21)
+            assert single.status_code == 200 and single.json()["data"]["total"] == 1
+            assert single.json()["data"]["items"][0]["tokens"]["total_tokens"]["value"] == "14"
+            assert (await read(sort_by=metric, tenant_id=peer)).status_code == 403
+            foreign = await read("admin", sort_by=metric, tenant_id=peer)
+            assert foreign.status_code == 200
+            assert {(row["tenant_id"], row["agent_id"]) for row in foreign.json()["data"]["items"]} == {(peer, 11)}
+        global_tokens = (await read("admin", sort_by="total_tokens")).json()["data"]["items"]
+        assert [(row["tenant_id"], row["agent_id"]) for row in global_tokens][:3] == [
+            (tenant, 21), (tenant, 23), (peer, 11),
+        ]
+        global_rates = (await read("admin", sort_by="success_rate")).json()["data"]["items"]
+        assert [(row["tenant_id"], row["agent_id"]) for row in global_rates][:3] == [
+            (tenant, 22), (tenant, 23), (peer, 11),
+        ]
+    record_property("agent_list_sorting", json.dumps(evidence))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["normal_traced", "normal_untraced", "root_failed", "child_failed", "cancelled"])
 async def test_actual_jiuwen_agent_monitoring_pipeline(
     isolated_monitoring, monkeypatch, tmp_path, record_property, first_answer_clock, mode,
