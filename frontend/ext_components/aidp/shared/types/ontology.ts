@@ -31,6 +31,8 @@ export interface AidpOntologyEntityProperty {
   display_name?: string;
   /** AIDP storage type: str/string/float/datetime/list[str]. */
   data_type?: string;
+  /** AIDP persists any string range and returns it verbatim. */
+  range?: string | null;
   value?: string;
 }
 

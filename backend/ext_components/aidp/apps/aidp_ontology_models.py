@@ -26,6 +26,7 @@ class EntityPropertyRequest(BaseModel):
     api_name: str = Field(..., min_length=1)
     display_name: str | None = None
     data_type: str = Field("string", description="AIDP property data_type (str/string/float/datetime/list[str])")
+    range: str | None = Field(None, description="AIDP property range; any string")
     value: str | None = Field("", description="Property value; empty string is the only legal blank")
 
 

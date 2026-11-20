@@ -25,7 +25,6 @@ import {
 import type { Dayjs } from "dayjs";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   ENTITY_API_NAME_MAX_CHARS,
@@ -47,12 +46,14 @@ interface AidpOntologyEntityDrawerProps {
   onSaved: () => void;
 }
 
-type PropertyDataType = "string" | "float" | "datetime" | "list[str]";
+type PropertyDataType = "str" | "string" | "float" | "datetime" | "list[str]";
 
 interface PropertyFormValue {
   name: string;
   data_type: PropertyDataType;
   value?: string | string[] | number | Dayjs | null;
+  /** AIDP persists any string here and returns it verbatim. */
+  range?: string;
 }
 
 interface EntityFormValues {
@@ -76,6 +77,7 @@ const API_NAME_PATTERN = /^[A-Za-z](?:[A-Za-z0-9_]*[A-Za-z0-9])?$/;
 const API_NAME_HINT_KEY = "aidpKnowledge.ontologyEntityApiNameHint";
 
 const DATA_TYPE_OPTIONS: PropertyDataType[] = [
+  "str",
   "string",
   "float",
   "datetime",
@@ -329,6 +331,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           name: property.display_name || property.api_name,
           data_type: toDataType(property.data_type),
           value: property.value ?? "",
+          range: property.range ?? "",
         })),
     [entity?.properties]
   );
@@ -366,6 +369,9 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         display_name: property.name.trim(),
         data_type: toDataType(property.data_type),
         value: propertyValueToText(property.value) || "",
+        ...((property.range ?? "").trim()
+          ? { range: (property.range ?? "").trim() }
+          : {}),
       }));
     // Synonyms are a `synonym` property in the confirmed AIDP contract, not a
     // relation; keep the select but fold it into the property list on save.
@@ -636,9 +642,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             <div className={styles.sectionTitle}>
               {t("aidpKnowledge.ontologyEntityRelations")}
             </div>
-            <AidpOntologyGapNote>
-              {t("aidpKnowledge.ontologyEntityRelationGap")}
-            </AidpOntologyGapNote>
             <Form.Item
               name="demo_parents"
               label={t("aidpKnowledge.ontologyEntityParent")}
@@ -718,6 +721,9 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                     <span>
                       {t("aidpKnowledge.ontologyEntityPropertyValue")}
                     </span>
+                    <span>
+                      {t("aidpKnowledge.ontologyEntityPropertyRange")}
+                    </span>
                     <span aria-hidden="true" />
                   </div>
                 )}
@@ -784,6 +790,17 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                     >
                       <PropertyValueInput name={field.name} />
                     </Form.Item>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "range"]}
+                      className={styles.propertyDense}
+                    >
+                      <Input
+                        placeholder={t(
+                          "aidpKnowledge.ontologyEntityPropertyRangePlaceholder"
+                        )}
+                      />
+                    </Form.Item>
                     <Button
                       type="text"
                       aria-label={t("aidpKnowledge.ontologyRemoveProperty")}
@@ -802,6 +819,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                       name: "",
                       data_type: "string",
                       value: "",
+                      range: "",
                     })
                   }
                 >
