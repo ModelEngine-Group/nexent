@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 from datetime import datetime, timezone
 
@@ -8,9 +10,9 @@ from nexent.scheduler import (
     ExecutionLease,
     LeaseScheduler,
     ScheduleMode,
+    SchedulerConfig,
     ScheduleRuleType,
     ScheduleSpec,
-    SchedulerConfig,
     compute_next_fire_at,
 )
 from nexent.scheduler import triggers as trigger_engine

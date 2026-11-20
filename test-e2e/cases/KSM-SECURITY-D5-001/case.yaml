@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "stage": "D5",
+  "module": "RUNTIME-SANDBOX",
+  "case": {
+    "case_id": "KSM-SECURITY-D5-001",
+    "feature_id": "KSM-SYSTEM",
+    "business_rule_ids": [
+      "KSM-SYSTEM-R1",
+      "KSM-SYSTEM-R3"
+    ],
+    "title": "Kubernetes SYSTEM enforces identity, TLS, RBAC and network boundaries",
+    "type": "SECURITY",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Kubernetes SYSTEM enforces identity, TLS, RBAC and network boundaries",
+    "preconditions": [
+      "A test cluster enforces NetworkPolicy and CSI RWX semantics; current images and Runtime SA are deployed."
+    ],
+    "test_data": {
+      "resource_prefix": "ksm-disposable",
+      "profile": "controlled model; real Kubernetes/Redis/storage"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Inspect Runtime SA permissions and try denied cluster-wide, secret and foreign namespace operations.",
+        "expected": "Only namespace-scoped required Pod/Service/exec operations are granted; sandbox has no service-account token."
+      },
+      {
+        "order": 2,
+        "action": "Inspect and probe execution UID, volumes, capabilities, TLS certificate and generation changes.",
+        "expected": "Nonroot execution, no host socket/privileged/hostNetwork, pinned public certificate and correct SAN are enforced; Pod/container replacement invalidates old connections."
+      },
+      {
+        "order": 3,
+        "action": "Probe denied external egress and allowed DNS, owner callback and Gateway channels; measure idle and representative load.",
+        "expected": "Network policy preserves control channels and denies configured external traffic; configured CPU/memory limits differ from measured consumption."
+      },
+      {
+        "order": 4,
+        "action": "Attempt traversal, profile conflict and foreign resource adoption, then restore the baseline fixture.",
+        "expected": "All attempts fail conservatively and the Docker compatibility baseline remains available."
+      }
+    ],
+    "expected_results": [
+      "Zero unauthorized access, plaintext connections, foreign resource adoption or profile changes.",
+      "Record Runtime/sandbox CPU, RSS, kernel count and Pod count for idle, Python, parent/child and representative scripts; no invented performance SLA."
+    ],
+    "forbidden_side_effects": [
+      "No token/key leakage into Redis, labels, annotations, logs or evidence.",
+      "No database tables, SQL migrations or new sandbox capability is introduced."
+    ],
+    "risk_type": "SECURITY",
+    "risk": "Execution or management identity escapes its owner or silently loses isolation.",
+    "condition": [
+      "Real enforced network and storage boundaries; attempt negative access and resource replacement."
+    ],
+    "metrics": [
+      "Unauthorized operation count",
+      "Measured CPU/memory and configured limits",
+      "Certificate and resource generation"
+    ],
+    "thresholds": [
+      "Unauthorized operations and leaked secrets equal zero.",
+      "One ready SYSTEM sandbox per owner and no plaintext control connection."
+    ],
+    "recovery_expectations": [
+      "Discard stale connection trust after replacement; never transparently replay business code.",
+      "Remove only UID-matched fixture resources and restore Docker fixture mode."
+    ],
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ],
+      "timeout_seconds": 900
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Complete the declared boundary and enforce all forbidden effects.",
+        "steps": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}

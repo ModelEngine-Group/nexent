@@ -729,6 +729,28 @@ async def test_prepared_conversation_cannot_export_unowned_message_boundary(mock
     compile_run.assert_not_called()
 
 
+@pytest.mark.parametrize("records", [
+    [],
+    [
+        {"record_type": "tool_result", "content": "42", "tool_call_id": "call-1", "invocation_id": "parent"},
+        {"record_type": "execution_logs", "content": None, "tool_call_id": None, "invocation_id": None},
+    ],
+])
+def test_prepared_conversation_preserves_authorized_execution_history(records):
+    from contracts.agentos import PreparedConversationHistory
+
+    turn = {"user_message": "request", "assistant_final_answer": "answer",
+            "user_message_id": 21, "assistant_message_id": 22}
+    if records:
+        turn["execution_records"] = records
+    history = evaluation_snapshot._prepare_conversation_history(
+        {"conversation_turns": [turn]}, "actor", "tenant",
+    )
+    payload = PreparedConversationHistory.model_validate_json(history.model_dump_json())
+    restored = prepared_evaluation._restore_conversation_history(payload, ServicePrincipal("actor", "tenant"))
+    assert restored["conversation_turns"][0].get("execution_records", []) == records
+
+
 def test_prepared_conversation_rejects_foreign_history_attachment():
     from contracts.agentos import PreparedConversationHistory
     from contracts.constants.environment import MINIO_DEFAULT_BUCKET

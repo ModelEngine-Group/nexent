@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "KSM-S1-001",
+    "change_type": "requirement",
+    "requirement_id": "KSM-S1-001",
+    "title": "Implement S1 Kubernetes SYSTEM execution and safe Runtime lifecycle",
+    "description": "Complete T02-T07 against the approved S1 SPEC, retaining Docker and public contracts with no new database tables.",
+    "affected_features": {
+      "existing": [
+        "KSM-CONFIG",
+        "SAI-001",
+        "TFP-001"
+      ],
+      "added": [
+        "KSM-SYSTEM"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "SAI-D3-001",
+        "TFP-D3-001"
+      ],
+      "added": [
+        "KSM-EXECUTION-D3-001",
+        "KSM-FILES-D3-001",
+        "KSM-DOWNLOAD-D4-001",
+        "KSM-SECURITY-D5-001",
+        "KSM-MULTIRUNTIME-D5-001"
+      ],
+      "modified": [],
+      "retired": [
+        "KSM-DRAIN-D2-001"
+      ]
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "test_selectors": [
+        "test/backend/agents/test_distributed_execution_registry.py",
+        "test/backend/agents/test_kubernetes_workspace.py",
+        "test/backend/agents/test_kubernetes_workspace_materials.py",
+        "test/backend/agents/test_owned_evaluation_admission.py",
+        "test/backend/agents/test_runtime_distributed_admission.py",
+        "test/backend/agents/test_sandbox_coordination.py",
+        "test/backend/agents/test_sandbox_coordination_boundaries.py",
+        "test/backend/agents/test_sandbox_journal_integrity.py",
+        "test/backend/agents/test_sandbox_runtime_wiring.py",
+        "test/backend/agents/test_runtime_state_protocol.py",
+        "test/backend/agents/test_runtime_execution_identity.py",
+        "test/backend/agents/test_sandbox_deployment_config.py",
+        "test/backend/agents/test_sandbox_owner.py",
+        "test/backend/agents/test_sandbox_recovery.py",
+        "test/backend/agents/test_sandbox_run_lifecycle.py",
+        "test/backend/agents/test_sandbox_stream_state.py",
+        "test/backend/app/test_agent_evaluation_runtime_app.py",
+        "test/backend/services/test_agent_automation_scheduler.py",
+        "test/backend/services/test_agent_automation_runner.py",
+        "test/backend/services/test_agent_evaluation_service.py",
+        "test/backend/services/test_agent_run_identity.py",
+        "test/backend/utils/test_trajectory_lifespan.py",
+        "test/backend/services/test_agent_subscription_lifecycle.py",
+        "test/backend/app/test_health_app.py",
+        "test/backend/apps/test_sandbox_callbacks.py",
+        "test/backend/database/test_runtime_owned_recovery.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_callbacks.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_contracts.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_exec.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_lifetime.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_pool.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_resources.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_runner.py",
+        "test/sdk/core/agents/test_kubernetes_sandbox_startup.py",
+        "test/sdk/core/agents/test_kubernetes_termination_proof.py",
+        "test/sdk/core/agents/test_jiuwen_runtime_lifecycle.py",
+        "test/sdk/core/agents/test_nexent_agent_sandbox_construction.py",
+        "test/sdk/core/agents/test_sandbox_channel_readiness.py",
+        "test/sdk/core/agents/test_subagent_resource_ownership.py",
+        "test/sdk/scheduler/test_core.py",
+        "test/backend/agents/test_runtime_cancel_generation.py",
+        "test/backend/agents/test_runtime_config_cancel.py",
+        "test/backend/apps/test_runtime_admission_api.py",
+        "test/backend/agents/test_runtime_admission.py"
+      ],
+      "behaviors": [
+        "Pod identity/profile/conflict/response-loss and pinned TLS generation.",
+        "Owner/run workspace permissions, protected exact associations and scoped cleanup. Sealed workspace UT fixtures remove their own read-only trees after assertions so repeated Linux runner Checkouts can clean .pytest-tmp.",
+        "Kernel/script compatibility, callback authentication/context lifetime and no replay.",
+        "Redis compare-token admission/renewal/generation, compact replay fenced to the admitted run, both recovery paths and existing shutdown compatibility; graceful drain removed by user.",
+        "Keep reservation while real native children, callbacks, kernels or uncertain script exec can still act; definitive exit releases only its own holder.",
+        "Preserve develop's Jiuwen tool cancellation lifetime, returned awaitables and explicit local fallback mapping; choose script runner from the actual executor backend."
+      ],
+      "reason": "Existing Docker SAI/TFP tests do not exercise Kubernetes, distributed reservation or coordination failure. Keep isolated tests in UT; no duplicate new D1."
+    },
+    "notes": "Primary responsibility sandbox. Integrated a2f137126 then be2e2caa8 onto develop 3bcd558ac on 2026-11-18, adapting to the split SDK, Jiuwen and trajectory lifecycle. SYSTEM is the supported Kubernetes scope; SESSION and actual Runtime autoscaling joint acceptance remain future work. Single-node Docker Desktop verification does not establish multi-node/CSI behavior. The earlier real NetworkPolicy negative probe failed because denied Pod HTTP still returned 200; no CNI change is authorized and network enforcement is not accepted. Owned D3-D5 implementations and preparation/cleanup bindings now exist. Five corresponding assets are registered in the external V5 suite, including PW-KSM-DOWNLOAD-001; structural registration is separate from business execution. Full-tree strict validation has the same four unrelated NB issues as the complete develop baseline. Current integration execution evidence and remaining acceptance gaps are recorded in the external PR report. The user removed graceful scale-in/restart completion on 2026-11-13; keep KSM-DRAIN-D2-001 retired and preserve live-run ownership and coordination failure protection. Historical drain passes are not current acceptance."
+  }
+}

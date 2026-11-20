@@ -36,6 +36,10 @@ class GatewayIdentityMiddleware:
         if self.audience == "runtime" and PRINCIPAL_KEY in scope:
             # AgentOSMiddleware already checked the operation and exact body.
             return await self.app(scope, receive, send)
+        if (self.audience == "runtime" and scope["type"] == "http"
+                and method == "POST" and path == "/internal/sandbox/tool-invoke"):
+            # The owner Runtime's callback registry verifies the invocation capability.
+            return await self.app(scope, receive, send)
         try:
             if (self.audience == "runtime" and self.internal_runtime_request is not None
                     and self.internal_runtime_request(method, path)):

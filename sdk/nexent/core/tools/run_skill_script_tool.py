@@ -8,10 +8,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents.tools import Tool
 
+from nexent.core.agents.sandbox_callbacks import SandboxCallbackPublicError
+
 logger = logging.getLogger(__name__)
 
 
-class SkillScriptExecutionError(RuntimeError):
+class SkillScriptExecutionError(SandboxCallbackPublicError):
     """Raised when a sandboxed skill script exits unsuccessfully."""
 
 

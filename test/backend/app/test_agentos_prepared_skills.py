@@ -50,8 +50,9 @@ def skill_snapshot(mocker, tmp_path):
     tools = [
         ("RunSkillScriptTool", "run_skill_script", {"workspace_path": None, "authorized_skill_names": ["summarize"],
                                                    "isolated_skills_root": False}),
-        ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False}),
-        ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": row["config"]}}),
+        ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False, "authorized_skill_names": ["summarize"]}),
+        ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": row["config"]},
+                                                      "authorized_skill_names": ["summarize"]}),
     ]
     agent = AgentConfig(
         agent_id=7, version_no=2, name="evaluation", description="", model_name=binding.cite_name,
@@ -118,9 +119,14 @@ def test_evaluation_skill_snapshot_authorizes_and_pins_local_files(skill_snapsho
     runtime_read.assert_called_once_with(7, 2, actor.tenant_id)
 
 
-def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot):
+@pytest.mark.parametrize(("tool_index", "key", "value"), [
+    (1, "local_skills_dir", "/wrong-source"),
+    (1, "authorized_skill_names", ["other"]),
+    (2, "authorized_skill_names", ["summarize", "other"]),
+])
+def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot, tool_index, key, value):
     agent, binding, *_ = skill_snapshot
-    agent.tools[1].params["local_skills_dir"] = "/wrong-source"
+    agent.tools[tool_index].params[key] = value
     assert evaluation_snapshot.export_snapshot(
         agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
     ) is None

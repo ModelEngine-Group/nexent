@@ -833,8 +833,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         for class_name, name, params in [
             ("RunSkillScriptTool", "run_skill_script",
              {"workspace_path": None, "isolated_skills_root": False, "authorized_skill_names": ["summarize"]}),
-            ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False}),
-            ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": skill["config"]}}),
+            ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False,
+                                                 "authorized_skill_names": ["summarize"]}),
+            ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": skill["config"]},
+                                                         "authorized_skill_names": ["summarize"]}),
         ]
     ]
 
@@ -1533,12 +1535,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         }],
     }])
 
+    execution_records = [{"record_type": "tool_result", "content": "previous tool output",
+                          "tool_call_id": "completed-call", "invocation_id": None}]
+
     def read_history(conversation_id, boundary_id, user_id, tenant_id):
         assert (conversation_id, boundary_id, user_id, tenant_id) == (42, 23, actor.user_id, actor.tenant_id)
         return {
             "history_summary": {"unit_id": 51, "summary": {"markdown": "earlier"}, "covered_through_message_id": 20},
             "conversation_turns": [{"user_message": "previous query", "assistant_final_answer": "previous answer",
-                                    "user_message_id": 21, "assistant_message_id": 22, "attachments": None}],
+                                    "user_message_id": 21, "assistant_message_id": 22, "attachments": None,
+                                    "execution_records": execution_records}],
         }
 
     monkeypatch.setattr(evaluation_snapshot, "get_historical_context", read_history)
@@ -1579,6 +1585,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         assert info.model_config_list[0].enable_thinking is True
         assert "temperature" not in info.model_config_list[0].extra_body
         assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
+        assert info.context_input.items[-1].content["execution_records"] == execution_records
         memory_item = next(item for item in info.context_input.items if item.id == "memory:0")
         assert memory_item.content["memory"] == "authorized preference"
         store, = info.agent_config.tools
