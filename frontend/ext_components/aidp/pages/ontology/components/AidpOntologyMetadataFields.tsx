@@ -21,7 +21,6 @@ import {
   Skeleton,
   Space,
   Table,
-  Tag,
   Tooltip,
   type TableColumnsType,
 } from "antd";
@@ -1042,22 +1041,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               bordered
               items={detailItems}
             />
-            <div>
-              <div className={styles.detailSectionTitle}>
-                {t("aidpKnowledge.ontologyMetadataCandidates")}
-              </div>
-              {demo && (detailField.candidates ?? []).length > 0 ? (
-                <div className={tableStyles.metadataTags}>
-                  {(detailField.candidates ?? []).map((item) => (
-                    <Tag key={item} className={tableStyles.metadataTag}>
-                      {item}
-                    </Tag>
-                  ))}
-                </div>
-              ) : (
-                <span className={styles.muted}>—</span>
-              )}
-            </div>
             <AidpOntologyGapNote>
               {t("aidpKnowledge.ontologyMetadataDetailGap")}
             </AidpOntologyGapNote>

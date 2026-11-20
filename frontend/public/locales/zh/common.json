@@ -2206,7 +2206,6 @@
   "aidpKnowledge.ontologyMetadataBatchUnbindTitle": "解除选中字段与 Chunk 的关联？",
   "aidpKnowledge.ontologyMetadataChunkCountValue": "{{count}} 个",
   "aidpKnowledge.ontologyMetadataClearSelection": "取消选择",
-  "aidpKnowledge.ontologyMetadataColumnCandidates": "候选值",
   "aidpKnowledge.ontologyMetadataColumnChunkCount": "关联 Chunk 数",
   "aidpKnowledge.ontologyMetadataColumnCreateTime": "创建时间",
   "aidpKnowledge.ontologyMetadataColumnId": "元数据 ID",

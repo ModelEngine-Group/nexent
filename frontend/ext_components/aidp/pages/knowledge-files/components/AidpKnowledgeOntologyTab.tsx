@@ -206,22 +206,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
         ),
     },
     {
-      title: t("aidpKnowledge.ontologyMetadataColumnCandidates"),
-      key: "candidates",
-      render: (_value, record) =>
-        demo && (record.candidates ?? []).length > 0 ? (
-          <div className={tableStyles.metadataTags}>
-            {(record.candidates ?? []).slice(0, 3).map((item) => (
-              <Tag key={item} className={tableStyles.metadataTag}>
-                {item}
-              </Tag>
-            ))}
-          </div>
-        ) : (
-          "—"
-        ),
-    },
-    {
       title: t("aidpKnowledge.ontologyMetadataColumnChunkCount"),
       key: "chunk",
       width: 150,

@@ -2206,7 +2206,6 @@
   "aidpKnowledge.ontologyMetadataBatchUnbindTitle": "Unbind the selected fields from chunks?",
   "aidpKnowledge.ontologyMetadataChunkCountValue": "{{count}}",
   "aidpKnowledge.ontologyMetadataClearSelection": "Clear selection",
-  "aidpKnowledge.ontologyMetadataColumnCandidates": "Candidates",
   "aidpKnowledge.ontologyMetadataColumnChunkCount": "Linked chunks",
   "aidpKnowledge.ontologyMetadataColumnCreateTime": "Created at",
   "aidpKnowledge.ontologyMetadataColumnId": "Metadata ID",
