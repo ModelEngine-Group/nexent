@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -159,7 +159,17 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [relationSearch, setRelationSearch] = useState("");
+  const [relationKeyword, setRelationKeyword] = useState("");
   const editing = !!entity;
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setRelationKeyword(relationSearch.trim()),
+      300
+    );
+    return () => window.clearTimeout(timer);
+  }, [relationSearch]);
 
   const handleClose = () => {
     setErrorMessage(null);
@@ -169,8 +179,19 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
   };
 
   const allEntitiesQuery = useQuery({
-    queryKey: [...scope.key, "ontology-entity-options", domainId],
-    queryFn: () => aidpOntologyService.listEntities(domainId, 1, 100),
+    queryKey: [
+      ...scope.key,
+      "ontology-entity-options",
+      domainId,
+      relationKeyword,
+    ],
+    queryFn: () =>
+      aidpOntologyService.listEntities(
+        domainId,
+        1,
+        100,
+        relationKeyword || undefined
+      ),
     enabled: scope.enabled && open,
     staleTime: 30_000,
     retry: false,
@@ -202,6 +223,26 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         .filter((item) => item.value),
     [allEntitiesQuery.data?.value]
   );
+
+  const initialParentIds = useMemo(
+    () =>
+      (entity?.parent_entities ?? []).map(relationId).filter(Boolean).sort(),
+    [entity?.parent_entities]
+  );
+  const initialChildIds = useMemo(
+    () => (entity?.child_entities ?? []).map(relationId).filter(Boolean).sort(),
+    [entity?.child_entities]
+  );
+
+  const relationConflictRule = (peer: "demo_parents" | "demo_children") => ({
+    validator: async (_rule: unknown, value?: string[]) => {
+      const selected = (value ?? []).filter(Boolean);
+      const other = (form.getFieldValue(peer) ?? []) as string[];
+      if (selected.some((item) => other.includes(item))) {
+        throw new Error(t("aidpKnowledge.ontologyEntityRelationConflict"));
+      }
+    },
+  });
 
   const initialProperties = useMemo<PropertyFormValue[]>(
     () =>
@@ -251,13 +292,21 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     setErrorMessage(null);
     try {
       if (entity?.entity_id) {
+        const parentIdsChanged =
+          JSON.stringify([...parentIds].sort()) !==
+          JSON.stringify(initialParentIds);
+        const childIdsChanged =
+          JSON.stringify([...childIds].sort()) !==
+          JSON.stringify(initialChildIds);
         await aidpOntologyService.updateEntity(domainId, entity.entity_id, {
           display_name: name,
           description: values.description?.trim() ?? "",
           properties,
           primary_properties: properties.map((item) => item.api_name),
-          parent_entities: parentIds,
-          child_entities: childIds,
+          // Only send relation fields that actually changed so a plain edit
+          // does not trigger an extra Relations read/write round trip.
+          ...(parentIdsChanged ? { parent_entities: parentIds } : {}),
+          ...(childIdsChanged ? { child_entities: childIds } : {}),
         });
         message.success(t("aidpKnowledge.ontologyEntityUpdated"));
       } else {
@@ -404,6 +453,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           <Form.Item
             name="demo_parents"
             label={t("aidpKnowledge.ontologyEntityParent")}
+            rules={[relationConflictRule("demo_children")]}
           >
             <Select
               mode="multiple"
@@ -411,7 +461,8 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               maxCount={RELATION_LIMIT.parent}
               options={relationOptions}
               placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
-              optionFilterProp="label"
+              filterOption={false}
+              onSearch={setRelationSearch}
             />
           </Form.Item>
           <Form.Item
@@ -424,12 +475,14 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               maxCount={RELATION_LIMIT.synonym}
               options={synonymOptions}
               placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
-              optionFilterProp="label"
+              filterOption={false}
+              onSearch={setRelationSearch}
             />
           </Form.Item>
           <Form.Item
             name="demo_children"
             label={t("aidpKnowledge.ontologyEntityChild")}
+            rules={[relationConflictRule("demo_parents")]}
           >
             <Select
               mode="multiple"
@@ -437,7 +490,8 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               maxCount={RELATION_LIMIT.child}
               options={relationOptions}
               placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
-              optionFilterProp="label"
+              filterOption={false}
+              onSearch={setRelationSearch}
             />
           </Form.Item>
         </section>
@@ -540,7 +594,6 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
                     </Form.Item>
                     <Button
                       type="text"
-                      danger
                       aria-label={t("aidpKnowledge.ontologyRemoveProperty")}
                       icon={<DeleteOutlined />}
                       onClick={() => remove(field.name)}

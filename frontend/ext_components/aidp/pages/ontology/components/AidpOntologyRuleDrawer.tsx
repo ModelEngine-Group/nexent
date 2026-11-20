@@ -590,7 +590,6 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                             </Form.Item>
                             <Button
                               type="text"
-                              danger
                               aria-label={t(
                                 "aidpKnowledge.ontologyRulesRemoveCondition"
                               )}

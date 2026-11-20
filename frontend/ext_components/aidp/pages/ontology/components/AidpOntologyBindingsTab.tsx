@@ -176,7 +176,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
       width: 560,
       okText: t("aidpKnowledge.ontologyBindingCancelConfirm"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: () => removeBindings(rows),
     });

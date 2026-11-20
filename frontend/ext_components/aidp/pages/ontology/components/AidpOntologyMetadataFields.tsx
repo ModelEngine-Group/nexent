@@ -372,7 +372,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       ),
       okText: t("aidpKnowledge.ontologyMetadataDeleteSubmit"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         try {
@@ -430,7 +429,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       ),
       okText: t("aidpKnowledge.ontologyMetadataDeleteSubmit"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         setSaving(true);
@@ -555,7 +553,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           <Button
             type="link"
             size="small"
-            danger
             disabled={!canManage}
             onClick={() => handleDelete(record)}
           >
@@ -629,7 +626,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         />
         <div className={tableStyles.toolbarActions}>
           <Button
-            danger
             loading={saving}
             disabled={!canManage || selectedFields.length === 0}
             onClick={handleBatchDelete}

@@ -208,12 +208,14 @@ const AidpOntologyListPage: React.FC = () => {
     }
   };
 
-  const submitSearch = () => {
-    const next = searchInput.trim();
-    if (next === search) return;
-    setSearch(next);
-    setPage(1);
-  };
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setSearch((current) => (current === next ? current : next));
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
   const queryKey = useMemo(
     () => [...scope.key, "ontology-domains", { page, pageSize, search }],
@@ -586,14 +588,7 @@ const AidpOntologyListPage: React.FC = () => {
               placeholder={t("aidpKnowledge.ontologyDomainSearchPlaceholder")}
               prefix={<SearchOutlined />}
               value={searchInput}
-              onChange={(event) => {
-                setSearchInput(event.target.value);
-                if (!event.target.value) {
-                  setSearch("");
-                  setPage(1);
-                }
-              }}
-              onPressEnter={submitSearch}
+              onChange={(event) => setSearchInput(event.target.value)}
             />
             <div className={styles.toolbarActions}>
               <Button

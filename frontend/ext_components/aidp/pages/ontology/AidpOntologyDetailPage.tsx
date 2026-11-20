@@ -7,10 +7,17 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, ConfigProvider, Dropdown, Skeleton, Tabs } from "antd";
+import {
+  Alert,
+  Breadcrumb,
+  Button,
+  ConfigProvider,
+  Dropdown,
+  Skeleton,
+  Tabs,
+} from "antd";
 import {
   ApartmentOutlined,
-  ArrowLeftOutlined,
   ClockCircleOutlined,
   DatabaseOutlined,
   EditOutlined,
@@ -77,7 +84,7 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
   const scope = useAidpQueryScope();
   const demo = useAidpOntologyDemoMode();
   const [activeTab, setActiveTab] = useState<DetailTab>(
-    createAction === "entity" ? "entities" : "metadata"
+    createAction === "metadata" ? "metadata" : "entities"
   );
   const [pendingCreate, setPendingCreate] = useState<DetailCreateAction | null>(
     createAction ?? null
@@ -167,6 +174,27 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
         )}
         {domain && (
           <>
+            <Breadcrumb
+              items={[
+                {
+                  title: (
+                    <Link
+                      href={`/${locale}/knowledges/ontology`}
+                      className={typography.breadcrumbLink}
+                    >
+                      {t("aidpKnowledge.ontologyTitle")}
+                    </Link>
+                  ),
+                },
+                {
+                  title: (
+                    <span className={typography.pageTitle}>
+                      {t("aidpKnowledge.ontologyDetailBreadcrumb")}
+                    </span>
+                  ),
+                },
+              ]}
+            />
             <header className={styles.hero}>
               <div className={styles.heroTop}>
                 <span className={styles.heroIcon} aria-hidden="true">
@@ -174,13 +202,6 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
                 </span>
                 <div className={styles.heroText}>
                   <div className={styles.titleRow}>
-                    <Link
-                      href={`/${locale}/knowledges/ontology`}
-                      className={styles.backButton}
-                      aria-label={t("aidpKnowledge.ontologyBackToList")}
-                    >
-                      <ArrowLeftOutlined />
-                    </Link>
                     <h1 className={typography.pageTitle}>{domain.name}</h1>
                     <Button
                       type="text"
@@ -195,14 +216,6 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
                     <p className={styles.description}>
                       {domain.description || "—"}
                     </p>
-                    <Button
-                      type="text"
-                      size="small"
-                      className={styles.titleEdit}
-                      aria-label={t("aidpKnowledge.ontologyEdit")}
-                      icon={<EditOutlined />}
-                      onClick={() => setEditOpen(true)}
-                    />
                   </div>
                 </div>
                 <div className={styles.heroActions}>
@@ -309,12 +322,12 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
               onChange={(key) => setActiveTab(key as DetailTab)}
               items={[
                 {
-                  key: "metadata",
-                  label: t("aidpKnowledge.ontologyTabMetadata"),
-                },
-                {
                   key: "entities",
                   label: t("aidpKnowledge.ontologyTabEntities"),
+                },
+                {
+                  key: "metadata",
+                  label: t("aidpKnowledge.ontologyTabMetadata"),
                 },
                 {
                   key: "rules",

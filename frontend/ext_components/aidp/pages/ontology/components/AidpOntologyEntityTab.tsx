@@ -21,7 +21,6 @@ import {
   type TableColumnsType,
 } from "antd";
 import {
-  DownloadOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -189,7 +188,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       width: 500,
       okText: t("aidpKnowledge.ontologyDelete"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         try {
@@ -277,7 +275,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       ),
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         const outcomes = await Promise.allSettled(
@@ -304,21 +301,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         refresh();
       },
     });
-  };
-
-  const handleExport = () => {
-    const blob = new Blob([JSON.stringify(filteredEntities, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `ontology-${domainId}-entities.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-    message.success(t("aidpKnowledge.ontologyEntityExportDone"));
   };
 
   const columns: TableColumnsType<AidpOntologyEntity> = [
@@ -398,7 +380,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
           {
             title: headerHint(
               t("aidpKnowledge.ontologyEntityParent"),
-              t("aidpKnowledge.ontologyEntityRelationHint")
+              t("aidpKnowledge.ontologyEntityParentHint")
             ),
             key: "parents",
             width: 130,
@@ -412,7 +394,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
           {
             title: headerHint(
               t("aidpKnowledge.ontologyEntitySynonym"),
-              t("aidpKnowledge.ontologyEntityRelationHint")
+              t("aidpKnowledge.ontologyEntitySynonymHint")
             ),
             key: "synonyms",
             width: 140,
@@ -426,7 +408,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
           {
             title: headerHint(
               t("aidpKnowledge.ontologyEntityChild"),
-              t("aidpKnowledge.ontologyEntityRelationHint")
+              t("aidpKnowledge.ontologyEntityChildHint")
             ),
             key: "children",
             width: 140,
@@ -482,7 +464,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             <Button
               type="link"
               size="small"
-              danger
               disabled={!canManage || !record.entity_id}
               onClick={() => handleDelete(record)}
             >
@@ -581,7 +562,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         />
         <div className={styles.toolbarActions}>
           <Button
-            danger
             disabled={!canManage || selectedKeys.length === 0}
             onClick={handleBatchDelete}
           >
@@ -608,14 +588,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             icon={<ReloadOutlined spin={query.isFetching} />}
             onClick={refresh}
           />
-          <Tooltip title={t("aidpKnowledge.ontologyEntityExport")}>
-            <Button
-              aria-label={t("aidpKnowledge.ontologyEntityExport")}
-              icon={<DownloadOutlined />}
-              disabled={entities.length === 0}
-              onClick={handleExport}
-            />
-          </Tooltip>
           <Dropdown
             trigger={["click"]}
             menu={{

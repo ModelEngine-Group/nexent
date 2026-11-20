@@ -30,7 +30,7 @@ export default function AidpOntologyPage() {
   if (!enableAidpKnowledge) return null;
 
   return (
-    <div style={{ width: "100%", height: "100%", padding: "0 20px" }}>
+    <div style={{ width: "100%", height: "100%", padding: "0 24px" }}>
       <div className="mt-4 flex h-full min-h-0 w-full flex-col">
         <AidpOntologyListPage />
       </div>

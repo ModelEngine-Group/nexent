@@ -311,7 +311,6 @@ const AidpOntologyChunkAnnotateDrawer: React.FC<
                     )}
                     <Button
                       type="text"
-                      danger
                       aria-label={t("aidpKnowledge.ontologyRemoveAssignment")}
                       icon={<DeleteOutlined />}
                       onClick={() => removeRow(row.key)}

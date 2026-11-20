@@ -210,7 +210,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       width: 480,
       okText: t("aidpKnowledge.ontologyDelete"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         try {
@@ -252,7 +251,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       width: 520,
       okText: t("aidpKnowledge.ontologyDelete"),
       cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
       centered: true,
       onOk: async () => {
         const outcomes = await Promise.allSettled(
@@ -413,7 +411,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
           <Button
             type="link"
             size="small"
-            danger
             disabled={!canManage}
             onClick={() => handleDelete(record)}
           >
@@ -504,7 +501,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
         />
         <div className={styles.toolbarActions}>
           <Button
-            danger
             disabled={!canManage || selectedKeys.length === 0}
             onClick={handleBatchDelete}
           >

@@ -94,7 +94,6 @@ const AidpOntologyEntityDetailDrawer: React.FC<
               <Button
                 type="text"
                 size="small"
-                danger
                 aria-label={t("aidpKnowledge.ontologyDelete")}
                 icon={<DeleteOutlined />}
                 onClick={() => onDelete?.(entity)}
