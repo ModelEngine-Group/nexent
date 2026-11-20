@@ -318,6 +318,11 @@ class DownloadAidpDocumentRequest(BaseModel):
 _FOLDER_NAME_MAX_LENGTH = 255
 
 
+def _aidp_file_uuid(value: UUID) -> str:
+    """AIDP requires the 32-character hex form without hyphens."""
+    return value.hex
+
+
 def _normalize_folder_path(value: str, *, allow_root: bool = True) -> str:
     """Validate a knowledge-base-relative folder path.
 
@@ -340,6 +345,24 @@ def _normalize_folder_path(value: str, *, allow_root: bool = True) -> str:
             raise ValueError("the root folder cannot be used here")
         return "/"
     return normalized.rstrip("/")
+
+
+def _relative_path_to_directory(value: str) -> str:
+    """Convert the UI's file-relative path to AIDP's directory-only field.
+
+    The new AIDP ``relative_paths`` form field describes a directory, while
+    the Nexent drawer naturally produces a file-relative path such as
+    ``sub/a.md``. Drop the final filename and reject traversal segments. A
+    root-level file becomes the empty string, which AIDP treats as flat inside
+    the target folder.
+    """
+    normalized = (value or "").replace("\\", "/").strip().lstrip("/")
+    if not normalized:
+        return ""
+    segments = [segment for segment in normalized.split("/") if segment]
+    if any(segment in {".", ".."} for segment in segments):
+        raise ValueError("relative_paths must not contain '.' or '..'")
+    return "/".join(segments[:-1])
 
 
 def _normalize_folder_name(value: str) -> str:
@@ -1181,27 +1204,42 @@ async def upload_documents(
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
     normalized_target: str | None = None
+    normalized_relative_paths: list[str] | None = None
     if target_folder is not None:
         try:
             normalized_target = _normalize_folder_path(target_folder)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if relative_paths is not None and len(relative_paths) != len(files):
+
+    if relative_paths is not None:
+        if target_folder is None:
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths requires target_folder",
+            )
+        if len(relative_paths) != len(files):
             raise HTTPException(
                 status_code=422,
                 detail="relative_paths must have one entry per uploaded file",
             )
+        try:
+            normalized_relative_paths = [
+                _relative_path_to_directory(path) for path in relative_paths
+            ]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     valid_files, validation_failures = _validate_upload_files(files)
     # Validation drops files, so the relative paths have to follow the original
     # upload order instead of being zipped with the shortened list.
-    relative_by_file = {
-        id(file): relative_paths[index] if relative_paths else (file.filename or "unknown")
-        for index, file in enumerate(files)
-    }
+    valid_file_ids = {id(file) for file in valid_files}
     valid_relative_paths = (
-        [relative_by_file[id(file)] for file in valid_files]
-        if normalized_target is not None
+        [
+            path
+            for file, path in zip(files, normalized_relative_paths)
+            if id(file) in valid_file_ids
+        ]
+        if normalized_relative_paths is not None
         else None
     )
     server_url, api_key = _credentials()
@@ -1248,10 +1286,11 @@ async def get_folder_tree(
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     folder_path: Annotated[str, Query(description="Folder path; root is '/'")] = "/",
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 10,
     keyword: Annotated[str | None, Query(max_length=200)] = None,
     file_type: Annotated[str | None, Query(max_length=32)] = None,
     file_status: Annotated[str | None, Query(max_length=32)] = None,
+    include_files: Annotated[bool, Query(description="Include current folder files")] = True,
 ) -> JSONResponse:
     """Read one folder level: direct subfolders plus its paginated files."""
     user_id, tenant_id = await _auth(request)
@@ -1274,6 +1313,7 @@ async def get_folder_tree(
         keyword,
         file_type,
         file_status,
+        include_files,
         lane="control-io",
         owner="config",
     )
@@ -1398,7 +1438,7 @@ async def move_files(
         server_url,
         api_key,
         kds_id,
-        [str(file_uuid) for file_uuid in body.file_uuids],
+        [file_uuid.hex for file_uuid in body.file_uuids],
         body.target_folder,
         lane="control-io",
         owner="config",
@@ -1422,7 +1462,7 @@ async def rename_file(
         server_url,
         api_key,
         kds_id,
-        str(body.file_uuid),
+        body.file_uuid.hex,
         body.new_file_name,
         lane="control-io",
         owner="config",
@@ -1447,7 +1487,7 @@ async def remove_documents(
         server_url,
         api_key,
         kds_id,
-        [str(file_uuid) for file_uuid in body.file_uuids],
+        [file_uuid.hex for file_uuid in body.file_uuids],
         lane="control-io",
         owner="config",
     )
@@ -1474,7 +1514,7 @@ async def download_document(
         server_url,
         api_key,
         kds_id,
-        str(body.file_uuid),
+        body.file_uuid.hex,
     )
     response_headers = {
         "Content-Disposition": aidp_response.headers["Content-Disposition"],
@@ -1560,7 +1600,7 @@ async def preview_document(
         server_url,
         api_key,
         kds_id,
-        str(file_uuid),
+        file_uuid.hex,
     )
     return _stream_aidp_preview(aidp_response)
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
@@ -1737,7 +1777,7 @@ async def retry_upload_tasks(
     """Retry selected failed tasks; the upstream request always carries a UUID array."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-    file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
+    file_uuids = list(dict.fromkeys(file_uuid.hex for file_uuid in body.file_uuids))
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-retry-upload-tasks",

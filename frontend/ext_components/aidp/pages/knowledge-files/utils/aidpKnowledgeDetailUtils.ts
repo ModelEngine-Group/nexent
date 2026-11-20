@@ -139,6 +139,146 @@ export const documentStatusMeta = (
     : { code, labelKey: null, dotClass: "bg-gray-400" };
 };
 
+/**
+ * Folder/Files status contract (new AIDP API).
+ *
+ * The folder tree uses numeric 1–6. This is deliberately separate from the
+ * legacy document list's ``file_status`` (0/1/2) and from the upload-task
+ * vocabulary, where 4 means queued and 5 means graph failed.
+ */
+export interface AidpFolderTreeStatusPermissions {
+  canRename: boolean;
+  canMove: boolean;
+  canDelete: boolean;
+  canPreview: boolean;
+  canDownload: boolean;
+  canRetry: boolean;
+}
+
+export interface AidpFolderTreeStatusMeta extends AidpDocumentStatusMeta {
+  permissions: AidpFolderTreeStatusPermissions;
+}
+
+const NONE_PERMISSIONS: AidpFolderTreeStatusPermissions = {
+  canRename: false,
+  canMove: false,
+  canDelete: false,
+  canPreview: false,
+  canDownload: false,
+  canRetry: false,
+};
+
+const FOLDER_TREE_STATUS_META: Record<
+  number,
+  {
+    labelKey: string;
+    dotClass: string;
+    permissions: AidpFolderTreeStatusPermissions;
+  }
+> = {
+  1: {
+    labelKey: "aidpKnowledge.fileStatusIngested",
+    dotClass: "bg-green-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: true,
+      canDownload: true,
+      canRetry: false,
+    },
+  },
+  2: {
+    labelKey: "aidpKnowledge.fileStatusExtracting",
+    dotClass: "bg-blue-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: false,
+      canPreview: false,
+      canDownload: true,
+      canRetry: false,
+    },
+  },
+  3: {
+    labelKey: "aidpKnowledge.fileStatusFailed",
+    dotClass: "bg-red-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: false,
+      canDownload: true,
+      canRetry: true,
+    },
+  },
+  4: {
+    labelKey: "aidpKnowledge.fileStatusGraphFailed",
+    dotClass: "bg-orange-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: true,
+      canDownload: true,
+      canRetry: true,
+    },
+  },
+  5: {
+    labelKey: "aidpKnowledge.fileStatusRemoving",
+    dotClass: "bg-gray-400",
+    permissions: { ...NONE_PERMISSIONS },
+  },
+  6: {
+    labelKey: "aidpKnowledge.fileStatusRemoveFailed",
+    dotClass: "bg-red-500",
+    permissions: { ...NONE_PERMISSIONS, canDelete: true },
+  },
+};
+
+// Int 1–6 is the authoritative AIDP folder/file status. String aliases below
+// only keep older responses readable until AIDP finishes its status migration.
+const folderTreeStatusCode = (
+  status: AidpDocumentItem["status"]
+): number | null => {
+  if (typeof status === "number") {
+    return status >= 1 && status <= 6 ? status : null;
+  }
+  if (typeof status === "string") {
+    const trimmed = status.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const code = Number(trimmed);
+      return code >= 1 && code <= 6 ? code : null;
+    }
+    const aliases: Record<string, number> = {
+      COMPLETED: 1,
+      SUCCESS: 1,
+      PROCESSING: 2,
+      EXTRACTING: 2,
+      WAITING: 2,
+      FAILED: 3,
+      VECTOR_INGESTION_FAILED: 3,
+      GRAPH_INGESTION_FAILED: 4,
+      GRAPH_FAILED: 4,
+      REMOVING: 5,
+      DELETING: 5,
+      REMOVE_FAILED: 6,
+      DELETE_FAILED: 6,
+    };
+    return aliases[trimmed.toUpperCase()] ?? null;
+  }
+  return null;
+};
+
+export const folderTreeStatusMeta = (
+  status: AidpDocumentItem["status"]
+): AidpFolderTreeStatusMeta | null => {
+  const code = folderTreeStatusCode(status);
+  if (code === null) return null;
+  const meta = FOLDER_TREE_STATUS_META[code];
+  return meta ? { code, ...meta, permissions: meta.permissions } : null;
+};
+
 /** Normalize an ingested file's delete status to its numeric contract.
  *
  * AIDP reports ``file_status`` as ``0`` (ingested), ``1`` (deleting) or

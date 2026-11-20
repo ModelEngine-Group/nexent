@@ -157,6 +157,7 @@ export const file: AidpDocumentItem = {
   file_name: "guide.txt",
   file_type: "txt",
   file_size: 1024,
+  status: 1,
   created_at: "2026-10-01T10:00:00Z",
   updated_at: "2026-10-01T10:00:00Z",
 };
@@ -173,7 +174,11 @@ export const filesResponse = (items = [file], total = items.length) => ({
   has_more: false,
 });
 export const folderTreeResponse = (
-  folders: Array<{ folder_name: string; is_empty?: boolean }> = [],
+  folders: Array<{
+    folder_name: string;
+    folder_id?: number;
+    has_child_folders?: boolean;
+  }> = [],
   items = [file],
   total = items.length,
   pageSize = 10,

@@ -8,7 +8,6 @@ import {
   DeleteOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
-  UploadOutlined,
 } from "@ant-design/icons";
 
 import { AIDP_ACCEPT_STRING } from "@/ext_components/aidp/features/file-import/uploadConstants";
@@ -55,7 +54,7 @@ const SelectionRow: React.FC<{
 }> = ({ row, onRemove }) => {
   const { t } = useTranslation();
   return (
-    <div className={`${styles.fileRow} ${styles.dashedRow}`}>
+    <div className={`${styles.fileRow} ${styles.selectionRow}`}>
       <div className={styles.fileIcon} aria-hidden="true">
         <FileTextOutlined />
       </div>
@@ -63,12 +62,8 @@ const SelectionRow: React.FC<{
         <Tooltip title={row.relativePath}>
           <div className={styles.fileName}>{row.relativePath}</div>
         </Tooltip>
-        <Tooltip
-          title={`${formatBytes(row.file.size)} · ${t("uploadCenter.statusQueued")}`}
-        >
-          <div className={styles.fileDetail}>
-            {formatBytes(row.file.size)} · {t("uploadCenter.statusQueued")}
-          </div>
+        <Tooltip title={formatBytes(row.file.size)}>
+          <div className={styles.fileDetail}>{formatBytes(row.file.size)}</div>
         </Tooltip>
       </div>
       <Button
@@ -100,16 +95,10 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
   const [dragOver, setDragOver] = useState(false);
   const rowsRef = useRef<AidpDroppedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   const replaceRows = useCallback((next: AidpDroppedFile[]) => {
     rowsRef.current = next;
     setRows(next);
-  }, []);
-
-  useEffect(() => {
-    folderInputRef.current?.setAttribute("webkitdirectory", "");
-    folderInputRef.current?.setAttribute("directory", "");
   }, []);
 
   useEffect(() => {
@@ -272,6 +261,10 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
         }
       >
         <div className={styles.drawerBody}>
+          <div className={styles.importIntro}>
+            {t("aidpKnowledge.importDescription")}
+          </div>
+
           <div className={styles.targetSection}>
             <label className={styles.targetLabel} htmlFor="aidp-target-folder">
               <span className={styles.required}>*</span>
@@ -295,105 +288,68 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
                 {t("aidpKnowledge.browseFolder")}
               </Button>
             </div>
-            <div className={styles.targetHint}>
-              {t("aidpKnowledge.uploadTargetHint")}
-            </div>
           </div>
 
-          <div
-            className={`${styles.dropzone} ${dragOver ? styles.dropzoneActive : ""}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+          <div className={styles.uploadSection}>
+            <Button
+              autoInsertSpace={false}
+              className={styles.selectButton}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {t("aidpKnowledge.selectFiles")}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              accept={AIDP_ACCEPT_STRING}
+              onChange={handleFileInput}
+            />
+
+            <div
+              className={`${styles.dropArea} ${
+                dragOver ? styles.dropAreaActive : ""
+              }`}
+              onDragOver={(event) => {
                 event.preventDefault();
-                fileInputRef.current?.click();
-              }
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "copy";
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragOver(false);
-              void collectDroppedFiles(event.dataTransfer).then(addFiles);
-            }}
-          >
-            <UploadOutlined className={styles.dropzoneIcon} />
-            <div className={styles.dropzoneTitle}>
-              {t("aidpKnowledge.uploadHint")}
-            </div>
-            <div className={styles.dropzoneDescription}>
-              {t("aidpKnowledge.importDescription")}
-            </div>
-            <div className={styles.dropzoneNotes}>
-              <div>{t("aidpKnowledge.uploadHintCount")}</div>
-              <div>{t("aidpKnowledge.uploadHintSize")}</div>
-              <div className={styles.formats}>
+                event.dataTransfer.dropEffect = "copy";
+                setDragOver(true);
+              }}
+              onDragLeave={(event) => {
+                if (
+                  !event.currentTarget.contains(
+                    event.relatedTarget as Node | null
+                  )
+                ) {
+                  setDragOver(false);
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOver(false);
+                void collectDroppedFiles(event.dataTransfer).then(addFiles);
+              }}
+            >
+              <div className={styles.formatsHint}>
                 {t("aidpKnowledge.uploadHintFormats")}
               </div>
-            </div>
-            <div className={styles.pickerActions}>
-              <Button
-                autoInsertSpace={false}
-                size="small"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  fileInputRef.current?.click();
-                }}
-              >
-                {t("aidpKnowledge.selectFiles")}
-              </Button>
-              <Button
-                autoInsertSpace={false}
-                size="small"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  folderInputRef.current?.click();
-                }}
-              >
-                {t("aidpKnowledge.selectFolder")}
-              </Button>
-            </div>
-          </div>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            accept={AIDP_ACCEPT_STRING}
-            onChange={handleFileInput}
-          />
-          <input
-            ref={folderInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={handleFileInput}
-          />
-
-          <div className={styles.fileList} aria-live="polite">
-            {rows.length === 0 ? (
-              <div className={styles.emptyState}>
-                {t("aidpKnowledge.importEmpty")}
+              <div className={styles.fileList} aria-live="polite">
+                {rows.length === 0 ? (
+                  <div className={styles.emptyState}>
+                    {t("aidpKnowledge.importEmpty")}
+                  </div>
+                ) : (
+                  rows.map((row) => (
+                    <SelectionRow
+                      key={`${row.relativePath}|${row.file.name}|${row.file.size}|${row.file.lastModified}`}
+                      row={row}
+                      onRemove={removeRow}
+                    />
+                  ))
+                )}
               </div>
-            ) : (
-              rows.map((row) => (
-                <SelectionRow
-                  key={`${row.relativePath}|${row.file.name}|${row.file.size}|${row.file.lastModified}`}
-                  row={row}
-                  onRemove={removeRow}
-                />
-              ))
-            )}
-          </div>
-          <div className={styles.fileCount}>
-            {t("uploadCenter.selectedCount", { count: rows.length })}
+            </div>
           </div>
         </div>
       </Drawer>

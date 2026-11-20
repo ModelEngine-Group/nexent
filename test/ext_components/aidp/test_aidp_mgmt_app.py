@@ -1005,8 +1005,8 @@ class TestAidpDocumentFileOperations:
 
         aidp_result = {
             "summary": {"total": 2, "success": 1, "failed": 1},
-            "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
-            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000002"}],
+            "success_list": [{"file_uuid": "00000000000040008000000000000001"}],
+            "failed_list": [{"file_uuid": "00000000000040008000000000000002"}],
         }
         with patch.object(
             aidp_permission_service,
@@ -1022,8 +1022,8 @@ class TestAidpDocumentFileOperations:
                 headers=_bearer(),
                 json={
                     "file_uuids": [
-                        "00000000-0000-4000-8000-000000000001",
-                        "00000000-0000-4000-8000-000000000002",
+                        "00000000000040008000000000000001",
+                        "00000000000040008000000000000002",
                     ]
                 },
             )
@@ -1031,8 +1031,8 @@ class TestAidpDocumentFileOperations:
         assert response.status_code == HTTPStatus.OK
         assert response.json() == aidp_result
         assert mock_remove.call_args.args[3] == [
-            "00000000-0000-4000-8000-000000000001",
-            "00000000-0000-4000-8000-000000000002",
+            "00000000000040008000000000000001",
+            "00000000000040008000000000000002",
         ]
 
     def test_remove_requires_file_uuids(self):
@@ -1094,7 +1094,7 @@ class TestAidpDocumentFileOperations:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
                 headers=_bearer(),
-                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
+                json={"file_uuid": "00000000000040008000000000000001"},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -1106,7 +1106,7 @@ class TestAidpDocumentFileOperations:
             SERVER_URL,
             API_KEY,
             "kb-1",
-            "00000000-0000-4000-8000-000000000001",
+            "00000000000040008000000000000001",
         )
         assert "x-file-name" not in response.headers
 
@@ -1147,7 +1147,7 @@ class TestAidpDocumentFileOperations:
         ) as mock_stream:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1167,7 +1167,7 @@ class TestAidpDocumentFileOperations:
             SERVER_URL,
             API_KEY,
             "kb-1",
-            "00000000-0000-4000-8000-000000000001",
+            "00000000000040008000000000000001",
         )
 
     def test_preview_reports_the_converted_file_name(self):
@@ -1204,7 +1204,7 @@ class TestAidpDocumentFileOperations:
         ):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1250,7 +1250,7 @@ class TestAidpDocumentFileOperations:
         ):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1288,7 +1288,7 @@ class TestAidpDocumentFileOperations:
         ):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1326,7 +1326,7 @@ class TestAidpDocumentFileOperations:
         try:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
         finally:
@@ -1362,7 +1362,7 @@ class TestAidpDocumentFileOperations:
         aidp_result = {
             "summary": {"total": 1, "success": 0, "failed": 1},
             "success_list": [],
-            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+            "failed_list": [{"file_uuid": "00000000000040008000000000000001"}],
         }
         with patch.object(
             aidp_permission_service,
@@ -1378,7 +1378,7 @@ class TestAidpDocumentFileOperations:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
-                json={"file_uuids": ["00000000-0000-4000-8000-000000000001"]},
+                json={"file_uuids": ["00000000000040008000000000000001"]},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -2348,7 +2348,7 @@ class TestUploadTaskRetryEndpoint:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        file_uuid = "00000000-0000-4000-8000-000000000003"
+        file_uuid = "00000000000040008000000000000003"
         upstream_result = {
             "success_list": [{"file_uuid": file_uuid}],
             "failed_list": [],
@@ -2393,7 +2393,7 @@ class TestUploadTaskRetryEndpoint:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks/retry",
                 headers=_bearer(),
-                json={"file_uuids": ["00000000-0000-4000-8000-000000000003"]},
+                json={"file_uuids": ["00000000000040008000000000000003"]},
             )
         assert response.status_code == HTTPStatus.FORBIDDEN
         retry_docs.assert_not_called()
@@ -2403,8 +2403,8 @@ class TestUploadTaskRetryEndpoint:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        first = "00000000-0000-4000-8000-000000000003"
-        second = "00000000-0000-4000-8000-000000000004"
+        first = "00000000000040008000000000000003"
+        second = "00000000000040008000000000000004"
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
              patch.object(aidp_mgmt_app, "retry_aidp_docs_impl",
@@ -2445,7 +2445,7 @@ class TestUploadTaskRetryEndpoint:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks/retry",
                 headers=_bearer(),
-                json={"file_uuids": ["00000000-0000-4000-8000-000000000003"]},
+                json={"file_uuids": ["00000000000040008000000000000003"]},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -2994,7 +2994,7 @@ class TestFolderAndFilePathRoutes:
         captured = {}
 
         def fake_tree(server_url, api_key, kds_id, folder_path, page, page_size,
-                      keyword, file_type, file_status):
+                      keyword, file_type, file_status, include_files):
             captured.update(
                 server_url=server_url,
                 kds_id=kds_id,
@@ -3004,10 +3004,11 @@ class TestFolderAndFilePathRoutes:
                 keyword=keyword,
                 file_type=file_type,
                 file_status=file_status,
+                include_files=include_files,
             )
             return {
                 "folder_path": folder_path,
-                "folders": [{"folder_name": "子目录", "is_empty": True}],
+                "folders": [{"folder_name": "子目录", "folder_id": 7, "has_child_folders": False}],
                 "files": {
                     "page": page,
                     "page_size": page_size,
@@ -3033,7 +3034,7 @@ class TestFolderAndFilePathRoutes:
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["folder_path"] == "/docs"
-        assert body["folders"] == [{"folder_name": "子目录", "is_empty": True}]
+        assert body["folders"] == [{"folder_name": "子目录", "folder_id": 7, "has_child_folders": False}]
         assert body["files"]["total"] == 1
         assert captured == {
             "server_url": SERVER_URL,
@@ -3044,6 +3045,7 @@ class TestFolderAndFilePathRoutes:
             "keyword": "制度",
             "file_type": "pdf",
             "file_status": "1",
+            "include_files": True,
         }
 
     def test_folder_crud_routes_forward_the_path_contract(self, monkeypatch):
@@ -3128,7 +3130,7 @@ class TestFolderAndFilePathRoutes:
             "/aidp-mgmt/knowledge-bases/kb-1/files/move",
             headers=_bearer(),
             json={
-                "file_uuids": ["11111111-1111-4111-8111-111111111111"],
+                "file_uuids": ["11111111111141118111111111111111"],
                 "target_folder": "/docs",
             },
         )
@@ -3136,7 +3138,7 @@ class TestFolderAndFilePathRoutes:
             "/aidp-mgmt/knowledge-bases/kb-1/files",
             headers=_bearer(),
             json={
-                "file_uuid": "11111111-1111-4111-8111-111111111111",
+                "file_uuid": "11111111111141118111111111111111",
                 "new_file_name": "b.pdf",
             },
         )
@@ -3147,14 +3149,14 @@ class TestFolderAndFilePathRoutes:
             SERVER_URL,
             API_KEY,
             "kb-1",
-            ["11111111-1111-4111-8111-111111111111"],
+            ["11111111111141118111111111111111"],
             "/docs",
         )
         assert captured["rename"] == (
             SERVER_URL,
             API_KEY,
             "kb-1",
-            "11111111-1111-4111-8111-111111111111",
+            "11111111111141118111111111111111",
             "b.pdf",
         )
 
@@ -3194,7 +3196,7 @@ class TestFolderAndFilePathRoutes:
         assert captured == {
             "kds_id": "kb-1",
             "target_folder": "/docs",
-            "relative_paths": ["合同/2026/a.txt", "b.txt"],
+            "relative_paths": ["合同/2026", ""],
             "names": ["a.txt", "b.txt"],
         }
 

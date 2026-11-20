@@ -354,12 +354,14 @@ class AidpKnowledgeService {
     page: number = 1,
     pageSize: number = 10,
     keyword: string = "",
+    includeFiles: boolean = true,
     signal?: AbortSignal
   ): Promise<AidpFolderTreeResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFolderTree(id), {
       folder_path: folderPath,
       page,
       page_size: pageSize,
+      include_files: includeFiles ? "true" : "false",
       keyword: keyword.trim() || undefined,
     });
     const response = await fetchWithErrorHandling(url, {
@@ -369,6 +371,8 @@ class AidpKnowledgeService {
     });
     const result = await response.json();
     return {
+      folder_id:
+        typeof result.folder_id === "number" ? result.folder_id : undefined,
       folder_path:
         typeof result.folder_path === "string"
           ? result.folder_path
@@ -508,7 +512,9 @@ class AidpKnowledgeService {
         }),
       }
     );
-    return response.json();
+    if (response.status === 204) return {};
+    const text = await response.text();
+    return text ? (JSON.parse(text) as AidpFileRenameResponse) : {};
   }
 
   /**

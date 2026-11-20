@@ -19,7 +19,6 @@ interface AidpFilesEmptyStateProps {
   isRoot: boolean;
   canUpload: boolean;
   onDropFiles: (files: AidpDroppedFile[]) => void;
-  onBrowse: () => void;
 }
 
 /**
@@ -33,7 +32,6 @@ const AidpFilesEmptyState: React.FC<AidpFilesEmptyStateProps> = ({
   isRoot,
   canUpload,
   onDropFiles,
-  onBrowse,
 }) => {
   const { t } = useTranslation();
   const [dragOver, setDragOver] = useState(false);
@@ -152,14 +150,9 @@ const AidpFilesEmptyState: React.FC<AidpFilesEmptyStateProps> = ({
           : t("aidpKnowledge.filesEmptyFolder", { folder: folderLabel })}
       </div>
       {canUpload && (
-        <>
-          <button type="button" className={styles.browse} onClick={onBrowse}>
-            {t("aidpKnowledge.filesEmptyAction")}
-          </button>
-          <div className={styles.description}>
-            {t("aidpKnowledge.filesEmptyFormats")}
-          </div>
-        </>
+        <div className={styles.description}>
+          {t("aidpKnowledge.filesEmptyFormats")}
+        </div>
       )}
       {!canUpload && (
         <div className={styles.description}>

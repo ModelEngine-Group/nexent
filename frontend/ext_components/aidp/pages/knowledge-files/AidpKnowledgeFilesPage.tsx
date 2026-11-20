@@ -229,7 +229,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         className="shrink-0 [&>.ant-tabs-nav]:mb-0 [&>.ant-tabs-content-holder]:hidden"
         tabBarStyle={{ marginBottom: 0 }}
         items={[
-          { key: "files", label: t("aidpKnowledge.detailTabUploadedFiles") },
+          { key: "files", label: t("aidpKnowledge.detailTabFiles") },
           { key: "tasks", label: t("aidpKnowledge.detailTabTasks") },
           {
             key: "information",

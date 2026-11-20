@@ -86,7 +86,7 @@ describe("AIDP-FE-FILES-01", () => {
     await advance(5);
     expect(matching(path).at(-1)!.url.searchParams.get("page")).toBe("2");
     const search = screen.getByPlaceholderText(
-      t("aidpKnowledge.detailFileSearch"),
+      t("aidpKnowledge.detailFileSearchInFolder"),
     );
     fireEvent.change(search, { target: { value: "guide" } });
     await advance(260);
@@ -331,7 +331,7 @@ describe("AIDP-FE-FILES-01", () => {
       if (request.url.pathname === path) {
         return reply(
           folderTreeResponse(
-            [{ folder_name: "目标目录", is_empty: true }],
+            [{ folder_name: "目标目录", has_child_folders: false }],
             moved ? [secondFile] : [file, secondFile],
             moved ? 1 : 2,
           ),
@@ -387,5 +387,173 @@ describe("AIDP-FE-FILES-01", () => {
       file_uuids: [file.file_uuid, secondFile.file_uuid],
       target_folder: "/目标目录",
     });
+  });
+
+  it("status 1–6 gates row and batch actions", async () => {
+    const extracting = {
+      ...file,
+      file_uuid: "11111111-1111-4111-8111-111111111111",
+      file_name: "extracting.txt",
+      status: 2,
+    };
+    const removing = {
+      ...file,
+      file_uuid: "22222222-2222-4222-8222-222222222222",
+      file_name: "removing.txt",
+      status: 5,
+    };
+    const removeFailed = {
+      ...file,
+      file_uuid: "33333333-3333-4333-8333-333333333333",
+      file_name: "remove-failed.txt",
+      status: 6,
+    };
+    const original = server.handler;
+    server.handler = (request) => {
+      if (request.url.pathname === path) {
+        return reply(
+          folderTreeResponse([], [file, extracting, removing, removeFailed], 4),
+        );
+      }
+      return original(request);
+    };
+
+    mount(page());
+    await screen.findByText(extracting.file_name);
+    const rowFor = (name: string) =>
+      screen.getByText(name).closest("tr") as HTMLTableRowElement;
+
+    const extractingRow = rowFor(extracting.file_name);
+    expect(
+      within(extractingRow).queryByRole("button", {
+        name: t("common.delete"),
+      }),
+    ).toBeNull();
+    expect(
+      within(extractingRow).getByRole("button", {
+        name: t("aidpKnowledge.download"),
+      }),
+    ).toBeEnabled();
+    expect(
+      within(extractingRow).getByRole("button", {
+        name: t("aidpKnowledge.moreOperations"),
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(extractingRow).getByText(extracting.file_name).closest("button"),
+    ).toBeDisabled();
+
+    const removingRow = rowFor(removing.file_name);
+    expect(within(removingRow).getByRole("checkbox")).toBeDisabled();
+    expect(
+      within(removingRow).queryByRole("button", {
+        name: t("common.delete"),
+      }),
+    ).toBeNull();
+    expect(
+      within(removingRow).queryByRole("button", {
+        name: t("aidpKnowledge.moreOperations"),
+      }),
+    ).toBeNull();
+
+    const removeFailedRow = rowFor(removeFailed.file_name);
+    expect(
+      within(removeFailedRow).getByRole("button", {
+        name: t("common.delete"),
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(removeFailedRow).getByRole("button", {
+        name: t("aidpKnowledge.download"),
+      }),
+    ).toBeDisabled();
+    expect(
+      within(removeFailedRow).queryByRole("button", {
+        name: t("aidpKnowledge.moreOperations"),
+      }),
+    ).toBeNull();
+    expect(
+      within(removeFailedRow)
+        .getByText(removeFailed.file_name)
+        .closest("button"),
+    ).toBeDisabled();
+
+    fireEvent.click(within(extractingRow).getByRole("checkbox"));
+    fireEvent.click(within(removeFailedRow).getByRole("checkbox"));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: t("aidpKnowledge.fileMoveAction"),
+      }),
+    );
+    expect(
+      await screen.findByText(
+        t("aidpKnowledge.statusActionBlocked", { count: 1 }),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("checks folder contents through the tree endpoint before deletion", async () => {
+    const folderName = "目标目录";
+    let hasContents = true;
+    const original = server.handler;
+    server.handler = (request) => {
+      if (request.url.pathname === path) {
+        const folderPath = request.url.searchParams.get("folder_path");
+        if (folderPath === `/${folderName}`) {
+          return reply(
+            folderTreeResponse(
+              [],
+              hasContents ? [{ ...file, file_name: "inside.txt" }] : [],
+              hasContents ? 1 : 0,
+            ),
+          );
+        }
+        return reply(
+          folderTreeResponse(
+            [
+              {
+                folder_name: folderName,
+                folder_id: 123,
+                has_child_folders: false,
+              },
+            ],
+            [],
+            0,
+          ),
+        );
+      }
+      return original(request);
+    };
+
+    mount(page());
+    const folderRow = await waitFor(() => {
+      const row = screen
+        .getAllByText(folderName)
+        .map((element) => element.closest("tr"))
+        .find((candidate): candidate is HTMLTableRowElement =>
+          Boolean(candidate),
+        );
+      if (!row) throw new Error("folder row not rendered yet");
+      return row;
+    });
+    fireEvent.click(
+      within(folderRow).getByRole("button", {
+        name: t("aidpKnowledge.moreOperations"),
+      }),
+    );
+    fireEvent.click(screen.getByText(t("aidpKnowledge.folderDelete")));
+    await screen.findByText(t("aidpKnowledge.folderDeleteNotEmpty"));
+    expect(matching(`${base}/kb-a/folders`, "DELETE")).toHaveLength(0);
+
+    hasContents = false;
+    fireEvent.click(
+      within(folderRow).getByRole("button", {
+        name: t("aidpKnowledge.moreOperations"),
+      }),
+    );
+    fireEvent.click(screen.getByText(t("aidpKnowledge.folderDelete")));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(matching(`${base}/kb-a/folders`, "DELETE")).toHaveLength(0);
   });
 });

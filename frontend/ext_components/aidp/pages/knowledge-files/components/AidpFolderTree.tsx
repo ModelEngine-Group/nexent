@@ -28,6 +28,7 @@ import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnow
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   folderAncestorPaths,
+  isPathEqualOrInside,
   joinFolderPath,
 } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
 import {
@@ -45,13 +46,16 @@ import styles from "./AidpFolderTree.module.css";
 export interface AidpFolderNodeTarget {
   path: string;
   name: string;
-  isEmpty: boolean;
 }
 
 interface AidpFolderTreeProps {
   knowledgeBaseId: string;
   rootLabel: string;
   selectedPath: string;
+  /** Path to reveal even when no node is selected (e.g. a move dialog). */
+  expandPath?: string;
+  /** Folder subtree that cannot be selected (shown greyed out). */
+  disabledPrefix?: string;
   onSelect: (path: string) => void;
   /** Bump to reload every already-expanded level after a folder/file write. */
   reloadToken?: number;
@@ -69,6 +73,8 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
   knowledgeBaseId,
   rootLabel,
   selectedPath,
+  expandPath,
+  disabledPrefix,
   onSelect,
   reloadToken = 0,
   disabled = false,
@@ -113,6 +119,7 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
           1,
           1,
           "",
+          false,
           controller.signal
         );
         if (controller.signal.aborted) return;
@@ -177,8 +184,16 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
 
   // Selecting a deep path from the table/breadcrumb must expand and load its
   // ancestors, otherwise the highlighted node is not reachable in the tree.
+  // A picker can also pass expandPath without preselecting a node, so it opens
+  // at the caller's current folder while keeping the target unselected.
+  const revealPath = expandPath || selectedPath;
   useEffect(() => {
-    const ancestors = folderAncestorPaths(selectedPath);
+    const ancestors = folderAncestorPaths(revealPath);
+    // A picker reveals the caller's current folder itself (so its children are
+    // visible), not just the ancestors needed to show a selected node.
+    if (expandPath && !ancestors.includes(revealPath)) {
+      ancestors.push(revealPath);
+    }
     if (ancestors.length === 0) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Selecting a deep path expands its ancestors so the node is visible.
     setExpandedKeys((current) =>
@@ -191,7 +206,7 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
         }
       }
     })();
-  }, [fetchChildren, selectedPath]);
+  }, [expandPath, fetchChildren, revealPath]);
 
   useEffect(
     () => () => {
@@ -276,7 +291,6 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
         menuItems.push({
           key: "delete",
           icon: <DeleteOutlined />,
-          danger: true,
           label: t("aidpKnowledge.folderDelete"),
         });
       }
@@ -347,7 +361,6 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
         const target: AidpFolderNodeTarget = {
           path,
           name: folder.folder_name,
-          isEmpty: folder.is_empty !== false,
         };
         const children = renderNodes(path);
         const loaded = Array.isArray(childrenMap[path]);
@@ -355,7 +368,12 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
           key: path,
           icon: <FolderOutlined />,
           title: renderTitle(target, false),
-          isLeaf: loaded ? children.length === 0 : target.isEmpty,
+          disabled: Boolean(
+            disabledPrefix && isPathEqualOrInside(path, disabledPrefix)
+          ),
+          isLeaf: loaded
+            ? children.length === 0
+            : folder.has_child_folders === false,
           children: children.length > 0 ? children : undefined,
         } satisfies DataNode;
       });
@@ -365,15 +383,15 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
       {
         key: "/",
         icon: <FolderOpenOutlined />,
-        title: renderTitle(
-          { path: "/", name: rootLabel, isEmpty: false },
-          true
+        title: renderTitle({ path: "/", name: rootLabel }, true),
+        disabled: Boolean(
+          disabledPrefix && isPathEqualOrInside("/", disabledPrefix)
         ),
         isLeaf: false,
         children: renderNodes("/"),
       },
     ];
-  }, [childrenMap, renderTitle, rootLabel]);
+  }, [childrenMap, disabledPrefix, renderTitle, rootLabel]);
 
   // Keep normal shallow trees inside the 240px rail, but let deep levels and
   // long folder names grow the tree so the aside's horizontal scrollbar can
@@ -425,7 +443,7 @@ const AidpFolderTree: React.FC<AidpFolderTreeProps> = ({
           disabled={disabled}
           treeData={treeData}
           expandedKeys={expandedKeys}
-          selectedKeys={[selectedPath]}
+          selectedKeys={selectedPath ? [selectedPath] : []}
           onExpand={(keys) => setExpandedKeys(keys)}
           onSelect={(keys) => {
             if (disabled) return;

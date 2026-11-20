@@ -8,6 +8,7 @@ import {
 } from "@/ext_components/aidp/features/file-import/uploadConstants";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { getAidpUploadErrorMessage } from "@/ext_components/aidp/shared/services/aidpUploadUtils";
+import { isAidpNameConflictError } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import type { AidpUploadFailedItem } from "@/ext_components/aidp/shared/types/management";
 import type {
   UploadBatchFile,
@@ -117,6 +118,14 @@ const reasonForFailure = (
     : item.reason_en || item.reason_zh || "uploadCenter.error.unknown";
 };
 
+const relativeDirectory = (relativePath: string): string => {
+  const normalized = relativePath
+    .replaceAll("\\", "/")
+    .replace(/^\/+|\/+$/g, "");
+  const separator = normalized.lastIndexOf("/");
+  return separator >= 0 ? normalized.slice(0, separator) : "";
+};
+
 const uploadBatch = async (
   files: UploadBatchFile[],
   context: UploadContext,
@@ -124,6 +133,28 @@ const uploadBatch = async (
   onProgress: (loaded: number, total: number) => void
 ): Promise<UploadBatchResult> => {
   const byName = new Map(files.map((file) => [file.file.name, file.id]));
+  const byNameAndRelativeDir = new Map(
+    files.map((file) => [
+      `${relativeDirectory(file.relativePath)}\u0000${file.file.name}`,
+      file.id,
+    ])
+  );
+  const resolveFileId = (
+    fileName: string | undefined,
+    relativeDir: string | undefined
+  ): string | undefined => {
+    if (fileName) {
+      const matched = byNameAndRelativeDir.get(
+        `${relativeDir ?? ""}\u0000${fileName}`
+      );
+      if (matched) return matched;
+    }
+    return fileName ? byName.get(fileName) : undefined;
+  };
+  const nonRetryableReason = (reason: string): boolean =>
+    /已存在|already exists|启动入库失败|Failed to initiate file ingestion/i.test(
+      reason
+    );
   let response;
   try {
     response = await aidpKnowledgeService.uploadDocsWithProgress(
@@ -143,12 +174,13 @@ const uploadBatch = async (
       context.translate ?? ((key) => key),
       "uploadCenter.error.unknown"
     );
+    const retryable = !isAidpNameConflictError(error);
     return {
       successFileIds: [],
       failed: files.map((file) => ({
         fileId: file.id,
         reason,
-        retryable: true,
+        retryable,
       })),
     };
   }
@@ -158,19 +190,21 @@ const uploadBatch = async (
   const handled = new Set<string>();
 
   for (const item of response.success_list ?? []) {
-    const fileId = byName.get(item.file_name);
+    const fileId = resolveFileId(item.file_name, item.relative_path);
     if (fileId) {
       successFileIds.push(fileId);
       handled.add(fileId);
     }
   }
   for (const item of response.failed_list ?? []) {
-    const fileId = byName.get(item.file_name);
+    const fileId = resolveFileId(item.file_name, item.relative_path);
     if (!fileId) continue;
+    const reason = reasonForFailure(item, context.language);
     failed.push({
       fileId,
-      reason: reasonForFailure(item, context.language),
-      retryable: true,
+      reason,
+      retryable:
+        String(item.code ?? "") !== "1089" && !nonRetryableReason(reason),
     });
     handled.add(fileId);
   }

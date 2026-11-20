@@ -45,7 +45,7 @@ import AidpFilesEmptyState from "@/ext_components/aidp/pages/knowledge-files/com
 import panelStyles from "@/ext_components/aidp/pages/knowledge-files/components/AidpKnowledgeFilesPanel.module.css";
 import {
   AIDP_DETAIL_PAGE_SIZE,
-  documentStatusMeta,
+  folderTreeStatusMeta,
   formatDetailDateTime,
   formatFileSize,
   sumColumnWidths,
@@ -61,6 +61,7 @@ import type { AidpDroppedFile } from "@/ext_components/aidp/pages/knowledge-file
 import {
   hasAidpFileMoveDrag,
   readAidpFileMoveDrag,
+  setAidpFileMoveDragImage,
   writeAidpFileMoveDrag,
 } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFileDrag";
 
@@ -77,7 +78,6 @@ type FolderTableRow = {
   kind: "folder";
   name: string;
   path: string;
-  isEmpty: boolean;
 };
 
 type FileTableRow = {
@@ -169,6 +169,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [fileRenameTarget, setFileRenameTarget] =
     useState<AidpFolderFileItem | null>(null);
   const [fileRenameSaving, setFileRenameSaving] = useState(false);
+  const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<AidpDocumentItem | null>(null);
   const [moveFailures, setMoveFailures] = useState<FileMoveFailure | null>(
@@ -273,7 +274,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               kind: "folder",
               name: folder.folder_name,
               path,
-              isEmpty: folder.is_empty !== false,
             };
           })
         : [];
@@ -305,6 +305,37 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           .map((file) => [file.file_uuid as string, file.file_name || ""])
       ),
     [files]
+  );
+
+  const permissionsForFile = useCallback(
+    (file: AidpFolderFileItem) =>
+      folderTreeStatusMeta(file.status)?.permissions ?? null,
+    []
+  );
+
+  const selectedFileItems = useMemo(
+    () =>
+      files.filter(
+        (file) =>
+          file.file_uuid && selectedFileKeys.includes(`file:${file.file_uuid}`)
+      ),
+    [files, selectedFileKeys]
+  );
+
+  const selectedDeletableUuids = useMemo(
+    () =>
+      selectedFileItems
+        .filter((file) => permissionsForFile(file)?.canDelete)
+        .map((file) => file.file_uuid as string),
+    [permissionsForFile, selectedFileItems]
+  );
+
+  const selectedMovableUuids = useMemo(
+    () =>
+      selectedFileItems
+        .filter((file) => permissionsForFile(file)?.canMove)
+        .map((file) => file.file_uuid as string),
+    [permissionsForFile, selectedFileItems]
   );
 
   const performFileMove = useCallback(
@@ -411,6 +442,15 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         event.preventDefault();
         return;
       }
+      if (selectedMovableUuids.length !== selectedFileUuids.length) {
+        event.preventDefault();
+        message.warning(
+          t("aidpKnowledge.statusActionBlocked", {
+            count: selectedFileUuids.length - selectedMovableUuids.length,
+          })
+        );
+        return;
+      }
       const target = event.target as HTMLElement;
       const interactive = target.closest(
         "button, a, input, textarea, select, .ant-checkbox-wrapper"
@@ -419,9 +459,21 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         event.preventDefault();
         return;
       }
-      writeAidpFileMoveDrag(event.dataTransfer, selectedFileUuids);
+      writeAidpFileMoveDrag(event.dataTransfer, selectedMovableUuids);
+      const names = selectedMovableUuids.map(
+        (fileUuid) => fileNameByUuid.get(fileUuid) || fileUuid
+      );
+      setAidpFileMoveDragImage(
+        event.dataTransfer,
+        names.length === 1
+          ? names[0]
+          : t("aidpKnowledge.fileDragSummary", {
+              name: names[0],
+              count: names.length,
+            })
+      );
     },
-    [selectedFileUuids]
+    [fileNameByUuid, message, selectedFileUuids, selectedMovableUuids, t]
   );
 
   const handleFileDragEnd = useCallback(() => {
@@ -485,14 +537,15 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       const selected =
         Boolean(record.file.file_uuid) &&
         selectedFileUuids.includes(record.file.file_uuid as string);
+      const canMove = permissionsForFile(record.file)?.canMove === true;
       return {
         draggable:
-          canEdit && selected && movingFileUuids.length === 0
+          canEdit && selected && canMove && movingFileUuids.length === 0
             ? true
             : undefined,
         onDragStart: canEdit && selected ? handleFileDragStart : undefined,
         onDragEnd: handleFileDragEnd,
-        className: canEdit && selected ? "cursor-grab" : undefined,
+        className: canEdit && selected && canMove ? "cursor-grab" : undefined,
       };
     },
     [
@@ -504,6 +557,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       handleFolderRowDragOver,
       handleInternalMoveDrop,
       movingFileUuids.length,
+      permissionsForFile,
       selectedFileUuids,
     ]
   );
@@ -611,8 +665,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   );
 
   const handleBatchDeleteFiles = useCallback(() => {
-    const fileUuids = selectedFileUuids;
-    if (fileUuids.length === 0) return;
+    if (selectedFileUuids.length === 0) return;
+    if (selectedDeletableUuids.length !== selectedFileUuids.length) {
+      message.warning(
+        t("aidpKnowledge.statusActionBlocked", {
+          count: selectedFileUuids.length - selectedDeletableUuids.length,
+        })
+      );
+      return;
+    }
+    const fileUuids = selectedDeletableUuids;
     if (fileUuids.length > AIDP_BATCH_DELETE_MAX) {
       message.warning(
         t("aidpKnowledge.deleteDocsLimit", { max: AIDP_BATCH_DELETE_MAX })
@@ -678,13 +740,38 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     message,
     modal,
     refreshAll,
+    selectedDeletableUuids,
     selectedFileUuids,
     t,
   ]);
 
   const handleDeleteFolder = useCallback(
-    (target: AidpFolderNodeTarget) => {
-      if (!target.isEmpty) {
+    async (target: AidpFolderNodeTarget) => {
+      let hasContents = false;
+      try {
+        const contents = await aidpKnowledgeService.getFolderTree(
+          knowledgeBase.kds_id,
+          target.path,
+          1,
+          1,
+          "",
+          true
+        );
+        hasContents =
+          (contents.folders?.length ?? 0) > 0 ||
+          (contents.files?.total ?? 0) > 0;
+      } catch (error) {
+        log.error("Failed to inspect AIDP folder before delete:", {
+          id: knowledgeBase.kds_id,
+          path: target.path,
+          error,
+        });
+        message.error(
+          getAidpErrorMessage(error, t, t("aidpKnowledge.folderDeleteFailed"))
+        );
+        return;
+      }
+      if (hasContents) {
         message.warning(t("aidpKnowledge.folderDeleteNotEmpty"));
         return;
       }
@@ -695,7 +782,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           centered: true,
           okText: t("common.delete"),
           cancelText: t("common.cancel"),
-          okButtonProps: { danger: true },
           afterClose: () => setDeleteConfirmOpen(false),
           content: t("aidpKnowledge.folderDeleteContent", {
             name: target.name,
@@ -917,7 +1003,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       {
         key: "delete",
         icon: <DeleteOutlined />,
-        danger: true,
         label: t("aidpKnowledge.folderDelete"),
       },
     ];
@@ -928,7 +1013,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       const target: AidpFolderNodeTarget = {
         path: row.path,
         name: row.name,
-        isEmpty: row.isEmpty,
       };
       if (key === "create")
         setFolderNameDialog({ mode: "create", parentPath: row.path });
@@ -939,21 +1023,74 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     [handleDeleteFolder]
   );
 
-  const fileMenuItems = useCallback((): NonNullable<MenuProps["items"]> => {
-    if (!canEdit) return [];
-    return [
-      {
-        key: "move",
-        icon: <FolderOpenOutlined />,
-        label: t("aidpKnowledge.fileMove"),
-      },
-      {
-        key: "rename",
-        icon: <EditOutlined />,
-        label: t("aidpKnowledge.fileRename"),
-      },
-    ];
-  }, [canEdit, t]);
+  const handleRetryFile = useCallback(
+    async (file: AidpFolderFileItem) => {
+      if (!file.file_uuid) return;
+      setRetryingFileUuid(file.file_uuid);
+      try {
+        const result = await aidpKnowledgeService.retryUploadTasks(
+          knowledgeBase.kds_id,
+          [file.file_uuid]
+        );
+        if (result.summary.failed > 0) {
+          const first = result.failed_list[0];
+          const reason =
+            (i18n.language.startsWith("zh")
+              ? first?.reason_zh || first?.reason_en
+              : first?.reason_en || first?.reason_zh) ||
+            first?.message ||
+            first?.reason ||
+            t("aidpKnowledge.retryTaskFailed");
+          throw new Error(reason);
+        }
+        message.success(t("aidpKnowledge.retryTaskSuccess"));
+        refreshAll();
+      } catch (error) {
+        log.error("Failed to retry AIDP file:", {
+          id: knowledgeBase.kds_id,
+          fileUuid: file.file_uuid,
+          error,
+        });
+        message.error(
+          getAidpErrorMessage(error, t, t("aidpKnowledge.retryTaskFailed"))
+        );
+      } finally {
+        setRetryingFileUuid(null);
+      }
+    },
+    [i18n.language, knowledgeBase.kds_id, message, refreshAll, t]
+  );
+
+  const fileMenuItems = useCallback(
+    (file: AidpFolderFileItem): NonNullable<MenuProps["items"]> => {
+      if (!canEdit) return [];
+      const permissions = permissionsForFile(file);
+      const items: NonNullable<MenuProps["items"]> = [];
+      if (permissions?.canMove) {
+        items.push({
+          key: "move",
+          icon: <FolderOpenOutlined />,
+          label: t("aidpKnowledge.fileMove"),
+        });
+      }
+      if (permissions?.canRename) {
+        items.push({
+          key: "rename",
+          icon: <EditOutlined />,
+          label: t("aidpKnowledge.fileRename"),
+        });
+      }
+      if (permissions?.canRetry) {
+        items.push({
+          key: "retry",
+          icon: <ReloadOutlined spin={retryingFileUuid === file.file_uuid} />,
+          label: t("aidpKnowledge.retryTask"),
+        });
+      }
+      return items;
+    },
+    [canEdit, permissionsForFile, retryingFileUuid, t]
+  );
 
   const handleFileMenuClick = useCallback(
     (file: AidpFolderFileItem, key: string) => {
@@ -966,8 +1103,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         });
       }
       if (key === "rename") setFileRenameTarget(file);
+      if (key === "retry") void handleRetryFile(file);
     },
-    [t]
+    [handleRetryFile, t]
   );
 
   const baseColumns: ColumnsType<FileTableRecord> = [
@@ -991,7 +1129,11 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           <Tooltip title={t("common.preview")}>
             <button
               type="button"
-              disabled={!record.file.file_uuid}
+              disabled={
+                !record.file.file_uuid ||
+                !folderTreeStatusMeta(record.file.status)?.permissions
+                  .canPreview
+              }
               data-aidp-file-name="true"
               className="flex max-w-full items-center gap-2 truncate text-left text-blue-600 hover:text-blue-700 hover:underline disabled:cursor-default disabled:text-gray-500 disabled:no-underline"
               onClick={() => setPreviewFile(toDocumentItem(record.file))}
@@ -1048,7 +1190,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       width: 90,
       render: (_value, record) => {
         if (record.kind === "folder") return "-";
-        const meta = documentStatusMeta(record.file.status);
+        const meta = folderTreeStatusMeta(record.file.status);
         if (!meta) return "-";
         return (
           <span className="inline-flex items-center gap-2 whitespace-nowrap text-gray-700">
@@ -1094,6 +1236,10 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             </Button>
           );
         }
+        const permissions = folderTreeStatusMeta(
+          record.file.status
+        )?.permissions;
+        const menuItems = fileMenuItems(record.file);
         return (
           <div className="flex items-center gap-2 whitespace-nowrap">
             <Tooltip title={t("aidpKnowledge.download")}>
@@ -1101,12 +1247,12 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                 type="text"
                 size="small"
                 icon={<DownloadOutlined />}
-                disabled={!record.file.file_uuid}
+                disabled={!record.file.file_uuid || !permissions?.canDownload}
                 aria-label={t("aidpKnowledge.download")}
                 onClick={() => void handleDownload(record.file)}
               />
             </Tooltip>
-            {canEdit && (
+            {canEdit && permissions?.canDelete && (
               <Tooltip title={t("common.delete")}>
                 <Button
                   type="text"
@@ -1117,12 +1263,12 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                 />
               </Tooltip>
             )}
-            {canEdit && (
+            {canEdit && menuItems.length > 0 && (
               <Tooltip title={t("aidpKnowledge.moreOperations")}>
                 <Dropdown
                   trigger={["click"]}
                   menu={{
-                    items: fileMenuItems(),
+                    items: menuItems,
                     onClick: ({ key }) => handleFileMenuClick(record.file, key),
                   }}
                 >
@@ -1175,14 +1321,14 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       : knowledgeBase.kds_name;
 
   return (
-    <section className="flex min-h-[420px] flex-1 shrink-0 flex-col bg-white">
+    <section className="flex min-h-[420px] grow shrink-0 basis-auto flex-col bg-white">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Input
           allowClear
           prefix={<SearchOutlined className="text-gray-400" />}
           value={keywordInput}
           onChange={(event) => setKeywordInput(event.target.value)}
-          placeholder={t("aidpKnowledge.detailFileSearch")}
+          placeholder={t("aidpKnowledge.detailFileSearchInFolder")}
           style={{ width: 280, maxWidth: "100%" }}
         />
         <div className="flex items-center gap-2">
@@ -1200,14 +1346,23 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               disabled={
                 selectedFileUuids.length === 0 || movingFileUuids.length > 0
               }
-              onClick={() =>
+              onClick={() => {
+                if (selectedMovableUuids.length !== selectedFileUuids.length) {
+                  message.warning(
+                    t("aidpKnowledge.statusActionBlocked", {
+                      count:
+                        selectedFileUuids.length - selectedMovableUuids.length,
+                    })
+                  );
+                  return;
+                }
                 setFileMoveRequest({
-                  fileUuids: selectedFileUuids,
+                  fileUuids: selectedMovableUuids,
                   title: t("aidpKnowledge.fileMoveTitleCount", {
-                    count: selectedFileUuids.length,
+                    count: selectedMovableUuids.length,
                   }),
-                })
-              }
+                });
+              }}
             >
               {t("aidpKnowledge.fileMoveAction")}
             </Button>
@@ -1268,9 +1423,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         />
       )}
 
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="flex min-h-0 flex-auto gap-4 border-b border-gray-200">
         <aside
-          className={`max-h-[calc(100vh-390px)] min-h-[240px] w-[240px] min-w-[200px] shrink-0 overflow-auto border-r border-gray-200 pr-2 ${panelStyles.folderRail}`}
+          className={`min-h-[240px] w-[240px] min-w-[200px] shrink-0 overflow-auto border-r border-gray-200 pr-2 ${panelStyles.folderRail}`}
         >
           <AidpFolderTree
             knowledgeBaseId={knowledgeBase.kds_id}
@@ -1305,27 +1460,29 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="mb-2 flex flex-wrap items-center gap-1 text-xs text-gray-500">
-            <button
-              type="button"
-              {...getBreadcrumbDropProps("/")}
-              onClick={() => openFolder("/")}
-            >
-              {knowledgeBase.kds_name}
-            </button>
-            {segments.map((segment) => (
-              <React.Fragment key={segment.path}>
-                <span>/</span>
-                <button
-                  type="button"
-                  {...getBreadcrumbDropProps(segment.path)}
-                  onClick={() => openFolder(segment.path)}
-                >
-                  {segment.label}
-                </button>
-              </React.Fragment>
-            ))}
-          </div>
+          {segments.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1 text-xs text-gray-500">
+              <button
+                type="button"
+                {...getBreadcrumbDropProps("/")}
+                onClick={() => openFolder("/")}
+              >
+                {knowledgeBase.kds_name}
+              </button>
+              {segments.map((segment) => (
+                <React.Fragment key={segment.path}>
+                  <span>/</span>
+                  <button
+                    type="button"
+                    {...getBreadcrumbDropProps(segment.path)}
+                    onClick={() => openFolder(segment.path)}
+                  >
+                    {segment.label}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          )}
 
           {showEmptyState ? (
             <AidpFilesEmptyState
@@ -1336,7 +1493,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               onDropFiles={(droppedFiles) =>
                 openImport(currentPath, droppedFiles)
               }
-              onBrowse={() => openImport(currentPath)}
             />
           ) : (
             <>
@@ -1351,9 +1507,19 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                     ? {
                         selectedRowKeys: selectedFileKeys,
                         onChange: (keys) => setSelectedFileKeys(keys),
-                        getCheckboxProps: (record) => ({
-                          disabled: record.kind === "folder",
-                        }),
+                        getCheckboxProps: (record) => {
+                          if (record.kind === "folder") {
+                            return { disabled: true };
+                          }
+                          const permissions = folderTreeStatusMeta(
+                            record.file.status
+                          )?.permissions;
+                          return {
+                            disabled:
+                              !permissions ||
+                              (!permissions.canDelete && !permissions.canMove),
+                          };
+                        },
                       }
                     : undefined
                 }
@@ -1437,6 +1603,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             ? parentFolderPath(folderMoveTarget.path)
             : currentPath
         }
+        preselect={false}
         invalidPrefix={folderMoveTarget?.path}
         invalidHint={t("aidpKnowledge.folderMoveInvalidHint")}
         onCancel={() => setFolderMoveTarget(null)}
@@ -1449,6 +1616,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         rootLabel={knowledgeBase.kds_name}
         title={fileMoveRequest?.title || t("aidpKnowledge.fileMove")}
         initialPath={currentPath}
+        preselect={false}
+        disabledPath={currentPath}
+        disabledHint={t("aidpKnowledge.fileMoveSameFolder")}
         onCancel={() => setFileMoveRequest(null)}
         onSelect={(path) => void handleMoveFile(path)}
       />

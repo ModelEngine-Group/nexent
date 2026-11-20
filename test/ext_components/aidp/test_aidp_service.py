@@ -2029,6 +2029,30 @@ class TestUploadAidpDocsImpl:
         )
         assert result == upload_response
 
+    def test_target_folder_uses_new_aidp_fields(self, aidp_service_module, mock_file, monkeypatch):
+        mock_resp = _make_success_response({"summary": {}, "success_list": [], "failed_list": []})
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+        monkeypatch.setattr(
+            aidp_service_module,
+            "_resolve_aidp_folder_id",
+            lambda *args, **kwargs: 42,
+        )
+
+        aidp_service_module.upload_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            files=[mock_file],
+            target_folder="/docs",
+            relative_paths=["sub"],
+        )
+
+        data = aidp_service_module.http_client_manager.get_sync_client.return_value.post.call_args.kwargs["data"]
+        assert data["target_folder_path"] == "/docs"
+        assert data["target_folder_id"] == 42
+        assert data["relative_paths"] == ["sub"]
+        assert "target_folder" not in data
+
     def test_file_with_no_content_type_uses_octet_stream(self, aidp_service_module, mock_file_no_ct):
         mock_resp = _make_success_response({"uploaded": 1})
         _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
@@ -2117,6 +2141,36 @@ class TestUploadAidpDocsImpl:
         assert exc_info.value.details == {
             "upstream_status": 500,
             "upstream_reason": "文件解析服务不可用",
+        }
+
+    def test_name_conflict_code_is_preserved_for_frontend_mapping(
+        self, aidp_service_module
+    ):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/folders/0")
+        response = httpx.Response(
+            409,
+            request=request,
+            json={
+                "detail": {
+                    "code": 1089,
+                    "message": "folder name already exists",
+                }
+            },
+        )
+        error = httpx.HTTPStatusError(
+            "http 409",
+            request=request,
+            response=response,
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._raise_aidp_http_error(error, "create-folder:kb-1")
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        assert exc_info.value.details == {
+            "upstream_status": 409,
+            "upstream_reason": "folder name already exists",
+            "upstream_code": 1089,
         }
 
     def test_structured_file_error_returns_localized_failed_list(self, aidp_service_module, mock_file):

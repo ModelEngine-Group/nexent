@@ -28,37 +28,17 @@
   flex-direction: column;
 }
 
-.dropzone {
-  display: flex;
-  min-height: 160px;
+.importIntro {
   flex: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  padding: 12px 20px;
-  border: 1px dashed #c9c9c9;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  text-align: center;
-  transition:
-    border-color 0.2s ease,
-    background 0.2s ease;
-}
-
-.dropzone:hover,
-.dropzoneActive {
-  border-color: #1677ff;
-}
-
-.dropzoneActive {
-  background: #f5faff;
+  margin-bottom: 16px;
+  color: #8c8c8c;
+  font-size: 14px;
+  line-height: 22px;
 }
 
 .targetSection {
   flex: none;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .targetLabel {
@@ -83,49 +63,38 @@
   flex: 1;
 }
 
-.targetHint {
-  margin-top: 4px;
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.pickerActions {
+.uploadSection {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
-.dropzoneIcon {
+.selectButton {
+  align-self: flex-start;
   margin-bottom: 8px;
-  color: #1677ff;
-  font-size: 24px;
 }
 
-.dropzoneTitle {
-  color: #1f1f1f;
-  font-size: 14px;
-  line-height: 22px;
+.dropArea {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  border-radius: 4px;
+  transition: background 0.2s ease;
 }
 
-.dropzoneNotes {
-  margin-top: 4px;
+.dropAreaActive {
+  background: #f5faff;
+}
+
+.formatsHint {
+  flex: none;
+  margin-bottom: 8px;
   color: #8c8c8c;
   font-size: 12px;
   line-height: 18px;
-}
-
-.dropzoneDescription {
-  margin-top: 4px;
-  color: #777;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.formats {
-  max-width: 100%;
   overflow-wrap: anywhere;
-  white-space: normal;
 }
 
 .fileList {
@@ -133,7 +102,6 @@
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
-  margin-top: 12px;
   padding: 1px;
 }
 
@@ -151,18 +119,12 @@
   background: #fff;
 }
 
-.dashedRow {
-  border-style: dashed;
-  border-color: #c9c9c9;
-}
-
-.successRow {
+.selectionRow {
   border-style: solid;
-  border-color: #191919;
+  border-color: #e5e7eb;
 }
 
 .fileIcon {
-  position: relative;
   display: flex;
   width: 32px;
   height: 32px;
@@ -173,15 +135,6 @@
   background: #6b7280;
   color: #fff;
   font-size: 19px;
-}
-
-.progressRing {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  overflow: visible;
-  filter: drop-shadow(0 0 1px rgb(0 0 0 / 35%));
-  transform: translate(-50%, -50%);
 }
 
 .fileText {
@@ -209,10 +162,6 @@
   line-height: 20px;
 }
 
-.fileError {
-  color: #e02128;
-}
-
 .deleteButton {
   width: 28px;
   height: 28px;
@@ -226,19 +175,6 @@
   justify-content: center;
   color: #8c8c8c;
   font-size: 14px;
-}
-
-.fileCount {
-  flex: none;
-  padding-top: 8px;
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 18px;
-  text-align: right;
-}
-
-.hierarchyNote {
-  margin-left: 8px;
 }
 
 .footer,
@@ -276,23 +212,6 @@
   .drawer :global(.ant-drawer-header) {
     padding-right: 16px;
     padding-left: 16px;
-  }
-
-  .drawerBody {
-    min-height: 0;
-  }
-
-  .dropzone {
-    min-height: 160px;
-  }
-
-  .dropzoneNotes {
-    font-size: 11px;
-  }
-
-  .dropzoneDescription {
-    font-size: 12px;
-    line-height: 18px;
   }
 
   .drawer :global(.ant-drawer-body) {

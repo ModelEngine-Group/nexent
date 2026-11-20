@@ -74,20 +74,57 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
 
 
+def _extract_upstream_code(response: httpx.Response) -> int | None:
+    """Read an AIDP business error code from a structured HTTP error body.
+
+    AIDP usually reports the business code as ``{"detail": {"code": 1089,
+    "message": ...}}``; some deployments put it at the top level or under
+    ``error``/``message``. Keeping the code separate from the human-readable
+    reason lets callers translate known codes such as 1089 (name conflict)
+    without parsing localized text.
+    """
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+
+    def find(value: Any) -> int | None:
+        if isinstance(value, dict):
+            for key in ("code", "error_code", "errorCode"):
+                candidate = value.get(key)
+                if isinstance(candidate, bool):
+                    continue
+                if isinstance(candidate, int):
+                    return candidate
+                if isinstance(candidate, str) and candidate.strip().isdigit():
+                    return int(candidate.strip())
+            for key in ("detail", "message", "error"):
+                found = find(value.get(key))
+                if found is not None:
+                    return found
+        return None
+
+    return find(payload)
+
+
 def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
     """Map an AIDP HTTP error to the common application exception format."""
     response = error.response
     upstream_reason = _extract_upstream_error(response)
+    upstream_code = _extract_upstream_code(response)
     logger.exception(
-        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        "AIDP %s HTTP error: status_code=%s upstream_code=%s upstream_reason=%s",
         operation,
         response.status_code,
+        upstream_code,
         upstream_reason or "unavailable",
     )
     details = {
         "upstream_status": response.status_code,
         "upstream_reason": upstream_reason,
     }
+    if upstream_code is not None:
+        details["upstream_code"] = upstream_code
     error_code = {
         401: ErrorCode.AIDP_AUTH_ERROR,
         403: ErrorCode.AIDP_AUTH_ERROR,
@@ -189,9 +226,117 @@ def _get_folders_path(kds_id: str, tenant_id: str | None = None) -> str:
     )
 
 
-def _get_folder_tree_path(kds_id: str, tenant_id: str | None = None) -> str:
-    """Build the lazy, one-level folder tree API path."""
-    return f"{_get_folders_path(kds_id, tenant_id)}/Tree"
+def _get_folder_tree_path(
+    kds_id: str,
+    folder_id: int = 0,
+    tenant_id: str | None = None,
+) -> str:
+    """Build the new AIDP folder-tree path addressed by numeric FolderId."""
+    return f"{_get_folders_path(kds_id, tenant_id)}/{int(folder_id)}"
+
+
+def _join_folder_path(parent: str, name: str) -> str:
+    """Join one folder segment to an AIDP path rooted at ``/``."""
+    if parent == "/":
+        return f"/{name}"
+    return f"{parent.rstrip('/')}/{name}"
+
+
+def _get_aidp_folder_level(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    folder_id: int,
+    folder_path: str,
+    *,
+    include_files: bool = False,
+    page: int = 1,
+    page_size: int = 1,
+    keyword: str | None = None,
+    file_type: str | None = None,
+    file_status: str | None = None,
+) -> Dict[str, Any]:
+    """Read one folder level from the new folder-id addressed AIDP endpoint."""
+    params: Dict[str, Any] = {
+        "folder_path": folder_path,
+        "page": page,
+        "page_size": page_size,
+        "include_files": str(include_files).lower(),
+    }
+    if keyword and keyword.strip():
+        params["keyword"] = keyword.strip()
+    if file_type and file_type.strip():
+        params["file_type"] = file_type.strip()
+    if file_status and file_status.strip():
+        params["file_status"] = file_status.strip()
+
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "GET",
+        _get_folder_tree_path(kds_id, folder_id),
+        context=f"folder-tree:{kds_id}:{folder_id}",
+        params=params,
+    )
+
+
+def _resolve_aidp_folder_id(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    folder_path: str,
+) -> int:
+    """Resolve an AIDP path to its numeric FolderId.
+
+    The new AIDP API never accepts a path in the route; it accepts the numeric
+    FolderId and keeps the path as a query/body attribute. Root is always 0.
+    Each segment is resolved through a folders-only tree read; this also gives
+    us an explicit error instead of forwarding a malformed path as a 404.
+    """
+    if folder_path == "/":
+        return 0
+
+    current_id = 0
+    current_path = "/"
+    for segment in folder_path.strip("/").split("/"):
+        if not segment:
+            continue
+        level = _get_aidp_folder_level(
+            server_url,
+            api_key,
+            kds_id,
+            current_id,
+            current_path,
+            include_files=False,
+            page=1,
+            page_size=200,
+        )
+        folders = level.get("folders")
+        match = next(
+            (
+                folder
+                for folder in folders
+                if isinstance(folder, dict)
+                and str(folder.get("folder_name")) == segment
+            ),
+            None,
+        ) if isinstance(folders, list) else None
+        if match is None:
+            raise AppException(
+                ErrorCode.AIDP_SERVICE_ERROR,
+                f"AIDP folder not found: {folder_path}",
+                details={"folder_path": folder_path, "segment": segment},
+            )
+        try:
+            current_id = int(match.get("folder_id"))
+        except (TypeError, ValueError) as exc:
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                f"AIDP folder has no numeric folder_id: {folder_path}",
+                details={"folder_path": folder_path},
+            ) from exc
+        current_path = _join_folder_path(current_path, segment)
+    return current_id
 
 
 def _get_knowledge_files_path(kds_id: str, tenant_id: str | None = None) -> str:
@@ -374,9 +519,10 @@ def _normalize_folder_tree_file(raw: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_doc_status(value: Any) -> str | None:
     """Normalize an AIDP file status to its canonical upper-case token.
 
-    AIDP reports ``COMPLETED`` / ``PROCESSING`` / ``FAILED`` or the numeric
-    contract ``1``-``5`` (observed both as integers and numeric strings);
-    normalizing here means the frontend can compare against one form regardless
+    AIDP is migrating to the integer status contract ``1``-``6`` as the
+    authority; legacy ``COMPLETED`` / ``PROCESSING`` / ``FAILED`` tokens are
+    retained only so older deployments stay readable during the transition.
+    Normalizing here means the frontend can compare against one form regardless
     of upstream spelling. ``None`` is returned for missing/blank values so
     callers can tell "no status reported" apart from a real status. Plain
     integers map to their decimal string so a numeric status is kept instead of
@@ -637,32 +783,27 @@ def get_aidp_folder_tree_impl(
     keyword: str | None = None,
     file_type: str | None = None,
     file_status: str | None = None,
+    include_files: bool = True,
 ) -> Dict[str, Any]:
-    """Read one level of the AIDP folder tree with a paginated file list.
+    """Read one level of the new AIDP folder tree.
 
-    AIDP returns the direct subfolders plus the current folder's files; the
-    files are server-side paginated. Every query parameter is forwarded so
-    filtering stays upstream rather than becoming a client-side page filter.
+    The route is addressed by numeric FolderId; the public Nexent API keeps
+    path addressing and resolves the id here. File rows are only returned when
+    ``include_files`` is true, which the new AIDP API defaults to false.
     """
-    params: Dict[str, Any] = {
-        "folder_path": folder_path,
-        "page": page,
-        "page_size": page_size,
-    }
-    if keyword and keyword.strip():
-        params["keyword"] = keyword.strip()
-    if file_type and file_type.strip():
-        params["file_type"] = file_type.strip()
-    if file_status and file_status.strip():
-        params["file_status"] = file_status.strip()
-
-    result = _request_aidp_json(
+    folder_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, folder_path)
+    result = _get_aidp_folder_level(
         server_url,
         api_key,
-        "GET",
-        _get_folder_tree_path(kds_id),
-        context=f"folder-tree:{kds_id}",
-        params=params,
+        kds_id,
+        folder_id,
+        folder_path,
+        include_files=include_files,
+        page=page,
+        page_size=page_size,
+        keyword=keyword,
+        file_type=file_type,
+        file_status=file_status,
     )
 
     folders = result.get("folders")
@@ -681,6 +822,7 @@ def get_aidp_folder_tree_impl(
     files["total"] = int(files.get("total") or 0)
     result["files"] = files
     result["folder_path"] = str(result.get("folder_path") or folder_path)
+    result["folder_id"] = int(result.get("folder_id") or folder_id)
     return result
 
 
@@ -691,15 +833,16 @@ def create_aidp_folder_impl(
     parent_folder: str,
     folder_name: str,
 ) -> Dict[str, Any]:
-    """Create one AIDP folder below ``parent_folder``."""
+    """Create one folder below a parent folder addressed by its new FolderId."""
+    parent_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, parent_folder)
     return _request_aidp_json(
         server_url,
         api_key,
         "POST",
-        _get_folders_path(kds_id),
+        f"{_get_folders_path(kds_id)}/{parent_id}",
         context=f"create-folder:{kds_id}",
         json_body={
-            "parent_folder": parent_folder,
+            "parent_folder_path": parent_folder,
             "folder_name": folder_name,
         },
     )
@@ -713,15 +856,17 @@ def rename_aidp_folder_impl(
     old_folder_name: str,
     new_folder_name: str,
 ) -> Dict[str, Any]:
-    """Rename one AIDP folder inside its current parent folder."""
+    """Rename one folder addressed by its own FolderId."""
+    source_path = _join_folder_path(parent_folder, old_folder_name)
+    folder_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, source_path)
     return _request_aidp_json(
         server_url,
         api_key,
         "PATCH",
-        _get_folders_path(kds_id),
+        f"{_get_folders_path(kds_id)}/{folder_id}",
         context=f"rename-folder:{kds_id}",
         json_body={
-            "parent_folder": parent_folder,
+            "parent_folder_path": parent_folder,
             "old_folder_name": old_folder_name,
             "new_folder_name": new_folder_name,
         },
@@ -734,12 +879,13 @@ def delete_aidp_folder_impl(
     kds_id: str,
     folder_path: str,
 ) -> None:
-    """Delete one AIDP folder. AIDP only accepts empty folders."""
+    """Delete one empty folder addressed by its own FolderId."""
+    folder_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, folder_path)
     _request_aidp_json(
         server_url,
         api_key,
         "DELETE",
-        _get_folders_path(kds_id),
+        f"{_get_folders_path(kds_id)}/{folder_id}",
         context=f"delete-folder:{kds_id}",
         params={"folder_path": folder_path},
     )
@@ -753,17 +899,22 @@ def move_aidp_folder_impl(
     folder_name: str,
     target_folder: str,
 ) -> Dict[str, Any]:
-    """Move one AIDP folder below ``target_folder``."""
+    """Move one folder below a target folder using the new target_* fields."""
+    source_path = _join_folder_path(parent_folder, folder_name)
+    folder_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, source_path)
+    target_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, target_folder)
     return _request_aidp_json(
         server_url,
         api_key,
         "POST",
-        f"{_get_folders_path(kds_id)}/Move",
+        f"{_get_folders_path(kds_id)}/{folder_id}/Move",
         context=f"move-folder:{kds_id}",
         json_body={
-            "parent_folder": parent_folder,
+            "src_parent_folder_path": parent_folder,
             "folder_name": folder_name,
-            "target_folder": target_folder,
+            "target_parent_folder_path": target_folder,
+            "target_parent_folder_id": target_id,
+            "merge_on_conflict": False,
         },
     )
 
@@ -775,7 +926,8 @@ def move_aidp_files_impl(
     file_uuids: List[str],
     target_folder: str,
 ) -> Dict[str, Any]:
-    """Move knowledge files to one target folder, returning per-file outcomes."""
+    """Move knowledge files using folder id + path and per-file outcomes."""
+    target_id = _resolve_aidp_folder_id(server_url, api_key, kds_id, target_folder)
     return _request_aidp_json(
         server_url,
         api_key,
@@ -784,7 +936,8 @@ def move_aidp_files_impl(
         context=f"move-files:{kds_id}",
         json_body={
             "file_uuids": file_uuids,
-            "target_folder": target_folder,
+            "target_folder_path": target_folder,
+            "target_folder_id": target_id,
         },
     )
 
@@ -796,7 +949,7 @@ def rename_aidp_file_impl(
     file_uuid: str,
     new_file_name: str,
 ) -> Dict[str, Any]:
-    """Rename one knowledge file and return its new logical path."""
+    """Rename one knowledge file; the new AIDP contract returns 204."""
     return _request_aidp_json(
         server_url,
         api_key,
@@ -1665,10 +1818,12 @@ def upload_aidp_docs_impl(
 ) -> Dict[str, Any]:
     """Upload documents to a knowledge base via AIDP API.
 
-    ``target_folder``/``relative_paths`` address the documented directory
-    upload: each file keeps its position relative to the selected folder, so a
-    whole-directory upload preserves its subdirectories. Both are omitted for
-    the legacy root upload, keeping the previous request shape unchanged.
+    ``target_folder`` is the public Nexent path. The new AIDP contract names
+    the multipart field ``target_folder_path`` and also accepts
+    ``target_folder_id``. ``relative_paths`` entries are directories, not file
+    paths; the proxy route converts the frontend's file-relative paths before
+    calling this function. Omitting relative_paths keeps the upload flat in the
+    target folder.
     """
     normalized_url = _validate_params(server_url, api_key)
 
@@ -1682,11 +1837,15 @@ def upload_aidp_docs_impl(
 
     form_data = None
     if target_folder is not None:
+        target_folder_id = _resolve_aidp_folder_id(
+            server_url, api_key, kds_id, target_folder
+        )
         form_data = {
-            "target_folder": target_folder,
-            "relative_paths": relative_paths
-            or [f.filename or "unknown" for f in files],
+            "target_folder_path": target_folder,
+            "target_folder_id": target_folder_id,
         }
+        if relative_paths:
+            form_data["relative_paths"] = relative_paths
 
     try:
         client = http_client_manager.get_sync_client(

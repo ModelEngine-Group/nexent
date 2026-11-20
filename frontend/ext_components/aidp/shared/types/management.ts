@@ -61,8 +61,10 @@ export interface AidpDocumentListResponse {
 /** One direct subfolder returned by the AIDP folder tree. */
 export interface AidpFolderItem {
   folder_name: string;
-  /** AIDP only guarantees name + emptiness for a folder node. */
-  is_empty?: boolean;
+  /** New AIDP folder tree: numeric id used by every folder route. */
+  folder_id?: number;
+  /** New AIDP folder tree: whether this folder has direct child folders. */
+  has_child_folders?: boolean;
   [key: string]: unknown;
 }
 
@@ -91,6 +93,7 @@ export interface AidpFolderTreeFiles {
 
 /** One level of the AIDP folder tree: direct folders + paginated files. */
 export interface AidpFolderTreeResponse {
+  folder_id?: number;
   folder_path: string;
   folders: AidpFolderItem[];
   files: AidpFolderTreeFiles;
@@ -150,6 +153,12 @@ export interface AidpUploadSuccessItem {
   file_size: number;
   file_ino_no: string;
   first_upload_time: number;
+  /** New AIDP receipt: stable AIDP storage identity and final logical path. */
+  storage_name?: string;
+  file_path?: string;
+  folder_id?: number;
+  /** Directory relative to target_folder_path; empty for flat uploads. */
+  relative_path?: string;
 }
 
 export interface AidpUploadFailedItem {
@@ -157,6 +166,8 @@ export interface AidpUploadFailedItem {
   reason_zh: string;
   reason_en: string;
   code?: string | number;
+  file_uuid?: string;
+  relative_path?: string;
 }
 
 export interface AidpUploadResponse {

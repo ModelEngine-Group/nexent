@@ -35,6 +35,7 @@ export const useAidpFolderTree = (
           page,
           pageSize,
           keyword,
+          true,
           signal
         );
       } catch (error) {

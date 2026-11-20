@@ -31,6 +31,45 @@ export const writeAidpFileMoveDrag = (
   dataTransfer.effectAllowed = "move";
 };
 
+/**
+ * Replace the browser's default row snapshot with a compact label containing
+ * only the dragged file name(s). The default snapshot includes every table
+ * column (type, size, timestamps), which reads like a data row rather than the
+ * file being moved.
+ */
+export const setAidpFileMoveDragImage = (
+  dataTransfer: DataTransfer,
+  label: string
+): void => {
+  if (!label || typeof document === "undefined") return;
+  document
+    .querySelectorAll("[data-aidp-drag-preview]")
+    .forEach((element) => element.remove());
+  const preview = document.createElement("div");
+  preview.textContent = label;
+  preview.setAttribute("data-aidp-drag-preview", "true");
+  Object.assign(preview.style, {
+    position: "fixed",
+    top: "-1000px",
+    left: "-1000px",
+    maxWidth: "320px",
+    overflow: "hidden",
+    padding: "6px 10px",
+    border: "1px solid #d9d9d9",
+    borderRadius: "6px",
+    background: "#ffffff",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.12)",
+    color: "#1f1f1f",
+    font: "13px/20px sans-serif",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+  });
+  document.body.appendChild(preview);
+  dataTransfer.setDragImage(preview, 10, 10);
+  window.setTimeout(() => preview.remove(), 0);
+};
+
 export const readAidpFileMoveDrag = (
   dataTransfer: DataTransfer | null | undefined
 ): string[] => {

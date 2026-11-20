@@ -33,20 +33,6 @@
   line-height: 22px;
 }
 
-.browse {
-  border: 0;
-  background: none;
-  color: #1677ff;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 22px;
-  padding: 0;
-}
-
-.browse:hover {
-  text-decoration: underline;
-}
-
 .description {
   max-width: 520px;
   color: #a3a3a3;

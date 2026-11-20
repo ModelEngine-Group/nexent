@@ -25,3 +25,7 @@ acceptance_bindings:
   AC-05:
   - AIDP-FE-FILES-01 > batch move keeps failed files selected and shows reasons
     inline
+  AC-06:
+  - AIDP-FE-FILES-01 > status 1–6 gates row and batch actions
+  AC-07:
+  - AIDP-FE-FILES-01 > checks folder contents through the tree endpoint before deletion
