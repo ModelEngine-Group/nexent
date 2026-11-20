@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Admit an entire KB upload batch before any source object can be published."""
+"""Admit KB uploads and persist the outcome for the admitted file."""
 
 import asyncio
 import logging
@@ -18,8 +18,13 @@ from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
-from nexent.storage.models import OperationContext
+from nexent.storage.errors import (
+    Conflict,
+    DeadlineExceeded,
+    OutcomeUnknown,
+    ScopeDenied,
+)
+from nexent.storage.models import FieldPatch, OperationContext, Revision, WriteOutcome
 
 from infrastructure.knowledge_admission import knowledge_admission_ports
 
@@ -79,5 +84,40 @@ async def admit_knowledge_uploads(specs, *, actor):
         logger.warning('knowledge_upload_admission_timeout operation_id=%s threshold_seconds=10 error_type=%s',
                        context.operation_id, type(error).__name__)
         raise DeadlineExceeded(operation_id=context.operation_id) from error
+    finally:
+        stopped.set()
+
+
+
+def _patch_upload_record(records, file_id, actor, expected_statuses, fields, *, context):
+    with records.transaction(context=context) as transaction:
+        row = transaction.get(FILES, file_id, context=context)
+        if row is None or row["created_by"] != actor.user_id or row["status"] not in expected_statuses:
+            return None
+        receipt = transaction.patch(
+            FILES, file_id, FieldPatch(set_values=fields),
+            expected=Revision(str(row["version"])), context=context,
+        )
+        if receipt.outcome is not WriteOutcome.CONFIRMED:
+            raise OutcomeUnknown(operation_id=context.operation_id)
+        if not receipt.matched:
+            return None
+        return transaction.get(FILES, file_id, context=context)
+
+
+async def update_upload_record(file_id, *, actor, expected_statuses, **fields):
+    """Update an admitted upload owned by the current request identity."""
+    stopped = Event()
+    context = OperationContext('knowledge-upload-outcome-' + uuid4().hex, monotonic() + 10, cancelled=stopped)
+
+    def update():
+        with knowledge_admission_ports(actor, context=context) as (records, _):
+            return _patch_upload_record(records, file_id, actor, expected_statuses, fields, context=context)
+
+    try:
+        async with asyncio.timeout(context.remaining()):
+            return await run_blocking('knowledge-upload-outcome', update, lane='control-io', owner='management.file')
+    except TimeoutError as error:
+        raise OutcomeUnknown(operation_id=context.operation_id) from error
     finally:
         stopped.set()

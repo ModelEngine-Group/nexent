@@ -218,3 +218,42 @@ def test_stale_parent_revision_does_not_reject_another_valid_upload(admission, m
     assert s.records.get(KB, 1, context=context())['version'] == 5
     assert s.records.get(FILES, 'a' * 32, context=context()) is not None
     assert s.records.get(FILES, 'b' * 32, context=context()) is not None
+
+
+def test_upload_outcome_updates_only_the_admitted_owner_and_status(admission):
+    from management.services.file.upload_admission import _patch_upload_record
+
+    s = admission
+    [row] = s.service.admit([s.spec()], context=context())
+    args = (s.records, row["file_id"])
+    foreign = SimpleNamespace(user_id="user-b", tenant_id="tenant-a")
+    fields = {"status": "UPLOADED", "uploaded_at": "2026-09-01T12:00:00+00:00"}
+    assert _patch_upload_record(*args, foreign, ("UPLOADING",), fields, context=context()) is None
+    assert _patch_upload_record(*args, s.actor, ("FAILED",), fields, context=context()) is None
+
+    updated = _patch_upload_record(*args, s.actor, ("UPLOADING",), fields, context=context())
+    assert updated["version"] == row["version"] + 1 and updated["status"] == "UPLOADED"
+    assert updated["uploaded_at"] == fields["uploaded_at"] and updated["updated_by"] == s.actor.user_id
+    assert _patch_upload_record(*args, s.actor, ("UPLOADING",), {"status": "FAILED"}, context=context()) is None
+    renamed = _patch_upload_record(*args, s.actor, ("UPLOADED",), {"original_filename": "new.txt"}, context=context())
+    assert renamed["original_filename"] == "new.txt" and renamed["uploaded_at"] == fields["uploaded_at"]
+
+
+@pytest.mark.parametrize("outcome", [WriteOutcome.CONFIRMED, WriteOutcome.UNKNOWN])
+def test_upload_outcome_cas_never_replays_an_unconfirmed_update(admission, monkeypatch, outcome):
+    from unittest.mock import Mock
+
+    from management.services.file.upload_admission import _patch_upload_record
+
+    s = admission
+    [row] = s.service.admit([s.spec()], context=context())
+    patch_record = Mock(return_value=WriteReceipt("op", False, outcome=outcome))
+    monkeypatch.setattr(type(s.records), "patch", patch_record)
+    args = (s.records, row["file_id"], s.actor, ("UPLOADING",), {"status": "FAILED"})
+    if outcome is WriteOutcome.UNKNOWN:
+        with pytest.raises(OutcomeUnknown):
+            _patch_upload_record(*args, context=context())
+    else:
+        assert _patch_upload_record(*args, context=context()) is None
+    patch_record.assert_called_once()
+    assert patch_record.call_args.kwargs["expected"].value == str(row["version"])

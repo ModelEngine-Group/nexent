@@ -367,6 +367,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
                     "status": "FAILED",
                     "error_code": "UPLOAD_FAILED",
                     "error_message": "parser unavailable",
+                    "failed_at": "2026-09-01T12:00:00+00:00",
                 }
             ]
             return result
@@ -396,6 +397,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
     assert '"quota_status":"warning"' in content
     assert "parser unavailable" in content
     assert "failed-file" in content
+    assert '"failed_at":"2026-09-01T12:00:00Z"' in content
 
 
 @pytest.mark.asyncio

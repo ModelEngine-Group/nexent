@@ -3,7 +3,7 @@ from contracts.file_types import get_content_type
 from infrastructure.system_configuration.runtime import get_config_snapshot
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from time import monotonic
@@ -18,7 +18,6 @@ from contracts.constants.constants import (
 )
 from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
 from contracts.object_tickets import InvalidObjectTicket, issue_download_url
-from contracts.errors.ingestion import ingestion_error_fields
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException,
@@ -30,11 +29,10 @@ from management.db.file.attachment import (
     generate_object_name,
     upload_fileobj,
 )
-from management.db.knowledge_base.file_lifecycle import transition_file_record
 from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.file.source_upload import upload_knowledge_source
-from management.services.file.upload_admission import admit_knowledge_uploads
+from management.services.file.upload_admission import admit_knowledge_uploads, update_upload_record
 from management.services.file.upload_context import resolve_upload_context
 from management.services.knowledge_base.usage_cache import invalidate_usage_cache
 from management.services.model.names import get_model_name_from_config
@@ -309,8 +307,8 @@ async def upload_files_impl(
 
         from infrastructure.agentos_identity import ServicePrincipal
 
-        storage_context = (await resolve_upload_context(index_name, ServicePrincipal(user_id, uploader_tenant_id))
-                           if index_name and uploader_tenant_id else None)
+        actor = ServicePrincipal(user_id, uploader_tenant_id) if index_name and uploader_tenant_id else None
+        storage_context = await resolve_upload_context(index_name, actor) if actor else None
         if index_name and _is_knowledge_base_upload(folder, index_name) and storage_context is None:
             raise ScopeDenied()
         if lifecycle_file_ids is not None:
@@ -355,7 +353,7 @@ async def upload_files_impl(
                 from infrastructure.agentos_identity import ServicePrincipal
 
                 lifecycle_records = await admit_knowledge_uploads(
-                    lifecycle_record_specs, actor=ServicePrincipal(user_id, uploader_tenant_id),
+                    lifecycle_record_specs, actor=actor,
                 )
                 if len(lifecycle_records) != len(lifecycle_record_indices):
                     raise RuntimeError("Lifecycle record batch creation returned an incomplete result")
@@ -365,23 +363,22 @@ async def upload_files_impl(
         if storage_context:
             from management.services.file.upload_quota import UploadQuota
 
-            from infrastructure.agentos_identity import ServicePrincipal
-
             total_file_size = await _get_complete_upload_batch_size(file)
-            quota_service = UploadQuota(ServicePrincipal(user_id, uploader_tenant_id), storage_context)
+            quota_service = UploadQuota(actor, storage_context)
             try:
                 quota_status = await quota_service.before(total_file_size)
             except Exception as quota_exc:
                 error_fields = ingestion_error_fields(quota_exc, "QUOTA")
                 for record in lifecycle_records_by_index.values():
-                    transition_file_record(
+                    await update_upload_record(
                         record["file_id"],
                         status="FAILED",
                         stage="QUOTA",
                         **error_fields,
                         error_stage="QUOTA",
-                        failed_at=datetime.utcnow(),
-                        updated_by=user_id,
+                        expected_statuses=("UPLOADING",),
+                        failed_at=datetime.now(timezone.utc).isoformat(),
+                        actor=actor,
                     )
                 raise
 
@@ -396,18 +393,18 @@ async def upload_files_impl(
         successful_lifecycle_records = []
         for file_index, result in enumerate(minio_results):
             record = lifecycle_records_by_index.get(file_index)
-            file_id = result.get("file_id") or (record or {}).get("file_id")
+            file_id = (record or {}).get("file_id")
             if result.get("success"):
                 if file_id:
-                    updated_record = transition_file_record(
+                    updated_record = await update_upload_record(
                         file_id,
                         status="UPLOADED",
                         stage="UPLOAD",
                         object_name=result.get("object_name"),
                         file_size=result.get("file_size"),
-                        uploaded_at=datetime.utcnow(),
+                        uploaded_at=datetime.now(timezone.utc).isoformat(),
                         expected_statuses=("UPLOADING",),
-                        updated_by=user_id,
+                        actor=actor,
                     )
                     if updated_record:
                         lifecycle_records_by_index[file_index] = updated_record
@@ -431,15 +428,15 @@ async def upload_files_impl(
                 errors.append(f"Failed to upload {file_name}: {error_msg}")
                 if file_id and not result.get("outcome_unknown"):
                     error_fields = ingestion_error_fields(result, "UPLOAD")
-                    updated_record = transition_file_record(
+                    updated_record = await update_upload_record(
                         file_id,
                         status="FAILED",
                         stage="UPLOAD",
                         **error_fields,
                         error_stage="UPLOAD",
-                        failed_at=datetime.utcnow(),
+                        failed_at=datetime.now(timezone.utc).isoformat(),
                         expected_statuses=("UPLOADING",),
-                        updated_by=user_id,
+                        actor=actor,
                     )
                     if updated_record:
                         lifecycle_records_by_index[file_index] = updated_record
@@ -499,11 +496,11 @@ async def upload_files_impl(
                     if not record.get("file_id") or current_filename is None or current_filename == effective_filename:
                         continue
                     try:
-                        updated_record = transition_file_record(
+                        updated_record = await update_upload_record(
                             record["file_id"],
                             original_filename=effective_filename,
                             expected_statuses=("UPLOADED",),
-                            updated_by=user_id,
+                            actor=actor,
                         )
                         if updated_record:
                             record.update(updated_record)
@@ -532,18 +529,18 @@ async def upload_files_impl(
                 error_fields = ingestion_error_fields(exc, "STORAGE_COMMIT")
                 for record in lifecycle_records_by_index.values():
                     if record.get("status") in {"UPLOADING", "UPLOADED"}:
-                        transition_file_record(
+                        await update_upload_record(
                             record["file_id"],
                             status="FAILED",
                             stage="STORAGE_COMMIT",
                             **error_fields,
                             error_stage="STORAGE_COMMIT",
-                            failed_at=datetime.utcnow(),
+                            failed_at=datetime.now(timezone.utc).isoformat(),
                             expected_statuses=("UPLOADING", "UPLOADED"),
-                            updated_by=user_id,
+                            actor=actor,
                         )
                 await compensate_uploaded_objects(storage_context, uploaded_file_paths,
-                    ServicePrincipal(user_id, uploader_tenant_id))
+                    actor)
                 invalidate_usage_cache(storage_context.tenant_id)
                 raise
     else:

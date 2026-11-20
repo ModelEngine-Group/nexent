@@ -96,7 +96,7 @@ async def _stub_admit_knowledge_uploads(specs, *, actor):
     ]
 
 
-def _stub_transition_file_record(file_id, **fields):
+async def _stub_update_upload_record(file_id, *, actor, expected_statuses, **fields):
     """Return an updated lifecycle row without requiring PostgreSQL in service tests."""
     return {
         "file_id": file_id,
@@ -127,8 +127,8 @@ def setup_patches():
         patch('management.db.file.attachment.delete_file', MagicMock()),
         patch_import_context('management.services.file.service.admit_knowledge_uploads',
               side_effect=_stub_admit_knowledge_uploads),
-        patch_import_context('management.services.file.service.transition_file_record',
-              side_effect=_stub_transition_file_record),
+        patch_import_context('management.services.file.service.update_upload_record',
+              side_effect=_stub_update_upload_record),
         patch_import_context('management.services.file.service.upload_dir',
               Path("/test/uploads")),
         patch_import_context('management.services.file.service.resolve_upload_context', new_callable=AsyncMock, return_value=None),
@@ -452,7 +452,7 @@ class TestUploadFilesImpl:
 
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
-                patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
+                patch_import_context("management.services.file.service.update_upload_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=minio_results)), \
                 patch_import_context("management.services.knowledge_base.file_listing.list_knowledge_files", AsyncMock(return_value=list_files_payload)), \
                 patch.dict(sys.modules, {"management.services.file.upload_quota": quota_module}):
@@ -640,7 +640,7 @@ class TestUploadFilesImpl:
         quota_module.UploadQuota = FakeQuota
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]) as create_records, \
-                patch_import_context("management.services.file.service.transition_file_record", side_effect=transition) as transition_record, \
+                patch_import_context("management.services.file.service.update_upload_record", side_effect=transition) as transition_record, \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-1", "file_name": "a.txt", "object_name": "folder/a.txt", "file_size": 3}
                 ])) as upload_mock, \
@@ -708,7 +708,7 @@ class TestUploadFilesImpl:
         monkeypatch.setitem(sys.modules, "management.services.file.upload_quota", quota_module)
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]) as create_records, \
-                patch_import_context("management.services.file.service.transition_file_record", return_value={"file_id": "fid-a", "status": "UPLOADED"}), \
+                patch_import_context("management.services.file.service.update_upload_record", return_value={"file_id": "fid-a", "status": "UPLOADED"}), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt"}
                 ])):
@@ -777,7 +777,7 @@ class TestUploadFilesImpl:
         quota_module.UploadQuota = FakeQuota
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=records), \
-                patch_import_context("management.services.file.service.transition_file_record", side_effect=transition), \
+                patch_import_context("management.services.file.service.update_upload_record", side_effect=transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(return_value=[
                     {
                         "success": True,
@@ -813,7 +813,7 @@ class TestUploadFilesImpl:
             tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1", ingroup_permission="SHARED"
         )
         record = {"file_id": "fid-quota", "object_name": "folder/quota.txt", "status": "UPLOADING"}
-        transition = MagicMock(return_value={"file_id": "fid-quota", "status": "FAILED"})
+        transition = AsyncMock(return_value={"file_id": "fid-quota", "status": "FAILED"})
 
         class FakeQuota:
             def __init__(self, *_args):
@@ -826,7 +826,7 @@ class TestUploadFilesImpl:
         quota_module.UploadQuota = FakeQuota
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]), \
-                patch_import_context("management.services.file.service.transition_file_record", transition), \
+                patch_import_context("management.services.file.service.update_upload_record", transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock()) as upload_mock, \
                 patch.dict(sys.modules, {"management.services.file.upload_quota": quota_module}):
             with pytest.raises(QuotaExceededError, match="quota exceeded"):
@@ -847,7 +847,7 @@ class TestUploadFilesImpl:
             tenant_id="tenant-1", knowledge_id=7, index_name="kb-1", bucket_name="bucket-1", ingroup_permission="SHARED"
         )
         record = {"file_id": "fid-upload", "object_name": "folder/broken.txt", "status": "UPLOADING"}
-        transition = MagicMock(side_effect=[
+        transition = AsyncMock(side_effect=[
             {"file_id": "fid-upload", "status": "FAILED"},
             {"file_id": "fid-commit", "status": "UPLOADED"},
             {"file_id": "fid-commit", "status": "FAILED"},
@@ -868,7 +868,7 @@ class TestUploadFilesImpl:
         quota_module.UploadQuota = FakeQuota
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[record]), \
-                patch_import_context("management.services.file.service.transition_file_record", transition), \
+                patch_import_context("management.services.file.service.update_upload_record", transition), \
                 patch_import_context("management.services.file.service.upload_to_minio", AsyncMock(side_effect=[
                     [{"success": False, "file_id": "fid-upload", "file_name": "broken.txt", "error": "read failed"}],
                     [{"success": True, "file_id": "fid-commit", "file_name": "commit.txt", "object_name": "folder/commit.txt", "file_size": 3}],
@@ -882,7 +882,7 @@ class TestUploadFilesImpl:
 
         with patch_import_context("management.services.file.service.resolve_upload_context", return_value=context), \
                 patch_import_context("management.services.file.service.admit_knowledge_uploads", return_value=[{"file_id": "fid-commit", "object_name": "folder/commit.txt", "status": "UPLOADING"}]), \
-                patch_import_context("management.services.file.service.transition_file_record", side_effect=[
+                patch_import_context("management.services.file.service.update_upload_record", side_effect=[
                     {"file_id": "fid-commit", "status": "UPLOADED"},
                     {"file_id": "fid-commit", "status": "FAILED"},
                 ]) as commit_transition, \

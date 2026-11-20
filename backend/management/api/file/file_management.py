@@ -93,6 +93,11 @@ async def upload_files(
             for record in getattr(upload_result, "file_records", [])
             if isinstance(record, dict)
         ]
+        for record in file_records:
+            for field in ("uploaded_at", "failed_at"):
+                value = record[field]
+                if isinstance(value, str) and value.endswith("+00:00"):
+                    record[field] = value.removesuffix("+00:00") + "Z"
 
         if uploaded_file_paths:
             response_content = {
