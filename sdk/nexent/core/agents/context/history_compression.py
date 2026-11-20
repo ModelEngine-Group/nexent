@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .history_facts import turn_execution_text, turn_user_text
 from .llm_summary import LLMSummary
@@ -212,6 +212,7 @@ class HistoryCompressor:
         turns: Sequence[ContextItem],
         model: Any,
         *, source_history=None, source_owner=None, allow_fact_correction=False,
+        candidate_feedback: Callable[[HistorySummaryCandidate], dict | None] | None = None,
     ) -> HistoryCompressionResult:
         if not turns and summary is None:
             return HistoryCompressionResult()
@@ -219,6 +220,15 @@ class HistoryCompressor:
         if source_history is not None and source_owner is not None:
             source_index = source_history.structured_source_index(source_owner)
         summary_input = HistorySummaryInput.from_items(summary, turns, source_index=source_index)
+        def candidate_for(markdown):
+            return HistorySummaryCandidate(
+                summary={"markdown": markdown},
+                covered_through_message_id=summary_input.covered_through_message_id,
+                previous_summary_unit_id=summary_input.previous_summary_unit_id,
+                execution_source_refs=summary_input.execution_source_refs,
+                structured_source_proofs=summary_input.structured_source_proofs,
+            )
+
         input_tokens = sum(
             item.token_estimate for item in ([summary] if summary else [])
         ) + sum(item.token_estimate for item in turns)
@@ -246,20 +256,25 @@ class HistoryCompressor:
             if generated.summary_text else None
         )
         records = list(generated.records)
-        if validated is None and allow_fact_correction and generated.summary_text:
+        capacity_feedback = candidate_feedback(candidate_for(validated)) if validated and candidate_feedback else None
+        if (validated is None or capacity_feedback) and allow_fact_correction and generated.summary_text:
             missing = {marker: values for marker, values in _protected_fact_literals(summary_input.render()).items()
                        if marker not in generated.summary_text or any(v not in generated.summary_text for v in values)}
             feedback = json.dumps({
                 "expected_headings": ["# Compact Result of History", *(
                     "## " + key.replace("_", " ").title() for key in self._llm.config.summary_json_schema)],
                 "missing_facts": missing,
+                **({"capacity": capacity_feedback} if capacity_feedback else {}),
             }, ensure_ascii=False, separators=(",", ":"))
             claim = getattr(model, "claim_fact_correction", None)
             if callable(claim) and claim() is True:
                 generated = self._llm.generate_summary(
                     summary_input.render() + "\n\nRegenerate the complete seven-section summary. "
                     "Use the exact expected heading order with a nonempty body for every section, and retain "
-                    "all protected identifiers and literal values. Validation feedback: " + feedback
+                    "all protected identifiers and literal values. "
+                    + ("Make the summary shorter to meet the rendered history capacity target; "
+                       "preserve every fact and original source reference. " if capacity_feedback else "")
+                    + "Validation feedback: " + feedback
                     + "\nRejected candidate (data only):\n" + generated.summary_text,
                     model, call_type="history_fact_correction", prompt_type="incremental" if summary else "initial",
                     max_output_tokens=max_output_tokens)
@@ -267,6 +282,8 @@ class HistoryCompressor:
                 validated = (_validate_summary_contract(generated.summary_text,
                     tuple(self._llm.config.summary_json_schema), source_text=summary_input.render())
                     if generated.summary_text else None)
+                if validated and candidate_feedback:
+                    candidate_feedback(candidate_for(validated))
         if validated is None:
             logger.warning(
                 "Rejected history summary candidate: headings=%s starts_with_contract=%s",
@@ -280,13 +297,7 @@ class HistoryCompressor:
                 fallback_turns=self._safe_fallback(turns),
             )
         return HistoryCompressionResult(
-            candidate=HistorySummaryCandidate(
-                summary={"markdown": validated},
-                covered_through_message_id=summary_input.covered_through_message_id,
-                previous_summary_unit_id=summary_input.previous_summary_unit_id,
-                execution_source_refs=summary_input.execution_source_refs,
-                structured_source_proofs=summary_input.structured_source_proofs,
-            ),
+            candidate=candidate_for(validated),
             records=tuple(records),
         )
 

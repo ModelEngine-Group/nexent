@@ -34,7 +34,8 @@ case:
     expected: Retired fields do not change thresholds or request behavior; provider and threads are reclaimed.
   - order: 4
     action: Reject an oversized historical full frame against an owned HTTP/SSE provider, then exercise accepted
-      summary, missing fixed title, invalid-format correction, persistently invalid summary and main-request authentication failure.
+      summary, missing fixed title, invalid-format correction, valid but expanded summary with one capacity correction,
+      still-oversized correction, persistently invalid summary and main-request authentication failure.
     expected: Only a valid history-only candidate with actual reduction and full-frame fit commits. Invalid candidates
       leave no checkpoint and prepare reentry makes no extra request. A later main failure retains the accepted
       old checkpoint. Only the fixed missing H1 is normalized without a model call; other invalid text may use the same single format-or-fact correction claim and strict validation. All actual bodies omit output limits and resources close.
@@ -83,8 +84,8 @@ case:
     - 2
     - 3
   - id: AC-CAPACITY-RECOVERY
-    description: Real HTTP transport proves accepted/invalid history recovery, shared prepare budget and accepted-old-checkpoint
-      survival after main failure.
+    description: Real HTTP transport proves accepted/invalid history recovery, shared format/fact/capacity correction
+      and prepare budget, expanded-candidate correction or rollback, and accepted-old-checkpoint survival after main failure.
     steps:
     - 4
     expected_results:

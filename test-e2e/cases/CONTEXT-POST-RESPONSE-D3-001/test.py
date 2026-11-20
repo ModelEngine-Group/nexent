@@ -121,7 +121,8 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
         assert not thread.is_alive()
 
 
-@pytest.mark.parametrize("outcome", ["accepted", "invalid_summary", "main_failure", "missing_title", "contract_corrected"])
+@pytest.mark.parametrize("outcome", ["accepted", "invalid_summary", "main_failure", "missing_title", "contract_corrected",
+                                     "capacity_corrected", "capacity_still_oversized"])
 def test_rejected_capacity_recovers_transactionally_over_http(outcome):
     requests, committed, summary_outputs = [], [], []
     summary = "# Compact Result of History\n\n" + "\n\n".join(
@@ -143,6 +144,8 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
                     text = summary.split("\n\n", 1)[1]
                 elif outcome == "contract_corrected" and not summary_outputs:
                     text = "Invalid summary format."
+                elif outcome.startswith("capacity_") and (not summary_outputs or outcome == "capacity_still_oversized"):
+                    text = summary + "\n" + "x" * 9000
                 summary_outputs.append(text)
             if not is_summary and outcome == "main_failure":
                 body = json.dumps({"error": {"message": "controlled authentication failure", "type": "authentication_error"}}).encode()
@@ -166,19 +169,20 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
     thread.start()
     try:
         data = resolved_profile_for_test(f"http://127.0.0.1:{server.server_port}/v1").model_dump(mode="json")
-        data["capabilities"]["context"] = {"combined_window": 20000, "input_limit": 1000, "output_limit": 5000}
+        window = 50000 if outcome.startswith("capacity_") else 20000
+        data["capabilities"]["context"] = {"combined_window": window, "input_limit": 1000, "output_limit": 5000}
         model = LegacyChatModel.from_profile(ResolvedModelProfile.model_validate(data), "owned-key")
         original_service = model.service
         runtime = ManagedContextRuntime(ContextManager(ContextManagerConfig(
-            context_window_tokens=20000, effective_input_limit_tokens=20000, chars_per_token=1,
+            context_window_tokens=window, effective_input_limit_tokens=window, chars_per_token=1,
             compaction_trigger_threshold_tokens=16000, compaction_target_tokens=12000,
             history_summary_sink=committed.append,
             policy_layers={"platform": {"processing_mode": "adaptive_compact"}})), items=[
-                ContextItemInput(id="old", type="conversation_turn", content={"user_message": "h" * 14000,
+                ContextItemInput(id="old", type="conversation_turn", content={"user_message": "h" * (8000 if window == 50000 else 14000),
                     "assistant_final_answer": "old fact", "user_message_id": 1, "assistant_message_id": 2})])
-        memory = SimpleNamespace(steps=[TaskStep(task="NEW_CURRENT_TASK" + "n" * 8000)])
+        memory = SimpleNamespace(steps=[TaskStep(task="NEW_CURRENT_TASK" + "n" * (45000 if window == 50000 else 8000))])
         runtime.prepare_run(memory=memory, fallback_system_prompt="MANDATORY_SYSTEM")
-        if outcome == "invalid_summary":
+        if outcome in {"invalid_summary", "capacity_still_oversized"}:
             with pytest.raises(ValueError, match="combined context window"):
                 runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
             first_calls = len(requests)
@@ -187,11 +191,15 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
             assert len(requests) == first_calls and not committed
             assert runtime.context_manager._history_candidate is None
             assert runtime.context_manager._pending_capacity_candidate is None
+            if outcome == "capacity_still_oversized":
+                assert runtime._capacity_budget.summary_calls == len(requests) == 2
+                assert runtime._capacity_budget.fact_correction_used
+                assert "history_target_tokens" in str(requests[1]["messages"])
         else:
             prepared = runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
             assert prepared.evidence.maintenance_phase == "local_capacity_recovery"
             assert prepared.evidence.provider_input_tokens is None
-            assert runtime._estimate(prepared.messages, prepared.tools) < 20000
+            assert runtime._estimate(prepared.messages, prepared.tools) < window
             assert len(committed) == 1 and committed[0].covered_through_message_id == 2
             if outcome == "main_failure":
                 from nexent.core.model_errors import ModelInvocationTerminalError
@@ -208,6 +216,12 @@ def test_rejected_capacity_recovers_transactionally_over_http(outcome):
                 assert runtime._capacity_budget.fact_correction_used
                 assert runtime._capacity_budget.summary_calls == 2 and len(requests) == 3
                 assert summary_outputs[0] == "Invalid summary format."
+            elif outcome == "capacity_corrected":
+                assert runtime._capacity_budget.fact_correction_used
+                assert runtime._capacity_budget.summary_calls == 2 and len(requests) == 3
+                assert "history_target_tokens" in str(requests[1]["messages"])
+                assert "NEW_CURRENT_TASK" not in str(requests[1]["messages"])
+                assert len(summary_outputs[0]) > len(summary_outputs[1])
             assert "NEW_CURRENT_TASK" in str(requests[-1]["messages"])
             assert "MANDATORY_SYSTEM" in str(requests[-1]["messages"])
         assert 1 <= runtime._capacity_budget.summary_calls <= 3
