@@ -366,7 +366,9 @@ the selected dates. Missing values remain null and are distinct from zero.
 
 The [Agent frontend handoff](agent-monitoring-api.md) lists the three current
 page integration routes, field mappings and request/response examples. The
-existing rankings route is outside this handoff's scope.
+existing execution-count Top 5 route is implemented. Total-Token and
+success-rate Top 5 remain unimplemented and will be scheduled separately;
+northbound interfaces remain deferred.
 
 Each resource includes `tenant_id`, `agent_id`, `is_current` and `metrics`.
 Current metadata includes `name`, `display_name`, `model_ids`,
