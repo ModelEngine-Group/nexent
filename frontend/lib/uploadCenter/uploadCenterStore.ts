@@ -20,6 +20,7 @@ const EMPTY_SNAPSHOT: UploadCenterSnapshot = {
   fileOrder: [],
   jobs: {},
   batches: {},
+  cancelling: false,
 };
 
 const PROGRESS_NOTIFY_INTERVAL_MS = 100;
@@ -174,6 +175,7 @@ export class UploadCenterStore {
       ],
       jobs,
       batches: batchMap,
+      cancelling: this.snapshot.cancelling,
     };
     this.transports.set(jobId, input.transport);
     if (input.onComplete) this.callbacks.set(jobId, input.onComplete);
@@ -186,12 +188,17 @@ export class UploadCenterStore {
     void this.drain();
   }
 
-  retryFailed(): void {
+  retryFailed(fileIds?: string[]): void {
+    const only = fileIds ? new Set(fileIds) : null;
     const retryIdsByJob = new Map<string, string[]>();
     for (const [jobId, job] of Object.entries(this.snapshot.jobs)) {
       const retryIds = job.fileIds.filter((fileId) => {
         const file = this.snapshot.files[fileId];
-        return file?.status === "upload_failed" && file.retryable !== false;
+        return (
+          (!only || only.has(fileId)) &&
+          (file?.status === "upload_failed" || file?.status === "cancelled") &&
+          file.retryable !== false
+        );
       });
       if (retryIds.length > 0) retryIdsByJob.set(jobId, retryIds);
     }
@@ -240,10 +247,64 @@ export class UploadCenterStore {
       this.completedCallbacks.delete(jobId);
     }
 
-    this.snapshot = { ...this.snapshot, files, jobs, batches };
+    this.snapshot = {
+      ...this.snapshot,
+      files,
+      jobs,
+      batches,
+      cancelling: false,
+    };
     this.queue.unshift(...newBatchIds);
     this.notify();
     void this.drain();
+  }
+
+  cancelAll(): boolean {
+    if (!this.isActive()) return false;
+
+    const files = { ...this.snapshot.files };
+    const batches = { ...this.snapshot.batches };
+    for (const batchId of this.queue) {
+      const batch = batches[batchId];
+      if (!batch || batch.status !== "pending") continue;
+      batches[batchId] = { ...batch, status: "cancelled" };
+      for (const fileId of batch.fileIds) {
+        const file = files[fileId];
+        if (!file) continue;
+        files[fileId] = {
+          ...file,
+          status: "cancelled",
+          error: undefined,
+          errorKey: "uploadCenter.statusCancelled",
+          errorParams: undefined,
+          retryable: true,
+        };
+      }
+    }
+    this.queue = [];
+
+    const activeBatchIds = Array.from(this.activeBatches);
+    this.snapshot = {
+      ...this.snapshot,
+      files,
+      batches,
+      cancelling: activeBatchIds.length > 0,
+    };
+    for (const batchId of activeBatchIds) {
+      const controller = this.controllers.get(batchId);
+      if (!controller) continue;
+      try {
+        controller.abort();
+      } catch {
+        // The request already settled; runBatch applies the real outcome.
+      }
+    }
+
+    for (const jobId of Object.keys(this.snapshot.jobs)) {
+      this.finalizeJob(jobId);
+    }
+    this.notify();
+    return true;
   }
 
   close(): boolean {
@@ -327,18 +388,25 @@ export class UploadCenterStore {
       );
       this.applyBatchResult(batchId, result);
     } catch (error) {
-      const reason =
-        error instanceof Error && error.message
-          ? error.message
-          : "uploadCenter.error.unknown";
-      this.applyBatchResult(batchId, {
-        successFileIds: [],
-        failed: batch.fileIds.map((fileId) => ({
-          fileId,
-          reason,
-          retryable: true,
-        })),
-      });
+      const aborted =
+        controller.signal.aborted ||
+        (error instanceof DOMException && error.name === "AbortError");
+      if (aborted) {
+        this.applyCancelledBatch(batchId);
+      } else {
+        const reason =
+          error instanceof Error && error.message
+            ? error.message
+            : "uploadCenter.error.unknown";
+        this.applyBatchResult(batchId, {
+          successFileIds: [],
+          failed: batch.fileIds.map((fileId) => ({
+            fileId,
+            reason,
+            retryable: true,
+          })),
+        });
+      }
     } finally {
       this.activeBatches.delete(batchId);
       this.controllers.delete(batchId);
@@ -349,6 +417,9 @@ export class UploadCenterStore {
             ? current.totalBytes
             : current.loadedBytes,
       }));
+      if (this.snapshot.cancelling && this.activeBatches.size === 0) {
+        this.snapshot = { ...this.snapshot, cancelling: false };
+      }
       this.finalizeJob(batch.jobId);
       this.notify();
       this.drain();
@@ -412,6 +483,19 @@ export class UploadCenterStore {
         : "failed",
       loadedBytes: batch.totalBytes,
     });
+  }
+
+  private applyCancelledBatch(batchId: string): void {
+    const batch = this.snapshot.batches[batchId];
+    if (!batch) return;
+    this.updateFiles(batch.fileIds, {
+      status: "cancelled",
+      error: undefined,
+      errorKey: "uploadCenter.statusCancelled",
+      errorParams: undefined,
+      retryable: true,
+    });
+    this.updateBatch(batchId, { status: "cancelled" });
   }
 
   private finalizeJob(jobId: string): void {

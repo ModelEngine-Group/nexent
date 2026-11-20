@@ -12,26 +12,19 @@ import React, {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useRouter } from "next/navigation";
 
-import { Button, Input, Pagination } from "antd";
+import { Button } from "antd";
 import {
   ArrowUpOutlined,
-  CheckCircleFilled,
-  ClockCircleOutlined,
-  CloseCircleFilled,
+  CheckOutlined,
   CloseOutlined,
   DownOutlined,
-  FileTextOutlined,
-  InfoCircleOutlined,
-  LoadingOutlined,
   ReloadOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
 
-import {
-  formatUploadBytes,
-  summarizeUploadFiles,
-} from "@/lib/uploadCenter/batching";
+import UploadFileIcon from "@/components/upload-center/UploadFileIcon";
+import { summarizeUploadFiles } from "@/lib/uploadCenter/batching";
 import type { UploadCenterStore } from "@/lib/uploadCenter/uploadCenterStore";
 import type { UploadFileRecord, UploadFileStatus } from "@/types/uploadCenter";
 
@@ -41,50 +34,33 @@ interface UploadCenterFloatingPanelProps {
   store: UploadCenterStore;
 }
 
-const STATUS_META: Record<
-  UploadFileStatus,
-  { labelKey: string; tone: string }
-> = {
-  queued: {
-    labelKey: "uploadCenter.statusQueued",
-    tone: styles.statusQueued,
-  },
-  uploading: {
-    labelKey: "uploadCenter.statusUploading",
-    tone: styles.statusUploading,
-  },
-  success: {
-    labelKey: "uploadCenter.statusSuccess",
-    tone: styles.statusSuccess,
-  },
-  validation_failed: {
-    labelKey: "uploadCenter.statusValidationFailed",
-    tone: styles.statusFailed,
-  },
-  upload_failed: {
-    labelKey: "uploadCenter.statusUploadFailed",
-    tone: styles.statusFailed,
-  },
-};
+type PanelState = "active" | "success" | "failed" | "partial";
+type FileTab = "all" | "failed" | "uploading" | "success";
 
-const StatusIcon: React.FC<{ status: UploadFileStatus }> = ({ status }) => {
-  if (status === "success") {
-    return <CheckCircleFilled />;
-  }
-  if (status === "uploading") {
-    return <LoadingOutlined />;
-  }
-  if (status === "validation_failed" || status === "upload_failed") {
-    return <CloseCircleFilled />;
-  }
-  return <ClockCircleOutlined />;
-};
-
-const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const VIEWPORT_MARGIN = 8;
 const DRAG_THRESHOLD = 4;
-const RING_COLOR = "#087c56";
-const RING_TRACK = "#dff6ec";
+const BALL_SIZE = 44;
+const ACTIVE_COLOR = "#1677ff";
+const ACTIVE_TRACK = "#e8f1ff";
+const SUCCESS_COLOR = "#12b76a";
+const FAILED_COLOR = "#b42318";
+
+const STATUS_LABEL_KEY: Record<UploadFileStatus, string> = {
+  queued: "uploadCenter.statusQueued",
+  uploading: "uploadCenter.statusUploading",
+  success: "uploadCenter.statusSuccess",
+  validation_failed: "uploadCenter.statusValidationFailed",
+  upload_failed: "uploadCenter.statusUploadFailed",
+  cancelled: "uploadCenter.statusCancelled",
+};
+
+const isFailedStatus = (status: UploadFileStatus): boolean =>
+  status === "validation_failed" ||
+  status === "upload_failed" ||
+  status === "cancelled";
+
+const isActiveStatus = (status: UploadFileStatus): boolean =>
+  status === "queued" || status === "uploading";
 
 interface FloatingPosition {
   left: number;
@@ -100,23 +76,33 @@ interface DragState {
   moved: boolean;
 }
 
+interface ProgressSample {
+  time: number;
+  bytes: number;
+}
+
 const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
   store,
 }) => {
   const { t } = useTranslation();
+  const router = useRouter();
   const snapshot = useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
     store.getSnapshot
   );
   const [minimized, setMinimized] = useState(false);
-  const [search, setSearch] = useState("");
-  const [failedOnly, setFailedOnly] = useState(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [position, setPosition] = useState<FloatingPosition | null>(null);
+  const [tab, setTab] = useState<FileTab>("all");
+  const [warningDismissed, setWarningDismissed] = useState(false);
+  const [finishedDismissed, setFinishedDismissed] = useState(false);
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+  const [expandedPosition, setExpandedPosition] =
+    useState<FloatingPosition | null>(null);
+  const [collapsedPosition, setCollapsedPosition] =
+    useState<FloatingPosition | null>(null);
   const [dragging, setDragging] = useState(false);
   const previousTotalRef = useRef(0);
+  const progressSamplesRef = useRef<ProgressSample[]>([]);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const suppressPillClickRef = useRef(false);
@@ -130,24 +116,77 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
       ),
     [snapshot]
   );
-  const failedCount = summary.validationFailed + summary.uploadFailed;
-  const showingFailed = failedOnly && failedCount > 0;
+  const failedCount =
+    summary.validationFailed + summary.uploadFailed + summary.cancelled;
+  const activeCount = summary.uploading + summary.queued;
+  const processedCount = Math.max(0, summary.total - activeCount);
+  const allFinished = activeCount === 0;
+  const panelState: PanelState =
+    allFinished && summary.total > 0 && summary.success === summary.total
+      ? "success"
+      : allFinished &&
+          summary.total > 0 &&
+          summary.success === 0 &&
+          failedCount === summary.total
+        ? "failed"
+        : allFinished && summary.success > 0 && failedCount > 0
+          ? "partial"
+          : "active";
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- New uploads must reveal the panel; closing resets the filters. */
+    /* eslint-disable react-hooks/set-state-in-effect -- New uploads must reveal the panel and reset its view state. */
     if (summary.total === 0) {
-      setSearch("");
-      setFailedOnly(false);
-      setPage(1);
+      setTab("all");
+      setWarningDismissed(false);
+      setFinishedDismissed(false);
       setMinimized(false);
+      progressSamplesRef.current = [];
+      setEtaMinutes(null);
     } else if (summary.total > previousTotalRef.current) {
       setMinimized(false);
-      setFailedOnly(false);
-      setPage(1);
+      setTab("all");
+      setWarningDismissed(false);
+      setFinishedDismissed(false);
+      progressSamplesRef.current = [];
+      setEtaMinutes(null);
     }
     /* eslint-enable react-hooks/set-state-in-effect */
     previousTotalRef.current = summary.total;
   }, [summary.total]);
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- ETA samples are updated only when progress changes. */
+    if (activeCount === 0) {
+      progressSamplesRef.current = [];
+      setEtaMinutes(null);
+      return;
+    }
+
+    const now = Date.now();
+    const samples = progressSamplesRef.current;
+    samples.push({ time: now, bytes: summary.processedBytes });
+    while (samples.length > 2 && now - samples[0].time > 10_000) {
+      samples.shift();
+    }
+
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const elapsedSeconds = (last.time - first.time) / 1000;
+    if (samples.length < 2 || elapsedSeconds < 3) return;
+
+    const bytesPerSecond = (last.bytes - first.bytes) / elapsedSeconds;
+    const remainingBytes = Math.max(
+      0,
+      summary.totalBytes - summary.processedBytes
+    );
+    if (remainingBytes <= 0) {
+      setEtaMinutes(0);
+      return;
+    }
+    if (bytesPerSecond <= 0) return;
+    setEtaMinutes(Math.max(1, Math.ceil(remainingBytes / bytesPerSecond / 60)));
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [activeCount, summary.processedBytes, summary.totalBytes]);
 
   const clampPosition = useCallback(
     (left: number, top: number): FloatingPosition => {
@@ -171,7 +210,13 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
   );
 
   const beginDrag = useCallback(
-    (event: ReactPointerEvent<HTMLElement>, suppressClickOnDrag = false) => {
+    (
+      event: ReactPointerEvent<HTMLElement>,
+      setPosition: React.Dispatch<
+        React.SetStateAction<FloatingPosition | null>
+      >,
+      suppressClickOnDrag = false
+    ) => {
       if (event.button !== 0) return;
       const target = event.target as HTMLElement;
       if (
@@ -194,7 +239,6 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
         originTop: rect.top,
         moved: false,
       };
-      setPosition({ left: rect.left, top: rect.top });
       setDragging(true);
       event.preventDefault();
 
@@ -209,7 +253,9 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
         if (!drag.moved && Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
           drag.moved = true;
         }
-        setPosition(clampPosition(drag.originLeft + dx, drag.originTop + dy));
+        if (drag.moved) {
+          setPosition(clampPosition(drag.originLeft + dx, drag.originTop + dy));
+        }
       };
 
       const finish = () => {
@@ -233,48 +279,63 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
   );
 
   useEffect(() => {
+    const setPosition = minimized ? setCollapsedPosition : setExpandedPosition;
     const handleResize = () =>
       setPosition((current) =>
         current ? clampPosition(current.left, current.top) : current
       );
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [clampPosition]);
+  }, [clampPosition, minimized]);
 
   useEffect(() => {
-    /* eslint-disable-next-line react-hooks/set-state-in-effect -- The panel size changes when minimizing/expanding; clamp the persisted position after layout. */
+    const setPosition = minimized ? setCollapsedPosition : setExpandedPosition;
+    /* eslint-disable-next-line react-hooks/set-state-in-effect -- The panel size changes when minimizing/expanding; clamp the active position after layout. */
     setPosition((current) =>
       current ? clampPosition(current.left, current.top) : current
     );
   }, [minimized, clampPosition]);
 
+  const collapsePanel = useCallback(() => {
+    const element = panelRef.current;
+    if (element && !collapsedPosition) {
+      const rect = element.getBoundingClientRect();
+      const maxLeft = Math.max(
+        VIEWPORT_MARGIN,
+        window.innerWidth - BALL_SIZE - VIEWPORT_MARGIN
+      );
+      const maxTop = Math.max(
+        VIEWPORT_MARGIN,
+        window.innerHeight - BALL_SIZE - VIEWPORT_MARGIN
+      );
+      setCollapsedPosition({
+        left: Math.min(
+          Math.max(VIEWPORT_MARGIN, rect.right - BALL_SIZE),
+          maxLeft
+        ),
+        top: Math.min(
+          Math.max(VIEWPORT_MARGIN, rect.bottom - BALL_SIZE),
+          maxTop
+        ),
+      });
+    }
+    setMinimized(true);
+  }, [collapsedPosition]);
+
   const filteredFiles = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    let files = snapshot.fileOrder
+    const files = snapshot.fileOrder
       .map((id) => snapshot.files[id])
       .filter((file): file is UploadFileRecord => Boolean(file));
-    if (showingFailed) {
-      files = files.filter(
-        (file) =>
-          file.status === "validation_failed" || file.status === "upload_failed"
-      );
+    if (tab === "failed")
+      return files.filter((file) => isFailedStatus(file.status));
+    if (tab === "uploading") {
+      return files.filter((file) => isActiveStatus(file.status));
     }
-    if (!term) return files;
-    return files.filter((file) =>
-      `${file.relativePath} ${file.name} ${file.context.knowledgeBaseName} ${
-        file.context.targetFolder ?? ""
-      }`
-        .toLowerCase()
-        .includes(term)
-    );
-  }, [search, showingFailed, snapshot.files, snapshot.fileOrder]);
-
-  const pageCount = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visibleFiles = filteredFiles.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+    if (tab === "success") {
+      return files.filter((file) => file.status === "success");
+    }
+    return files;
+  }, [snapshot.files, snapshot.fileOrder, tab]);
 
   if (summary.total === 0) return null;
 
@@ -290,23 +351,54 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
     return "";
   };
 
-  const processedCount = Math.max(0, summary.total - summary.active);
-  const loadedBytes = Math.min(summary.processedBytes, summary.totalBytes);
+  const etaText =
+    etaMinutes === null
+      ? t("uploadCenter.etaCalculating")
+      : etaMinutes <= 0
+        ? t("uploadCenter.etaAlmostDone")
+        : etaMinutes <= 1
+          ? t("uploadCenter.etaLessThanMinute")
+          : t("uploadCenter.etaMinutes", { minutes: etaMinutes });
   const headline =
-    summary.active > 0
-      ? t("uploadCenter.uploadingHeadline", {
+    panelState === "active"
+      ? t("uploadCenter.importingHeadline", {
           processed: processedCount,
           total: summary.total,
+          eta: etaText,
         })
-      : t("uploadCenter.finishedHeadline", {
-          processed: processedCount,
-          total: summary.total,
-        });
-  const ringBackground = `conic-gradient(${RING_COLOR} ${summary.percent}%, ${RING_TRACK} 0)`;
-  const floatingStyle: React.CSSProperties | undefined = position
+      : panelState === "success"
+        ? t("uploadCenter.successHeadline", {
+            success: summary.success,
+            total: summary.total,
+          })
+        : panelState === "failed"
+          ? summary.cancelled === summary.total
+            ? t("uploadCenter.cancelledHeadline", { total: summary.total })
+            : t("uploadCenter.failedHeadline", {
+                success: summary.success,
+                total: summary.total,
+              })
+          : t("uploadCenter.partialHeadline", {
+              success: summary.success,
+              total: summary.total,
+            });
+
+  const successPercent = summary.total
+    ? (summary.success / summary.total) * 100
+    : 0;
+  const ringBackground =
+    panelState === "active"
+      ? `conic-gradient(${ACTIVE_COLOR} ${summary.percent}%, ${ACTIVE_TRACK} 0)`
+      : panelState === "partial"
+        ? `conic-gradient(${SUCCESS_COLOR} 0 ${successPercent}%, ${FAILED_COLOR} ${successPercent}% 100%)`
+        : panelState === "success"
+          ? SUCCESS_COLOR
+          : FAILED_COLOR;
+  const activePosition = minimized ? collapsedPosition : expandedPosition;
+  const floatingStyle: React.CSSProperties | undefined = activePosition
     ? {
-        left: `${position.left}px`,
-        top: `${position.top}px`,
+        left: `${activePosition.left}px`,
+        top: `${activePosition.top}px`,
         right: "auto",
         bottom: "auto",
       }
@@ -319,6 +411,50 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
         })
       : t("uploadCenter.expandProgress", { percent: summary.percent });
 
+  const barSegments = [
+    {
+      key: "success",
+      count: summary.success,
+      className: styles.segmentSuccess,
+    },
+    { key: "failed", count: failedCount, className: styles.segmentFailed },
+    {
+      key: "uploading",
+      count: summary.uploading,
+      className: styles.segmentUploading,
+    },
+    { key: "queued", count: summary.queued, className: styles.segmentQueued },
+  ].filter((segment) => segment.count > 0);
+
+  const tabs: Array<{ key: FileTab; label: string; count: number }> = [
+    { key: "all", label: t("uploadCenter.tabAll"), count: summary.total },
+    { key: "failed", label: t("uploadCenter.tabFailed"), count: failedCount },
+    {
+      key: "uploading",
+      label: t("uploadCenter.tabUploading"),
+      count: activeCount,
+    },
+    {
+      key: "success",
+      label: t("uploadCenter.tabSuccess"),
+      count: summary.success,
+    },
+  ];
+
+  const openUploadTasks = () => {
+    const currentKb = new URLSearchParams(window.location.search).get("kb");
+    const latestFile = [...snapshot.fileOrder]
+      .reverse()
+      .map((id) => snapshot.files[id])
+      .find((file): file is UploadFileRecord => Boolean(file));
+    const kbId = currentKb || latestFile?.context.knowledgeBaseId;
+    if (!kbId) return;
+    const locale = window.location.pathname.split("/")[1] || "zh";
+    router.push(
+      `/${locale}/knowledges/detail?kb=${encodeURIComponent(kbId)}&tab=tasks`
+    );
+  };
+
   if (minimized) {
     return (
       <div
@@ -327,7 +463,7 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
         tabIndex={0}
         className={`${styles.ball} ${dragging ? styles.dragging : ""}`}
         style={{ ...floatingStyle, background: ringBackground }}
-        onPointerDown={(event) => beginDrag(event, true)}
+        onPointerDown={(event) => beginDrag(event, setCollapsedPosition, true)}
         onClick={() => {
           if (suppressPillClickRef.current) {
             suppressPillClickRef.current = false;
@@ -362,229 +498,242 @@ const UploadCenterFloatingPanel: React.FC<UploadCenterFloatingPanelProps> = ({
     >
       <header
         className={`${styles.header} ${dragging ? styles.dragging : ""}`}
-        onPointerDown={beginDrag}
+        onPointerDown={(event) => beginDrag(event, setExpandedPosition)}
       >
-        <span
-          className={styles.ring}
-          style={{ background: ringBackground }}
-          aria-hidden="true"
-        >
-          <span className={styles.ringInner}>
-            <ArrowUpOutlined />
+        <div className={styles.overview}>
+          <span
+            className={`${styles.stateRing} ${
+              panelState === "success"
+                ? styles.stateRingSuccess
+                : panelState === "failed"
+                  ? styles.stateRingFailed
+                  : panelState === "partial"
+                    ? styles.stateRingPartial
+                    : styles.stateRingActive
+            }`}
+            style={{ background: ringBackground }}
+            aria-hidden="true"
+          >
+            <span className={styles.stateRingInner}>
+              {panelState === "active" && (
+                <span className={styles.ringPercent}>{summary.percent}%</span>
+              )}
+              {panelState === "success" && (
+                <CheckOutlined className={styles.ringSuccessIcon} />
+              )}
+              {panelState === "failed" && (
+                <CloseOutlined className={styles.ringFailedIcon} />
+              )}
+            </span>
           </span>
-        </span>
-        <div className={styles.heading}>
-          <strong>{headline}</strong>
-          <span className={styles.headingMeta}>
-            {formatUploadBytes(loadedBytes)} /{" "}
-            {formatUploadBytes(summary.totalBytes)}
-          </span>
-        </div>
-        <div className={styles.headerActions}>
-          <Button
-            type="text"
-            size="small"
-            icon={<DownOutlined />}
-            aria-label={t("uploadCenter.collapse")}
-            onClick={() => setMinimized(true)}
-          />
-          {summary.canClose && (
+
+          <div className={styles.heading}>
+            <strong className={styles.headline}>{headline}</strong>
+            <div className={styles.headerLinks}>
+              {panelState === "active" && (
+                <button
+                  type="button"
+                  className={styles.actionLink}
+                  disabled={snapshot.cancelling}
+                  onClick={() => store.cancelAll()}
+                >
+                  {snapshot.cancelling
+                    ? t("uploadCenter.cancelling")
+                    : t("uploadCenter.cancelTask")}
+                </button>
+              )}
+              {(panelState === "active" ||
+                panelState === "failed" ||
+                panelState === "partial") &&
+                failedCount > 0 && (
+                  <button
+                    type="button"
+                    className={styles.actionLink}
+                    disabled={summary.retryableFailed === 0}
+                    aria-label={t("uploadCenter.retryFailed", {
+                      count: summary.retryableFailed,
+                    })}
+                    onClick={() => store.retryFailed()}
+                  >
+                    {t("uploadCenter.retryAction")}
+                  </button>
+                )}
+            </div>
+          </div>
+
+          <div className={styles.headerActions}>
             <Button
               type="text"
               size="small"
-              icon={<CloseOutlined />}
-              aria-label={t("uploadCenter.close")}
-              onClick={() => store.close()}
+              icon={<DownOutlined />}
+              aria-label={t("uploadCenter.collapse")}
+              onClick={collapsePanel}
             />
-          )}
+            {summary.canClose && (
+              <Button
+                type="text"
+                size="small"
+                icon={<CloseOutlined />}
+                aria-label={t("uploadCenter.close")}
+                onClick={() => store.close()}
+              />
+            )}
+          </div>
+        </div>
+
+        <div
+          className={styles.stateBar}
+          role="img"
+          aria-label={t("uploadCenter.stateBarLabel")}
+        >
+          {barSegments.map((segment) => (
+            <span
+              key={segment.key}
+              className={`${styles.stateSegment} ${segment.className}`}
+              style={{ width: `${(segment.count / summary.total) * 100}%` }}
+            />
+          ))}
         </div>
       </header>
 
-      <div className={styles.summary}>
-        <div
-          className={styles.track}
-          role="progressbar"
-          aria-label={t("uploadCenter.progressLabel")}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={summary.percent}
-        >
-          <span
-            className={styles.trackFill}
-            style={{ width: `${summary.percent}%` }}
-          />
-        </div>
-        <div className={styles.counts}>
-          <span className={`${styles.count} ${styles.statusSuccess}`}>
-            <i className={styles.dot} aria-hidden="true" />
-            {t("uploadCenter.successCount", { count: summary.success })}
-          </span>
-          <span className={`${styles.count} ${styles.statusUploading}`}>
-            <i className={styles.dot} aria-hidden="true" />
-            {t("uploadCenter.uploadingCount", { count: summary.uploading })}
-          </span>
-          <span className={`${styles.count} ${styles.statusQueued}`}>
-            <i className={styles.dot} aria-hidden="true" />
-            {t("uploadCenter.queuedCount", { count: summary.queued })}
-          </span>
-          <span className={`${styles.count} ${styles.statusFailed}`}>
-            <i className={styles.dot} aria-hidden="true" />
-            {t("uploadCenter.failedCount", { count: failedCount })}
-          </span>
-        </div>
-      </div>
-
       <div className={styles.body}>
-        {summary.active > 0 && (
-          <div className={styles.note}>
-            <InfoCircleOutlined aria-hidden="true" />
-            <span>{t("uploadCenter.refreshHintShort")}</span>
+        {panelState === "active" && !warningDismissed && (
+          <div className={styles.warningBanner}>
+            <span>{t("uploadCenter.activeWarning")}</span>
+            <button
+              type="button"
+              className={styles.bannerClose}
+              aria-label={t("uploadCenter.dismissHint")}
+              onClick={() => setWarningDismissed(true)}
+            >
+              <CloseOutlined />
+            </button>
+          </div>
+        )}
+        {panelState !== "active" && !finishedDismissed && (
+          <div className={styles.infoBanner}>
+            <span>
+              {t("uploadCenter.finishedHintBefore")}
+              <button
+                type="button"
+                className={styles.bannerLink}
+                onClick={openUploadTasks}
+              >
+                {t("uploadCenter.uploadTasks")}
+              </button>
+              {t("uploadCenter.finishedHintAfter")}
+            </span>
+            <button
+              type="button"
+              className={styles.bannerClose}
+              aria-label={t("uploadCenter.dismissHint")}
+              onClick={() => setFinishedDismissed(true)}
+            >
+              <CloseOutlined />
+            </button>
           </div>
         )}
 
-        <div className={styles.tabs}>
-          <button
-            type="button"
-            className={`${styles.tab} ${!showingFailed ? styles.tabActive : ""}`}
-            aria-pressed={!showingFailed}
-            onClick={() => {
-              setFailedOnly(false);
-              setPage(1);
-            }}
-          >
-            {t("uploadCenter.filterAll", { count: summary.total })}
-          </button>
-          <button
-            type="button"
-            className={`${styles.tab} ${showingFailed ? styles.tabActive : ""}`}
-            aria-pressed={showingFailed}
-            disabled={failedCount === 0}
-            onClick={() => {
-              setFailedOnly(true);
-              setPage(1);
-            }}
-          >
-            {t("uploadCenter.filterUnsuccessful", { count: failedCount })}
-          </button>
-        </div>
-
-        <div className={styles.searchRow}>
-          <Input
-            allowClear
-            size="small"
-            prefix={<SearchOutlined className="text-gray-400" />}
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder={t("uploadCenter.searchPlaceholder")}
-          />
+        <div className={styles.tabs} role="tablist">
+          {tabs.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.key}
+              className={`${styles.tab} ${
+                tab === item.key ? styles.tabActive : ""
+              }`}
+              onClick={() => setTab(item.key)}
+            >
+              <span>{item.label}</span>
+              <span className={styles.tabCount}>{item.count}</span>
+            </button>
+          ))}
         </div>
 
         <div className={styles.fileList}>
-          {visibleFiles.length === 0 ? (
-            <div className={styles.empty}>{t("uploadCenter.noMatches")}</div>
+          {filteredFiles.length === 0 ? (
+            <div className={styles.empty}>{t("uploadCenter.tabEmpty")}</div>
           ) : (
-            visibleFiles.map((file) => {
-              const meta = STATUS_META[file.status];
+            filteredFiles.map((file) => {
+              const failed = isFailedStatus(file.status);
+              const retryable = file.retryable !== false;
               const error = errorText(file);
-              const statusLabel = t(meta.labelKey);
+              const statusLabel = t(STATUS_LABEL_KEY[file.status]);
               return (
                 <div className={styles.fileRow} key={file.id}>
-                  <span className={styles.fileIcon} aria-hidden="true">
-                    <FileTextOutlined />
-                  </span>
+                  <UploadFileIcon />
                   <div className={styles.fileText}>
-                    <div className={styles.fileName} title={file.relativePath}>
-                      {file.relativePath}
-                    </div>
                     <div
-                      className={styles.fileMeta}
-                      title={`${statusLabel} · ${file.context.knowledgeBaseName}${
+                      className={styles.fileName}
+                      title={`${file.relativePath} · ${file.context.knowledgeBaseName}${
                         file.context.targetFolder
-                          ? ` · ${t("uploadCenter.targetPath", {
-                              path: file.context.targetFolder,
-                            })}`
+                          ? ` · ${file.context.targetFolder}`
                           : ""
-                      } · ${formatUploadBytes(file.size)}`}
+                      }`}
                     >
-                      <span className={`${styles.fileStatus} ${meta.tone}`}>
-                        {statusLabel}
-                      </span>
-                      {" · "}
-                      {file.context.knowledgeBaseName}
-                      {file.context.targetFolder && (
-                        <>
-                          {" · "}
-                          {t("uploadCenter.targetPath", {
-                            path: file.context.targetFolder,
-                          })}
-                        </>
-                      )}
-                      {" · "}
-                      {formatUploadBytes(file.size)}
+                      {file.name}
                     </div>
                     {error && (
                       <div className={styles.fileError} title={error}>
-                        {file.status === "validation_failed"
-                          ? t("uploadCenter.validationRetryHint", {
-                              reason: error,
-                            })
-                          : error}
+                        {error}
                       </div>
                     )}
+                    <span className={styles.srOnly}>{statusLabel}</span>
                   </div>
-                  <span
-                    className={`${styles.fileStatusIcon} ${meta.tone}`}
-                    title={statusLabel}
-                    aria-label={statusLabel}
-                  >
-                    <StatusIcon status={file.status} />
-                  </span>
+                  <div className={styles.fileAction}>
+                    {failed ? (
+                      <>
+                        <span
+                          className={styles.failureDotInline}
+                          aria-hidden="true"
+                        />
+                        <button
+                          type="button"
+                          className={styles.rowRetry}
+                          disabled={!retryable}
+                          aria-label={t("uploadCenter.retryFile", {
+                            name: file.name,
+                          })}
+                          title={
+                            retryable
+                              ? t("uploadCenter.retryFile", {
+                                  name: file.name,
+                                })
+                              : t("uploadCenter.retryUnavailable")
+                          }
+                          onClick={() => store.retryFailed([file.id])}
+                        >
+                          <ReloadOutlined />
+                        </button>
+                      </>
+                    ) : file.status === "uploading" ? (
+                      <span
+                        className={styles.spinner}
+                        role="status"
+                        aria-label={statusLabel}
+                      />
+                    ) : file.status === "success" ? (
+                      <span
+                        className={styles.successDot}
+                        role="img"
+                        aria-label={statusLabel}
+                      />
+                    ) : (
+                      <span
+                        className={styles.queuedDot}
+                        role="img"
+                        aria-label={statusLabel}
+                      />
+                    )}
+                  </div>
                 </div>
               );
             })
           )}
         </div>
-
-        {filteredFiles.length > pageSize && (
-          <div className={styles.pagerRow}>
-            <Pagination
-              size="small"
-              current={currentPage}
-              pageSize={pageSize}
-              total={filteredFiles.length}
-              showSizeChanger
-              pageSizeOptions={PAGE_SIZE_OPTIONS}
-              onChange={(nextPage, nextPageSize) => {
-                setPage(nextPageSize !== pageSize ? 1 : nextPage);
-                setPageSize(nextPageSize);
-              }}
-            />
-          </div>
-        )}
       </div>
-
-      {summary.retryableFailed > 0 && (
-        <div className={styles.footer}>
-          <Button
-            type="text"
-            size="small"
-            className={styles.retry}
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              setFailedOnly(false);
-              setPage(1);
-              store.retryFailed();
-            }}
-          >
-            {t("uploadCenter.retryFailed", {
-              count: summary.retryableFailed,
-            })}
-          </Button>
-        </div>
-      )}
     </section>
   );
 };

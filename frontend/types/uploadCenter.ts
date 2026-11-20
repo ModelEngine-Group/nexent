@@ -9,7 +9,12 @@
  */
 
 export type UploadFileStatus =
-  "queued" | "uploading" | "success" | "validation_failed" | "upload_failed";
+  | "queued"
+  | "uploading"
+  | "success"
+  | "validation_failed"
+  | "upload_failed"
+  | "cancelled";
 
 export interface UploadCapabilities {
   supportsTargetFolder: boolean;
@@ -96,7 +101,8 @@ export interface UploadFileRecord {
   retryable?: boolean;
 }
 
-export type UploadBatchStatus = "pending" | "uploading" | "success" | "failed";
+export type UploadBatchStatus =
+  "pending" | "uploading" | "success" | "failed" | "cancelled";
 
 export interface UploadBatchRecord {
   id: string;
@@ -121,6 +127,8 @@ export interface UploadCenterSnapshot {
   fileOrder: string[];
   jobs: Record<string, UploadJobRecord>;
   batches: Record<string, UploadBatchRecord>;
+  /** True while active batches are being aborted after a cancel request. */
+  cancelling: boolean;
 }
 
 export interface UploadEnqueueInput {

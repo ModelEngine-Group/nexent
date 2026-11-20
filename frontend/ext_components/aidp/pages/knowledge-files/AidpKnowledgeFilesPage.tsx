@@ -42,6 +42,7 @@ interface AidpKnowledgeFilesPageProps {
   onDelete: (knowledgeBase: AidpKnowledgeBaseItem) => void;
   onUpdated: (knowledgeBase: AidpKnowledgeBaseItem) => void;
   pollingPaused?: boolean;
+  initialTab?: DetailTab;
 }
 
 type DetailTab = "files" | "tasks" | "information";
@@ -54,6 +55,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   onDelete,
   onUpdated,
   pollingPaused = false,
+  initialTab = "files",
 }) => {
   const { t } = useTranslation();
   const {
@@ -68,7 +70,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     () => ({ ...knowledgeBase, ...detailQuery.data }),
     [knowledgeBase, detailQuery.data]
   );
-  const [activeTab, setActiveTab] = useState<DetailTab>("files");
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab);
   const [editingKbMode, setEditingKbMode] = useState<
     "metadata" | "permissions" | null
   >(null);

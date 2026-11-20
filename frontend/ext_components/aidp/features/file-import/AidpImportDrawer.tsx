@@ -4,11 +4,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { App, Button, Drawer, Input, Tooltip } from "antd";
-import {
-  DeleteOutlined,
-  FileTextOutlined,
-  FolderOpenOutlined,
-} from "@ant-design/icons";
+import { DeleteOutlined, FolderOpenOutlined } from "@ant-design/icons";
+
+import UploadFileIcon from "@/components/upload-center/UploadFileIcon";
 
 import { AIDP_ACCEPT_STRING } from "@/ext_components/aidp/features/file-import/uploadConstants";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
@@ -55,9 +53,7 @@ const SelectionRow: React.FC<{
   const { t } = useTranslation();
   return (
     <div className={`${styles.fileRow} ${styles.selectionRow}`}>
-      <div className={styles.fileIcon} aria-hidden="true">
-        <FileTextOutlined />
-      </div>
+      <UploadFileIcon />
       <div className={styles.fileText}>
         <Tooltip title={row.relativePath}>
           <div className={styles.fileName}>{row.relativePath}</div>

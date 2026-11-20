@@ -57,6 +57,7 @@ export interface UploadCenterSummary {
   success: number;
   validationFailed: number;
   uploadFailed: number;
+  cancelled: number;
   retryableFailed: number;
   active: number;
   totalBytes: number;
@@ -77,6 +78,7 @@ export const summarizeUploadFiles = (
     success: 0,
     validationFailed: 0,
     uploadFailed: 0,
+    cancelled: 0,
     retryableFailed: 0,
     active: 0,
     totalBytes: 0,
@@ -109,6 +111,11 @@ export const summarizeUploadFiles = (
         break;
       case "upload_failed":
         summary.uploadFailed += 1;
+        summary.processedBytes += file.size;
+        if (file.retryable !== false) summary.retryableFailed += 1;
+        break;
+      case "cancelled":
+        summary.cancelled += 1;
         summary.processedBytes += file.size;
         if (file.retryable !== false) summary.retryableFailed += 1;
         break;

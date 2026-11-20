@@ -124,19 +124,6 @@
   border-color: #e5e7eb;
 }
 
-.fileIcon {
-  display: flex;
-  width: 32px;
-  height: 32px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 5px;
-  background: #6b7280;
-  color: #fff;
-  font-size: 19px;
-}
-
 .fileText {
   min-width: 0;
   flex: 1;
