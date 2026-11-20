@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: HTTP-REQUEST-CONTEXT-20261121
+  change_type: bugfix
+  bug_id: HTTP-REQUEST-CONTEXT-20261121
+  title: Isolate Management HTTP request tracing on reused connections
+  description: Enable supported Uvicorn request task context isolation only at the Management launcher.
+  observed_behavior: A large request can copy its active span into the resumed transport reader callback;
+    later keep-alive requests inherit an ended span and can ignore legitimate remote trace context.
+  expected_behavior: Independent requests start independent HTTP server spans, legitimate W3C parents
+    remain valid, and older launcher signatures and streaming behavior remain compatible.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Direct ASGI lifecycle tests and real tracing cases with explicit per-request parents
+      do not exercise large-body TCP reader context copying across reused connections.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-146
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - NB-OTEL-D3-001
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Enable request context isolation when the actual Uvicorn launcher explicitly supports it.
+    - Preserve older launcher signatures, single startup failure propagation and import-only behavior.
+    test_selectors:
+    - test/backend/test_config_service_context.py
+    reason: Launcher compatibility is isolated UT; actual TCP reader lifetime and deployed tracing
+      remain separate runtime proof obligations, without duplicating these branches as D1.
+  notes: >-
+    SPEC model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md.
+    Only Management startup changes; no global OTel reset, Runtime/Gateway changes, dependency cap or retry.
+    NB-OTEL-D3-001 is unchanged adjacent real model/tool/stream ancestry regression, not evidence that the
+    newly identified no-header large-body keep-alive boundary is already covered. Task-local paired real
+    TCP probes exercise that boundary through the actual product launch options and actual Gateway with
+    controlled local streaming application and local exporter; they are not formal Case or VM passes.
+    Formal coverage of the new boundary remains an explicit gap until the dedicated container window
+    supplies fixed acceptance evidence; required two-runtime real-model/Phoenix checks remain pending.
+    Frozen fc4346826 formal48 and later observation-fix source results must remain distinct.

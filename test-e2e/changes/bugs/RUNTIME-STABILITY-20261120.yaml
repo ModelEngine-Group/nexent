@@ -44,6 +44,8 @@ change:
     - Recover eligible committed history after typed capacity rejection using one shared transaction and bounded
       summary requests and inherited parent/task deadlines without inventing a wallclock limit from transport timeout; atomically register private checkpoint sources and expose bounded native recall
       without rendering originals.
+    - Share one correction claim between invalid contract/facts and valid but ineffective history candidates;
+      use actual rendered capacity feedback within the existing three summary subrequests and transactional checks.
     reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
       required. No duplicate D1.
     test_selectors:
@@ -61,6 +63,7 @@ change:
     - test/backend/app/test_history_source_contracts.py
     - test/backend/services/test_agentos_conversation_projection.py
     - test/sdk/core/agents/test_history_summary_contract.py
+    - test/sdk/core/agents/test_history_capacity_feedback.py
   notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md
     FIX01 and RSR-003; RSR-001 delegated to stacked PR4378; RSR-002 withdrawn after complete Phoenix events proved
     usage was retained. Approved isolated follow-up from2c18. No original worktree/VM change, C/O change, guessed
@@ -86,4 +89,11 @@ change:
     v13 actual response has exactly seven complete ordered H2 sections and all protected facts but misses the fixed
     H1: prepend only that constant for this exact shape, preserve response body, then apply all existing validation.
     Other invalid text may reuse the same one format-or-fact correction claim within existing calls/deadline/input
-    capacity; never directly accept malformed structure or facts. No regular prompt or model policy change.'
+    capacity; never directly accept malformed structure or facts. No regular prompt or model policy change.
+    v14 turn08 first real summary is accepted; second passes contract/facts but expands the rendered history.
+    Extend the same correction claim with actual rendered capacity feedback only in history-only recovery.
+    Preserve positive-but-unfitting iterations and the total three-summary-subrequest budget, not a new physical
+    attempt limit; retain transport retries and all usage. No C/O, output-cap, protected-content or 5-percent
+    criterion change. Existing owned HTTP/SSE Case adds correction-fit and still-oversized rollback variants.
+    Original full failed frame/live revision and claim were not captured; readonly delta bounds and static
+    control-flow inference stay labeled as such. New real-container/two-runtime/Phoenix acceptance remains pending.'

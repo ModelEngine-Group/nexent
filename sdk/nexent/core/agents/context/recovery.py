@@ -54,10 +54,14 @@ class RecoverySummaryModel:
 
     def claim_fact_correction(self):
         self._budget.check(self._cancelled)
-        if self._budget.fact_correction_used or self._budget.summary_calls >= self._budget.max_summary_calls:
-            return False
-        self._budget.fact_correction_used = True
-        return True
+        allowed = not self._budget.fact_correction_used and self._budget.summary_calls < self._budget.max_summary_calls
+        if allowed:
+            self._budget.fact_correction_used = True
+        logger.info(
+            "event=history_summary_correction_claim allowed=%s correction_used=%s summary_calls=%s max_summary_calls=%s",
+            allowed, self._budget.fact_correction_used, self._budget.summary_calls, self._budget.max_summary_calls,
+        )
+        return allowed
 
     def __call__(self, messages, **kwargs):
         self._budget.check(self._cancelled)
@@ -196,6 +200,10 @@ def recover_history(
         )
     finally:
         if not committed:
+            logger.info(
+                "event=context_capacity_recovery committed=False limit=%s summary_calls=%s correction_used=%s",
+                limit, budget.summary_calls, budget.fact_correction_used,
+            )
             manager._history_candidate = old_candidate
             manager._pending_history_summary_event = old_event
             manager._representation_overrides = old_overrides
