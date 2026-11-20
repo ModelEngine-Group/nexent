@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.object_tickets import InvalidObjectTicket, issue_download_url
 from management.api.file.http import ObjectStreamingResponse
 from management.services.file.download import byte_chunks, open_preview, read_download
 
@@ -317,10 +318,14 @@ async def get_storage_files(
 
         files = filtered_files
 
-        if not include_urls:
-            for file in files:
-                if "url" in file:
-                    del file["url"]
+        for file in files:
+            if include_urls:
+                try:
+                    file["url"] = issue_download_url(file["key"])
+                except InvalidObjectTicket:
+                    pass
+            else:
+                file.pop("url", None)
 
         return {"total": len(files), "files": files}
     except HTTPException:

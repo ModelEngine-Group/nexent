@@ -7,13 +7,9 @@ import base64
 import hashlib
 import json
 import logging
-import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Literal, Optional
-from urllib.parse import unquote, urlparse
 
-import httpx
-from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
@@ -51,7 +47,6 @@ from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, NORTHBOUND_SERVICE_NAME, RATE_LIMIT_EXCEEDED_DETAIL
-from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
@@ -83,7 +78,7 @@ from management.services.permission.api_keys import (
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
+from management.api.file.http import build_content_disposition_header
 from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
     create_knowledge_base_for_northbound,
@@ -111,22 +106,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nb/v1", tags=["northbound"])
 
 __all__ = ["router", "_get_northbound_context"]
-
-
-def _resolve_proxy_download_filename(presigned_url: str, content_disposition: str) -> str:
-    """Resolve a stable download filename for the northbound file proxy."""
-    if content_disposition:
-        filename_star_match = re.search(r"filename\*=UTF-8''([^;]+)", content_disposition)
-        if filename_star_match:
-            return unquote(filename_star_match.group(1)) or "download"
-
-        filename_match = re.search(r'filename="?([^";]+)"?', content_disposition)
-        if filename_match:
-            return filename_match.group(1) or "download"
-
-    path = unquote(urlparse(presigned_url).path)
-    filename = path.split("/")[-1].strip()
-    return filename or "download"
 
 
 @router.get("/health")
@@ -681,64 +660,25 @@ async def fetch_file_from_presigned_url(
     request: Request,
     presigned_url: str = Query(..., description="Nexent download ticket or existing presigned URL"),
 ):
-    """
-    Fetch file content using an authorized download link.
-
-    This endpoint acts as a proxy - it downloads the file from MinIO
-    (which is only accessible from within the container network) and
-    returns the file content to external callers (e.g., MCP tools).
-
-    The presigned_url parameter should be URL-encoded by the caller.
-
-    Application tickets are verified by Management. Existing presigned URLs
-    use the configured storage origin, and redirects are never followed.
-    """
-    if not presigned_url:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="presigned_url is required")
+    """Redeem an application ticket or reauthorize a legacy object reference."""
+    from contracts.constants import environment
     from contracts.object_tickets import TICKET_PREFIX
+    from management.api.file.http import legacy_storage_object_name
+    from management.api.file.ticket import (
+        download_authorized_object_response,
+        download_ticket_response,
+    )
 
+    if not presigned_url:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, "presigned_url is required")
     if presigned_url.startswith(TICKET_PREFIX):
-        from management.api.file.ticket import download_ticket_response
-
         return await download_ticket_response(presigned_url, request)
 
-    storage_url = build_storage_proxy_url(presigned_url, MINIO_ENDPOINT)
-
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=False, trust_env=False) as client:
-            response = await client.get(storage_url)
-
-        if response.status_code != 200:
-            logging.error(f"Failed to fetch file from presigned_url, status: {response.status_code}")
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_GATEWAY,
-                detail=f"Failed to fetch file from storage, status: {response.status_code}",
-            )
-
-        content_type = response.headers.get("Content-Type", "application/octet-stream")
-        content_disposition = response.headers.get("Content-Disposition", "")
-        download_filename = _resolve_proxy_download_filename(presigned_url, content_disposition)
-
-        headers = {
-            "Content-Type": content_type,
-            "Content-Disposition": build_content_disposition_header(download_filename),
-        }
-
-        return StreamingResponse(
-            content=response.aiter_bytes(), status_code=HTTPStatus.OK, headers=headers, media_type=content_type
-        )
-
-    except httpx.TimeoutException:
-        logging.error(f"Timeout fetching file from presigned_url")
-        raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail="Timeout fetching file from storage")
-    except httpx.RequestError:
-        logging.error("Request error fetching file from configured storage")
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Failed to fetch file from storage") from None
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Unexpected error fetching file: {str(e)}", exc_info=e)
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal server error")
+    key = legacy_storage_object_name(presigned_url, environment.MINIO_ENDPOINT, environment.MINIO_DEFAULT_BUCKET)
+    ctx = await _get_northbound_context(request)
+    if not check_file_access(key, ctx.user_id, ctx.tenant_id):
+        raise HTTPException(HTTPStatus.FORBIDDEN, "You don't have permission to access this file")
+    return await download_authorized_object_response(key, request)
 
 
 async def _require_asset_owner_context(request: Request) -> NorthboundContext:

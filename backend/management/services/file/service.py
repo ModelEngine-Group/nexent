@@ -16,8 +16,8 @@ from contracts.constants.constants import (
     ASSET_OWNER_TENANT_ID,
     MODEL_CONFIG_MAPPING,
 )
-from contracts.constants.environment import JWT_SECRET, MAX_KNOWLEDGE_FILE_SIZE_BYTES, NORTHBOUND_EXTERNAL_URL, UPLOAD_FOLDER
-from contracts.object_tickets import InvalidObjectTicket, issue_object_ticket, object_ticket_url
+from contracts.constants.environment import MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.object_tickets import InvalidObjectTicket, issue_download_url
 from contracts.errors.ingestion import ingestion_error_fields
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
@@ -28,7 +28,6 @@ from contracts.errors.ingestion import ingestion_error_fields
 from fastapi import UploadFile
 from management.db.file.attachment import (
     generate_object_name,
-    get_file_url,
     upload_fileobj,
 )
 from management.db.knowledge_base.file_lifecycle import transition_file_record
@@ -639,11 +638,11 @@ async def upload_to_minio(
 
 async def get_file_url_impl(object_name: str, expires: int):
     try:
-        ticket = issue_object_ticket(object_name, expires, secret=JWT_SECRET)
+        url = issue_download_url(object_name, expires)
     except InvalidObjectTicket:
         raise RuntimeError("File does not exist or cannot be accessed: Download link unavailable") from None
     return {"success": True, "object_name": object_name, "expires_in": expires,
-            "url": object_ticket_url(NORTHBOUND_EXTERNAL_URL, ticket)}
+            "url": url}
 
 
 def _list_attachment_files(prefix: str, limit: int | None) -> list[dict]:
@@ -664,9 +663,6 @@ def _list_attachment_files(prefix: str, limit: int | None) -> list[dict]:
             "key": entry.key, "size": entry.size, "last_modified": entry.last_modified,
             "content_type": get_content_type(entry.key),
         }
-        result = get_file_url(entry.key)
-        if result["success"]:
-            row["url"] = result["url"]
         items.append(row)
     return items
 

@@ -257,27 +257,6 @@ class TestMinioClient:
 
     @patch('infrastructure.object_storage.client.create_storage_client_from_config')
     @patch('infrastructure.object_storage.client.MinIOStorageConfig')
-    def test_minio_client_get_file_url(self, mock_config_class, mock_create_client):
-        """Test MinioClient.get_file_url delegates to storage client"""
-        MinioClient._instance = None
-        MinioClient._initialized = False
-
-        mock_storage_client = MagicMock()
-        mock_storage_client.get_file_url.return_value = (
-            True, 'http://example.com/file.txt')
-        mock_create_client.return_value = mock_storage_client
-        mock_config_class.return_value = MagicMock()
-
-        client = MinioClient()
-        success, result = client.get_file_url('file.txt', 'bucket', 7200)
-
-        assert success is True
-        assert result == 'http://example.com/file.txt'
-        mock_storage_client.get_file_url.assert_called_once_with(
-            'file.txt', 'bucket', 7200)
-
-    @patch('infrastructure.object_storage.client.create_storage_client_from_config')
-    @patch('infrastructure.object_storage.client.MinIOStorageConfig')
     def test_minio_client_get_file_size(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_size delegates to storage client"""
         MinioClient._instance = None

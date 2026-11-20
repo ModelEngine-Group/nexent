@@ -28,6 +28,7 @@ from contracts.errors.exceptions import (
     RuntimeUpstreamError,
     UnauthorizedError,
 )
+from contracts.object_tickets import InvalidObjectTicket, issue_download_url
 from contracts.runtime_metadata import (
     runtime_metadata_hash,
     validate_runtime_metadata,
@@ -39,7 +40,6 @@ from management.db.conversation.repository import (
     get_conversation_list,
     get_conversation_messages,
 )
-from management.db.file.attachment import get_file_url
 from management.db.identity.token import log_token_usage
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
 from management.services.agent.management import get_agent_by_name_impl
@@ -74,6 +74,7 @@ from nexent.core.concurrency import ManagedTaskSpec, run_blocking
 from nexent.multi_modal.utils import parse_s3_url
 
 from infrastructure.file_reads import read_attachment_size
+from infrastructure.object_storage.read_access import can_read_object
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("northbound_service")
@@ -272,8 +273,6 @@ def _normalize_northbound_attachments(
     1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
     2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]
     """
-    from management.db.file.attachment import _build_mcp_presigned_url
-
     if attachments is None:
         return None
     if not isinstance(attachments, list):
@@ -295,12 +294,12 @@ def _normalize_northbound_attachments(
             # Add presigned_url if available, or generate one if we have object_name
             if "presigned_url" in attachment:
                 normalized_file["presigned_url"] = attachment["presigned_url"]
-            elif normalized_file.get("object_name"):
+            elif isinstance(normalized_file["object_name"], str) and can_read_object(
+                normalized_file["object_name"], user_id, tenant_id,
+            ):
                 try:
-                    presigned_result = get_file_url(object_name=normalized_file["object_name"], expires=86400)
-                    if presigned_result.get("success") and presigned_result.get("url"):
-                        normalized_file["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
-                except Exception:
+                    normalized_file["presigned_url"] = issue_download_url(normalized_file["object_name"])
+                except InvalidObjectTicket:
                     pass
             normalized_files.append(normalized_file)
             continue
@@ -332,7 +331,6 @@ def _normalize_northbound_attachments(
 
         try:
             validate_urls_access([validate_url], user_id, tenant_id)
-            presigned_result = get_file_url(object_name=object_name, expires=86400)
         except PermissionError as exc:
             detail = str(exc)
             if "Invalid S3 URL format" in detail:
@@ -356,9 +354,10 @@ def _normalize_northbound_attachments(
             "url": f"/nexent/{object_name}",
             "description": "",
         }
-        # Use MCP proxy URL for presigned_url (same as frontend format)
-        if presigned_result.get("success") and presigned_result.get("url"):
-            normalized_file["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
+        try:
+            normalized_file["presigned_url"] = issue_download_url(object_name)
+        except InvalidObjectTicket:
+            pass
         normalized_files.append(normalized_file)
 
     return normalized_files

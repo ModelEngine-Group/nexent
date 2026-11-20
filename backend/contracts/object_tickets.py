@@ -69,3 +69,13 @@ def open_object_ticket(ticket: str, *, secret: str, now: int | None = None) -> s
 
 def object_ticket_url(base_url: str, ticket: str) -> str:
     return f"{base_url}/nb/v1/file/fetch?{urlencode({'presigned_url': ticket})}"
+
+
+def issue_download_url(key: str, ttl: int = 86400, *, bucket: str | None = None) -> str:
+    """Issue a link for an object already authorized by the caller."""
+    from contracts.constants import environment
+
+    if bucket and bucket != environment.MINIO_DEFAULT_BUCKET:
+        raise InvalidObjectTicket()
+    ticket = issue_object_ticket(key, ttl, secret=environment.JWT_SECRET)
+    return object_ticket_url(environment.NORTHBOUND_EXTERNAL_URL, ticket)

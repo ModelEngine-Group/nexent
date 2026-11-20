@@ -3871,6 +3871,7 @@
       "source": "backend/management/api/northbound.py",
       "route_id": "route-350731bc17230f9c",
       "credential_kinds": [
+        "anonymous",
         "api_key"
       ]
     },
@@ -5908,6 +5909,7 @@
       "source": "backend/management/api/northbound.py",
       "route_id": "route-b2351fc0b57440f5",
       "credential_kinds": [
+        "anonymous",
         "api_key"
       ]
     },
@@ -6383,5 +6385,5 @@
       ]
     }
   ],
-  "revision": "2026-11-18.3"
+  "revision": "2026-11-20.1"
 }

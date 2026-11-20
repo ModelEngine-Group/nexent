@@ -162,8 +162,6 @@ sys.modules["management.db.knowledge_base.repository"] = knowledge_db_mod
 # Mock attachment_db
 attachment_db_mod = types.ModuleType("management.db.file.attachment")
 attachment_db_mod.build_s3_url = MagicMock(return_value="s3://bucket/file")
-attachment_db_mod.get_file_url = MagicMock(return_value={"success": True, "url": "https://proxy.example/file"})
-attachment_db_mod._build_mcp_presigned_url = MagicMock(side_effect=lambda url: url)
 sys.modules["management.db.file.attachment"] = attachment_db_mod
 
 file_reads_module = types.ModuleType("infrastructure.file_reads")
@@ -1942,13 +1940,21 @@ class TestNormalizeAttachmentsErrorHandling:
             assert "Access denied" in str(exc_info.value)
         read_size.assert_not_called()
 
+    def test_dict_attachment_issues_only_for_owned_keys(self):
+        own = "attachments/user123/report.pdf"
+        foreign = "attachments/user456/report.pdf"
+        with patch.object(ns, "issue_download_url", return_value="signed-own") as signer:
+            result = ns._normalize_northbound_attachments(
+                [{"object_name": own}, {"object_name": foreign}], "user123", "tenant123",
+            )
+        signer.assert_called_once_with(own)
+        assert result[0]["presigned_url"] == "signed-own"
+        assert "presigned_url" not in result[1]
+
     def test_normalize_attachments_s3_url_success(self):
         """Test successful normalization of an s3:// URL with assertions on collaborator calls."""
         with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
-                    "success": True,
-                    "url": "https://proxy.example/file"
-                }) as mock_get_url, \
+                patch("management.services.northbound.issue_download_url", return_value="https://proxy.example/file") as mock_get_url, \
                 patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")), \
                 patch.object(ns, "read_attachment_size", return_value=123) as read_size:
             result = ns._normalize_northbound_attachments(
@@ -1963,8 +1969,7 @@ class TestNormalizeAttachmentsErrorHandling:
             "tenant123",
         )
         mock_get_url.assert_called_once_with(
-            object_name="attachments/user123/report.pdf",
-            expires=86400,
+            "attachments/user123/report.pdf",
         )
         read_size.assert_called_once_with("attachments/user123/report.pdf")
         assert result == [{
@@ -1980,10 +1985,7 @@ class TestNormalizeAttachmentsErrorHandling:
     def test_normalize_attachments_no_presigned_url(self):
         """Test that presigned_url is omitted when get_file_url returns no url."""
         with patch("management.services.northbound.validate_urls_access"), \
-                patch("management.services.northbound.get_file_url", return_value={
-                    "success": True,
-                    "url": None
-                }), \
+                patch("management.services.northbound.issue_download_url", side_effect=ns.InvalidObjectTicket), \
                 patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
             result = ns._normalize_northbound_attachments(
                 ["s3://nexent/attachments/user123/report.pdf"],
@@ -1995,10 +1997,7 @@ class TestNormalizeAttachmentsErrorHandling:
     def test_normalize_attachments_relative_path(self):
         """Test support for attachments/xxx.md relative path format."""
         with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
-                    "success": True,
-                    "url": "https://proxy.example/file"
-                }) as mock_get_url:
+                patch("management.services.northbound.issue_download_url", return_value="https://proxy.example/file") as mock_get_url:
             result = ns._normalize_northbound_attachments(
                 ["attachments/user123/report.pdf"],
                 "user123",
@@ -2011,8 +2010,7 @@ class TestNormalizeAttachmentsErrorHandling:
             "tenant123",
         )
         mock_get_url.assert_called_once_with(
-            object_name="attachments/user123/report.pdf",
-            expires=86400,
+            "attachments/user123/report.pdf",
         )
         assert result == [{
             "name": "report.pdf",
@@ -2027,10 +2025,7 @@ class TestNormalizeAttachmentsErrorHandling:
     def test_normalize_attachments_nexent_path(self):
         """Test support for nexent/xxx.md path format."""
         with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
-                    "success": True,
-                    "url": "https://proxy.example/file"
-                }) as mock_get_url:
+                patch("management.services.northbound.issue_download_url", return_value="https://proxy.example/file") as mock_get_url:
             result = ns._normalize_northbound_attachments(
                 ["nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -2043,8 +2038,7 @@ class TestNormalizeAttachmentsErrorHandling:
             "tenant123",
         )
         mock_get_url.assert_called_once_with(
-            object_name="nexent/attachments/user123/report.pdf",
-            expires=86400,
+            "nexent/attachments/user123/report.pdf",
         )
         assert result == [{
             "name": "report.pdf",
@@ -2059,10 +2053,7 @@ class TestNormalizeAttachmentsErrorHandling:
     def test_normalize_attachments_absolute_path(self):
         """Test support for /nexent/xxx.md absolute path format."""
         with patch("management.services.northbound.validate_urls_access") as mock_validate, \
-                patch("management.services.northbound.get_file_url", return_value={
-                    "success": True,
-                    "url": "https://proxy.example/file"
-                }) as mock_get_url:
+                patch("management.services.northbound.issue_download_url", return_value="https://proxy.example/file") as mock_get_url:
             result = ns._normalize_northbound_attachments(
                 ["/nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -2075,8 +2066,7 @@ class TestNormalizeAttachmentsErrorHandling:
             "tenant123",
         )
         mock_get_url.assert_called_once_with(
-            object_name="attachments/user123/report.pdf",
-            expires=86400,
+            "attachments/user123/report.pdf",
         )
         assert result == [{
             "name": "report.pdf",

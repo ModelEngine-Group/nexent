@@ -8,13 +8,12 @@ from typing import Any, BinaryIO, Dict, Optional
 
 from contracts import file_types
 from contracts.constants.constants import S3_URL_PREFIX
-from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
+from contracts.object_tickets import InvalidObjectTicket, issue_download_url
 from nexent.storage.errors import StorageError
 
 from infrastructure.attachment_upload import put_attachment
 from infrastructure.object_storage.client import minio_client
 from infrastructure.object_storage.read_access import (
-    build_attachment_proxy_url,
     normalize_object_location,
 )
 from infrastructure.trace.knowledge import (
@@ -44,19 +43,6 @@ def build_s3_url(object_name: str, bucket: Optional[str] = None) -> str:
     if resolved_bucket:
         return f"{S3_URL_PREFIX}{resolved_bucket}/{object_name}"
     return f"{S3_URL_PREFIX}{object_name}"
-
-
-def _build_mcp_presigned_url(presigned_url: str) -> str:
-    """
-    Build northbound API proxy URL for MCP tools.
-
-    Args:
-        presigned_url: Original MinIO presigned URL
-
-    Returns:
-        str: URL wrapped with northbound API proxy, with presigned_url URL-encoded
-    """
-    return build_attachment_proxy_url(presigned_url, NORTHBOUND_EXTERNAL_URL)
 
 
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
@@ -122,10 +108,10 @@ def upload_file(
         response["url"] = result
         # Generate presigned URL for external access if requested
         if generate_presigned_url:
-            presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
-            if presigned_result.get("success"):
-                # Only expose MCP URL (with proxy prefix), not raw MinIO URL
-                response["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
+            try:
+                response["presigned_url"] = issue_download_url(object_name, presigned_url_expires, bucket=bucket)
+            except InvalidObjectTicket:
+                pass
     else:
         response["error"] = result
 
@@ -201,10 +187,10 @@ def upload_fileobj(
         response["url"] = result
         # Generate presigned URL for external access if requested
         if generate_presigned_url:
-            presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
-            if presigned_result.get("success"):
-                # Only expose MCP URL (with proxy prefix), not raw MinIO URL
-                response["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
+            try:
+                response["presigned_url"] = issue_download_url(object_name, presigned_url_expires, bucket=bucket)
+            except InvalidObjectTicket:
+                pass
     else:
         response["error"] = result
 
@@ -230,32 +216,6 @@ def download_file(object_name: str, file_path: str, bucket: Optional[str] = None
     response = {"success": success, "object_name": object_name, "file_path": file_path}
 
     if not success:
-        response["error"] = result
-
-    return response
-
-
-def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Dict[str, Any]:
-    """
-    Get presigned URL for file
-
-    Args:
-        object_name: Object name
-        bucket: Bucket name, if not specified will use default bucket
-        expires: URL expiration time in seconds (default 86400 = 24 hours)
-
-    Returns:
-        Dict[str, Any]: Result containing success flag, URL and error message (if any)
-    """
-    # Get presigned URL
-    success, result = minio_client.get_file_url(object_name, bucket, expires)
-
-    # Build response
-    response = {"success": success, "object_name": object_name, "expires_in": expires}
-
-    if success:
-        response["url"] = result
-    else:
         response["error"] = result
 
     return response

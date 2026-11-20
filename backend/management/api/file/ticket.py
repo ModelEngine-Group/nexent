@@ -33,6 +33,10 @@ async def download_ticket_response(ticket, request):
         key = open_object_ticket(ticket, secret=environment.JWT_SECRET)
     except InvalidObjectTicket:
         raise HTTPException(HTTPStatus.FORBIDDEN, 'Invalid or expired file ticket') from None
+    return await download_authorized_object_response(key, request)
+
+
+async def download_authorized_object_response(key, request):
     try:
         meta = await run_blocking('file-ticket-stat', _stat_download, key, lane='control-io', owner='management.file')
         headers = {

@@ -124,7 +124,6 @@ def setup_patches():
         patch('infrastructure.rdb.client.db_client', MagicMock()),
         patch('management.db.file.attachment.minio_client', minio_mock),
         patch('management.db.file.attachment.upload_fileobj', MagicMock()),
-        patch('management.db.file.attachment.get_file_url', MagicMock()),
         patch('management.db.file.attachment.delete_file', MagicMock()),
         patch_import_context('management.services.file.service.admit_knowledge_uploads',
               side_effect=_stub_admit_knowledge_uploads),
@@ -1100,21 +1099,22 @@ class TestGetFileUrlImpl:
     async def test_get_file_url_signs_a_nexent_link_without_storage(self, mocker):
         from urllib.parse import parse_qs, urlsplit
 
+        from contracts.constants import environment
         from contracts.object_tickets import open_object_ticket
 
-        mocker.patch.object(file_management_service, "JWT_SECRET", "synthetic")
-        mocker.patch.object(file_management_service, "NORTHBOUND_EXTERNAL_URL", "https://gateway.invalid/api")
-        native = mocker.patch.object(file_management_service, "get_file_url")
+        mocker.patch.object(environment, "JWT_SECRET", "synthetic")
+        mocker.patch.object(environment, "NORTHBOUND_EXTERNAL_URL", "https://gateway.invalid/api")
         result = await get_file_url_impl(object_name="test/file.txt", expires=3600)
         assert result["success"] and result["expires_in"] == 3600 and result["object_name"] == "test/file.txt"
         link = urlsplit(result["url"])
         assert (link.netloc, link.path) == ("gateway.invalid", "/api/nb/v1/file/fetch")
         assert open_object_ticket(parse_qs(link.query)["presigned_url"][0], secret="synthetic") == "test/file.txt"
-        native.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_file_url_fails_closed_without_signing_key(self, mocker):
-        mocker.patch.object(file_management_service, "JWT_SECRET", "")
+        from contracts.constants import environment
+
+        mocker.patch.object(environment, "JWT_SECRET", "")
         with pytest.raises(RuntimeError, match="Download link unavailable"):
             await get_file_url_impl(object_name="test/file.txt", expires=3600)
 
@@ -1130,17 +1130,13 @@ class TestListFilesImpl:
         inventory = Mock()
         inventory.first_page.return_value = entries
         mocker.patch.object(file_management_service, "attachment_inventory_port", return_value=inventory)
-        sign = mocker.patch.object(file_management_service, "get_file_url", side_effect=lambda key: {
-            "success": key.endswith("1.txt"), "url": "https://example.invalid/signed",
-        })
 
         listed = await list_files_impl(prefix="folder/", limit=limit)
         assert len(listed) == count
         assert listed[0] == {"key": "folder/1.txt", "size": 1, "content_type": "text/plain",
-                             "last_modified": modified, "url": "https://example.invalid/signed"}
+                             "last_modified": modified}
         assert [item["key"] for item in listed] == [entry.key for entry in entries[:count]]
-        assert all("url" not in item for item in listed[1:])
-        assert sign.call_count == count
+        assert all("url" not in item for item in listed)
         assert inventory.first_page.call_args.args == ("folder/",)
         assert inventory.first_page.call_args.kwargs["limit"] == 1000
         inventory.close.assert_called_once()
@@ -1152,11 +1148,9 @@ class TestListFilesImpl:
         inventory = Mock()
         inventory.first_page.side_effect = Unavailable()
         mocker.patch.object(file_management_service, "attachment_inventory_port", return_value=inventory)
-        signer = mocker.patch.object(file_management_service, "get_file_url")
         assert await list_files_impl(prefix="folder/", limit=1) == []
         inventory.first_page.assert_called_once()
         inventory.close.assert_called_once()
-        signer.assert_not_called()
 
 
 class TestCheckFileAccess:

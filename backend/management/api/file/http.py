@@ -27,8 +27,8 @@ class ObjectStreamingResponse(StreamingResponse):
             await self._owner.aclose()
 
 
-def build_storage_proxy_url(presigned_url: str, storage_endpoint: Optional[str]) -> httpx.URL:
-    """Pin the request authority to configured storage without rewriting its signature."""
+def legacy_storage_object_name(presigned_url: str, storage_endpoint: str, bucket: str) -> str:
+    """Extract a key for reauthorization; never forward the signed URL."""
     try:
         origin = httpx.URL(storage_endpoint or "")
         if (
@@ -56,9 +56,14 @@ def build_storage_proxy_url(presigned_url: str, storage_endpoint: Optional[str])
             status_code=HTTPStatus.BAD_REQUEST, detail="presigned_url must use the configured storage endpoint"
         ) from None
 
-    # Copy only the object path and signed query; the authority always comes from server configuration.
-    return origin.copy_with(raw_path=target.raw_path)
-
+    selected_bucket, separator, key = target.path.removeprefix("/").partition("/")
+    if (
+        not separator or not bucket or selected_bucket != bucket
+        or not key or "\x00" in key or "\\" in key
+        or any(part in {"", ".", ".."} for part in key.split("/"))
+    ):
+        raise HTTPException(HTTPStatus.BAD_REQUEST, detail="Invalid storage object reference")
+    return key
 
 def build_content_disposition_header(filename: Optional[str], inline: bool = False) -> str:
     """

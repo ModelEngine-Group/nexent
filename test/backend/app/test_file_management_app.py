@@ -666,12 +666,13 @@ async def test_get_storage_files_include_and_strip_urls(monkeypatch):
         ]
 
     monkeypatch.setattr(file_management_app, "list_files_impl", fake_list)
+    monkeypatch.setattr(file_management_app, "issue_download_url", lambda key: "https://gateway.invalid/" + key)
     # include URLs
     out1 = await file_management_app.get_storage_files(
         prefix="", limit=10, include_urls=True, authorization=MOCK_AUTH
     )
     assert out1["total"] == 2
-    assert out1["files"][0]["url"] == "http://u"
+    assert out1["files"][0]["url"] == "https://gateway.invalid/knowledge_base/a.txt"
     # strip URLs
     out2 = await file_management_app.get_storage_files(
         prefix="", limit=10, include_urls=False, authorization=MOCK_AUTH
@@ -693,9 +694,12 @@ async def test_get_storage_files_with_user_id_filters_by_access(monkeypatch):
 
     monkeypatch.setattr(file_management_app, "list_files_impl", fake_list)
 
+    issued = []
+    monkeypatch.setattr(file_management_app, "issue_download_url", lambda key: issued.append(key) or "url")
     out = await file_management_app.get_storage_files(
-        prefix="", limit=10, include_urls=False, authorization=MOCK_AUTH
+        prefix="", limit=10, include_urls=True, authorization=MOCK_AUTH
     )
+    assert issued == ["knowledge_base/shared.txt", "attachments/user1/mine.txt"]
     # user1 can access knowledge_base and attachments/user1
     keys = [f["key"] for f in out["files"]]
     assert "knowledge_base/shared.txt" in keys

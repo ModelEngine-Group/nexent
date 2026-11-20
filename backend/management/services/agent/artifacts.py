@@ -6,11 +6,8 @@ import json
 import logging
 import os
 
-from management.db.file.attachment import (
-    _build_mcp_presigned_url,
-    get_file_url,
-    upload_fileobj,
-)
+from contracts.object_tickets import InvalidObjectTicket, issue_download_url
+from management.db.file.attachment import upload_fileobj
 from management.services.file.service import is_allowed_skill_upload_path
 from nexent.core.concurrency import run_blocking
 
@@ -92,22 +89,9 @@ def enrich_file_uploads_with_presigned_urls(
         object_name = str(result.get("object_name") or "").strip()
         if object_name and not enriched_result.get("presigned_url"):
             try:
-                url_result = get_file_url(object_name=object_name, expires=expires)
-                if url_result.get("success") and url_result.get("url"):
-                    enriched_result["presigned_url"] = _build_mcp_presigned_url(
-                        url_result["url"]
-                    )
-                else:
-                    logger.warning(
-                        "Failed to generate presigned URL object_name=%s error=%s",
-                        object_name,
-                        url_result.get("error"),
-                    )
-            except Exception:
-                logger.exception(
-                    "Failed to enrich file upload with presigned URL object_name=%s",
-                    object_name,
-                )
+                enriched_result["presigned_url"] = issue_download_url(object_name, expires)
+            except InvalidObjectTicket:
+                logger.warning("Unable to issue download link for run output")
         enriched_results.append(enriched_result)
     return enriched_results
 

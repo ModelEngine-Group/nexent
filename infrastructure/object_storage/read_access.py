@@ -3,7 +3,6 @@
 """Object-read scope shared by Management and Runtime tool adapters."""
 
 import logging
-from urllib.parse import quote
 
 from contracts.constants.constants import (
     ASSET_OWNER_ATTACHMENTS_PREFIX,
@@ -68,12 +67,6 @@ def require_s3_read_access(urls: list[str], user_id: str, tenant_id: str) -> Non
             raise PermissionError("Invalid S3 URL") from exc
         if not can_read_object(object_name, user_id, tenant_id):
             raise PermissionError("Object is outside the run's read scope")
-
-
-def build_attachment_proxy_url(presigned_url: str, northbound_url: str) -> str:
-    if not presigned_url:
-        return ""
-    return f"{northbound_url}/nb/v1/file/fetch?presigned_url={quote(presigned_url, safe='')}"
 
 
 def validate_s3_url_access(

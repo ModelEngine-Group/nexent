@@ -14,8 +14,6 @@ import pytest
 # Keep these utility tests isolated from database and file-service import chains.
 # The functions are patched at their import site by individual tests below.
 attachment_db = types.ModuleType("management.db.file.attachment")
-attachment_db._build_mcp_presigned_url = MagicMock(side_effect=lambda url: f"/proxy?url={url}")
-attachment_db.get_file_url = MagicMock()
 attachment_db.upload_fileobj = MagicMock()
 sys.modules["management.db.file.attachment"] = attachment_db
 
@@ -63,8 +61,8 @@ def test_answer_fragments_do_not_merge_across_type_attempt_invocation_or_step(ch
 
 def test_failed_presigned_url_lookup_keeps_uploaded_file_metadata(mocker):
     uploads = [{"object_name": "outputs/result.txt", "url": "stored", "size": 10}]
-    mocker.patch.object(agent_artifacts_backend, "get_file_url", side_effect=RuntimeError("Storage unavailable"))
-    log = mocker.patch.object(agent_artifacts_backend.logger, "exception")
+    mocker.patch.object(agent_artifacts_backend, "issue_download_url", side_effect=agent_artifacts_backend.InvalidObjectTicket)
+    log = mocker.patch.object(agent_artifacts_backend.logger, "warning")
     result = agent_artifacts_backend.enrich_file_uploads_with_presigned_urls(uploads)
     assert result == uploads and result[0] is not uploads[0]
     assert "presigned_url" not in result[0]
@@ -136,11 +134,7 @@ class TestSerialization:
 
         with patch.object(
             agent_artifacts_backend,
-            "get_file_url",
-            return_value={"success": True, "url": "https://minio/signed"},
-        ), patch.object(
-            agent_artifacts_backend,
-            "_build_mcp_presigned_url",
+            "issue_download_url",
             return_value="https://api/file/fetch?signed",
         ):
             result = agent_artifacts_backend.enrich_file_uploads_with_presigned_urls(uploads)
@@ -151,7 +145,7 @@ class TestSerialization:
     def test_preserves_existing_presigned_url(self):
         uploads = [{"object_name": "outputs/chart.png", "presigned_url": "existing"}]
 
-        with patch.object(agent_artifacts_backend, "get_file_url") as get_file_url:
+        with patch.object(agent_artifacts_backend, "issue_download_url") as get_file_url:
             result = agent_artifacts_backend.enrich_file_uploads_with_presigned_urls(uploads)
 
         assert result[0]["presigned_url"] == "existing"

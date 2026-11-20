@@ -3,13 +3,11 @@
 """Unit tests for management.api.northbound module."""
 import sys
 from nexent.storage.errors import DeadlineExceeded
-import os
 from http import HTTPStatus
 
 # The conftest.py sets up all mocks
 
 from unittest.mock import AsyncMock, MagicMock, patch
-import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -20,7 +18,7 @@ from io import BytesIO
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
     from management.api.northbound import _role_for_context, router
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, ValidationError
 from contracts.errors.codes import ErrorCode
 
 
@@ -1584,7 +1582,6 @@ def test_simple_northbound_endpoints_map_errors(endpoint, service_name, error, e
     ],
 )
 def test_northbound_endpoint_error_mappings(service_name, error, expected_status):
-    from fastapi import HTTPException
 
     path_by_service = {
         "get_conversation_history": "/nb/v1/conversations/1",
@@ -1624,7 +1621,6 @@ def test_update_conversation_title_ignores_invalid_metadata_and_sets_headers():
     ],
 )
 def test_models_and_title_preserve_expected_http_errors(service_name, error, expected_status):
-    from fastapi import HTTPException
 
     path = "/nb/v1/models" if service_name == "list_configured_models" else "/nb/v1/generate_title"
     with patch("management.api.northbound._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
@@ -1646,112 +1642,6 @@ def test_file_fetch_rejects_invalid_urls(url, expected_status):
     response = client.get("/nb/v1/file/fetch", params={"presigned_url": url})
     assert response.status_code == expected_status
 
-
-def test_file_fetch_returns_bad_gateway_for_storage_status():
-    response = MagicMock(status_code=404)
-    response.headers = {}
-    with patch("management.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("management.api.northbound.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
-        client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        client_cls.return_value.get = AsyncMock(return_value=response)
-        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
-
-    assert result.status_code == 502
-
-
-@pytest.mark.parametrize("error", [httpx.TimeoutException("timeout"), httpx.RequestError("request failed")])
-def test_file_fetch_maps_http_client_errors(error):
-    with patch("management.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("management.api.northbound.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
-        client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        client_cls.return_value.get = AsyncMock(side_effect=error)
-        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
-
-    assert result.status_code == (504 if isinstance(error, httpx.TimeoutException) else 502)
-
-
-def test_file_fetch_streams_content_and_uses_content_disposition_filename():
-    async def chunks():
-        yield b"file content"
-
-    response = MagicMock(status_code=200)
-    response.headers = {
-        "Content-Type": "text/plain",
-        "Content-Disposition": 'attachment; filename="report.txt"',
-    }
-    response.aiter_bytes = chunks
-    with patch("management.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("management.api.northbound.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
-        client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        client_cls.return_value.get = AsyncMock(return_value=response)
-        result = client.get("/nb/v1/file/fetch", params={"presigned_url": "https://storage/file"})
-
-    assert result.status_code == 200
-    assert result.content == b"file content"
-    assert "report.txt" in result.headers["content-disposition"]
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
-
-# =============================================================================
-# Helper Function Tests
-# =============================================================================
-
-def test_resolve_proxy_download_filename_with_rfc598_filename():
-    """Test filename resolution with RFC 598 filename."""
-    from management.api.northbound import _resolve_proxy_download_filename
-
-    result = _resolve_proxy_download_filename(
-        "https://example.com/path/file.pdf",
-        'filename="report.pdf"'
-    )
-    assert result == "report.pdf"
-
-
-def test_resolve_proxy_download_filename_with_rfc598_star_filename():
-    """Test filename resolution with RFC 598 star filename."""
-    from management.api.northbound import _resolve_proxy_download_filename
-
-    result = _resolve_proxy_download_filename(
-        "https://example.com/path/file.pdf",
-        "filename*=UTF-8''report%20final.pdf"
-    )
-    assert result == "report final.pdf"
-
-
-def test_resolve_proxy_download_filename_from_url():
-    """Test filename resolution from URL when no content-disposition."""
-    from management.api.northbound import _resolve_proxy_download_filename
-
-    result = _resolve_proxy_download_filename(
-        "https://example.com/path/to/document.pdf",
-        ""
-    )
-    assert result == "document.pdf"
-
-
-def test_resolve_proxy_download_filename_no_filename_in_url():
-    """Test filename resolution returns 'download' when no filename in URL."""
-    from management.api.northbound import _resolve_proxy_download_filename
-
-    result = _resolve_proxy_download_filename(
-        "https://example.com/path/",
-        ""
-    )
-    assert result == "download"
-
-
-def test_resolve_proxy_download_filename_empty_content_disposition():
-    """Test filename resolution with empty content-disposition."""
-    from management.api.northbound import _resolve_proxy_download_filename
-
-    result = _resolve_proxy_download_filename(
-        "https://example.com/path/file.pdf",
-        None
-    )
-    assert result == "file.pdf"
 
 def test_get_agent_knowledge_bases_not_found():
     """Test 404 when the target agent cannot be found."""
@@ -1831,13 +1721,14 @@ def test_retired_control_fields_rejected_before_northbound_execution(field, valu
 
 @pytest.mark.parametrize("failure", [None, TimeoutError(), DeadlineExceeded()])
 def test_knowledge_file_list_keeps_public_envelope_and_timeout_mapping(caplog, failure):
-    ctx, core = MagicMock(user_id="reader", tenant_id="asset-tenant"), object()
+    ctx = MagicMock(user_id="reader", tenant_id="asset-tenant")
     payload = {"files": [{"file": "a.txt", "status": "PROCESSING", "file_id": "f"}]}
     with patch("management.api.northbound._require_asset_owner_context", new=AsyncMock(return_value=ctx)), \
-            patch("management.api.northbound.get_vector_db_core", return_value=core), \
+            patch("management.api.northbound.get_vector_db_core") as legacy_storage, \
             patch("management.api.northbound.list_knowledge_files_for_northbound", new=AsyncMock(return_value=payload, side_effect=failure)) as listing:
         response = client.get("/nb/v1/knowledge/indices/kb/files", headers=_build_headers())
     assert response.status_code == (200 if failure is None else 500)
     assert response.json() == ({"status": "success", **payload} if failure is None else {"detail": "Error getting index files"})
-    listing.assert_awaited_once_with(ctx=ctx, index_name="kb", vdb_core=core)
+    listing.assert_awaited_once_with(ctx=ctx, index_name="kb")
+    legacy_storage.assert_not_called()
     assert not [record for record in caplog.records if record.levelno >= 40]

@@ -39,7 +39,8 @@ async def _resolve_identity(connection, *, settings, identity_lookup=None):
     authorization = authorization_for(connection)
     # Bootstrap callbacks carry their own one-time tickets/pending tokens.
     optional_session = path in {"/user/current_user_info", "/user/session", "/user/logout"}
-    if is_public_request(method, path) and not (optional_session and authorization):
+    optional_api_key = method == "GET" and path == "/nb/v1/file/fetch"
+    if is_public_request(method, path) and not ((optional_session or optional_api_key) and authorization):
         return None
     language = connection.cookies.get("NEXT_LOCALE", "zh")
     language = language if language in {"zh", "en"} else "zh"

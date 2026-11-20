@@ -199,3 +199,37 @@ def test_registry_cannot_be_changed_by_mutating_its_input():
     data["routes"][0]["credential_kinds"].append("api_key")
     data["routes"].clear()
     assert registry.match("GET", "/api/models/test").credential_kinds == ("session",)
+
+
+@pytest.mark.asyncio
+async def test_file_fetch_routes_ticket_and_optional_api_key_without_opening_other_routes():
+    calls, identities = [], []
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"delegated"
+
+    def downstream(request):
+        calls.append(request)
+        return httpx.Response(200, stream=Body())
+
+    async def lookup(query):
+        identities.append(query)
+        return {"user_id": "u", "tenant_id": "t", "kind": "api_key"}
+
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(downstream),
+                             settings=GatewaySettings(jwt_secret="fixture"), identity_lookup=lookup)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://edge",
+    ) as client:
+        for path in ("/api/nb/v1/file/fetch", "/nb/v1/file/fetch"):
+            response = await client.get(path, params={"presigned_url": "nxo1.opaque"})
+            assert response.status_code == 200
+            assert calls[-1].url.path == path
+            assert calls[-1].url.params["presigned_url"] == "nxo1.opaque"
+        assert identities == []
+        response = await client.get("/api/nb/v1/file/fetch", params={"presigned_url": "legacy"},
+                                    headers={"Authorization": "Bearer supplied-api-key"})
+        assert response.status_code == 200
+        assert [identity["access_key"] for identity in identities] == ["supplied-api-key"]
+        assert (await client.get("/api/nb/v1/models")).status_code == 401
