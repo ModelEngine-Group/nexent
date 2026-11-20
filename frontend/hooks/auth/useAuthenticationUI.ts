@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
@@ -5,7 +6,6 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import {
@@ -33,7 +33,6 @@ export function useAuthenticationUI({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { isSpeedMode } = useDeployment();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
@@ -60,7 +59,7 @@ export function useAuthenticationUI({
 
   const handleUnauthenticatedModalClose = useCallback(() => {
     // Only emit back to home event and redirect if user is not authenticated
-    if (!isAuthenticated && !isSpeedMode && !preservesShareReturnPath) {
+    if (!isAuthenticated && !preservesShareReturnPath) {
       // Emit event to notify SideNavigation to reset selected key
       authEventUtils.emitBackToHome();
       // Redirect to home page if not already there
@@ -73,7 +72,6 @@ export function useAuthenticationUI({
     isAuthenticated,
     isOAuthCompletePage,
     preservesShareReturnPath,
-    isSpeedMode,
     router,
   ]);
 
@@ -182,7 +180,6 @@ export function useAuthenticationUI({
   );
 
   useEffect(() => {
-    if (isSpeedMode) return;
     if (isAnonymousConversationSharePage) return;
 
     const handleSessionExpired = () => {
@@ -217,7 +214,6 @@ export function useAuthenticationUI({
     };
   }, [
     effectivePath,
-    isSpeedMode,
     isAnonymousConversationSharePage,
     openSessionExpiredModal,
     isLoginModalOpen,
@@ -226,7 +222,6 @@ export function useAuthenticationUI({
 
   // Auto-open login modal when returning from a failed OAuth redirect
   useEffect(() => {
-    if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
     if (isAnonymousConversationSharePage) return;
     if (isAuthChecking) return;
@@ -248,7 +243,6 @@ export function useAuthenticationUI({
     searchParams,
     isAuthChecking,
     isAuthenticated,
-    isSpeedMode,
     isLoginModalOpen,
     router,
     isOAuthCompletePage,
@@ -266,7 +260,6 @@ export function useAuthenticationUI({
 
   // Route guard for unauthenticated users - check when pathname changes
   useEffect(() => {
-    if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
     if (isAnonymousConversationSharePage) return;
     // Skip while checking auth state
@@ -292,7 +285,6 @@ export function useAuthenticationUI({
     effectivePath,
     authenticationReturnPath,
     isAuthenticated,
-    isSpeedMode,
     isAuthChecking,
     isSessionExpiredModalOpen,
     isSessionExpiredLoginInProgress,

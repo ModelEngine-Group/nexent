@@ -4,10 +4,12 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
-from contracts.conversation import MessageRequest, MessageUnit
 from contracts.agent import WorkbenchSessionConfig
+from contracts.conversation import MessageRequest, MessageUnit
+from management.services.conversation.runtime_output import is_runtime_event
 from management.db.conversation.repository import get_conversation_history
 from management.services.conversation.creator_targets import bind_creator_target
 from management.services.conversation.service import (
@@ -40,10 +42,15 @@ def prepare_creation_history(
     user_id: str,
     tenant_id: str,
     target: dict[str, Any] | None = None,
+    model_parameter_preferences: dict[str, dict[str, Any]] | None = None,
+    selected_model_id: int | None = None,
     retry_user_message_id: int | None = None,
     retry_message_index: int | None = None,
+    message_receipt: dict[str, int | None] | None = None,
 ) -> tuple[int, int]:
     """Verify the owner and creation mode, then persist the current user turn."""
+    if message_receipt is not None:
+        message_receipt.clear()
     if mode not in _CREATION_MODES:
         raise ValueError("Unsupported Workbench creation mode")
     if conversation_id is None:
@@ -60,6 +67,8 @@ def prepare_creation_history(
             agent_id=agent_id,
             target=target,
             workbench_config=normalized_config,
+            **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
+            **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
         )
         resolved_id = int(created["conversation_id"])
         next_index = 0
@@ -102,13 +111,15 @@ def prepare_creation_history(
                 for item in history["message_records"]
             ):
                 raise ValueError("Creation retry target has no assistant response")
+            if message_receipt is not None:
+                message_receipt["message_id"] = user_record.get("message_id")
             return resolved_id, assistant_index
         next_index = max(
             (int(item["message_index"]) for item in history["message_records"]),
             default=-1,
         ) + 1
 
-    save_message(
+    message_id = save_message(
         MessageRequest(
             conversation_id=resolved_id,
             message_idx=next_index,
@@ -119,6 +130,8 @@ def prepare_creation_history(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if message_receipt is not None:
+        message_receipt["message_id"] = message_id
     return resolved_id, next_index + 1
 
 
@@ -134,32 +147,33 @@ async def persist_creation_stream(
     units: list[tuple[str, str]] = []
     status = "completed"
     try:
-        async for event in stream:
-            for line in event.splitlines():
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    chunk = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(chunk, dict) or not isinstance(chunk.get("type"), str):
-                    continue
-                kind = chunk["type"]
-                raw_content = chunk.get("content")
-                content = (
-                    raw_content
-                    if isinstance(raw_content, str)
-                    else json.dumps(raw_content, ensure_ascii=False)
-                )
-                if kind in {
-                    "skill_body", "file_content", "agent_new_run",
-                    "target_files", "model_attempt_control", "done",
-                }:
-                    content = json.dumps(chunk, ensure_ascii=False)
-                units.append((kind, content))
-                if kind == "error":
-                    status = "failed"
-            yield event
+        async with aclosing(stream):
+            async for event in stream:
+                for line in event.splitlines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(chunk, dict) or not isinstance(chunk.get("type"), str):
+                        continue
+                    kind = chunk["type"]
+                    raw_content = chunk.get("content")
+                    content = (
+                        raw_content
+                        if isinstance(raw_content, str)
+                        else json.dumps(raw_content, ensure_ascii=False)
+                    )
+                    if kind in {
+                        "skill_body", "file_content", "agent_new_run",
+                        "target_files", "model_attempt_control", "run_terminal", "done",
+                    }:
+                        content = json.dumps(chunk, ensure_ascii=False)
+                    units.append((kind, content))
+                    if kind == "error":
+                        status = "failed"
+                yield event
     except BaseException:
         status = "stopped"
         raise

@@ -33,33 +33,43 @@ case:
     expected: Migration succeeds without reading audit rows, creating an audit archive
       or reporting audit counts.
   - order: 4
-    action: Replay the single account SQL against old account/membership schemas and
+    action: Execute the consolidated 001 against old account/membership schemas and
       conflicting metadata.
     expected: Role/email move to account, original associations and credentials survive,
-      replay preserves local edits, and conflicts roll back all schema/data changes.
+      replay preserves local edits, active provider-only accounts retain bindings without password login, dual-credential accounts retain password login, and conflicts roll back all schema/data changes.
   - order: 5
-    action: Upgrade legacy API-only memberships and keys, then replay against old disabled placeholders and explicitly disabled/deleted identities.
-    expected: Empty-email USER/DEV identities with historical keys and active membership become passwordless active accounts; original keys and IDs survive, replay preserves subsequent disablement, and normal/deleted identities remain unavailable.
+    action: Upgrade legacy API-only memberships and keys, convert old status columns through consolidated 001, and repeat against explicitly disabled/deleted identities.
+    expected: Empty-email USER/DEV identities with historical keys and active membership become passwordless active accounts; original keys and IDs survive, replay preserves subsequent disablement, and ordinary ineligible identities are excluded without changing their memberships.
   - order: 6
     action: Apply an import using an isolated stopped Supabase source DB and owned Auth/Kong containers; exercise failure and preview before a successful apply.
     expected: Preview/failure preserve the stack; successful committed apply removes its DB/Auth/Kong containers without deleting data volumes, backups or unrelated containers.
   - order: 7
-    action: Run deployment prepare and apply hooks around the normal versioned SQL runner, repeat deployment and retry a failed import using its retained private snapshot.
-    expected: One standalone Python script automatically imports only when the account SQL/data checkpoint requires it; fresh installs and completed upgrades skip source access, failures remain retryable, and SQL success alone never marks credential migration complete.
+    action: Execute the real infrastructure init.sql before running the deployment entry against fresh, legacy and completed databases; fail after schema creation and retry, then execute the normal SQL runner with unchanged and forced account migration checksums.
+    expected: Infrastructure initialization never creates the account completion marker. Complete per-user account data skips source access; empty/partial account tables with active members stop deployment without automatic repair even when version history is absent. Legacy import commits schema and credentials together; failures restore legacy profile columns and remove only tables created by that attempt, preserving preexisting accounts and leaving no private retry files. New schemas never create account_status; ordinary and forced replay remove existing legacy status columns before committing.
   - order: 8
-    action: Execute the actual historical SPEED seed statement, migrate and replay against a prior pending placeholder and an operator-modified account.
+    action: Execute the actual historical SPEED seed statement, run historical 001 followed by the account-array migration, and replay both against an operator-modified account.
     expected: The fixed demo identity retains its original ID/tenant and remains disabled for normal login, has system provenance without pending credentials, and replay preserves operator changes. Mixed-user deployment still imports human credentials.
+  - order: 9
+    action: Reuse an email after historical account deletion, vary source presence/order, exclude all-inactive and banned identities, and submit genuinely conflicting active accounts.
+    expected: Only eligible ordinary accounts enter user_account_t; original source/membership rows remain, the unavailable SPEED system record is retained with no role grants, inactive historical associations do not block SU preflight, and actual conflicts report account IDs while rolling back all target changes.
+  - order: 10
+    action: Execute Docker Shell orchestration without any host Python before application SQL. Include completed/fresh targets, stopped source, removed source with original storage, an empty recovery directory, failed import and preview.
+    expected: The host invokes only Shell and platform CLIs. Docker recovers a removed DB from its original storage and rejects an empty directory. The worker owns one atomic schema/credential transaction. Failed import preserves the recovered source, committed success removes its container and preserves storage, and credentials are never printed or stored as snapshots.
+  - order: 11
+    action: Run a new migration with empty/passwordless source data and verify precommit rollback, inspect existing empty/partial account tables without modifying them, and rerun after intentional inactive exclusion.
+    expected: New imports with unresolved IDs roll back the table and profile moves before commit. Existing inconsistent tables stop without source access or automatic repair and require consistent backup recovery; existing local passwords and token versions remain unchanged; inactive-source evidence permits repeat deployment after source removal. Shell reports safe preflight/source/worker/result/cleanup stages.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
   - No authentication audit history is read or imported; CLI output contains only
-    account counters.
-  - Canonical user_email/user_role exist only on accounts; old membership columns
-    are removed atomically and credential-pending rows are hydrated safely.
+    safe account counters, stage outcomes and affected account/resource IDs.
+  - Canonical user_email/user_roles exist only on accounts, with no physical scalar user_role; old membership columns
+    are removed atomically with credential import; no pending rows survive commit.
   - API-only account upgrades preserve existing keys, keep password login disabled and never reactivate explicitly disabled or deleted accounts on replay.
   - Source containers are reclaimed only after a successful local apply and all persistent data is retained.
-  - Deployment requires no manual Python invocation or host database packages; private snapshots survive incomplete upgrades and are removed only after committed import and successful cleanup.
+  - Per-user credential/identity coverage and recorded unavailable-source exclusions determine completion; failures roll back schema/data and leave no persistent credential process files. Consolidated 001 creates only the final schema and removes legacy account_status idempotently, including after forced SQL replay.
   - Default SPEED system identity is never pending for Supabase import and receives no normal login access; operator changes are preserved.
+  - Email reuse succeeds according to final availability; excluded ordinary accounts stay out of the local table and active conflicts include IDs in errors.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
     unrelated users.
@@ -75,6 +85,9 @@ case:
     - 6
     - 7
     - 8
+    - 9
+    - 10
+    - 11
     expected_results:
     - 1
     - 2
@@ -84,6 +97,7 @@ case:
     - 6
     - 7
     - 8
+    - 9
     forbidden_side_effects:
     - 1
   risk_type: DEPLOYMENT

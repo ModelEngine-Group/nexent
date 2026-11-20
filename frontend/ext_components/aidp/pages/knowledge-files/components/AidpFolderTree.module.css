@@ -1,0 +1,130 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.container {
+  min-height: 0;
+  padding: 4px 0 8px;
+}
+
+.tree {
+  width: max-content;
+  min-width: 100%;
+  font-size: 13px;
+}
+
+.tree :global(.ant-tree-list-holder-inner) {
+  min-width: max-content;
+}
+
+.tree :global(.ant-tree-switcher) {
+  width: 18px;
+  margin-inline-end: 0;
+}
+
+.tree :global(.ant-tree-node-content-wrapper) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  padding-inline: 2px;
+}
+
+.tree :global(.ant-tree-iconEle) {
+  width: 18px;
+  margin-inline-end: 2px;
+}
+
+.tree :global(.ant-tree-title) {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  width: auto;
+}
+
+.nodeTitle {
+  display: flex;
+  min-width: 165px;
+  width: 100%;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  /* Keep the trailing menu button off the tree's scroll edge and give the
+     row's hover state room before the button's click target. */
+  padding: 1px 8px 1px 2px;
+}
+
+.nodeName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeActions {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  opacity: 0;
+  /* Long/deep trees scroll horizontally. Keep the menu at the visible right
+     edge instead of letting it ride off with the max-content row. */
+  position: sticky;
+  right: 8px;
+  z-index: 2;
+  border-radius: 4px;
+  background: #ffffff;
+  /* Ant Design buttons transition every property. A delayed opacity fade
+     makes the menu look like it failed to appear on quick row hovers. */
+  transition: none;
+}
+
+.tree :global(.ant-tree-node-content-wrapper:hover) .nodeActions {
+  background: #f5f5f5;
+  /* Mask the tail of long names behind and to the right of the sticky button,
+     so the name ends at the action instead of running past it. */
+  box-shadow: 24px 0 0 #f5f5f5;
+}
+
+/* Selected rows paint an opaque blue behind the sticky button; use the same
+   color so the action does not look like a white patch over the row. */
+.tree
+  :global(.ant-tree-node-content-wrapper.ant-tree-node-selected)
+  .nodeActions,
+.tree
+  :global(.ant-tree-node-content-wrapper.ant-tree-node-selected:hover)
+  .nodeActions {
+  background: #e6f2fd;
+  box-shadow: 24px 0 0 #e6f2fd;
+}
+
+/* blockNode highlights the whole row, while the title does not start until
+   after the switcher and icon. Reveal the action from the row wrapper too, so
+   hovering anywhere on the highlighted row shows the menu. */
+.tree :global(.ant-tree-node-content-wrapper:hover) .nodeActions,
+.tree :global(.ant-tree-node-content-wrapper:focus-within) .nodeActions,
+.nodeTitle:hover .nodeActions,
+.nodeTitle:focus-within .nodeActions {
+  opacity: 1;
+}
+
+.dropTarget {
+  background: #e6f4ff;
+  outline: 1px dashed #1677ff;
+  outline-offset: -1px;
+}
+
+.loading {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+}
+
+.error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 18px;
+}

@@ -31,7 +31,7 @@ import importlib
 import sys
 importlib.import_module('contracts.constants.constants')
 assert 'contracts.constants.environment' not in sys.modules
-assert 'management.db.client' not in sys.modules
+assert 'infrastructure.rdb.client' not in sys.modules
 assert 'nexent.core.models.capacity_resolver' not in sys.modules
 """
     environment = os.environ.copy()
@@ -70,6 +70,11 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
     assert {p.stem for p in CONTRACTS.glob("*.py") if p.name != "__init__.py"} == {
         "a2a",
         "agent",
+        "agent_prompt",
+        "agentos",
+        "model_names",
+        "model_administration",
+        "runtime_metadata",
         "authentication",
         "automation",
         "clarification",
@@ -78,12 +83,14 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "evaluation",
         "file",
         "identity",
+        "roles",
         "knowledge",
         "memory",
         "model",
         "skill",
         "tag",
         "tool",
+        "trajectory",
         "voice",
     }
 
@@ -131,6 +138,9 @@ def test_error_definitions_have_one_canonical_directory():
         "codes.py",
         "messages.py",
         "exceptions.py",
+        "trajectory.py",
+        "capabilities.py",
+        "ingestion.py",
     }
     assert not any(
         (CONTRACTS / name).exists()

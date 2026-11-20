@@ -5,16 +5,14 @@ Database operations for group management
 
 from typing import Any, Dict, List, Optional, Union
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb import account_access
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
 from management.utils.serialization import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError
-from contracts.constants.environment import MAX_GROUPS_PER_TENANT
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from sqlalchemy import text
-
-_GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
-
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
     """
@@ -137,11 +135,12 @@ def add_group(
             .count()
         )
         group_count = group_count if isinstance(group_count, int) else 0
-        if group_count >= _GROUP_LIMIT:
-            error = TenantResourceLimitError(f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant")
+        limit = get_config_snapshot().get("MAX_GROUPS_PER_TENANT")
+        if group_count >= limit:
+            error = TenantResourceLimitError(f"Tenant group limit reached: maximum {limit} groups per tenant")
             error.resource = "groups"
             error.scope = "tenant"
-            error.limit = _GROUP_LIMIT
+            error.limit = limit
             error.current_count = group_count
             raise error
         group = TenantGroupInfo(
@@ -284,51 +283,11 @@ def query_group_users(group_id: int) -> List[Dict[str, Any]]:
 
 
 def query_group_ids_by_user_in_tenant(user_id: str, tenant_id: str) -> List[int]:
-    """Return ``user_id``'s group IDs restricted to ``tenant_id``.
-
-    Joins ``tenant_group_user_t`` with ``tenant_group_info_t`` so a user that
-    happens to share a group ID across tenants cannot leak access. Filters on
-    ``delete_flag='N'`` for both tables.
-    """
-    if not user_id or not tenant_id:
-        return []
-    with get_db_session() as session:
-        result = (
-            session.query(TenantGroupUser.group_id)
-            .join(
-                TenantGroupInfo,
-                TenantGroupInfo.group_id == TenantGroupUser.group_id,
-            )
-            .filter(
-                TenantGroupUser.user_id == user_id,
-                TenantGroupUser.delete_flag == "N",
-                TenantGroupInfo.tenant_id == tenant_id,
-                TenantGroupInfo.delete_flag == "N",
-            )
-            .all()
-        )
-    return [row[0] for row in result]
+    return account_access.query_group_ids_by_user_in_tenant(user_id, tenant_id, session_factory=get_db_session)
 
 
 def filter_tenant_group_ids(group_ids: List[int], tenant_id: str) -> List[int]:
-    """Return the subset of ``group_ids`` that exist in ``tenant_id``.
-
-    Used by the AIDP permission service to validate submitted ``group_ids``
-    against the current tenant. Returns an empty list when no IDs match.
-    """
-    if not group_ids or not tenant_id:
-        return []
-    with get_db_session() as session:
-        rows = (
-            session.query(TenantGroupInfo.group_id)
-            .filter(
-                TenantGroupInfo.group_id.in_(group_ids),
-                TenantGroupInfo.tenant_id == tenant_id,
-                TenantGroupInfo.delete_flag == "N",
-            )
-            .all()
-        )
-    return [row[0] for row in rows]
+    return account_access.filter_tenant_group_ids(group_ids, tenant_id, session_factory=get_db_session)
 
 
 def query_group_ids_by_user(user_id: str) -> List[int]:
@@ -434,6 +393,19 @@ def check_user_in_group(user_id: str, group_id: int) -> bool:
         )
 
         return result is not None
+
+
+def count_users_by_group_ids(group_ids: List[int]) -> Dict[int, int]:
+    """Count active membership rows for a page of groups in one query."""
+    if not group_ids:
+        return {}
+    from sqlalchemy import func
+
+    with get_db_session() as session:
+        rows = session.query(TenantGroupUser.group_id, func.count()).filter(
+            TenantGroupUser.group_id.in_(group_ids), TenantGroupUser.delete_flag == "N"
+        ).group_by(TenantGroupUser.group_id).all()
+        return {group_id: count for group_id, count in rows}
 
 
 def count_group_users(group_id: int) -> int:

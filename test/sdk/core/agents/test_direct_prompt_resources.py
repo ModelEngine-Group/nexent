@@ -13,8 +13,8 @@ import yaml
 ROOT = Path(__file__).parents[4]
 PROMPTS = ROOT / "sdk/nexent/core/prompts"
 POLICY_HASHES = {
-    "zh/agent/human_interaction.yaml": "31bb381d4603d6d0ae5ab4492dc3d6d980d4ad9a3b64de84685b479927d71b2d",
-    "en/agent/human_interaction.yaml": "af8fe686dd7e1549a1ba24c563800076bf291a38c36c653d9a8f86e6a5a50f79",
+    "zh/agent/human_interaction.yaml": "057d4a6a3402000f193cfa6051d3e6e4d8e0437ea6c0d0f7fd63b46b410c164a",
+    "en/agent/human_interaction.yaml": "37b61ad58222b39fa2e07d14dcab2d731384ea27c1deca2bc1711476c5158ffc",
     "en/agent/context_summary.yaml": "dd689841e3e4f03809ea6d198121688dbbb8531234fc90e2dc0107ae0939543b",
     "en/agent/answer_verifier.yaml": "0232a3c067ebff27194ea6d9abe9f4bfb2005aea678e18281a91742077d0ac15",
 }
@@ -112,7 +112,10 @@ def test_ut_sdk_fps_009_special_names_and_no_redundant_automation_path():
     assert not (PROMPTS / "en/memory/dreaming_user_memory.yaml").exists()
     resources = list(PROMPTS.rglob("*.yaml"))
     expected = json.loads((ROOT / "test/assets/sdk_prompt_migration_hashes.json").read_text(encoding="utf-8"))
-    assert {path.relative_to(PROMPTS).as_posix() for path in resources} == set(expected)
+    shared_response_resources = {
+        f"{language}/agent/response_style.yaml" for language in ("zh", "en")
+    }
+    assert {path.relative_to(PROMPTS).as_posix() for path in resources} == set(expected) | shared_response_resources
     for resource in resources:
         if resource.stem.startswith(("nl2agent", "nl2skill", "agent_manager", "agent_worker")):
             continue
@@ -144,7 +147,7 @@ def test_ut_sdk_fps_011_languages_have_matching_paths_fields_and_jinja_variables
     en_paths = {p.relative_to(PROMPTS / "en") for p in (PROMPTS / "en").rglob("*.yaml")}
     zh_paths = {p.relative_to(PROMPTS / "zh") for p in (PROMPTS / "zh").rglob("*.yaml")}
     assert en_paths == zh_paths
-    assert len(en_paths) == 36
+    assert len(en_paths) == 37
     assert en_paths == zh_paths
 
     def flatten(value, prefix=""):
@@ -212,7 +215,7 @@ def test_ut_sdk_fps_012_tool_policy_registry_is_active_not_a_prompt_alias():
     assert set(result.execution_tools) == {"visible", "hidden"}
     assert result.audit["policy_version"] == "p1"
     assert "prompt_registry" in (ROOT / "backend/management/services/agent/preparation/compiler.py").read_text(encoding="utf-8")
-    assert "prompt_registry" in (ROOT / "sdk/nexent/core/agents/nexent_agent.py").read_text(encoding="utf-8")
+    assert "prompt_registry" in (ROOT / "sdk/nexent/core/agents/cores/smolagents/agent.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("source", ["Heading\n", "\nHeading\n\n", "Text {{ value }}\n"])

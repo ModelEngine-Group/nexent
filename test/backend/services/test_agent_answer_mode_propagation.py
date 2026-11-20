@@ -1,60 +1,36 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Retain the selected answer mode through subscriptions and memory fallback."""
+"""Presentation stays local to Management through preparation and admission."""
 
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from . import test_agent_service as legacy
-from .test_agent_subscription_lifecycle import lifecycle
+from contracts.agent import AgentRequest
+from management.services.agent import prepared_turn
+from .test_prepared_public_turn import ACTOR, PAYLOAD, flow
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [None, "complete", "delta"])
-async def test_subscription_propagates_mode_to_the_detached_producer(lifecycle, mode):
-    env = lifecycle
-    observed = []
+@pytest.mark.parametrize("complete_answer", [False, True])
+@pytest.mark.parametrize("memory_enabled", [False, True])
+async def test_presentation_survives_prepared_admission(mocker, flow, complete_answer, memory_enabled):
+    operations, compile_snapshot, client, _ = flow
+    snapshot = compile_snapshot.return_value
+    snapshot.memory_enabled = memory_enabled
+    snapshot.resource = SimpleNamespace(agent_id=7)
+    present = mocker.patch.object(prepared_turn, "present_public_resume")
+    request = AgentRequest.model_validate(PAYLOAD.request)
 
-    async def source(_request, **kwargs):
-        observed.append(kwargs.get("final_answer_mode", "delta"))
-        env.channel.complete()
-        env.future.set_result(None)
-        if False:
-            yield ""
+    result = await prepared_turn.start_turn(
+        PAYLOAD, request, *ACTOR, client, include_journal_controls=False, complete_answer=complete_answer,
+    )
 
-    await env.start(source, **({} if mode is None else {"final_answer_mode": mode}))
-    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
-    assert observed == [mode or "delta"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [None, "complete", "delta"])
-@pytest.mark.parametrize("fallback", [False, True])
-async def test_generator_retains_mode_during_memory_preparation_fallback(monkeypatch, mode, fallback):
-    service = legacy.agent_run_service
-    request = legacy.AgentRequest(agent_id=1, conversation_id=999, query="hello")
-    info = SimpleNamespace()
-    prepare = AsyncMock(return_value=(info, None))
-    if fallback:
-        prepare.side_effect = [RuntimeError("controlled preparation failure"), (info, None)]
-    monkeypatch.setattr(service, "prepare_agent_run", prepare)
-    monkeypatch.setattr(service, "build_memory_context", MagicMock(return_value=SimpleNamespace(
-        user_config=SimpleNamespace(memory_switch=True))))
-    monkeypatch.setattr(service, "_cancel_task_on_runtime_signal", AsyncMock())
-    observed = []
-
-    async def chunks(**kwargs):
-        observed.append(kwargs["final_answer_mode"])
-        yield "data: answer\n\n"
-
-    monkeypatch.setattr(service, "_stream_agent_chunks", chunks)
-    result = [chunk async for chunk in service.generate_stream(
-        request, "user", "tenant", enable_memory=fallback,
-        **({} if mode is None else {"final_answer_mode": mode}))]
-    assert result == ["data: answer\n\n"]
-    assert observed == [mode or "delta"]
-    assert prepare.await_count == (2 if fallback else 1)
-    assert prepare.await_args.kwargs["allow_memory_search"] is False
+    assert result is present.return_value
+    assert operations == ["stage", "start", "confirm"]
+    client.start_prepared_run.assert_awaited_once_with(snapshot, *ACTOR)
+    assert "complete_answer" not in compile_snapshot.await_args.kwargs
+    assert present.call_args.kwargs["include_journal_controls"] is False
+    assert present.call_args.kwargs["complete_answer"] is complete_answer
+    staged = prepared_turn.store.stage_turn.call_args.args[5]
+    assert staged.get("memory_agent_id") == (7 if memory_enabled else None)

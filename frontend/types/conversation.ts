@@ -95,6 +95,11 @@ export interface ConversationListPage {
 }
 
 export interface ApiMessageItem {
+  answer_phase?: "delta" | "complete";
+  step_id?: string;
+  reclassify_step?: boolean;
+  is_error?: boolean;
+  provider_call_id?: string;
   type: string;
   content: string;
   unit_index?: number;
@@ -112,8 +117,15 @@ export interface ApiMessageItem {
   depth?: number;
 }
 
+export interface ApiMessageAnnotation {
+  quoted_text: string;
+  comment?: string | null;
+  source_excerpt?: string | null;
+}
+
 export interface ApiMessage {
   clarification_response?: unknown;
+  annotations?: ApiMessageAnnotation[];
   status?: "pending" | "streaming" | "completed" | "failed" | "stopped";
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;

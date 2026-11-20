@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MCP_TOOLS_QUERY_KEYS, McpSource } from "@/const/mcpTools";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { formatNl2AgentActionSummary } from "./nl2agent-action-summary";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { refreshToolListWithToast } from "@/hooks/mcpTools/useRefreshToolListWithToast";
@@ -221,8 +222,9 @@ export function SuggestedResourceInstallationCard({
   const aui = useAui();
   const queryClient = useQueryClient();
   const reactId = useId();
-  const cardKey = `suggested_resource_installation:${payload.agent_id}:${reactId}`;
-  const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
+  const cardKey = `suggested_resource_installation:${payload.agent_id}:${payload.card_id ?? reactId}`;
+  const { registerCard, submitCard, isCardInteractive, sessionGeneration } =
+    useNl2AgentFlow();
   const [items, dispatch] = useReducer(
     reducer,
     payload.resources,
@@ -239,7 +241,7 @@ export function SuggestedResourceInstallationCard({
 
   useEffect(() => {
     if (!disabled) registerCard(cardKey, payload.subtype);
-  }, [cardKey, disabled, payload.subtype, registerCard]);
+  }, [cardKey, disabled, payload.subtype, registerCard, sessionGeneration]);
 
   const interactive = !disabled && !submitted && isCardInteractive(cardKey);
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);
@@ -491,6 +493,7 @@ export function SuggestedResourceInstallationCard({
     if (!canContinue) return;
     const action: Nl2AgentCardAction = {
       type: "nl2agent_card_action",
+      ...(payload.card_id ? { card_id: payload.card_id } : {}),
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: "continue",
@@ -523,10 +526,7 @@ export function SuggestedResourceInstallationCard({
       content: [
         {
           type: "text",
-          text: t(
-            "nl2agent.resourceInstallation.submittedSummary",
-            "Resource installation completed"
-          ),
+          text: formatNl2AgentActionSummary(payload.subtype, t),
         },
       ],
       metadata: { custom: { nl2agentCardAction: action } },

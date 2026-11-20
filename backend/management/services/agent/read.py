@@ -2,14 +2,79 @@
 
 """Shared Agent read projections and availability rules."""
 
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 from contracts.agent import AgentUnavailableReason
 from contracts.agent import AgentModelProjection
 from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.model.repository import get_model_by_model_id_ignore_delete, get_valid_model_ids
-from management.db.tool.repository import check_tool_is_available, search_tools_for_sub_agent
-from management.services.model.resolver import is_model_available, resolve_model_record
+from management.db.model.repository import get_model_by_model_id_ignore_delete, get_model_records_by_ids, get_valid_model_ids
+from management.db.tool.repository import check_tool_is_available, query_agent_tools_for_list, search_tools_for_sub_agent
+from management.services.model.resolver import is_model_configured, resolve_model_record
+
+
+_DECODE_REQUIRED_COLUMNS = ("base_url", "config_revision", "protocol_id")
+
+
+def _record_has_full_outlet_columns(record: dict) -> bool:
+    """True when the model record carries columns decode_resolved_model_profile needs.
+
+    get_model_records_by_ids intentionally returns a lightweight projection (8 list-only
+    columns without credentials). When read_context.model_cache() feeds those rows into
+    project_agent_models, decode would otherwise blow up with ProfileStorageError.
+    """
+    return any(record.get(col) is not None for col in _DECODE_REQUIRED_COLUMNS)
+
+
+@dataclass
+class AgentListReadContext:
+    """Request-local records; never share authorization-scoped data across requests."""
+
+    models: dict
+    tools: dict
+    definitions: dict
+    tenant_id: str
+
+    def valid_model_ids(self, ids):
+        # Preserve the legacy validity query's global ID check, independently of
+        # the tenant-scoped model projection that follows it.
+        return [mid for mid in ids if self.models.get(mid, {}).get("delete_flag") == "N"]
+
+    def model_cache(self):
+        return {
+            mid: row if row.get("delete_flag") == "N" and (
+                not self.tenant_id or row.get("tenant_id") == self.tenant_id
+            ) else None
+            for mid, row in self.models.items()
+        }
+
+
+def load_agent_list_context(agents: list[dict], tenant_id: str) -> AgentListReadContext:
+    """Batch only data needed by the existing list projection and availability rules."""
+    instances, definitions = query_agent_tools_for_list([a["agent_id"] for a in agents], tenant_id)
+    tools = {}
+    model_ids = {mid for agent in agents for mid in (agent.get("model_ids") or [])}
+    for instance in instances:
+        definition = definitions.get(instance["tool_id"])
+        if definition is None:
+            raise AttributeError("Tool definition is missing")
+        params = deepcopy(definition["params"])
+        for param in params:
+            value = instance["params"].get(param["name"])
+            if value is not None:
+                param["default"] = value
+        tools.setdefault(instance["agent_id"], []).append({"tool_id": instance["tool_id"], "params": params})
+        for param in params:
+            if param.get("name") == "selected_model_id":
+                value = param.get("default")
+                if value is not None:
+                    model_ids.add(int(value))
+                break
+    models = get_model_records_by_ids(list(model_ids))
+    # Include absent IDs so resolve_model_record never falls back to N+1 reads.
+    models = {mid: models.get(mid, {}) for mid in model_ids}
+    return AgentListReadContext(models, tools, definitions, tenant_id)
 
 
 def project_agent_models(
@@ -18,16 +83,20 @@ def project_agent_models(
     model_cache: dict | None = None,
     *,
     detail: bool = False,
+    read_context: AgentListReadContext | None = None,
 ) -> AgentModelProjection:
     """Project model fields while preserving detail/list legacy-name semantics."""
     configured_model_ids = agent.get("model_ids") or []
-    model_ids = get_valid_model_ids(configured_model_ids, tenant_id)
+    if read_context is None:
+        model_ids = get_valid_model_ids(configured_model_ids, tenant_id)
+    else:
+        model_ids = read_context.valid_model_ids(configured_model_ids)
     records = [
         (mid, resolve_model_record(mid, None if detail else tenant_id, model_cache))
         for mid in model_ids
     ]
     available_records = [
-        (mid, record) for mid, record in records if is_model_available(record)
+        (mid, record) for mid, record in records if is_model_configured(record)
     ]
     available_model_ids = [mid for mid, _ in available_records]
     names = [
@@ -42,12 +111,30 @@ def project_agent_models(
             if available_records and available_records[0][1] is not None
             else None
         )
+    fields = {"model_ids": available_model_ids, "model_names": names, "model_name": legacy_name}
+    overrides = agent.get("model_params_override")
+    if isinstance(overrides, dict):
+        from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
+        from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
+        from nexent.core.model_service.registry import model_service_references
+
+        current = dict(overrides)
+        for model_id, record in records:
+            if (record and record.get("model_type") in {"llm", "chat"}
+                    and record.get("profile_schema_version") is not None and str(model_id) in current):
+                # read_context.model_cache() intentionally holds a lightweight
+                # projection (list columns only, no credentials). decode_resolved_model_profile
+                # needs the full outlet row (base_url, config_revision, resolved_profile, ...).
+                full_record = record
+                if not _record_has_full_outlet_columns(record):
+                    full_record = resolve_model_record(model_id, tenant_id, None)
+                if full_record is None:
+                    continue
+                profile = decode_resolved_model_profile(full_record, registered_references=model_service_references())
+                current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)], profile=profile)
+        fields["model_params_override"] = current
     return AgentModelProjection(
-        fields={
-            "model_ids": available_model_ids,
-            "model_names": names,
-            "model_name": legacy_name,
-        },
+        fields=fields,
         deleted_model_ids=frozenset(configured_model_ids) - frozenset(model_ids),
         availability_model_ids=model_ids,
     )
@@ -67,13 +154,16 @@ def apply_deleted_model_reason(
     return not unavailable_reasons and is_available, unavailable_reasons
 
 
-def tool_has_deleted_model(tool: dict, tenant_id: str) -> bool:
+def tool_has_deleted_model(tool: dict, tenant_id: str, read_context: AgentListReadContext | None = None) -> bool:
     """Check the first selected_model_id parameter using the legacy deletion rule."""
     params = tool.get("params") or []
     if isinstance(params, list):
         for param in params:
             if isinstance(param, dict) and param.get("name") == "selected_model_id":
                 model_id = param.get("default")
+                if read_context is not None:
+                    record = read_context.models.get(int(model_id), {}) if model_id is not None else {}
+                    return (not tenant_id or record.get("tenant_id") == tenant_id) and record.get("delete_flag") == "Y"
                 record = (
                     get_model_by_model_id_ignore_delete(model_id, tenant_id)
                     if model_id is not None
@@ -88,6 +178,7 @@ def check_agent_availability(
     tenant_id: str,
     agent_info: dict | None = None,
     model_cache: Dict[int, Optional[dict]] | None = None,
+    read_context: AgentListReadContext | None = None,
 ) -> tuple[bool, list[str]]:
     """Evaluate tools and configured models using request-local model caching."""
     cache = model_cache if model_cache is not None else {}
@@ -95,15 +186,25 @@ def check_agent_availability(
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
     if not agent_info:
         return False, [AgentUnavailableReason.AGENT_NOT_FOUND]
-    tools = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
+    if read_context is None:
+        tools = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
+    else:
+        tools = read_context.tools.get(agent_id, [])
     reasons = []
     tool_ids = [tool["tool_id"] for tool in tools if tool.get("tool_id") is not None]
-    if tool_ids and not all(check_tool_is_available(tool_ids)):
+    if read_context is None:
+        available = check_tool_is_available(tool_ids) if tool_ids else []
+    else:
+        available = [
+            read_context.definitions[tid].get("is_available") for tid in set(tool_ids)
+            if read_context.definitions[tid].get("delete_flag") not in (None, "Y")
+        ]
+    if tool_ids and not all(available):
         reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
     reasons.extend(
         AgentUnavailableReason.TOOL_UNAVAILABLE
         for tool in tools
-        if tool_has_deleted_model(tool, tenant_id)
+        if tool_has_deleted_model(tool, tenant_id, read_context)
     )
     model_ids = agent_info.get("model_ids") or []
     if not model_ids:
@@ -112,7 +213,7 @@ def check_agent_availability(
         model_records = [
             resolve_model_record(mid, tenant_id, cache) for mid in model_ids if mid
         ]
-        if not any(is_model_available(record) for record in model_records):
+        if not any(is_model_configured(record) for record in model_records):
             reasons.append(AgentUnavailableReason.MODEL_UNAVAILABLE)
     return not reasons, reasons
 

@@ -8,31 +8,48 @@ import shutil
 import tempfile
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 
-from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.errors.exceptions import RuntimeMetadataVersionConflict, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
+from infrastructure.workbench_skill_execution import resolve_skill_config
 from contracts.agent import WorkbenchSessionConfig
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_PRIVATE,
+)
+from contracts.errors.exceptions import (
+    ValidationError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.roles import has_any_role
+from management.services.agent.runtime_config import clone_runtime_config
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.identity.group import query_group_ids_by_user
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
-from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
     system_agent_provider,
 )
-from management.services.model.resolver import is_model_available
-from management.services.skill.service import SkillService
-from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
-from management.db.identity.group import query_group_ids_by_user
-from infrastructure.serialization.containers import clone_runtime_config
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     get_agent_knowledge_capabilities,
+    resolve_executable_knowledge_scope,
     resolve_root_version,
 )
+from management.services.skill.permission import (
+    _get_user_role,
+    _to_group_id_set,
+    can_view_skill,
+)
+from management.services.skill.service import SkillService
 
 
 @dataclass(frozen=True)
@@ -87,6 +104,16 @@ class ResolvedAgentPlan:
     root_skills: Tuple[ResolvedSkillMount, ...]
     child_mounts: Tuple[RuntimeAgentIdentity, ...] = ()
     knowledge_tree: Tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedWorkbench:
+    config: WorkbenchSessionConfig
+    plan: ResolvedAgentPlan
+    previous_version: int
+    version: int
+    knowledge: ResolvedKnowledgeScope | None = None
+    knowledge_tools: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +189,7 @@ def _resolve_skill_mounts(
     if not mounts and not published_instances:
         return ()
     runtime_mounts = {int(mount["skill_id"]): mount for mount in mounts}
+    explicit_skill_ids = set(runtime_mounts)
     effective_mounts: list[Mapping[str, Any]] = []
     seen_skill_ids: set[int] = set()
     for instance in published_instances:
@@ -177,7 +205,9 @@ def _resolve_skill_mounts(
         )
     effective_mounts.extend(runtime_mounts.values())
 
-    resolved = []
+    # Runtime prompts, configuration and files share the Skill name namespace.
+    # Select complete resources before capturing files or resolving dependencies.
+    selected_by_name: Dict[str, tuple[int, Mapping[str, Any], Dict[str, Any], str]] = {}
     role = _get_user_role(user_id) if user_id else None
     groups = set(query_group_ids_by_user(user_id) or []) if user_id else set()
     for mount in effective_mounts:
@@ -188,6 +218,19 @@ def _resolve_skill_mounts(
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
         if resource_owner != ASSET_OWNER_TENANT_ID and user_id and not can_view_skill(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups):
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
+        skill_name = str(skill.get("name") or skill_id)
+        previous = selected_by_name.get(skill_name)
+        if previous is not None and previous[0] != skill_id:
+            previous_is_explicit = previous[0] in explicit_skill_ids
+            current_is_explicit = skill_id in explicit_skill_ids
+            if previous_is_explicit == current_is_explicit:
+                raise WorkbenchError("RUNTIME_SKILL_NAME_CONFLICT")
+            if previous_is_explicit:
+                continue
+        selected_by_name[skill_name] = (skill_id, mount, skill, resource_owner)
+
+    resolved = []
+    for skill_id, mount, skill, resource_owner in selected_by_name.values():
         instance = next((item for item in published_instances if item.get("skill_id") == skill_id), {})
         config_values = resolve_skill_config(
             skill.get("config_schemas") or [],
@@ -210,10 +253,16 @@ def _resolve_skill_mounts(
         )
     tool_ids = sorted({tool_id for skill in resolved for tool_id in skill.tool_ids})
     definitions = {int(tool["tool_id"]): deepcopy(tool) for tool in query_tools_by_ids(tool_ids)} if tool_ids else {}
+    tool_names: Dict[str, int] = {}
     for tool_id in tool_ids:
         tool = definitions.get(tool_id)
         if not tool or tool.get("is_available") is not True or str(tool.get("author")) not in (tenant_id, ASSET_OWNER_TENANT_ID):
             raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+        tool_name = str(tool.get("name") or tool.get("class_name") or "")
+        if tool_name and tool_name in tool_names and tool_names[tool_name] != tool_id:
+            raise WorkbenchError("RUNTIME_SKILL_TOOL_CONFLICT")
+        if tool_name:
+            tool_names[tool_name] = tool_id
         values: Dict[str, Any] = {}
         parameter_names = {param.get("name") for param in tool.get("params") or []}
         for skill in resolved:
@@ -249,43 +298,6 @@ def build_workbench_main_profile(tenant_id: str) -> Dict[str, Any]:
     }
 
 
-def resolve_skill_config(schemas, defaults, published, runtime):
-    """Validate declared configuration after applying the three precedence layers."""
-    fields = {item["name"]: item for item in schemas if isinstance(item, dict) and item.get("name")}
-    values = deepcopy(defaults)
-    values.update(deepcopy(published))
-    values.update(deepcopy(runtime))
-    if any(name not in fields for name in runtime):
-        raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-    types = {
-        "string": str, "boolean": bool, "integer": int,
-        "number": (int, float), "object": dict, "array": list,
-    }
-    for name, schema in fields.items():
-        value = values.get(name)
-        if value is None and "default" in schema:
-            value = values[name] = deepcopy(schema["default"])
-        if value is None or value == "":
-            if schema.get("required"):
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            continue
-        expected = types.get(schema.get("type"))
-        if expected and (not isinstance(value, expected) or (
-            schema.get("type") in {"integer", "number"} and isinstance(value, bool)
-        )):
-            raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-        if isinstance(schema.get("enum"), list) and value not in schema["enum"]:
-            raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-        if schema.get("type") in {"integer", "number"}:
-            if not isfinite(value):
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            if schema.get("minimum") is not None and value < schema["minimum"]:
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            if schema.get("maximum") is not None and value > schema["maximum"]:
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-    return values
-
-
 class RuntimeMountService:
     """Compile an already-authorized executable root without repository access."""
 
@@ -301,8 +313,6 @@ class RuntimeMountService:
         Callers consume the returned tree and scope summary before starting a
         model. Resource checks are separate from the pure root compilation.
         """
-        from contracts.knowledge import ConversationKnowledgeScopeRequest
-        from management.services.knowledge_base.scope import resolve_executable_knowledge_scope
 
         scope = ConversationKnowledgeScopeRequest.model_validate(dict(tree.overlay.knowledge_scope or {}))
         compiled, resolution = resolve_executable_knowledge_scope(
@@ -445,25 +455,17 @@ def resolve_workbench_config(
         origin="SYSTEM",
     )
     child_mounts = tuple(child_identities)
-    if canonical.model_id is not None:
-        model_info = get_model_by_model_id(
-            canonical.model_id, tenant_id=tenant_id
-        )
-        if not is_model_available(model_info):
-            raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
-
     snapshot["skill_instances"] = skill_db.search_skills_for_agent(
         agent_id=int(root_identity.agent_id), tenant_id=system_ref.tenant_id,
         version_no=int(root_identity.version_no),
     )
-    generation = canonical.generation_config
     root = PublishedRootDescriptor(
         identity=root_identity,
         published_snapshot=deepcopy(snapshot),
     )
     overlay = RootRuntimeOverlay(
-        model_id=canonical.model_id,
-        requested_output_tokens=generation.requested_output_tokens,
+        model_id=None,
+        requested_output_tokens=canonical.requested_output_tokens,
         skill_mounts=tuple(
             value.model_dump(mode="json") for value in canonical.skill_mounts
         ),
@@ -489,7 +491,7 @@ def resolve_workbench_config(
 def authorize_workbench_agent(snapshot: Mapping[str, Any], user_id: str) -> None:
     """Apply the Agent list's creator/group visibility rules before resolving resources."""
     role = _get_user_role(user_id)
-    if role in CAN_EDIT_ALL_USER_ROLES or str(snapshot.get("created_by")) == str(user_id):
+    if has_any_role(role, CAN_EDIT_ALL_USER_ROLES) or str(snapshot.get("created_by")) == str(user_id):
         return
     groups = set(query_group_ids_by_user(user_id) or [])
     if snapshot.get("ingroup_permission") == PERMISSION_PRIVATE or not groups.intersection(_to_group_id_set(snapshot.get("group_ids"))):
@@ -570,6 +572,55 @@ def assert_workbench_version(
             current_version,
             deepcopy(conversation.get("workbench_config")),
         )
+
+
+def prepare_portable_workbench(
+    request: AgentRequest, conversation: Mapping[str, Any] | None, user_id: str, tenant_id: str,
+) -> PreparedWorkbench | None:
+    from management.services.model.run_controls import validate_agent_model_selection
+
+    if not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+    validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
+    stored = conversation.get("workbench_config") if conversation is not None else None
+    previous_version = 0
+    if conversation is not None:
+        assert_workbench_version(conversation, request.expected_workbench_config_version)
+        previous_version = int(conversation.get("workbench_config_version") or 0)
+        metadata_version = int(conversation.get("runtime_metadata_version") or 0)
+        if request.metadata is not None and request.expected_metadata_version not in (None, metadata_version):
+            raise RuntimeMetadataVersionConflict(metadata_version)
+    requested = request.workbench
+    if requested is None and stored is not None:
+        requested = WorkbenchSessionConfig.model_validate(stored)
+    if requested is None:
+        raise ValidationError("Workbench configuration is required")
+    canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
+    version = previous_version + int(canonical.model_dump(mode="json") != stored)
+    if canonical.knowledge_scope is None:
+        return PreparedWorkbench(canonical, plan, previous_version, version)
+
+    knowledge, tools = resolve_workbench_knowledge(canonical, plan, request, user_id, tenant_id)
+    return PreparedWorkbench(canonical, plan, previous_version, version, knowledge, tools)
+
+
+def resolve_workbench_knowledge(
+    canonical: WorkbenchSessionConfig, plan: ResolvedAgentPlan, request: AgentRequest, user_id: str, tenant_id: str,
+) -> tuple[ResolvedKnowledgeScope, list[dict[str, Any]]]:
+    from management.services.knowledge_base.mount import mount_knowledge_records
+    from management.services.knowledge_base.scope import resolve_knowledge_scope, snapshot_runtime_knowledge_tree
+
+    root = plan.root.identity
+    # Workbench scopes apply only to the root, even when the run has mounted Agents.
+    tree = snapshot_runtime_knowledge_tree(int(root.agent_id), tenant_id, int(root.version_no))[:1]
+    tools = mount_knowledge_records(tree[0]["tools"], canonical.knowledge_scope, tenant_id)
+    tree[0]["tools"] = tools
+    knowledge = resolve_knowledge_scope(
+        scope=canonical.knowledge_scope, agent_id=int(root.agent_id), tenant_id=tenant_id, user_id=user_id,
+        version_no=root.version_no, is_debug=bool(request.is_debug),
+        request_tool_params=request.tool_params, runtime_agent_tree=tree,
+    )
+    return knowledge, tools
 
 
 def runtime_skill_snapshot(tree: ResolvedAgentPlan | ResolvedAgentTree) -> list[Dict[str, Any]]:

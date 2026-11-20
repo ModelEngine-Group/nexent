@@ -6,9 +6,8 @@ from management.services.conversation import creation_history as service
 
 def _config(mode="skill_create"):
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "mode": mode,
-        "generation_config": {"deep_thinking": False},
         "agent_mounts": [],
         "skill_mounts": [],
     }

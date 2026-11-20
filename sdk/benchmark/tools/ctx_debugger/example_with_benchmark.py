@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run the generic benchmark with ContextDebugger attached, full layers,
 without touching benchmark or SDK source.
 
@@ -43,7 +44,7 @@ def _install_auto_attach():
     compress_* events and llm_call(tag=compression) events live in the same
     run.
     """
-    from nexent.core.agents.core_agent import CoreAgent  # noqa: I001
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent  # noqa: I001
     from ctx_debugger import attach_debugger
     from ctx_debugger.debugger import _wrap_compress_if_needed
     import logging

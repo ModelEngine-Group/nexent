@@ -198,15 +198,10 @@ def test_resolve_workbench_rejects_disabled_system_root(monkeypatch):
         workbench_service.resolve_workbench_config(_config(), tenant_id="tenant-a")
 
 
-def test_resolve_workbench_rejects_unavailable_model(monkeypatch):
-    _resolve_dependencies(monkeypatch)
-    monkeypatch.setattr(workbench_service, "get_model_by_model_id", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(workbench_service, "is_model_available", lambda _model: False)
-
-    with pytest.raises(WorkbenchError, match="WORKBENCH_MODEL_NOT_ALLOWED"):
-        workbench_service.resolve_workbench_config(
-            _config(model_id=8), tenant_id="tenant-a"
-        )
+def test_su_ac_07_resource_plan_rejects_a_parallel_model_selection():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        _config(model_id=8)
 
 
 def test_capability_preview_rejects_missing_published_version(monkeypatch):
@@ -406,3 +401,20 @@ def test_resolve_skill_mounts_skips_unrelated_tool_values(monkeypatch):
     )
 
     assert [skill.skill_id for skill in result] == [1, 2]
+
+
+def test_portable_workbench_keeps_tools_required_by_mounted_skills(monkeypatch):
+    from contracts.agent import AgentRequest
+
+    config = WorkbenchSessionConfig(mode="generic_chat", skill_mounts=[{"skill_id": 11}])
+    request = AgentRequest(entrypoint="workbench", query="work", workbench=config)
+    plan = SimpleNamespace(
+        root=SimpleNamespace(identity=SimpleNamespace(agent_id=7, version_no=3)),
+        root_skills=(SimpleNamespace(tool_ids=(19,)),),
+    )
+    monkeypatch.setattr(workbench_service, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(workbench_service, "resolve_workbench_config", lambda *_args, **_kwargs: (config, plan))
+
+    result = workbench_service.prepare_portable_workbench(request, None, "actor", "tenant")
+
+    assert result.plan is plan and result.version == 1

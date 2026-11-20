@@ -2,7 +2,6 @@
 """BE-UT-012: verify full title lifecycle, ancestry and request isolation."""
 
 import asyncio
-import threading
 from types import SimpleNamespace
 
 import httpx
@@ -42,7 +41,7 @@ async def test_http_title_lifecycle(runtime, path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["prepare", "adapter", "save"])
+@pytest.mark.parametrize("stage", ["prepare", "invoke", "save"])
 async def test_errors_remain_in_request_trace(runtime, stage):
     """BE-UT-012-02: failures before/after the model retain operation context."""
     getattr(runtime, stage).side_effect = ValueError("controlled title failure")
@@ -57,7 +56,7 @@ async def test_errors_remain_in_request_trace(runtime, stage):
     assert "controlled title failure" in operation.status.description
     assert "output.value" not in operation.attributes
     if stage == "prepare":
-        runtime.adapter.assert_not_called()
+        runtime.invoke.assert_not_called()
     if stage != "save":
         runtime.save.assert_not_called()
     assert not trace.get_current_span().get_span_context().is_valid
@@ -65,14 +64,14 @@ async def test_errors_remain_in_request_trace(runtime, stage):
 
 @pytest.mark.asyncio
 async def test_concurrent_title_requests_are_isolated(runtime):
-    """BE-UT-012-03: simultaneously executing workers keep their own parents."""
-    barrier = threading.Barrier(2)
+    """BE-UT-012-03: overlapping async requests keep their own parents."""
+    barrier = asyncio.Barrier(2)
 
-    def overlapping_model(messages):
-        barrier.wait(timeout=5)
-        return runtime.model(messages)
+    async def overlapping_model(**request):
+        await asyncio.wait_for(barrier.wait(), timeout=5)
+        return await runtime.model(**request)
 
-    runtime.adapter.side_effect = overlapping_model
+    runtime.invoke.side_effect = overlapping_model
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=runtime.app()), base_url="http://test") as client:
         responses = await asyncio.gather(*[
             client.post("/conversation/generate_title", params={"conversation_id": cid, "question": str(cid)})
@@ -97,8 +96,8 @@ async def test_disabled_monitoring_preserves_behavior(runtime):
     runtime.manager._config.enable_telemetry = False
     runtime.prepare.side_effect = None
     runtime.prepare.return_value = SimpleNamespace(system="Title", user="hello")
-    runtime.adapter.side_effect = None
-    runtime.adapter.return_value.content = "A title"
+    runtime.invoke.side_effect = None
+    runtime.invoke.return_value = "A title"
     runtime.save.side_effect = None
     title = await runtime.service.generate_conversation_title_service(1, "hello", "user", "tenant")
     assert title == "A title"
@@ -135,35 +134,23 @@ async def test_direct_service_call_has_full_lifecycle(runtime):
 
 @pytest.mark.asyncio
 async def test_cancelled_title_does_not_persist_late_result(runtime):
-    """BE-UT-012-05: cancellation closes the service span and restores context."""
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    """BE-UT-012-05: cancellation closes the service span and prevents a write."""
+    started, release = asyncio.Event(), asyncio.Event()
 
-    def slow_model(messages):
+    async def slow_model(**request):
         started.set()
-        try:
-            assert release.wait(timeout=5)
-            return runtime.model(messages)
-        finally:
-            finished.set()
+        await release.wait()
+        return await runtime.model(**request)
 
-    runtime.adapter.side_effect = slow_model
+    runtime.invoke.side_effect = slow_model
     task = asyncio.create_task(runtime.service.generate_conversation_title_service(1, "hello", "user", "tenant"))
     try:
-        for _ in range(200):
-            if started.is_set():
-                break
-            await asyncio.sleep(0.01)
-        assert started.is_set()
+        await asyncio.wait_for(started.wait(), timeout=2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
     finally:
         release.set()
-    for _ in range(200):
-        if finished.is_set():
-            break
-        await asyncio.sleep(0.01)
-    assert finished.is_set()
     runtime.save.assert_not_called()
     operations = [span for span in runtime.exporter.get_finished_spans() if span.name == "conversation.generate_title"]
     assert len(operations) == 1

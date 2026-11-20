@@ -47,6 +47,8 @@ def _mod(name):
 
 
 nexent_pkg = _mod("nexent")
+# Keep unmocked SDK packages importable without relying on prior collection.
+nexent_pkg.__path__ = [os.path.join(PROJECT_ROOT, "sdk", "nexent")]
 nexent_utils = _mod("nexent.utils")
 nexent_http_mgr = _mod("nexent.utils.http_client_manager")
 nexent_http_mgr.http_client_manager = MagicMock()
@@ -71,14 +73,14 @@ for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
             nexent_storage_factory, services_pkg, tag_management_service):
     sys.modules[mod.__name__] = mod
 
-# Register non-prefixed ``database`` / ``management.db.client`` stubs so that
-# production modules (which import as ``from management.db.client import ...``)
+# Register non-prefixed ``database`` / ``infrastructure.rdb.client`` stubs so that
+# production modules (which import as ``from infrastructure.rdb.client import ...``)
 # resolve to these mocks rather than loading real Minio/Postgres clients.
 # Previous ``backend.*``-prefixed keys caused Python to create parallel
 # module objects that broke mock patching.
 _db_pkg = sys.modules.get("database") or _mod("database")
 _db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
-_db_client = _mod("management.db.client")
+_db_client = _mod("infrastructure.rdb.client")
 _db_client.MinioClient = MagicMock()
 _db_client.PostgresClient = MagicMock()
 _db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
@@ -89,6 +91,7 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
+from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
@@ -96,7 +99,7 @@ from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     aidp_mgmt_router,
 )
 from ext_components.aidp.consts.aidp_exceptions import AidpSensitiveWordError  # noqa: E402
-from management.utils.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
@@ -216,10 +219,12 @@ def configure_aidp_constants(monkeypatch, _isolated_imports):
 
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", SERVER_URL)
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", API_KEY)
+    monkeypatch.setattr(aidp_mgmt_common, "AIDP_SERVER_URL", SERVER_URL)
+    monkeypatch.setattr(aidp_mgmt_common, "AIDP_API_KEY", API_KEY)
 
     # Default: auth succeeds with the standard test user/tenant.
     monkeypatch.setattr(
-        aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+        aidp_mgmt_common.auth_utils_module, "get_current_user_id",
         lambda *_a, **_kw: (USER_ID, TENANT_ID),
     )
     # Existing management tests exercise the shared-KB path. Individual
@@ -296,12 +301,12 @@ class TestAuthRequired:
             from fastapi import HTTPException
             raise HTTPException(status_code=401, detail="bad")
 
-        original = aidp_mgmt_app.auth_utils_module.get_current_user_id
-        aidp_mgmt_app.auth_utils_module.get_current_user_id = _raise
+        original = aidp_mgmt_common.auth_utils_module.get_current_user_id
+        aidp_mgmt_common.auth_utils_module.get_current_user_id = _raise
         try:
             response = client.get("/aidp-mgmt/knowledge-bases")
         finally:
-            aidp_mgmt_app.auth_utils_module.get_current_user_id = original
+            aidp_mgmt_common.auth_utils_module.get_current_user_id = original
         assert response.status_code == HTTPStatus.UNAUTHORIZED
 
     def test_missing_auth_for_set_permission_returns_401(self):
@@ -313,15 +318,15 @@ class TestAuthRequired:
         def _raise(*_a, **_kw):
             raise HTTPException(status_code=401, detail="bad")
 
-        original = aidp_mgmt_app.auth_utils_module.get_current_user_id
-        aidp_mgmt_app.auth_utils_module.get_current_user_id = _raise
+        original = aidp_mgmt_common.auth_utils_module.get_current_user_id
+        aidp_mgmt_common.auth_utils_module.get_current_user_id = _raise
         try:
             response = client.patch(
                 "/aidp-mgmt/aidp-permissions/kb-1",
                 json={"ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         finally:
-            aidp_mgmt_app.auth_utils_module.get_current_user_id = original
+            aidp_mgmt_common.auth_utils_module.get_current_user_id = original
         assert response.status_code == HTTPStatus.UNAUTHORIZED
 
 
@@ -1007,8 +1012,8 @@ class TestAidpDocumentFileOperations:
 
         aidp_result = {
             "summary": {"total": 2, "success": 1, "failed": 1},
-            "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
-            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000002"}],
+            "success_list": [{"file_uuid": "00000000000040008000000000000001"}],
+            "failed_list": [{"file_uuid": "00000000000040008000000000000002"}],
         }
         with patch.object(
             aidp_permission_service,
@@ -1024,8 +1029,8 @@ class TestAidpDocumentFileOperations:
                 headers=_bearer(),
                 json={
                     "file_uuids": [
-                        "00000000-0000-4000-8000-000000000001",
-                        "00000000-0000-4000-8000-000000000002",
+                        "00000000000040008000000000000001",
+                        "00000000000040008000000000000002",
                     ]
                 },
             )
@@ -1033,8 +1038,8 @@ class TestAidpDocumentFileOperations:
         assert response.status_code == HTTPStatus.OK
         assert response.json() == aidp_result
         assert mock_remove.call_args.args[3] == [
-            "00000000-0000-4000-8000-000000000001",
-            "00000000-0000-4000-8000-000000000002",
+            "00000000000040008000000000000001",
+            "00000000000040008000000000000002",
         ]
 
     def test_remove_requires_file_uuids(self):
@@ -1096,7 +1101,7 @@ class TestAidpDocumentFileOperations:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
                 headers=_bearer(),
-                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
+                json={"file_uuid": "00000000000040008000000000000001"},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -1108,7 +1113,7 @@ class TestAidpDocumentFileOperations:
             SERVER_URL,
             API_KEY,
             "kb-1",
-            "00000000-0000-4000-8000-000000000001",
+            "00000000000040008000000000000001",
         )
         assert "x-file-name" not in response.headers
 
@@ -1149,7 +1154,7 @@ class TestAidpDocumentFileOperations:
         ) as mock_stream:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1169,7 +1174,7 @@ class TestAidpDocumentFileOperations:
             SERVER_URL,
             API_KEY,
             "kb-1",
-            "00000000-0000-4000-8000-000000000001",
+            "00000000000040008000000000000001",
         )
 
     def test_preview_reports_the_converted_file_name(self):
@@ -1206,7 +1211,7 @@ class TestAidpDocumentFileOperations:
         ):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1252,7 +1257,7 @@ class TestAidpDocumentFileOperations:
         ):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1290,7 +1295,7 @@ class TestAidpDocumentFileOperations:
         ):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
 
@@ -1328,7 +1333,7 @@ class TestAidpDocumentFileOperations:
         try:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-                "00000000-0000-4000-8000-000000000001/preview",
+                "00000000000040008000000000000001/preview",
                 headers=_bearer(),
             )
         finally:
@@ -1364,7 +1369,7 @@ class TestAidpDocumentFileOperations:
         aidp_result = {
             "summary": {"total": 1, "success": 0, "failed": 1},
             "success_list": [],
-            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+            "failed_list": [{"file_uuid": "00000000000040008000000000000001"}],
         }
         with patch.object(
             aidp_permission_service,
@@ -1380,7 +1385,7 @@ class TestAidpDocumentFileOperations:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
-                json={"file_uuids": ["00000000-0000-4000-8000-000000000001"]},
+                json={"file_uuids": ["00000000000040008000000000000001"]},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -1414,7 +1419,7 @@ class TestAuthEdgeCases:
         from contracts.errors.exceptions import UnauthorizedError
 
         monkeypatch.setattr(
-            aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+            aidp_mgmt_common.auth_utils_module, "get_current_user_id",
             lambda *_a, **_kw: (_ for _ in ()).throw(
                 UnauthorizedError("invalid token")
             ),
@@ -1428,7 +1433,7 @@ class TestAuthEdgeCases:
         from ext_components.aidp.apps import aidp_mgmt_app
 
         monkeypatch.setattr(
-            aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+            aidp_mgmt_common.auth_utils_module, "get_current_user_id",
             lambda *_a, **_kw: ("user-1", ""),
         )
         client = _client()
@@ -2349,7 +2354,7 @@ class TestUploadTaskRetryEndpoint:
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
 
-        file_uuid = "00000000-0000-4000-8000-000000000003"
+        file_uuid = "00000000000040008000000000000003"
         upstream_result = {
             "success_list": [{"file_uuid": file_uuid}],
             "failed_list": [],
@@ -2394,7 +2399,7 @@ class TestUploadTaskRetryEndpoint:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks/retry",
                 headers=_bearer(),
-                json={"file_uuids": ["00000000-0000-4000-8000-000000000003"]},
+                json={"file_uuids": ["00000000000040008000000000000003"]},
             )
         assert response.status_code == HTTPStatus.FORBIDDEN
         retry_docs.assert_not_called()
@@ -2404,8 +2409,8 @@ class TestUploadTaskRetryEndpoint:
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
 
-        first = "00000000-0000-4000-8000-000000000003"
-        second = "00000000-0000-4000-8000-000000000004"
+        first = "00000000000040008000000000000003"
+        second = "00000000000040008000000000000004"
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
              patch.object(aidp_mgmt_app, "retry_aidp_docs_impl",
@@ -2446,7 +2451,7 @@ class TestUploadTaskRetryEndpoint:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks/retry",
                 headers=_bearer(),
-                json={"file_uuids": ["00000000-0000-4000-8000-000000000003"]},
+                json={"file_uuids": ["00000000000040008000000000000003"]},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -2756,13 +2761,11 @@ class TestNormalizeKbConfigFields:
 
 def test_cleanup_document_assignments_delegates_to_tag_management(monkeypatch):
     """The delete flow keeps document assignment usage in sync."""
-    from importlib import import_module
 
-    tag_service = import_module("management.services.tag.library")
-    from ext_components.aidp.apps import aidp_mgmt_app
+    from management.services.tag import library as tag_library
 
     sentinel = MagicMock()
-    monkeypatch.setattr(tag_service, "TagManagementService", sentinel)
+    monkeypatch.setattr(tag_library, "TagManagementService", sentinel)
 
     aidp_mgmt_app._cleanup_document_assignments_for_deleted_knowledge_base(
         "tenant-1", "kb-9", "user-1"
@@ -3272,6 +3275,263 @@ class TestSensitiveWordRoutes:
             json={"word": "w", "mode": "BLACK", "description": "d"},
         ).status_code == 401
         assert client.delete(f"{base}/sw-1").status_code == 401
+class TestFolderAndFilePathRoutes:
+    """Folder tree/CRUD and file path operations forward the documented contract."""
+
+    @pytest.fixture(autouse=True)
+    def _allow_edit(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        monkeypatch.setattr(
+            aidp_mgmt_app.perms,
+            "require_permission",
+            lambda *a, **kw: MagicMock(permission="EDIT"),
+        )
+
+    def test_folder_tree_forwards_path_paging_and_search(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_folder_routes
+
+        captured = {}
+
+        def fake_tree(server_url, api_key, kds_id, folder_path, page, page_size,
+                      keyword, file_type, file_status, include_files):
+            captured.update(
+                server_url=server_url,
+                kds_id=kds_id,
+                folder_path=folder_path,
+                page=page,
+                page_size=page_size,
+                keyword=keyword,
+                file_type=file_type,
+                file_status=file_status,
+                include_files=include_files,
+            )
+            return {
+                "folder_path": folder_path,
+                "folders": [{"folder_name": "子目录", "folder_id": 7, "has_child_folders": False}],
+                "files": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total": 1,
+                    "value": [{"file_uuid": "u-1", "file_name": "a.pdf"}],
+                },
+            }
+
+        monkeypatch.setattr(aidp_folder_routes, "get_aidp_folder_tree_impl", fake_tree)
+        response = _client().get(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/tree",
+            params={
+                "folder_path": "/docs/",
+                "page": 2,
+                "page_size": 20,
+                "keyword": "制度",
+                "file_type": "pdf",
+                "file_status": "1",
+            },
+            headers=_bearer(),
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["folder_path"] == "/docs"
+        assert body["folders"] == [{"folder_name": "子目录", "folder_id": 7, "has_child_folders": False}]
+        assert body["files"]["total"] == 1
+        assert captured == {
+            "server_url": SERVER_URL,
+            "kds_id": "kb-1",
+            "folder_path": "/docs",
+            "page": 2,
+            "page_size": 20,
+            "keyword": "制度",
+            "file_type": "pdf",
+            "file_status": "1",
+            "include_files": True,
+        }
+
+    def test_folder_crud_routes_forward_the_path_contract(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_folder_routes
+
+        calls = []
+
+        def record(name):
+            def inner(*args):
+                calls.append((name, *args))
+                return {"folder_path": "/docs/new"}
+
+            return inner
+
+        monkeypatch.setattr(
+            aidp_folder_routes, "create_aidp_folder_impl", record("create")
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes, "rename_aidp_folder_impl", record("rename")
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes, "move_aidp_folder_impl", record("move")
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes,
+            "delete_aidp_folder_impl",
+            lambda *args: calls.append(("delete", *args)),
+        )
+        client = _client()
+
+        created = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            json={"parent_folder": "/docs", "folder_name": "new"},
+        )
+        renamed = client.patch(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            json={
+                "parent_folder": "/docs",
+                "old_folder_name": "new",
+                "new_folder_name": "renamed",
+            },
+        )
+        moved = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/move",
+            headers=_bearer(),
+            json={
+                "parent_folder": "/docs",
+                "folder_name": "renamed",
+                "target_folder": "/archive",
+            },
+        )
+        deleted = client.delete(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            params={"folder_path": "/docs/renamed"},
+        )
+
+        assert created.status_code == HTTPStatus.OK
+        assert renamed.status_code == HTTPStatus.OK
+        assert moved.status_code == HTTPStatus.OK
+        assert deleted.status_code == HTTPStatus.NO_CONTENT
+        assert calls == [
+            ("create", SERVER_URL, API_KEY, "kb-1", "/docs", "new"),
+            ("rename", SERVER_URL, API_KEY, "kb-1", "/docs", "new", "renamed"),
+            ("move", SERVER_URL, API_KEY, "kb-1", "/docs", "renamed", "/archive"),
+            ("delete", SERVER_URL, API_KEY, "kb-1", "/docs/renamed"),
+        ]
+
+    def test_file_move_and_rename_forward_per_file_objects(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_folder_routes
+
+        captured = {}
+        monkeypatch.setattr(
+            aidp_folder_routes,
+            "move_aidp_files_impl",
+            lambda *args: captured.setdefault("move", args) or {"summary": {}},
+        )
+        monkeypatch.setattr(
+            aidp_folder_routes,
+            "rename_aidp_file_impl",
+            lambda *args: captured.setdefault("rename", args)
+            or {"file_path": "/docs/b.pdf"},
+        )
+        client = _client()
+
+        moved = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/files/move",
+            headers=_bearer(),
+            json={
+                "file_uuids": ["11111111111141118111111111111111"],
+                "target_folder": "/docs",
+            },
+        )
+        renamed = client.patch(
+            "/aidp-mgmt/knowledge-bases/kb-1/files",
+            headers=_bearer(),
+            json={
+                "file_uuid": "11111111111141118111111111111111",
+                "new_file_name": "b.pdf",
+            },
+        )
+
+        assert moved.status_code == HTTPStatus.OK
+        assert renamed.status_code == HTTPStatus.OK
+        assert captured["move"] == (
+            SERVER_URL,
+            API_KEY,
+            "kb-1",
+            ["11111111111141118111111111111111"],
+            "/docs",
+        )
+        assert captured["rename"] == (
+            SERVER_URL,
+            API_KEY,
+            "kb-1",
+            "11111111111141118111111111111111",
+            "b.pdf",
+        )
+
+    def test_upload_forwards_target_folder_and_relative_paths(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        captured = {}
+
+        def fake_upload(server_url, api_key, kds_id, files, target_folder, relative_paths):
+            captured.update(
+                kds_id=kds_id,
+                target_folder=target_folder,
+                relative_paths=relative_paths,
+                names=[file.filename for file in files],
+            )
+            return {
+                "summary": {"total": 2, "success": 2, "failed": 0},
+                "success_list": [],
+                "failed_list": [],
+            }
+
+        monkeypatch.setattr(aidp_mgmt_app, "upload_aidp_docs_impl", fake_upload)
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases/kb-1/documents",
+            headers=_bearer(),
+            data={
+                "target_folder": "/docs/",
+                "relative_paths": ["合同/2026/a.txt", "b.txt"],
+            },
+            files=[
+                ("files", ("a.txt", b"a", "text/plain")),
+                ("files", ("b.txt", b"b", "text/plain")),
+            ],
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        assert captured == {
+            "kds_id": "kb-1",
+            "target_folder": "/docs",
+            "relative_paths": ["合同/2026", ""],
+            "names": ["a.txt", "b.txt"],
+        }
+
+    def test_folder_path_validation_rejects_traversal(self):
+        client = _client()
+        tree = client.get(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/tree",
+            headers=_bearer(),
+            params={"folder_path": "/docs/../secret"},
+        )
+        create = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders",
+            headers=_bearer(),
+            json={"parent_folder": "/docs", "folder_name": "../escape"},
+        )
+        self_move = client.post(
+            "/aidp-mgmt/knowledge-bases/kb-1/folders/move",
+            headers=_bearer(),
+            json={
+                "parent_folder": "/docs",
+                "folder_name": "a",
+                "target_folder": "/docs/a/child",
+            },
+        )
+
+        assert tree.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert create.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert self_move.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 _install_module_stubs = capture_module_stubs(_modules_before_stubs)

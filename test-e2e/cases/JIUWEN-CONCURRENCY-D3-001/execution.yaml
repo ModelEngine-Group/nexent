@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: JIUWEN-CONCURRENCY-D3-001
+implementations:
+- framework: pytest
+  file: test_deployed.py
+  selector: test_deployed_first_attempt_parallel_children
+  profiles:
+  - real_smoke
+timeout_seconds: 1100
+acceptance_bindings:
+  AC-01:
+  - test_deployed_first_attempt_parallel_children
+  AC-02:
+  - test_deployed_first_attempt_parallel_children
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

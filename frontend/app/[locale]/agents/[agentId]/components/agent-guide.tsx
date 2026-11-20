@@ -8,7 +8,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
-import { StandardInput } from "@/components/common/StandardInput";
+
 import HighFidelityTextArea from "./HighFidelityTextArea";
 
 const MAX_EXAMPLE_QUESTIONS = 6;
@@ -38,7 +38,7 @@ export default function AgentConversationGuide({
       example_questions: [...exampleQuestions, ""],
     });
   };
-  const QuestionInput = highFidelity ? StandardInput : Input;
+  const QuestionInput = highFidelity ? Input : Input;
 
   const renderQuestion = (question: string, index: number) => (
     <div

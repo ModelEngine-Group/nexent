@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import {
   useState,
@@ -60,7 +60,6 @@ const { TextArea } = Input;
 const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
   USER_ROLES.SU,
   USER_ROLES.ADMIN,
-  USER_ROLES.SPEED,
   USER_ROLES.ASSET_OWNER,
 ]);
 
@@ -165,7 +164,7 @@ export default function SkillBuildModal({
   const isEditMode = Boolean(editingSkill);
   const creationConversationId = useRef<string | undefined>(undefined);
   const savedCreatorSkillId = useRef<number | undefined>(undefined);
-  const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
+  const isAdmin = hasRole(user, ...CAN_EDIT_ALL_ROLES);
   const isCreator =
     !isEditMode ||
     (!!editingSkill?.created_by &&
@@ -216,12 +215,11 @@ export default function SkillBuildModal({
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
-    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
-    null;
-  const {
-    data: tagDefinitions,
-    refresh: refreshTagDefinitions,
-  } = useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions, refresh: refreshTagDefinitions } =
+    useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
 
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
 
@@ -509,7 +507,7 @@ export default function SkillBuildModal({
           ...values,
           // Legacy flat tags are compatibility-only. Existing values are
           // preserved on edit; new assignments use the structured modal.
-          tags: isEditMode ? editingSkill?.tags ?? [] : [],
+          tags: isEditMode ? (editingSkill?.tags ?? []) : [],
           content,
           files: extraFiles.length > 0 ? extraFiles : undefined,
         } as SkillData,
@@ -692,10 +690,7 @@ export default function SkillBuildModal({
   };
 
   const handleAttemptRollback = (event: Nl2SkillStreamEvent): boolean => {
-    if (
-      event.type === "model_attempt_control" &&
-      event.phase === "rollback"
-    ) {
+    if (event.type === "model_attempt_control" && event.phase === "rollback") {
       rollbackDraftStream();
       return true;
     }
@@ -909,10 +904,13 @@ export default function SkillBuildModal({
   const bindSavedSkill = async (id: number) => {
     savedCreatorSkillId.current = id;
     if (creationConversationId.current) {
-      await conversationService.bindTarget(Number(creationConversationId.current), {
-        type: "skill",
-        id,
-      });
+      await conversationService.bindTarget(
+        Number(creationConversationId.current),
+        {
+          type: "skill",
+          id,
+        }
+      );
     }
   };
 
@@ -992,148 +990,148 @@ export default function SkillBuildModal({
 
   return (
     <>
-    <Modal
-      title={
-        <div>
-          <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {isEditMode
-              ? t("skillManagement.edit.title")
-              : t("skillManagement.title")}
+      <Modal
+        title={
+          <div>
+            <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
+              {isEditMode
+                ? t("skillManagement.edit.title")
+                : t("skillManagement.title")}
+            </div>
+            <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
+              {isEditMode
+                ? t("skillManagement.edit.subtitle", { name: editingSkillName })
+                : t("skillManagement.create.subtitle")}
+            </div>
           </div>
-          <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
-            {isEditMode
-              ? t("skillManagement.edit.subtitle", { name: editingSkillName })
-              : t("skillManagement.create.subtitle")}
-          </div>
-        </div>
-      }
-      open={isOpen}
-      onCancel={handleModalClose}
-      destroyOnHidden
-      zIndex={zIndex}
-      centered
-      width="min(1180px, calc(100vw - 32px))"
-      styles={{
-        container: {
-          display: "flex",
-          flexDirection: "column",
-          maxHeight: modalViewportFrame,
-          overflow: "hidden",
-        },
-        body: {
-          display: "flex",
-          flex: "1 1 auto",
-          flexDirection: "column",
-          height: modalBodyFrame,
-          maxHeight: modalBodyFrame,
-          minHeight: 0,
-          overflow: "hidden",
-        },
-      }}
-      footer={[
-        <Button key="cancel" onClick={handleModalClose}>
-          {t("common.cancel")}
-        </Button>,
-        isEditMode || activeTab === "interactive" ? (
-          <Button
-            key="submit"
-            type="primary"
-            loading={isSubmitting}
-            onClick={handleManualSubmit}
-            disabled={
-              isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
-            }
-          >
-            {getConfirmButtonText()}
-          </Button>
-        ) : (
-          <Button
-            key="submit"
-            type="primary"
-            loading={isSubmitting}
-            onClick={handleUploadSubmit}
-            disabled={
-              !uploadFile ||
-              !uploadExtractedSkillName.trim() ||
-              !uploadIsCreateMode
-            }
-          >
-            {getConfirmButtonText()}
-          </Button>
-        ),
-      ]}
-    >
-      <Tabs
-        activeKey={isEditMode ? "interactive" : activeTab}
-        onChange={(key) => {
-          if (!isEditMode) {
-            setActiveTab(key);
-          }
+        }
+        open={isOpen}
+        onCancel={handleModalClose}
+        destroyOnHidden
+        zIndex={zIndex}
+        centered
+        width="min(1180px, calc(100vw - 32px))"
+        styles={{
+          container: {
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: modalViewportFrame,
+            overflow: "hidden",
+          },
+          body: {
+            display: "flex",
+            flex: "1 1 auto",
+            flexDirection: "column",
+            height: modalBodyFrame,
+            maxHeight: modalBodyFrame,
+            minHeight: 0,
+            overflow: "hidden",
+          },
         }}
-        items={visibleTabItems}
-        className="skill-build-tabs shrink-0"
+        footer={[
+          <Button key="cancel" onClick={handleModalClose}>
+            {t("common.cancel")}
+          </Button>,
+          isEditMode || activeTab === "interactive" ? (
+            <Button
+              key="submit"
+              type="primary"
+              loading={isSubmitting}
+              onClick={handleManualSubmit}
+              disabled={
+                isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
+              }
+            >
+              {getConfirmButtonText()}
+            </Button>
+          ) : (
+            <Button
+              key="submit"
+              type="primary"
+              loading={isSubmitting}
+              onClick={handleUploadSubmit}
+              disabled={
+                !uploadFile ||
+                !uploadExtractedSkillName.trim() ||
+                !uploadIsCreateMode
+              }
+            >
+              {getConfirmButtonText()}
+            </Button>
+          ),
+        ]}
+      >
+        <Tabs
+          activeKey={isEditMode ? "interactive" : activeTab}
+          onChange={(key) => {
+            if (!isEditMode) {
+              setActiveTab(key);
+            }
+          }}
+          items={visibleTabItems}
+          className="skill-build-tabs shrink-0"
+        />
+        {isEditMode && !isEditContentReady ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <Spin spinning={isLoadingEditFiles}>
+              {editFilesError ? (
+                <p className="text-sm text-red-500">{editFilesError}</p>
+              ) : (
+                <div className="h-16 w-16" />
+              )}
+            </Spin>
+          </div>
+        ) : isEditMode || activeTab === "interactive" ? (
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            {renderChatPanel()}
+            {renderDraftPanel()}
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1">{renderUploadTab()}</div>
+        )}
+        <style jsx global>{`
+          .skill-build-info-form .ant-form-item-label {
+            padding-bottom: 3px !important;
+          }
+
+          .skill-build-info-form .ant-form-item-label > label {
+            height: 20px;
+            color: #475569;
+            font-size: 12px;
+            line-height: 20px;
+          }
+
+          .expanded-file-editor textarea {
+            max-height: 70vh !important;
+            overflow-y: auto !important;
+            resize: none !important;
+          }
+        `}</style>
+      </Modal>
+      <ResourceTagAssignmentModal
+        open={assignTagsOpen}
+        onClose={() => {
+          setAssignTagsOpen(false);
+          setTagPreviewRefreshKey((current) => current + 1);
+        }}
+        resourceType="skill"
+        resourceId={String(editingSkill?.skill_id ?? "")}
+        definitions={tagDefinitions ?? []}
+        canEdit={editingSkill?.permission !== "READ_ONLY"}
+        onManageDefinitions={() => {
+          setTagManagementOpen(true);
+        }}
       />
-      {isEditMode && !isEditContentReady ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <Spin spinning={isLoadingEditFiles}>
-            {editFilesError ? (
-              <p className="text-sm text-red-500">{editFilesError}</p>
-            ) : (
-              <div className="h-16 w-16" />
-            )}
-          </Spin>
-        </div>
-      ) : isEditMode || activeTab === "interactive" ? (
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {renderChatPanel()}
-          {renderDraftPanel()}
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1">{renderUploadTab()}</div>
-      )}
-      <style jsx global>{`
-        .skill-build-info-form .ant-form-item-label {
-          padding-bottom: 3px !important;
-        }
-
-        .skill-build-info-form .ant-form-item-label > label {
-          height: 20px;
-          color: #475569;
-          font-size: 12px;
-          line-height: 20px;
-        }
-
-        .expanded-file-editor textarea {
-          max-height: 70vh !important;
-          overflow-y: auto !important;
-          resize: none !important;
-        }
-      `}</style>
-    </Modal>
-    <ResourceTagAssignmentModal
-      open={assignTagsOpen}
-      onClose={() => {
-        setAssignTagsOpen(false);
-        setTagPreviewRefreshKey((current) => current + 1);
-      }}
-      resourceType="skill"
-      resourceId={String(editingSkill?.skill_id ?? "")}
-      definitions={tagDefinitions ?? []}
-      canEdit={editingSkill?.permission !== "READ_ONLY"}
-      onManageDefinitions={() => {
-        setTagManagementOpen(true);
-      }}
-    />
-    <TagDefinitionManagementModal
-      open={tagManagementOpen}
-      onClose={() => {
-        setTagManagementOpen(false);
-        void refreshTagDefinitions();
-      }}
-      bucketId={defaultTagLibrary?.bucket_id ?? 0}
-      bucketName={defaultTagLibrary?.bucket_name ?? ""}
-      canManage={editingSkill?.permission !== "READ_ONLY"}
-    />
+      <TagDefinitionManagementModal
+        open={tagManagementOpen}
+        onClose={() => {
+          setTagManagementOpen(false);
+          void refreshTagDefinitions();
+        }}
+        bucketId={defaultTagLibrary?.bucket_id ?? 0}
+        bucketName={defaultTagLibrary?.bucket_name ?? ""}
+        canManage={editingSkill?.permission !== "READ_ONLY"}
+      />
     </>
   );
 }

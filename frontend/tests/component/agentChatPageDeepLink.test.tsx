@@ -169,6 +169,7 @@ describe("newchat Agent deep-link page wiring", () => {
     );
     renderPage();
 
+
     expect(
       await screen.findByText("Agent chat: Fixed Agent")
     ).toBeInTheDocument();
@@ -179,6 +180,7 @@ describe("newchat Agent deep-link page wiring", () => {
     switchToNewThread.mockResolvedValue(undefined);
     const user = userEvent.setup();
     renderPage();
+
 
     expect(
       await screen.findByText("Agent chat: Fixed Agent")
@@ -223,6 +225,7 @@ describe("newchat Agent deep-link page wiring", () => {
     );
     const user = userEvent.setup();
     renderPage();
+
     await screen.findByText("Agent chat: Fixed Agent");
 
     await user.click(screen.getByRole("button", { name: "back to list" }));

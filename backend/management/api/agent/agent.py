@@ -9,19 +9,21 @@ from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
 from urllib.parse import quote
-from typing import Literal, Optional
+from typing import Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from starlette.responses import JSONResponse, Response
+
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
 from contracts.conversation import ConversationResponse
 from contracts.tag import TagAssignmentFilter
 from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
-from permissions.depends import require
-from permissions.models import CurrentUser
+from management.utils.managed_read import managed_read, run_management_read
+from contracts.errors.exceptions import ManagementReadBusyError
 from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
@@ -51,7 +53,6 @@ from management.services.agent.workbench import (
     build_workbench_main_profile,
 )
 from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import (
     prepare_creation_history,
@@ -70,7 +71,8 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from gateway.authentication.auth import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
+from management.services.permission.identity.session import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
+from permissions.resource_access import resource_read_tenant
 
 agent_config_router = APIRouter(prefix="/agent")
 
@@ -177,6 +179,7 @@ async def search_agent_info_api(
     version_no: int = Body(0),
     tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
+    request: Request = None,
 ):
     """
     Search agent info by agent_id and version_no
@@ -187,7 +190,16 @@ async def search_agent_info_api(
         user_id, auth_tenant_id = get_current_user_id(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
+        inventory_tenant = resource_read_tenant(request, shared=True)
+        if inventory_tenant and effective_tenant_id != inventory_tenant:
+            raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Resource reads are limited to your tenant")
         agent_info = await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
+        if inventory_tenant:
+            if agent_info.get("tenant_id") != auth_tenant_id:
+                raise AgentNotFoundError("Agent not found")
+            agent_info = {
+                key: agent_info.get(key) for key in ("display_name", "description", "prompt", "group_ids")
+            }
         return apply_agent_detail_prompt_visibility(auth_tenant_id, agent_info)
     except AgentNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found.") from e
@@ -196,6 +208,8 @@ async def search_agent_info_api(
             status_code=HTTPStatus.FORBIDDEN,
             detail=str(e),
         ) from e
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent search info error.")
@@ -250,6 +264,9 @@ async def update_agent_info_api(
             "agent_update", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
         )
         return result or {}
+    except ParameterValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail={"code": exc.category, "field": exc.path}) from None
     except AgentRelationValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except AgentNotFoundError as exc:
@@ -360,12 +377,13 @@ async def generate_guardrail_rules_api(
         JSONResponse with ``{"message": "Success", "data": <result>}`` on
         success, or ``{"message": <error>, "data": null}`` on AppException.
     """
-    _, tenant_id, auth_language = get_current_user_info(authorization, http_request)
+    user_id, tenant_id, auth_language = get_current_user_info(authorization, http_request)
     try:
-        result = generate_guardrail_rules_impl(
+        result = await generate_guardrail_rules_impl(
             description=description,
             model_id=model_id,
             tenant_id=tenant_id,
+            user_id=user_id,
             language=auth_language or language,
         )
         return JSONResponse(
@@ -600,20 +618,33 @@ async def list_all_agent_info_api(
     tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
     request: Request = None,
+    include_version_label: bool = Query(False, description="Include current version display label"),
 ):
     """
     list all agent info
     """
+    label_options = {"include_version_label": True} if include_version_label is True else {}
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        user_id, auth_tenant_id, _ = await run_management_read(
+            "agent-list-identity", get_current_user_info, authorization, request,
+        )
+
+        if authorized_tenant := resource_read_tenant(request, shared=True):
+            return await list_all_agent_info_impl(
+                tenant_id=authorized_tenant, user_id=user_id, inventory_read=True, **label_options,
+            )
 
         if tenant_id is None:
-            agent_list = await list_all_agent_info_impl(tenant_id=auth_tenant_id, user_id=user_id)
+            agent_list = await list_all_agent_info_impl(tenant_id=auth_tenant_id, user_id=user_id, **label_options)
             if auth_tenant_id != ASSET_OWNER_TENANT_ID:
-                asset_agent_list = await list_all_agent_info_impl(tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id)
+                asset_agent_list = await list_all_agent_info_impl(tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id, **label_options)
                 return agent_list + asset_agent_list
             return agent_list
-        return await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+        return await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id, **label_options)
+    except HTTPException:
+        raise
+    except ManagementReadBusyError:
+        raise
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent list error.")
@@ -753,7 +784,8 @@ async def compare_versions_api(
 
 
 @agent_config_router.get("/{agent_id}/versions", response_model=VersionListResponse)
-async def get_version_list_api(
+@managed_read
+def get_version_list_api(
     agent_id: int,
     tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
@@ -765,13 +797,15 @@ async def get_version_list_api(
     try:
         _, auth_tenant_id, _ = get_current_user_info(authorization, request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
-        effective_tenant_id = tenant_id or auth_tenant_id
+        effective_tenant_id = resource_read_tenant(request) or tenant_id or auth_tenant_id
         result = get_version_list_impl(
             agent_id=agent_id,
             tenant_id=effective_tenant_id,
         )
         logger.info(f"Version list: {result}")
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Get version list error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version list error.")
@@ -995,12 +1029,16 @@ async def list_published_agents_api(
     List all published agents with their current published version information.
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, request)
+        user_id, tenant_id, _ = await run_management_read(
+            "agent-list-identity", get_current_user_info, authorization, request,
+        )
         agent_list = await list_published_agents_impl(tenant_id=tenant_id, user_id=user_id)
         if tenant_id != ASSET_OWNER_TENANT_ID:
             asset_agent_list = await list_published_agents_impl(tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id)
             return agent_list + asset_agent_list
         return agent_list
+    except ManagementReadBusyError:
+        raise
     except Exception as e:
         logger.error(f"Published agents list error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error.")

@@ -1,0 +1,58 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-MODEL-20261109
+  change_type: requirement
+  title: Introduce typed AgentOS model operations
+  description: Establish tenant-scoped model access and invocation in Runtime using the existing model records and SDK adapters.
+  affected_features:
+    existing: []
+    added: [AOS-MODEL]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AOS-TRANSPORT-D3-001]
+    added: [AOS-MODEL-D3-001]
+    modified: []
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Model input rejects provider connection overrides.
+    - Wrong tenant, revision or modality never reaches the SDK.
+    - Model metadata omits credentials.
+    - Runtime owns model writes and probes under the signed tenant; Management retains role bindings.
+    - Tenant deletion stops before cascading if Runtime model cleanup fails.
+    - Management worker inference forwards its job identity and preserves model output and failure handling.
+    - Evaluation vectorization, automation intent and final-answer memory extraction use model IDs and the trusted actor.
+    - Memory query vectorization uses the signed model binding and hybrid search reuses that vector with scope filters.
+    - Memory writes share signed embedding and skip repeated inference for an existing idempotent write.
+    reason: Existing adapter and legacy model management tests do not exercise the new AgentOS model contract.
+    test_selectors:
+    - test/backend/services/test_agentos_model.py
+    - test/backend/services/test_agentos_model_administration.py
+    - test/backend/services/test_model_management_service.py
+    - test/backend/services/test_model_health_service.py
+    - test/backend/app/test_model_managment_app.py
+    - test/backend/app/test_voice_app.py
+    - test/backend/services/test_tenant_service.py
+    - test/backend/app/test_tenant_app.py
+    - test/backend/services/test_agent_name_contract.py
+    - test/backend/services/test_evaluator_service.py
+    - test/backend/services/test_conversation_management_service.py
+    - test/backend/app/test_conversation_management_app.py
+    - test/backend/services/test_evaluation_set_service.py
+    - test/backend/test_document_vector_utils.py
+    - test/backend/services/test_auto_summary_scheduler.py
+    - test/backend/adapters/test_jiuwen_sdk_adapter.py
+    - test/backend/services/test_agent_evaluation_service.py
+    - test/backend/services/test_agent_automation_intent_analyzer.py
+    - test/backend/services/test_fa_memory_extractor.py
+    - test/backend/services/test_memory_context_service.py
+    - test/backend/services/test_memory_retrieval_service.py
+    - test/backend/services/test_memory_index_service.py
+    - test/backend/services/test_memory_record_service.py
+    - test/backend/services/test_memory_backend_adapter.py
+    - test/backend/services/test_memory_transparent_proxy.py
+    - test/sdk/vector_database/test_elasticsearch_core.py
+  requirement_id: AOS-REQ-008

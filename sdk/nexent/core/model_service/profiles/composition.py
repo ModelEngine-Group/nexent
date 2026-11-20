@@ -28,12 +28,12 @@ from nexent.core.model_service.profiles.resolver import SourceCatalog, SourceCat
 from nexent.core.model_service.profiles.supplements import SupplementCatalog
 
 
-COMPOSER_REF = "profile_policy_composer_v6"
+COMPOSER_REF = "profile_policy_composer_v8"
 _CAPABILITY_PATHS = frozenset(
     f"/{group}/{field}"
     for group, fields in {
         "context": ("combined_window", "input_limit", "output_limit"),
-        "reasoning": ("status", "controls", "response_paths"),
+        "reasoning": ("status", "controls", "response_paths", "can_disable"),
         "tools": ("status", "schema_constraints", "result_format"),
         "sampling": ("temperature", "top_p"),
         "structured_output": ("status",),
@@ -238,16 +238,20 @@ def compose_provider_model_policy(
     model = catalog.models.get(model_profile_key) if model_profile_key is not None else None
     if model_profile_key is not None and model is None:
         raise ProfileCompositionError("MODEL_PROFILE_NOT_FOUND")
-    # Complete the upstream baseline before applying any Nexent experience rule.
+    # Apply each source followed by its preferences, from general to specific.
     capabilities = _capabilities({})
-    for atom in (model, provider, combo):
-        if atom is not None:
-            _merge_capability_facts(capabilities, atom.source.capabilities)
     overrides = []
     parameters = {}
     for atom in (model, provider, combo):
         if atom is None:
             continue
+        _merge_capability_facts(capabilities, atom.source.capabilities)
+        reasoning = atom.source.capabilities.get("reasoning", {})
+        if "controls" in reasoning or reasoning.get("status") == "unsupported":
+            allowed = {control["parameter_key"] for control in
+                       _capabilities({"reasoning": reasoning})["reasoning"]["controls"] or ()}
+            for key in {"enable_thinking", "reasoning_effort", "reasoning_budget_tokens"} - allowed:
+                parameters.pop(key, None)
         for override in atom.overrides:
             group, field = override["path"][1:].split("/")
             overrides.append(

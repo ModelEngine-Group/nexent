@@ -39,7 +39,13 @@ interface UnifiedModelRow extends ModelOption {
   total_tokens?: number;
 }
 
-export default function ModelList({ tenantId }: { tenantId: string | null }) {
+export default function ModelList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
@@ -74,17 +80,45 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     new Set()
   );
 
-  const monitoringMap = useMemo(() => {
+  // A tenant may register several model configs that share the same
+  // model_name. Keying a single map by display_name/model_name lets those
+  // rows overwrite each other, so two list rows end up showing the same
+  // request count / error rate. Match by model_id first and keep the
+  // name-based maps separate for rows where model_id is not available.
+  const monitoringById = useMemo(() => {
+    const map = new Map<number, ModelMonitoringItem>();
+    for (const m of monitoringModels) {
+      if (m.model_id != null) map.set(m.model_id, m);
+    }
+    return map;
+  }, [monitoringModels]);
+
+  const monitoringByDisplayName = useMemo(() => {
     const map = new Map<string, ModelMonitoringItem>();
     for (const m of monitoringModels) {
-      map.set(m.display_name, m);
+      if (m.display_name && !map.has(m.display_name)) {
+        map.set(m.display_name, m);
+      }
+    }
+    return map;
+  }, [monitoringModels]);
+
+  const monitoringByName = useMemo(() => {
+    const map = new Map<string, ModelMonitoringItem>();
+    for (const m of monitoringModels) {
+      if (m.model_name && !map.has(m.model_name)) {
+        map.set(m.model_name, m);
+      }
     }
     return map;
   }, [monitoringModels]);
 
   const unifiedData: UnifiedModelRow[] = useMemo(() => {
     return models.map((m) => {
-      const mon = monitoringMap.get(m.displayName);
+      const mon =
+        monitoringById.get(m.id) ??
+        monitoringByDisplayName.get(m.displayName) ??
+        monitoringByName.get(m.name);
       return {
         ...m,
         request_count: mon?.request_count,
@@ -95,7 +129,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         total_tokens: mon?.total_tokens,
       };
     });
-  }, [models, monitoringMap]);
+  }, [models, monitoringById, monitoringByDisplayName, monitoringByName]);
 
   const openCreate = () => {
     setAddDialogVisible(true);
@@ -266,7 +300,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
                   className="text-yellow-500 cursor-pointer ml-1.5 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
-                    openEdit(record);
+                    if (!readOnly) openEdit(record);
                   }}
                 />
               </Tooltip>
@@ -458,31 +492,35 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               loading={checkingConnectivity.has(record.displayName)}
             />
           </Tooltip>
-          <Tooltip title={t("tenantResources.models.editModel")}>
-            <Button
-              type="text"
-              icon={<Edit className="h-4 w-4" />}
-              onClick={() => openEdit(record)}
-              size="small"
-            />
-          </Tooltip>
-          <Tooltip title={t("tenantResources.models.deleteModel")}>
-            <Button
-              type="text"
-              danger
-              icon={<Trash2 className="h-4 w-4" />}
-              size="small"
-              onClick={() =>
-                confirm({
-                  title: t("tenantResources.models.confirmDelete"),
-                  content: t("common.cannotBeUndone"),
-                  okText: t("common.confirm"),
-                  cancelText: t("common.cancel"),
-                  onOk: () => handleDelete(record.displayName, record.source),
-                })
-              }
-            />
-          </Tooltip>
+          {!readOnly && (
+            <Tooltip title={t("tenantResources.models.editModel")}>
+              <Button
+                type="text"
+                icon={<Edit className="h-4 w-4" />}
+                onClick={() => openEdit(record)}
+                size="small"
+              />
+            </Tooltip>
+          )}
+          {!readOnly && (
+            <Tooltip title={t("tenantResources.models.deleteModel")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() =>
+                  confirm({
+                    title: t("tenantResources.models.confirmDelete"),
+                    content: t("common.cannotBeUndone"),
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record.displayName, record.source),
+                  })
+                }
+              />
+            </Tooltip>
+          )}
         </div>
       ),
     },
@@ -518,9 +556,11 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               {t("monitoring.dashboard.refresh")}
             </Button>
           </div>
-          <Button type="primary" onClick={openCreate}>
-            + {t("modelConfig.button.addCustomModel")}
-          </Button>
+          {!readOnly && (
+            <Button type="primary" onClick={openCreate}>
+              + {t("modelConfig.button.addCustomModel")}
+            </Button>
+          )}
         </div>
       </div>
 

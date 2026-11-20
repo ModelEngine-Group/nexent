@@ -158,8 +158,23 @@ class OpenAILongContextLLMAdapter(LongTextPreparation, OpenAILLMAdapter):
         """Construct the wrapped :class:`OpenAILongContextModel` on first use."""
         ctx = self._context
         if ctx.resolved_profile is not None:
-            limits = ctx.resolved_profile.capabilities.context
-            self.initialize_long_text(limits.input_limit or limits.combined_window, ctx.truncation_strategy or "start")
+            profile = ctx.resolved_profile
+            limits = profile.capabilities.context
+            input_limits = []
+            if limits.input_limit is not None:
+                input_limits.append(limits.input_limit)
+            if limits.combined_window is not None:
+                output_limits = [profile.parameter_values[key]
+                    for key in ("max_output_tokens", "max_tokens", "max_completion_tokens")
+                    if profile.parameter_values.get(key) is not None]
+                # An omitted wire cap may use the provider's full declared output capacity.
+                output_tokens = max(output_limits) if output_limits else limits.output_limit
+                if type(output_tokens) is not int or output_tokens <= 0:
+                    raise ValueError("Long-text output allowance must be known and positive")
+                input_limits.append(limits.combined_window - output_tokens)
+            self.initialize_long_text(
+                min(input_limits) if input_limits else None, ctx.truncation_strategy or "start",
+            )
             return super()._build_model()
         self._model = OpenAILongContextModel(
             observer=ctx.observer,

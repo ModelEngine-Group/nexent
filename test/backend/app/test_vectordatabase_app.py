@@ -43,7 +43,7 @@ sys.modules['boto3'] = boto3_module
 storage_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 
 class SearchRequest(BaseModel):
@@ -68,8 +68,8 @@ class IndexingResponse(BaseModel):
 # Module-level mocks for AWS connections
 # Apply these patches before importing any modules to prevent actual AWS connections
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-patch('management.db.client.get_db_session').start()
-patch('management.db.client.db_client').start()
+patch('infrastructure.rdb.client.get_db_session').start()
+patch('infrastructure.rdb.client.db_client').start()
 
 # Mock Elasticsearch to prevent connection errors
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
@@ -2118,7 +2118,7 @@ async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_
     lifecycle_record = {"file_id": "fid-1", "object_name": "knowledge_base/a.txt"}
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", return_value=lifecycle_record) as mock_get_record, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as mock_get_record, \
             patch(
                 "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
@@ -2151,7 +2151,7 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
     """A temporary lifecycle-table outage must retain the legacy delete contract."""
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", side_effect=RuntimeError("table unavailable")), \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", side_effect=RuntimeError("table unavailable")), \
             patch(
                 "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
@@ -2206,7 +2206,7 @@ async def test_delete_documents_removes_lifecycle_record_without_object(vdb_core
     }
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", return_value=lifecycle_record), \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
             patch(
                 "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_lifecycle_record_without_object",
                 return_value=delete_result,
@@ -2239,7 +2239,7 @@ async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock
     }
     with patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", return_value=lifecycle_record), \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
             patch(
                 "management.api.knowledge_base.vectordatabase.ElasticSearchService.delete_lifecycle_record_without_object",
             ) as mock_delete_lifecycle:
@@ -2255,7 +2255,8 @@ async def test_delete_documents_rejects_source_only_without_object(vdb_core_mock
 
 
 @pytest.mark.asyncio
-async def test_get_document_error_info_returns_lifecycle_error(auth_data):
+@pytest.mark.parametrize("use_query", [False, True])
+async def test_get_document_error_info_returns_lifecycle_error(auth_data, use_query):
     """Durable lifecycle errors take precedence over Redis task metadata."""
     lifecycle_record = {
         "file_id": "fid-failed",
@@ -2265,13 +2266,16 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
         "failed_at": "2026-08-22T00:00:00",
     }
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", return_value=lifecycle_record) as mock_get_record, \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as mock_get_record, \
             patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new_callable=AsyncMock) as mock_legacy:
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-failed"},
-            headers=auth_data["auth_header"],
-        )
+        path = f"/indices/{auth_data['index_name']}/documents"
+        params = {"file_id": "fid-failed"}
+        if use_query:
+            path += "/error-info"
+            params["path_or_url"] = "https://example.test/folder/a.txt?download=1"
+        else:
+            path += "/knowledge_base/a.txt/error-info"
+        response = client.get(path, params=params, headers=auth_data["auth_header"])
 
         assert response.status_code == 200
         assert response.json() == {
@@ -2292,8 +2296,10 @@ async def test_get_document_error_info_returns_lifecycle_error(auth_data):
 
 
 @pytest.mark.asyncio
-async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data):
+@pytest.mark.parametrize("use_query", [False, True])
+async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(auth_data, use_query):
     """A lifecycle row without error metadata must not hide legacy Redis errors."""
+    document = "https://example.test/folder/a%20b.txt?download=1#part" if use_query else "knowledge_base/a.txt"
     lifecycle_record = {
         "file_id": "fid-processing",
         "tenant_id": auth_data["tenant_id"],
@@ -2307,17 +2313,16 @@ async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(au
     redis_service = MagicMock()
     redis_service.get_error_info.return_value = '{"error_code":"LEGACY_PARSE_FAILED"}'
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", return_value=lifecycle_record), \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record) as lookup, \
             patch(
                 "management.api.knowledge_base.vectordatabase.get_all_files_status",
-                new=AsyncMock(return_value={"knowledge_base/a.txt": {"latest_task_id": "task-legacy"}}),
+                new=AsyncMock(return_value={document: {"latest_task_id": "task-legacy"}}),
             ), \
             patch("management.api.knowledge_base.vectordatabase.get_redis_service", return_value=redis_service):
-        response = client.get(
-            f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",
-            params={"file_id": "fid-processing"},
-            headers=auth_data["auth_header"],
-        )
+        path = f"/indices/{auth_data['index_name']}/documents"
+        params = {"path_or_url": document} if use_query else {"file_id": "fid-processing"}
+        path += "/error-info" if use_query else f"/{document}/error-info"
+        response = client.get(path, params=params, headers=auth_data["auth_header"])
 
     assert response.status_code == 200
     assert response.json() == {
@@ -2327,6 +2332,7 @@ async def test_get_document_error_info_falls_back_when_lifecycle_has_no_error(au
         "error_stage": None,
         "failed_at": None,
     }
+    assert lookup.call_args.kwargs["object_name"] == (document if use_query else None)
     redis_service.get_error_info.assert_called_once_with("task-legacy")
 
 
@@ -2343,7 +2349,7 @@ async def test_get_document_error_info_returns_lifecycle_stage_without_legacy_st
         "failed_at": None,
     }
     with patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.db.knowledge_base.file_lifecycle.get_file_record", return_value=lifecycle_record), \
+            patch("management.api.knowledge_base.vectordatabase.get_file_record", return_value=lifecycle_record), \
             patch("management.api.knowledge_base.vectordatabase.get_all_files_status", new_callable=AsyncMock, return_value={}):
         response = client.get(
             f"/indices/{auth_data['index_name']}/documents/knowledge_base/a.txt/error-info",

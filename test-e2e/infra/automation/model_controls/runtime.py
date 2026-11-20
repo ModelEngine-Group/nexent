@@ -10,44 +10,58 @@ import threading
 import time
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
+import httpx
 import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from runtime.api.agent import execution as agent_app_execution
-from runtime.api.skill import creation as skill_app_creation
+from management.api.agent import creator as agent_creator_api, nl2agent_callback as callback_api
+from management.services.agent import nl2agent_callback
+from runtime.agentos import prepared_agent_creator
+from contracts.constants import environment
+from management.api.skill import creation as skill_app_creation
+from management.clients.agentos import AgentOSClient
+from management.services.agent import runtime_client
+from runtime.agentos import ephemeral
+from runtime.agentos.middleware import AgentOSMiddleware
 from management.services.agent.preparation import run as agent_preparation
+from model_controls.api import install_fixture_gateway_session
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
-from services import nl2agent_service as nl2agent_service
-from services import nl2skill_service as nl2skill_service
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from nexent.core.concurrency.helpers import shutdown_fallback_thread_manager
 from nexent.core.concurrency import ThreadManager
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 
 
 @contextmanager
-def mcp_server():
-    app = local_mcp_service.http_app(transport="sse", path="/sse")
+def serve_fixture(app, *, lifespan="off"):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan=lifespan))
     thread = threading.Thread(target=lambda: asyncio.run(server.serve(sockets=[listener])), daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.02)
     if not server.started:
-        raise RuntimeError("Case-owned MCP server did not start")
+        raise RuntimeError("Case-owned service did not start")
     try:
-        yield f"http://127.0.0.1:{port}/sse"
+        yield f"http://127.0.0.1:{port}"
     finally:
         server.should_exit = True
         thread.join(timeout=10)
         listener.close()
+
+
+@contextmanager
+def mcp_server():
+    with serve_fixture(local_mcp_service.http_app(transport="sse", path="/sse"), lifespan="on") as url:
+        yield f"{url}/sse"
 
 
 class RuntimeFixture:
@@ -63,18 +77,28 @@ class RuntimeFixture:
         if "agent" in path:
             body["agent_id"] = self.agent_id
         if generation is not None:
-            body["generation_config"] = generation
+            from model_controls.profiles import preference_values
+            body["model_parameter_preferences"] = {str(model_id): preference_values(generation)}
         if workbench:
-            config = {"schema_version": 3, "mode": "agent_create" if "nl2agent" in path else
-                      "skill_create" if "nl2skill" in path else "generic_chat", "model_id": model_id,
-                      "generation_config": generation or {"deep_thinking": True, "thinking_effort": "auto"},
+            config = {"schema_version": 4, "mode": "agent_create" if "nl2agent" in path else
+                      "skill_create" if "nl2skill" in path else "generic_chat",
                       "agent_mounts": [], "skill_mounts": []}
             if "nl2" in path:
                 body["workbench_config"] = config
                 body["persist_history"] = True
             else:
                 body.update(entrypoint="workbench", workbench=config)
-        return self.client.post(path, json=body, headers={"Authorization": "Bearer fixture-creator"})
+        headers = {"Authorization": "Bearer fixture-creator"}
+        if body.get("conversation_id") and body.get("model_parameter_preferences"):
+            preferences = body.pop("model_parameter_preferences")[str(model_id)]
+            endpoint = f"/api/conversation/{body['conversation_id']}/model_preferences"
+            selected = self.client.patch(endpoint, headers=headers, json={
+                "selected_model_id": model_id})
+            assert selected.status_code == 200, selected.text
+            patched = self.client.patch(endpoint + f"/{model_id}", headers=headers, json={
+                "parameter_values": preferences})
+            assert patched.status_code == 200, patched.text
+        return self.client.post(path, json=body, headers=headers)
 
     def draft(self):
         from sqlalchemy import select
@@ -83,6 +107,19 @@ class RuntimeFixture:
             row = session.scalars(select(AgentInfo).where(AgentInfo.agent_id == self.agent_id, AgentInfo.version_no == 0)).one()
             return {"description": row.description, "model_ids": list(row.model_ids), "model_params_override": row.model_params_override,
                     "business_logic_model_id": row.business_logic_model_id}
+
+    def set_outlet_defaults(self, label, values):
+        from management.db.model.models import ModelRecord
+        from management.services.model.adapter import restore_model_snapshot
+        from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+        from nexent.core.model_service.registry import model_service_references
+        with self.storage["sessions"]() as session:
+            record = session.get(ModelRecord, self.models[label])
+            row = {column.name: getattr(record, column.name) for column in record.__table__.columns}
+            profile = restore_model_snapshot(row, row["tenant_id"])
+            profile = profile.model_copy(update={"parameter_values": values(profile.parameter_values)})
+            for key, value in encode_resolved_model_profile(profile, registered_references=model_service_references()).items():
+                setattr(record, key, value)
 
     def model_records(self):
         from sqlalchemy import select
@@ -107,6 +144,8 @@ def runtime_fixture(monkeypatch):
             monkeypatch.setattr(inputs, "AGENT_WORKSPACE_ROOT", workspace)
             manager = ThreadManager("model-controls-case", runtime_thread_manager._policies)
             manager.start()
+            monkeypatch.setattr(agent_app_execution, "runtime_thread_manager", manager)
+            monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
             for name, module in list(sys.modules.items()):
                 if name.startswith(("services.", "management.", "tool_collection.")) and getattr(module, "runtime_thread_manager", None) is runtime_thread_manager:
                     monkeypatch.setattr(module, "runtime_thread_manager", manager)
@@ -114,7 +153,7 @@ def runtime_fixture(monkeypatch):
             # Authentication is an external issuer boundary. RBAC, DAC, storage,
             # model resolution, capacity policy, services and SDK remain real.
             for name, module in list(sys.modules.items()):
-                if name.startswith(("utils.", "services.", "management.", "runtime.", "apps.", "permissions.", "tool_collection.")):
+                if name.startswith(("gateway.", "services.", "management.", "runtime.", "permissions.", "tool_collection.")):
                     if hasattr(module, "get_current_user_id"):
                         monkeypatch.setattr(module, "get_current_user_id", lambda *a, **k: (owner, tenant))
                     if hasattr(module, "get_current_user_info"):
@@ -126,12 +165,12 @@ def runtime_fixture(monkeypatch):
             rbac.init_rbac()
             # Ordinary Agent preparation resolves MCP through this imported
             # boundary as well. Never fall back to a developer's deployment URL.
-            _bind_case_mcp(monkeypatch, mcp_url, nl2agent_service, agent_preparation)
-            monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+            _bind_case_mcp(monkeypatch, mcp_url, agent_preparation)
+            monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary
             runs = []
-            for module in (nl2agent_service, nl2skill_service, ordinary):
+            for module in (ephemeral, ordinary):
                 original = module.agent_run
                 async def observe(run_info, *args, _original=original, **kwargs):
                     runs.append(run_info)
@@ -160,9 +199,26 @@ def runtime_fixture(monkeypatch):
 
             provider.responder = respond
             app = FastAPI()
+            install_fixture_gateway_session(app, owner, tenant)
             app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+            app.include_router(agent_creator_api.router, prefix="/api")
+            app.include_router(callback_api.router, prefix="/api")
+            grants = {}
+            monkeypatch.setattr(nl2agent_callback, "get_db_session", storage["sessions"])
+            monkeypatch.setattr(nl2agent_callback, "get_redis_client", lambda: SimpleNamespace(
+                set=lambda key, value, **_: grants.setdefault(key, value),
+                get=grants.get, delete=lambda key: grants.pop(key, None),
+            ))
             app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
-            with TestClient(app) as http:
+            runtime = FastAPI(root_path="/api")
+            runtime.add_middleware(AgentOSMiddleware)
+            runtime.include_router(ephemeral.create_ephemeral_run_router())
+            monkeypatch.setattr(environment, "JWT_SECRET", "model-controls-fixture-agentos-key")
+            with serve_fixture(runtime) as runtime_url, serve_fixture(app) as management_url, TestClient(app) as http:
+                monkeypatch.setattr(prepared_agent_creator, "MANAGEMENT_AGENTOS_URL", management_url)
+                monkeypatch.setattr(runtime_client, "_agentos_client", lambda: AgentOSClient(
+                    runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs),
+                ))
                 try:
                     yield RuntimeFixture(storage, provider, http, runs)
                 finally:

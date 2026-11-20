@@ -35,15 +35,9 @@ vi.mock("@/app/[locale]/agents/components/agent-avatar", () => ({
 vi.mock("../../app/[locale]/agents/components/agent-config-actions", () => ({
   default: function MockAgentConfigActions({
     agentId,
-    readOnly,
-    onConfigure,
-    onPublish,
     onManageVersions,
   }: {
     agentId: number;
-    readOnly: boolean;
-    onConfigure: (agentId: number) => void;
-    onPublish: (agentId: number) => void;
     onManageVersions: (agentId: number) => void;
   }) {
     const [open, setOpen] = useState(false);
@@ -54,16 +48,6 @@ vi.mock("../../app/[locale]/agents/components/agent-config-actions", () => ({
         </button>
         {open && (
           <>
-            <button type="button" onClick={() => onConfigure(agentId)}>
-              配置
-            </button>
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => onPublish(agentId)}
-            >
-              发布
-            </button>
             <button type="button" onClick={() => onManageVersions(agentId)}>
               版本管理
             </button>
@@ -89,15 +73,13 @@ describe("AgentListCard", () => {
       <AgentListCard
         agent={agent}
         onOpen={vi.fn()}
-        onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
 
     expect(container.querySelector("article")).toHaveClass(
       "h-[180px]",
-      "rounded-[12px]",
+      "rounded-lg",
       "px-6",
       "py-4"
     );
@@ -107,7 +89,7 @@ describe("AgentListCard", () => {
     );
     expect(screen.getByText("医疗").closest(".ant-tag")).toHaveClass(
       "!h-[22px]",
-      "!rounded-full"
+      "!rounded-base"
     );
     expect(screen.getByText("一个专业、全面的健康咨询智能体")).toHaveClass(
       "text-[12px]",
@@ -125,6 +107,50 @@ describe("AgentListCard", () => {
   });
 
   it.each([
+    ["Release 2", "Release 2"],
+    [null, "V2"],
+    ["   ", "V2"],
+  ])(
+    "shows the published version for version name %j",
+    (versionName, label) => {
+      render(
+        <AgentListCard
+          agent={{
+            ...agent,
+            current_version_no: 2,
+            version_label: versionName,
+          }}
+          onOpen={vi.fn()}
+          onManageVersions={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId("agent-card-body")).toHaveTextContent(label);
+    }
+  );
+
+  it("omits the version on an unpublished Agent and keeps its availability warning", () => {
+    render(
+      <AgentListCard
+        agent={{
+          ...agent,
+          current_version_no: 0,
+          version_label: "Old release",
+          is_available: false,
+        }}
+        onOpen={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Old release")).not.toBeInTheDocument();
+    expect(screen.queryByText("V0")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("mcpConfig.status.unavailable")
+    ).toBeInTheDocument();
+  });
+
+  it.each([
     ["marketing", "营销"],
     ["customer_service", "客服"],
     ["database", "database"],
@@ -133,8 +159,6 @@ describe("AgentListCard", () => {
       <AgentListCard
         agent={{ ...agent, tags: [rawTag] }}
         onOpen={vi.fn()}
-        onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
@@ -146,49 +170,35 @@ describe("AgentListCard", () => {
     }
   });
 
-  it("keeps detail, configuration, and publish navigation distinct", () => {
+  it("opens configuration from the card and keeps version actions in the menu", () => {
     const onOpen = vi.fn();
-    const onConfigure = vi.fn();
-    const onPublish = vi.fn();
     const onManageVersions = vi.fn();
     render(
       <AgentListCard
         agent={agent}
         onOpen={onOpen}
-        onConfigure={onConfigure}
-        onPublish={onPublish}
         onManageVersions={onManageVersions}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置" }));
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
     fireEvent.click(screen.getByRole("button", { name: "版本管理" }));
     expect(onOpen).toHaveBeenCalledWith(agent);
-    expect(onConfigure).toHaveBeenCalledWith(42);
-    expect(onPublish).toHaveBeenCalledWith(42);
     expect(onManageVersions).toHaveBeenCalledWith(42);
   });
 
-  it("keeps publishing disabled for a read-only Agent in the more menu", () => {
-    const onPublish = vi.fn();
+  it("omits publication shortcuts for a read-only Agent", () => {
     render(
       <AgentListCard
         agent={{ ...agent, permission: "READ_ONLY" } as Agent}
         onOpen={vi.fn()}
-        onConfigure={vi.fn()}
-        onPublish={onPublish}
         onManageVersions={vi.fn()}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    const publish = screen.getByRole("button", { name: "发布" });
-    expect(publish).toBeDisabled();
-    fireEvent.click(publish);
-    expect(onPublish).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "发布" })).toBeNull();
   });
 
   it("prefers an update timestamp without inventing one", () => {
@@ -212,8 +222,6 @@ describe("AgentListCard", () => {
       <AgentListCard
         agent={{ ...agent, tags: "['医疗', '健康']" as unknown as string[] }}
         onOpen={vi.fn()}
-        onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );

@@ -43,6 +43,12 @@ the v2.6.1 release, through v2.7.0), and `v2.8.0_merged_migrations.sql`
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
+`v2.9.0_011_trajectory.sql` consolidates the trajectory execution summaries,
+statistics snapshots, historical conversation placeholders, and OPS/SU menu
+grants. It runs after `v2.9.0_010_account_and_ops_roles.sql`, which synchronizes
+the role permission sequence. It is safe to apply after the earlier separate
+trajectory migrations or to run again.
+
 A filename prefix records the release the migration targets when it is written,
 not the develop version at that moment, so repeated prefixes and skipped
 versions do occur. Deployment order comes only from `sort -V` over the file
@@ -57,3 +63,5 @@ take a long time on large merges. Use a new versioned file (for example
 `v2.7.1_005_remove_agent_prompt_templates.sql` removes the retired private Agent prompt-template table and Agent binding columns. Historical initialization and merged migrations remain unchanged. Prompt generation uses bundled SDK defaults after this migration.
 
 The unified Agent prompt migrations are included in `v2.8.0_merged_migrations.sql` in this order: Agent section consolidation, frozen marketplace JSON consolidation, and physical `duty_prompt` to `prompt` rename. Each section is included once, with no separate migration files. The historical `v2.7.0_merged_migrations.sql` remains unchanged.
+
+Before running application SQL against a historical authentication database, follow the [account migration runbook](../tools/supabase_to_postgres/README.md). It owns the Python-before-SQL cutover sequence and troubleshooting.

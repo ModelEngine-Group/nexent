@@ -252,6 +252,43 @@ it("retains per-turn model snapshots in the creation adapter including canonical
   expect(JSON.stringify(fixture.remoteRun.mock.calls)).toContain("temperature");
 });
 
+it.each(["zh", "en"] as const)(
+  "fills the optimization prompt without sending in %s",
+  (locale) => {
+    const ref = createRef<Nl2AgentChatPanelHandle>();
+    const copy = locale === "zh" ? zh : en;
+    const prompt = copy["nl2agent.optimization.prompt.input"];
+    render(<Nl2AgentChatPanel ref={ref} agentId={42} />);
+    act(() => ref.current!.fillPrompt(prompt));
+    expect(
+      fixture.runtime.thread.composer.setText
+    ).toHaveBeenCalledExactlyOnceWith(prompt);
+    expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+    expect(fixture.remoteRun).not.toHaveBeenCalled();
+  }
+);
+
+it.each(["disabled", "running", "blank"])(
+  "does not replace the composer when the prompt action is %s",
+  (condition) => {
+    const ref = createRef<Nl2AgentChatPanelHandle>();
+    fixture.state.isRunning = condition === "running";
+    render(
+      <Nl2AgentChatPanel
+        ref={ref}
+        agentId={42}
+        disabled={condition === "disabled"}
+      />
+    );
+    act(() =>
+      ref.current!.fillPrompt(condition === "blank" ? " \n\t " : "optimize")
+    );
+    expect(fixture.runtime.thread.composer.setText).not.toHaveBeenCalled();
+    expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+    expect(fixture.remoteRun).not.toHaveBeenCalled();
+  }
+);
+
 it("blocks invalid-model sends and imperative prompts without a creation target", async () => {
   const ref = createRef<Nl2AgentChatPanelHandle>();
   fixture.controls.canSend = false;
@@ -262,20 +299,22 @@ it("blocks invalid-model sends and imperative prompts without a creation target"
       showOptimizationSuggestions={false}
     />
   );
-  ref.current!.sendPrompt("create");
+  ref.current!.fillPrompt("create");
   const result = fixture.adapter!.run({ messages: [] } as never);
   for await (const chunk of result as AsyncIterable<unknown>) {
     void chunk;
   }
   expect(fixture.remoteRun).not.toHaveBeenCalled();
   expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+  expect(fixture.runtime.thread.composer.setText).not.toHaveBeenCalled();
   expect(
     within(screen.getByTestId("creator-welcome")).queryByRole("button")
   ).not.toBeInTheDocument();
   fixture.controls.canSend = true;
   view.rerender(<Nl2AgentChatPanel ref={ref} agentId={null} />);
-  ref.current!.sendPrompt("create");
+  ref.current!.fillPrompt("create");
   expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+  expect(fixture.runtime.thread.composer.setText).not.toHaveBeenCalled();
 });
 
 it.each([undefined, null, "", " \n\t "])(
@@ -335,7 +374,10 @@ it("switches examples on description changes while retaining the visibility opt-
   );
   expect(
     within(screen.getByTestId("creator-welcome")).getAllByRole("button")
-  ).toHaveLength(4);
+  ).toHaveLength(3);
+  expect(
+    screen.queryByText("nl2agent.suggestions.recommendKnowledgeBases.title")
+  ).not.toBeInTheDocument();
   expect(
     screen.getByText("nl2agent.suggestions.generatePrompts.title")
   ).toBeInTheDocument();
@@ -499,9 +541,13 @@ it("ignores a history load completed after the panel is removed", async () => {
         resolve = done;
       })
   );
-  const panel = render(<Nl2AgentChatPanel agentId={42} />);
+  const ref = createRef<Nl2AgentChatPanelHandle>();
+  const panel = render(<Nl2AgentChatPanel ref={ref} agentId={42} />);
   fireEvent.click(screen.getByRole("button", { name: "历史 3" }));
   fireEvent.click(await screen.findByRole("button", { name: /Slow history/ }));
+  act(() => ref.current!.fillPrompt("optimize"));
+  expect(fixture.runtime.thread.composer.setText).not.toHaveBeenCalled();
+  expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
   panel.unmount();
   await act(async () => {
     resolve({

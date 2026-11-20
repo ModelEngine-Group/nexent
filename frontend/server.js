@@ -166,12 +166,12 @@ const COOKIE_NAMES = {
   OAUTH_PENDING: "nexent_oauth_pending",
 };
 
-const isProduction = process.env.NODE_ENV === "production";
+const authCookieSecure = process.env.NEXENT_AUTH_COOKIE_SECURE !== "false";
 
 function buildCookieOptions(httpOnly) {
   return {
     httpOnly,
-    secure: false, // cookie can be send through http
+    secure: authCookieSecure,
     sameSite: "lax",
     path: BASE_PATH || "/",
   };
@@ -232,7 +232,7 @@ function setAuthCookies(res, session) {
 }
 
 function clearAuthCookies(res) {
-  const expired = { maxAge: 0, path: "/" };
+  const expired = { ...buildCookieOptions(false), maxAge: 0 };
   res.setHeader("Set-Cookie", [
     cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", {
       ...expired,
@@ -262,9 +262,8 @@ function setPendingOAuthCookie(res, pendingToken) {
 function clearPendingOAuthCookie(res) {
   appendSetCookies(res, [
     cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
+      ...buildCookieOptions(true),
       maxAge: 0,
-      path: "/",
-      httpOnly: true,
     }),
   ]);
 }
@@ -278,18 +277,9 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
-// Matches backend consts/const.py: IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
-const IS_SPEED_MODE = (process.env.DEPLOYMENT_VERSION || "speed") === "speed";
-
-// Matches backend consts/notification.py SU_ROLES and services/mcp_management_service.py SUPER_ADMIN_ROLES
 const SUPER_ADMIN_ROLES = new Set(["SU", "SUPER_ADMIN"]);
 
 async function isSuperAdminRequest(req) {
-  // Speed mode: SPEED role has SU-level privileges (see backend is_speed_admin logic in user_service.py)
-  if (IS_SPEED_MODE) {
-    return true;
-  }
-
   const cookies = parseCookies(req);
   const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
   if (!token) {
@@ -309,7 +299,12 @@ async function isSuperAdminRequest(req) {
 
     const data = await response.json();
     const userRole = data?.data?.user?.user_role;
-    return SUPER_ADMIN_ROLES.has(userRole);
+    const roles = data?.data?.user?.roles ?? [userRole];
+    return (
+      Array.isArray(roles) &&
+      roles.length === 1 &&
+      SUPER_ADMIN_ROLES.has(roles[0])
+    );
   } catch (error) {
     console.error(
       "[isSuperAdminRequest] Error checking super admin:",
@@ -570,6 +565,7 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 
           // Copy response headers, but override content-length and set cookies
           const responseHeaders = { ...proxyRes.headers };
+          delete responseHeaders["transfer-encoding"];
           responseHeaders["content-length"] = String(finalBody.length);
           // Merge Set-Cookie: proxyRes cookies + our auth cookies
           const existingSetCookie = res.getHeader("Set-Cookie") || [];
@@ -817,6 +813,8 @@ function handleNorthboundProxy(pathname, req, res) {
 function handleAllApiProxy(pathname, req, res) {
   if (!pathname.startsWith("/api/")) return false;
 
+
+
   // 1. 认证接口单独处理
   if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
     forwardAuthRequest(req, res, HTTP_BACKEND);
@@ -824,13 +822,11 @@ function handleAllApiProxy(pathname, req, res) {
   }
 
   // 2. 判断是否为 runtime 运行时接口
+  const isConversationRun = /^\/api\/agent\/run\/?$/.test(pathname);
   const runtimePathPrefixes = [
-    "/api/agent/run",
     "/api/agent/nl2agent/run",
     "/api/agent/human-interactions",
     "/api/skills/nl2skill/run",
-    "/api/agent/stop",
-    "/api/agent/automations",
     "/api/conversation/",
     "/api/share/",
     "/api/file/preprocess",
@@ -845,18 +841,18 @@ function handleAllApiProxy(pathname, req, res) {
   // 分发代理目标
   if (isRuntime) {
     const runtimeProxyTimeout =
-      pathname.startsWith("/api/agent/run") ||
       pathname.startsWith("/api/agent/nl2agent/run") ||
       pathname.startsWith("/api/skills/nl2skill/run")
         ? SSE_PROXY_TIMEOUT_MS
         : PROXY_TIMEOUT_MS;
     proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
   } else {
+    const timeout = isConversationRun ? SSE_PROXY_TIMEOUT_MS : PROXY_TIMEOUT_MS;
     proxy.web(req, res, {
       target: HTTP_BACKEND,
       changeOrigin: true,
-      proxyTimeout: PROXY_TIMEOUT_MS,
-      timeout: PROXY_TIMEOUT_MS,
+      proxyTimeout: timeout,
+      timeout,
     });
   }
 

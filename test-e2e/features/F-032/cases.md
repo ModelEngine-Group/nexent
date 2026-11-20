@@ -2,4 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-当前测试基线未保留关联用例。
+- D5 [MODEL-LEGACY-VOICE-D5-001](../../cases/MODEL-LEGACY-VOICE-D5-001/case.yaml) · active

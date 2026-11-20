@@ -256,8 +256,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           knowledgeBase={quickImportKb}
           onClose={() => {
             setQuickImportKb(null);
-            void refreshLists();
           }}
+          onUploadComplete={() => void refreshLists()}
         />
       )}
     </div>

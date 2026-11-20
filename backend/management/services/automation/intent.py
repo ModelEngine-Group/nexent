@@ -8,11 +8,11 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from contracts.agentos import ChatOptions
+from management.clients.model import invoke_chat_prompt
 from contracts.constants.environment import AGENT_AUTOMATION_MIN_INTERVAL_SECONDS
-from contracts.constants.constants import MESSAGE_ROLE
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_by_model_id
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -243,8 +243,8 @@ class RuleBasedAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
 
 
 class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
-    def __init__(self, model_config: Dict[str, Any], fallback: AutomationIntentAnalysisStrategy):
-        self._model_config = model_config
+    def __init__(self, model_id: int, fallback: AutomationIntentAnalysisStrategy):
+        self._model_id = model_id
         self._fallback = fallback
 
     async def analyze(self, context: AutomationIntentContext) -> Dict[str, Any]:
@@ -252,13 +252,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         if not context.force_llm and not has_automation_schedule_signal(context.message):
             return fallback
         try:
-            content = await run_blocking(
-                "automation-intent-analysis",
-                self._generate_sync,
-                context,
-                lane="model-tool-io",
-                owner="config",
-            )
+            content = await self._generate(context)
             payload = _LLMIntentPayload.model_validate(_extract_json_object(content))
             return _payload_to_result(payload, context, fallback)
         except (ValidationError, ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -268,11 +262,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             logger.warning("Failed to analyze automation intent with LLM, using rule fallback: %s", exc)
             return fallback
 
-    def _generate_sync(self, context: AutomationIntentContext) -> str:
-        from nexent.core.models import OpenAIModel
-        from nexent.core.utils.observer import MessageObserver
-        from management.services.model.names import get_model_name_from_config
-
+    async def _generate(self, context: AutomationIntentContext) -> str:
         language = detect_instruction_language(context.message)
         now = _analysis_time(context)
         values = {
@@ -282,48 +272,34 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             "min_interval_seconds": AGENT_AUTOMATION_MIN_INTERVAL_SECONDS,
         }
         prompt = compose_auxiliary_prompt(language, "automation_intent", values)
-        llm = OpenAIModel(
-            observer=MessageObserver(),
-            model_id=get_model_name_from_config(self._model_config),
-            api_base=self._model_config.get("base_url", ""),
-            api_key=self._model_config.get("api_key", ""),
-            temperature=0.1,
-            top_p=0.9,
-            max_output_tokens=700,
-            model_factory=self._model_config.get("model_factory"),
-            ssl_verify=self._model_config.get("ssl_verify", True),
-            display_name=self._model_config.get("display_name"),
-            timeout_seconds=self._model_config.get("timeout_seconds"),
-            stream=False,
+        return await invoke_chat_prompt(
+            model_id=self._model_id,
+            system_prompt=prompt.system,
+            user_prompt=prompt.user.strip(),
+            user_id=context.user_id,
+            tenant_id=context.tenant_id,
+            options=ChatOptions(temperature=0.1, top_p=0.9, max_output_tokens=700),
         )
-        response = llm([
-            {
-                "role": MESSAGE_ROLE["SYSTEM"],
-                "content": prompt.system,
-            },
-            {"role": MESSAGE_ROLE["USER"], "content": prompt.user.strip()},
-        ])
-        return getattr(response, "content", "") or ""
 
 
 class AutomationIntentStrategyFactory:
     def create(self, context: AutomationIntentContext) -> AutomationIntentAnalysisStrategy:
         fallback = RuleBasedAutomationIntentStrategy()
         try:
-            model_config = None
             if context.model_id is not None:
                 selected = get_model_by_model_id(context.model_id, context.tenant_id)
                 if selected and selected.get("model_type") == "llm":
-                    model_config = selected
-            if model_config is None:
-                from management.services.configuration.tenant.settings import tenant_config_manager
+                    return LLMAutomationIntentStrategy(context.model_id, fallback)
 
-                model_config = tenant_config_manager.get_model_config(
-                    key=MODEL_CONFIG_MAPPING["llm"],
-                    tenant_id=context.tenant_id,
-                )
-            if model_config:
-                return LLMAutomationIntentStrategy(model_config, fallback)
+            from management.services.configuration.tenant.settings import tenant_config_manager
+
+            model_config = tenant_config_manager.get_model_config(
+                key=MODEL_CONFIG_MAPPING["llm"],
+                tenant_id=context.tenant_id,
+            )
+            model_id = (model_config or {}).get("model_id")
+            if model_id:
+                return LLMAutomationIntentStrategy(model_id, fallback)
         except Exception as exc:
             logger.warning("Failed to resolve automation intent model, using rule fallback: %s", exc)
         return fallback

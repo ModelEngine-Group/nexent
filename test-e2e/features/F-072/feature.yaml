@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-072-RULE-01
     description: 租户 skill 列表、official skill 及安装状态
+  - rule_id: F-072-RULE-02
+    description: 技能列表默认省略 content，include_content=true 返回全文；单个技能详情保留全文，其他元数据、权限及配置覆盖规则不变。
   required_test_stages:
   - D2
   source:

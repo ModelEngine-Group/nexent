@@ -25,17 +25,34 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Path, Query, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
-import gateway.authentication.auth as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, UnauthorizedError
+from contracts.errors.exceptions import AppException
+from contracts.roles import has_any_role
+from ext_components.aidp.apps.aidp_folder_routes import aidp_folder_router
+from ext_components.aidp.apps.aidp_mgmt_common import (
+    _auth,
+    _credentials,
+    _normalize_folder_path,
+    _relative_path_to_directory,
+)
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -69,10 +86,8 @@ from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
     create_aidp_kb_impl,
-    delete_aidp_kb_impl,
     get_aidp_graph_template_impl,
     get_aidp_kb_impl,
-    get_bound_agents,
     list_aidp_channels_impl,
     list_aidp_doc_history_impl,
     list_aidp_docs_impl,
@@ -87,9 +102,15 @@ from ext_components.aidp.services.aidp_service import (
     upload_aidp_docs_impl,
 )
 from management.db.identity.user_tenant import get_user_role_by_tenant
+from management.services.knowledge_base.providers.shared_aidp import (
+    delete_aidp_kb_impl,
+    get_bound_agents,
+)
+from management.services.permission.identity.display import enrich_cas_usernames
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
+aidp_mgmt_router.include_router(aidp_folder_router)
 logger = logging.getLogger("aidp_mgmt_app")
 
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
@@ -151,7 +172,9 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
     user_id: str,
 ) -> None:
     """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
-
+    # Imported lazily: the tag service pulls in the MCP container stack, which
+    # is unnecessary for the rest of the AIDP router and makes test collection
+    # depend on Docker/paramiko being importable.
     from management.services.tag.library import TagManagementService
 
     TagManagementService.cleanup_document_assignments_for_knowledge_base(
@@ -355,29 +378,6 @@ class UpdateSensitiveWordRequest(BaseModel):
         return self
 
 
-# ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
-
-
-async def _auth(request: Request) -> tuple[str, str]:
-    """Resolve ``(user_id, tenant_id)`` from the Authorization header.
-
-    Raises 401 for missing/invalid tokens or empty tenant contexts so the
-    caller never has to defend against partially-authenticated state.
-    """
-    auth = request.headers.get("Authorization")
-    if not auth:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Missing Authorization header")
-    try:
-        user_id, tenant_id = auth_utils_module.get_current_user_id(auth)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
-    if not tenant_id:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="No tenant context")
-    return user_id, tenant_id
-
-
 def _infer_is_multimodal(detail: dict) -> bool:
     """Reverse-derive ``is_multimodal`` from AIDP detail response.
 
@@ -503,10 +503,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
     )
 
 
-def _credentials() -> tuple[str, str]:
-    return AIDP_SERVER_URL, AIDP_API_KEY
-
-
 def _is_user_role(user_id: str, tenant_id: str) -> bool:
     """Return whether the caller is a regular USER in the current tenant.
 
@@ -515,7 +511,7 @@ def _is_user_role(user_id: str, tenant_id: str) -> bool:
     provisioned.
     """
     role = get_user_role_by_tenant(user_id, tenant_id)
-    return (role or "USER").upper() == "USER"
+    return has_any_role(role, {"USER"}) and not has_any_role(role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"})
 
 
 def _raise_sensitive_word_upstream_error(exc: AidpSensitiveWordError) -> NoReturn:
@@ -784,7 +780,6 @@ async def list_knowledge_bases(
         sum(1 for row in page_rows if not _has_kb_card_metadata(row)),
     )
 
-    from management.services.permission.identity.display import enrich_cas_usernames
 
     await run_blocking(
         "aidp-list-creator-names", enrich_cas_usernames,
@@ -982,7 +977,6 @@ async def get_knowledge_base(
     detail["group_ids"] = permission_record.get("group_ids") or []
     detail["created_by"] = permission_record.get("owner_user_id")
     detail["creator_name"] = permission_record.get("creator_name")
-    from management.services.permission.identity.display import enrich_cas_usernames
 
     await run_blocking(
         "aidp-detail-creator-name", enrich_cas_usernames,
@@ -1108,11 +1102,57 @@ async def upload_documents(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     files: List[UploadFile] = File(..., description="Files to upload"),
+    target_folder: Annotated[
+        Optional[str],
+        Form(description="Destination folder path; root is '/'"),
+    ] = None,
+    relative_paths: Annotated[
+        Optional[List[str]],
+        Form(description="One relative path per file, preserving directory levels"),
+    ] = None,
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
+    normalized_target: str | None = None
+    normalized_relative_paths: list[str] | None = None
+    if target_folder is not None:
+        try:
+            normalized_target = _normalize_folder_path(target_folder)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if relative_paths is not None:
+        if target_folder is None:
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths requires target_folder",
+            )
+        if len(relative_paths) != len(files):
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths must have one entry per uploaded file",
+            )
+        try:
+            normalized_relative_paths = [
+                _relative_path_to_directory(path) for path in relative_paths
+            ]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     valid_files, validation_failures = _validate_upload_files(files)
+    # Validation drops files, so the relative paths have to follow the original
+    # upload order instead of being zipped with the shortened list.
+    valid_file_ids = {id(file) for file in valid_files}
+    valid_relative_paths = (
+        [
+            path
+            for file, path in zip(files, normalized_relative_paths)
+            if id(file) in valid_file_ids
+        ]
+        if normalized_relative_paths is not None
+        else None
+    )
     server_url, api_key = _credentials()
     if valid_files:
         result = await run_blocking(
@@ -1122,6 +1162,8 @@ async def upload_documents(
             api_key,
             kds_id,
             valid_files,
+            normalized_target,
+            valid_relative_paths,
             lane="control-io",
             owner="config",
         )
@@ -1166,7 +1208,7 @@ async def remove_documents(
         server_url,
         api_key,
         kds_id,
-        [str(file_uuid) for file_uuid in body.file_uuids],
+        [file_uuid.hex for file_uuid in body.file_uuids],
         lane="control-io",
         owner="config",
     )
@@ -1193,7 +1235,7 @@ async def download_document(
         server_url,
         api_key,
         kds_id,
-        str(body.file_uuid),
+        body.file_uuid.hex,
     )
     response_headers = {
         "Content-Disposition": aidp_response.headers["Content-Disposition"],
@@ -1279,7 +1321,7 @@ async def preview_document(
         server_url,
         api_key,
         kds_id,
-        str(file_uuid),
+        file_uuid.hex,
     )
     return _stream_aidp_preview(aidp_response)
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
@@ -1456,7 +1498,7 @@ async def retry_upload_tasks(
     """Retry selected failed tasks; the upstream request always carries a UUID array."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-    file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
+    file_uuids = list(dict.fromkeys(file_uuid.hex for file_uuid in body.file_uuids))
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-retry-upload-tasks",

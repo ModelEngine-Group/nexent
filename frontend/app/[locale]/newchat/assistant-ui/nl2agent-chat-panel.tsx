@@ -64,7 +64,7 @@ export interface Nl2AgentChatPanelProps {
 
 export interface Nl2AgentChatPanelHandle {
   cancelRun: () => void;
-  sendPrompt: (prompt: string) => void;
+  fillPrompt: (prompt: string) => void;
 }
 
 export const Nl2AgentChatPanel = forwardRef<
@@ -226,7 +226,7 @@ export const Nl2AgentChatPanel = forwardRef<
     ref,
     () => ({
       cancelRun: () => runtime.thread.cancelRun(),
-      sendPrompt: (prompt) => {
+      fillPrompt: (prompt) => {
         if (
           disabled ||
           restoring ||
@@ -236,10 +236,7 @@ export const Nl2AgentChatPanel = forwardRef<
           runtime.thread.getState().isRunning
         )
           return;
-        runtime.thread.append({
-          role: "user",
-          content: [{ type: "text", text: prompt.trim() }],
-        });
+        runtime.thread.composer.setText(prompt.trim());
       },
     }),
     [agentId, disabled, restoring, runtime, modelControls.canSend]
@@ -304,6 +301,7 @@ export const Nl2AgentChatPanel = forwardRef<
               variant="embedded"
               welcomeContent={
                 <AgentWelcome
+                  className="h-auto min-h-full shrink-0 justify-evenly gap-8 py-8 [&>div]:shrink-0"
                   title={t("nl2agent.configuration.title")}
                   greeting={t("nl2agent.configuration.description")}
                 >

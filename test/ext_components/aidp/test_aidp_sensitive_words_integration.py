@@ -18,10 +18,9 @@ from unittest.mock import MagicMock
 
 import pytest
 import uvicorn
-from ext_components.aidp.apps import aidp_mgmt_app
+from backend.http.server.app_factory import register_exception_handlers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from management.utils.app_factory import register_exception_handlers
 
 MOCK_PATH = Path(__file__).parent / "mock_servers" / "aidp_mgmt_mock_server.py"
 MOCK_API_KEY = "mock-aidp-key"
@@ -32,6 +31,10 @@ KB_TWO = "aidp-kb-04"
 
 
 def _client() -> TestClient:
+    # Imported lazily so collecting this module does not load the AIDP router
+    # (and its real permission/database modules) before the unit-test stubs.
+    from ext_components.aidp.apps import aidp_mgmt_app
+
     app = FastAPI()
     app.include_router(aidp_mgmt_app.aidp_mgmt_router)
     register_exception_handlers(app)
@@ -79,10 +82,14 @@ def aidp_mock_url(tmp_path, monkeypatch):
 
 @pytest.fixture
 def configured_client(aidp_mock_url, monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
+
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", aidp_mock_url)
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", MOCK_API_KEY)
+    monkeypatch.setattr(aidp_mgmt_common, "AIDP_SERVER_URL", aidp_mock_url)
+    monkeypatch.setattr(aidp_mgmt_common, "AIDP_API_KEY", MOCK_API_KEY)
     monkeypatch.setattr(
-        aidp_mgmt_app.auth_utils_module,
+        aidp_mgmt_common.auth_utils_module,
         "get_current_user_id",
         lambda *_a, **_kw: (USER_ID, TENANT_ID),
     )

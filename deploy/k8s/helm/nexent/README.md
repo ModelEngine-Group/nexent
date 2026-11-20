@@ -96,6 +96,8 @@ K8s deployments read runtime configuration from `deploy/env/.env`, the same file
 
 Config, Runtime, MCP, Northbound, and Data Process load every variable declared in `.env` through the backend-only `nexent-env` Secret, including newly added variables without a Helm mapping. Config and Runtime additionally load `deploy/env/monitoring.env` through `nexent-monitoring-env`. These scopes match the production Docker Compose configuration. Web and infrastructure do not reference either complete env Secret; they keep their service-specific environment configuration.
 
+Internal MCP authentication uses `NEXENT_MCP_INTERNAL_TOKEN`. The deployment script carries an existing `TOKEN` assignment forward when the new key is missing. For direct Helm upgrades, move any existing `nexent-common.config.voiceService.token` override to `nexent-common.secrets.mcpInternalToken`. When `NEXENT_MCP_INTERNAL_TOKEN` is present in the deployment environment file, it takes precedence over the Helm value.
+
 Environment precedence, from lowest to highest, is the existing ConfigMap, `.env`, `monitoring.env` where applicable, finalized deployment credentials, and explicit container environment settings. Kubernetes mode, namespace, SQL startup/checksum, selected MCP/sandbox images, and sandbox execution level remain deployment-controlled. Env files use the existing trusted Bash-compatible syntax: empty strings, quoting, JSON, substitutions, and multiline strings are preserved. Only variables assigned in the file are emitted; unrelated exported host variables are excluded.
 
 Application Secret values are rendered after credentials are finalized and written atomically with mode `0600`. The chart exposes `nexent-common.envFiles.rootData` and `monitoringData` as Base64-encoded string mappings; both default to `{}` so direct Helm rendering works without generated env files. Editing `.env` takes effect on the next deployment, when the environment checksum replaces backend Pods. Fresh Secret maps also remove deleted variables. Generated values contain sensitive configuration and must stay outside Git and shared logs.
@@ -117,7 +119,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
-| `--monitoring-provider` | Provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
+| `--monitoring-provider` | Provider when `monitoring` is selected | `local_file`, `otlp`, `phoenix`, `langfuse`, `langsmith` |
 | `--use-local-config` | Reuse saved local deployment config | Flag |
 | `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
 | `--config` | Open the interactive deployment configuration | Flag |
@@ -255,9 +257,7 @@ After successful deployment:
 | Web Application | http://localhost:30000 |
 | SSH Terminal | localhost:30022 (if enabled) |
 | Langfuse | http://localhost:30001 |
-| Grafana | http://localhost:30002 |
 | Phoenix | http://localhost:30006 |
-| Zipkin | http://localhost:30011 |
 
 ## Data Persistence
 
@@ -274,7 +274,8 @@ The following local PersistentVolumes can preserve data:
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
 - `nexent-minio-pv` - Object storage data
-- Monitoring PVs such as Phoenix, Grafana, Tempo, and Langfuse data when monitoring is enabled
+- `nexent-trajectory-pv` - Local trajectory archives
+- Monitoring PVs such as Phoenix and Langfuse data when those providers are selected
 
 ### Deleted Data
 
@@ -289,7 +290,7 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-config | Configuration service | 1 |
 | nexent-runtime | Runtime service | 1 |
 | nexent-mcp | MCP container service | 1 |
-| nexent-northbound | Northbound API service | 1 |
+| nexent-gateway | Northbound API service | 1 |
 | nexent-web | Web frontend | 1 |
 | nexent-data-process | Data processing service | 1 |
 
@@ -320,8 +321,6 @@ Supported providers:
 
 - `otlp` / `collector` - Collector only, debug exporter
 - `phoenix` - Collector + local Phoenix
-- `grafana` - Collector + Tempo + Grafana
-- `zipkin` - Collector + local Zipkin
 - `langfuse` - Collector + self-hosted Langfuse stack
 - `langsmith` - Collector forwarding to hosted LangSmith
 
@@ -331,7 +330,7 @@ Example:
 helm upgrade --install nexent nexent \
   --set nexent-monitoring.enabled=true \
   --set global.monitoring.enabled=true \
-  --set global.monitoring.provider=grafana \
+  --set global.monitoring.provider=local_file \
   --set 'global.monitoring.dashboardUrl=http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
 ```
 
@@ -382,6 +381,10 @@ helm upgrade --install nexent nexent \
 | `global.sharedStorage.workspace.localPath` | Host path for shared workspace data | `/var/lib/nexent` |
 | `global.sharedStorage.skills.size` | Shared `/mnt/nexent-data/skills` PVC size | `5Gi` |
 | `global.sharedStorage.skills.localPath` | Host path for shared skills data | `/var/lib/nexent-data/skills` |
+| `global.sharedStorage.trajectory.size` | Trajectory PVC size | `50Gi` |
+| `global.sharedStorage.trajectory.localPath` | Host path for trajectory archives | `/var/lib/nexent-data/trajectory` |
+| `global.sharedStorage.trajectory.existingClaim` | Existing trajectory PVC in existing-storage mode | `nexent-trajectory` |
+| `global.monitoring.trajectoryRootDir` | Runtime mount and trajectory directory | `/mnt/nexent-data/trajectory` |
 | `global.sharedStorage.projectConfig.size` | Web project configuration PVC size | `1Gi` |
 | `global.sharedStorage.projectConfig.localPath` | Host path for Web project configuration | `/var/lib/nexent-data/project-config` |
 | `global.sharedStorage.projectConfig.existingClaim` | Existing project configuration PVC | `nexent-project-config` |
@@ -461,4 +464,4 @@ Released PVs are automatically cleaned during deployment. To manually clean:
 kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```
 
-Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../../docs/local-authentication-migration.md) covers historical credentials and cutover.
+Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../sql/tools/supabase_to_postgres/README.md) covers historical credentials and cutover.

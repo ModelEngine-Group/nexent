@@ -87,17 +87,202 @@ export const statusCode = (
   const aliases: Record<string, number> = {
     COMPLETED: 1,
     SUCCESS: 1,
+    INGESTED: 1,
     PROCESSING: 2,
     EXTRACTING: 2,
+    WAITING: 2,
     FAILED: 3,
     VECTOR_INGESTION_FAILED: 3,
     UPLOADING: 4,
     QUEUED: 4,
     GRAPH_INGESTION_FAILED: 5,
+    GRAPH_FAILED: 5,
+    GRAPHFAILED: 5,
   };
   return typeof status === "string"
     ? (aliases[status.toUpperCase()] ?? null)
     : null;
+};
+
+/**
+ * Status presentation shared by the file list and the upload-task tab.
+ *
+ * AIDP is adding the same status field to the folder/file listing, so both
+ * surfaces must use one vocabulary: success / extracting / failed / queued /
+ * graph failed, plus the remove-failed state when a deployment reports it.
+ */
+export interface AidpDocumentStatusMeta {
+  code: number;
+  labelKey: string | null;
+  dotClass: string;
+}
+
+const DOCUMENT_STATUS_META: Record<
+  number,
+  { labelKey: string; dotClass: string }
+> = {
+  1: { labelKey: "aidpKnowledge.taskSuccess", dotClass: "bg-green-500" },
+  2: { labelKey: "aidpKnowledge.taskExtracting", dotClass: "bg-blue-500" },
+  3: { labelKey: "aidpKnowledge.taskFailed", dotClass: "bg-red-500" },
+  4: { labelKey: "aidpKnowledge.taskQueued", dotClass: "bg-gray-400" },
+  5: { labelKey: "aidpKnowledge.taskGraphFailed", dotClass: "bg-red-500" },
+  6: {
+    labelKey: "aidpKnowledge.fileStatusRemoveFailed",
+    dotClass: "bg-red-500",
+  },
+};
+
+export const documentStatusMeta = (
+  status: AidpDocumentItem["status"]
+): AidpDocumentStatusMeta | null => {
+  const code = statusCode(status);
+  if (code === null) return null;
+  const meta = DOCUMENT_STATUS_META[code];
+  return meta
+    ? { code, ...meta }
+    : { code, labelKey: null, dotClass: "bg-gray-400" };
+};
+
+/**
+ * Folder/Files status contract (new AIDP API).
+ *
+ * The folder tree uses numeric 1–6. This is deliberately separate from the
+ * legacy document list's ``file_status`` (0/1/2) and from the upload-task
+ * vocabulary, where 4 means queued and 5 means graph failed.
+ */
+export interface AidpFolderTreeStatusPermissions {
+  canRename: boolean;
+  canMove: boolean;
+  canDelete: boolean;
+  canPreview: boolean;
+  canDownload: boolean;
+  canRetry: boolean;
+}
+
+export interface AidpFolderTreeStatusMeta extends AidpDocumentStatusMeta {
+  permissions: AidpFolderTreeStatusPermissions;
+}
+
+const NONE_PERMISSIONS: AidpFolderTreeStatusPermissions = {
+  canRename: false,
+  canMove: false,
+  canDelete: false,
+  canPreview: false,
+  canDownload: false,
+  canRetry: false,
+};
+
+const FOLDER_TREE_STATUS_META: Record<
+  number,
+  {
+    labelKey: string;
+    dotClass: string;
+    permissions: AidpFolderTreeStatusPermissions;
+  }
+> = {
+  1: {
+    labelKey: "aidpKnowledge.fileStatusIngested",
+    dotClass: "bg-green-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: true,
+      canDownload: true,
+      canRetry: false,
+    },
+  },
+  2: {
+    labelKey: "aidpKnowledge.fileStatusExtracting",
+    dotClass: "bg-blue-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: false,
+      canPreview: false,
+      canDownload: true,
+      canRetry: false,
+    },
+  },
+  3: {
+    labelKey: "aidpKnowledge.fileStatusFailed",
+    dotClass: "bg-red-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: false,
+      canDownload: true,
+      canRetry: true,
+    },
+  },
+  4: {
+    labelKey: "aidpKnowledge.fileStatusGraphFailed",
+    dotClass: "bg-orange-500",
+    permissions: {
+      canRename: true,
+      canMove: true,
+      canDelete: true,
+      canPreview: true,
+      canDownload: true,
+      canRetry: true,
+    },
+  },
+  5: {
+    labelKey: "aidpKnowledge.fileStatusRemoving",
+    dotClass: "bg-gray-400",
+    permissions: { ...NONE_PERMISSIONS },
+  },
+  6: {
+    labelKey: "aidpKnowledge.fileStatusRemoveFailed",
+    dotClass: "bg-red-500",
+    permissions: { ...NONE_PERMISSIONS, canDelete: true },
+  },
+};
+
+// AIDP's string status is authoritative. Numeric 1–6 is retained only as a
+// fallback for deployments that still return the previous contract.
+const folderTreeStatusCode = (
+  status: AidpDocumentItem["status"]
+): number | null => {
+  if (typeof status === "number") {
+    return status >= 1 && status <= 6 ? status : null;
+  }
+  if (typeof status === "string") {
+    const trimmed = status.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const code = Number(trimmed);
+      return code >= 1 && code <= 6 ? code : null;
+    }
+    const aliases: Record<string, number> = {
+      COMPLETED: 1,
+      SUCCESS: 1,
+      INGESTED: 1,
+      PROCESSING: 2,
+      EXTRACTING: 2,
+      WAITING: 2,
+      FAILED: 3,
+      VECTOR_INGESTION_FAILED: 3,
+      GRAPH_INGESTION_FAILED: 4,
+      GRAPH_FAILED: 4,
+      GRAPHFAILED: 4,
+      REMOVING: 5,
+      DELETING: 5,
+      REMOVE_FAILED: 6,
+      DELETE_FAILED: 6,
+    };
+    return aliases[trimmed.toUpperCase()] ?? null;
+  }
+  return null;
+};
+
+export const folderTreeStatusMeta = (
+  status: AidpDocumentItem["status"]
+): AidpFolderTreeStatusMeta | null => {
+  const code = folderTreeStatusCode(status);
+  if (code === null) return null;
+  const meta = FOLDER_TREE_STATUS_META[code];
+  return meta ? { code, ...meta, permissions: meta.permissions } : null;
 };
 
 /** Normalize an ingested file's delete status to its numeric contract.
@@ -197,12 +382,12 @@ export const TASK_COLUMN_MIN_WIDTHS: Record<string, number> = {
 // acts as the baseline until the user drags a handle. Dragging moves the
 // boundary between the column and its next visible neighbour, keeping the
 // table's total width stable - the same interaction as the knowledge-base list.
-export const withResizableHeaders = (
-  columns: ColumnsType<AidpDocumentItem>,
+export const withResizableHeaders = <T>(
+  columns: ColumnsType<T>,
   columnWidths: Record<string, number>,
   minWidths: Record<string, number>,
   setColumnWidths: React.Dispatch<React.SetStateAction<Record<string, number>>>
-): ColumnsType<AidpDocumentItem> => {
+): ColumnsType<T> => {
   const keys = columns.map((column) => String(column.key));
   return columns.map((column, index) => {
     const key = keys[index];
@@ -265,9 +450,7 @@ export const withResizableHeaders = (
   });
 };
 
-export const sumColumnWidths = (
-  columns: ColumnsType<AidpDocumentItem>
-): number =>
+export const sumColumnWidths = <T>(columns: ColumnsType<T>): number =>
   columns.reduce(
     (sum, column) =>
       sum + (typeof column.width === "number" ? column.width : 0),

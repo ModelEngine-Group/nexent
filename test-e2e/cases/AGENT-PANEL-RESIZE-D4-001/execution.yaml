@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: AGENT-PANEL-RESIZE-D4-001
+preparation:
+  families: []
+notes: Self-contained controlled browser APIs own all fixtures in the isolated context. Cleanup closes the page; context teardown releases routes and fixture state. No model or server resources are created.
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: AGENT-PANEL-RESIZE-D4-001
+acceptance_bindings:
+  AC-01: [AGENT-PANEL-RESIZE-D4-001]
+  AC-02: [AGENT-PANEL-RESIZE-D4-001]
+  AC-03: [AGENT-PANEL-RESIZE-D4-001]

@@ -1,0 +1,13 @@
+schema_version = 1
+rule_id = "minimax_minimax_m2_7_shutdown_preference_v1"
+version = 1
+target_kind = "model"
+target_key = "minimax/MiniMax-M2.7"
+reason = "Retain the confirmed always-thinking restriction on custom providers"
+evidence = "https://platform.qianwenai.com/docs/developer-guides/text-generation/thinking; reviewed 2026-11-05"
+
+[[capability_overrides]]
+path = "/reasoning/can_disable"
+value = false
+reason = "This exact model does not support disabling reasoning"
+evidence = "https://platform.qianwenai.com/docs/developer-guides/text-generation/thinking; reviewed 2026-11-05"

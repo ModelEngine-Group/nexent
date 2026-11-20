@@ -25,7 +25,7 @@ This development container configuration sets up a complete Nexent development e
 
 1. Clone the project locally
 2. Open project folder in Cursor/VS Code
-3. Run `bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development` from the repository root to start base containers
+3. Run `bash deploy.sh docker --components infrastructure,application,data-process --port-policy development` from the repository root to start base containers
 4. The deploy script writes generated variables such as `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `ELASTICSEARCH_API_KEY` back to `deploy/env/.env`. Services in `deploy/docker/compose/docker-compose.dev.yml` load these settings automatically via `env_file`, so no manual copying is needed
 5. Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Reopen in Container ...`
 6. Cursor will start the development container based on configuration in `.devcontainer` directory
