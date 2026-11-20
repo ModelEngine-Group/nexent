@@ -76,17 +76,28 @@ class TestModelNameUtils:
         actual_empty_order = [model["id"] for model in sorted_empty]
         assert actual_empty_order == expected_empty_order
 
-        # Test case 4: Empty list
+        # Test case 4: IDs sharing a prefix must be ordered by the full id
+        models_shared_prefix = [
+            {"id": "qwen-7b", "name": "Qwen 7B"},
+            {"id": "qwen-72b", "name": "Qwen 72B"},
+            {"id": "qwen-1.5", "name": "Qwen 1.5"},
+        ]
+        sorted_shared_prefix = sort_models_by_id(models_shared_prefix)
+        expected_shared_prefix_order = ["qwen-1.5", "qwen-72b", "qwen-7b"]
+        actual_shared_prefix_order = [model["id"] for model in sorted_shared_prefix]
+        assert actual_shared_prefix_order == expected_shared_prefix_order
+
+        # Test case 5: Empty list
         empty_list = []
         sorted_empty_list = sort_models_by_id(empty_list)
         assert sorted_empty_list == []
 
-        # Test case 5: Non-list input (should return as-is)
+        # Test case 6: Non-list input (should return as-is)
         non_list = "not a list"
         result = sort_models_by_id(non_list)
         assert result == non_list
 
-        # Test case 6: List with non-dict items
+        # Test case 7: List with non-dict items
         mixed_list = [
             {"id": "chatglm3-6b", "name": "ChatGLM3-6B"},
             "string_item",
