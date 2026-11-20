@@ -130,6 +130,26 @@ async def test_global_cutoff_is_applied_to_each_visible_branch_before_fusion(mix
     assert s.s.models.invoke.await_count == 1
 
 
+async def test_multimodal_returns_authorized_hits_from_two_collections(mixed):
+    s = mixed
+    s.s.models.get.return_value = ModelMetadata(model_id=2, model_type="multi_embedding", display_name=None, revision="r1")
+    for name, kind in (("collection", "text"), ("shared", "image")):
+        port = s.vectors[name]
+        hit, = port.search.return_value
+        hit = replace(hit, payload={**hit.payload, "media_kind": kind})
+        port.search.side_effect = [(hit,), (), (hit,) if kind == "text" else (), (hit,) if kind == "image" else ()]
+    request = KnowledgeSearch.model_validate({
+        **s.request.model_dump(), "search_mode": "hybrid", "top_k": 1,
+        "global_hybrid_candidates": True, "split_multimodal_candidates": True,
+    })
+
+    result = await s.service.search(request, s.actor)
+
+    assert [hit.knowledge_id for hit in result.hits] == [1]
+    assert [hit.knowledge_id for hit in result.image_hits] == [2]
+    assert s.calls == [(s.actor.user_id, s.actor.tenant_id)] * 2
+
+
 async def test_shared_sample_uses_resource_record_scope_and_actor_model_scope(mixed):
     s=mixed
     result=await s.sample.sample(KnowledgeSample(knowledge_id=2,expected_revision="a"*64),s.actor)

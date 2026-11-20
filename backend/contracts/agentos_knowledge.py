@@ -250,6 +250,7 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     search_mode: Literal["accurate", "semantic", "hybrid"] = "semantic"
     weight_accurate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     global_hybrid_candidates: bool = False
+    split_multimodal_candidates: bool = False
     include_public_document: bool = False
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
@@ -262,6 +263,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     def pinned_resources(self):
         if self.global_hybrid_candidates and (self.search_mode != "hybrid" or self.rerank_model is not None):
             raise ValueError("Global candidates require hybrid search without reranking")
+        if self.split_multimodal_candidates and not self.global_hybrid_candidates:
+            raise ValueError("Separate media candidates require global hybrid search")
         if self.file_versions and (
             set(self.file_versions) != set(self.file_ids)
             or any(type(value) is not int or value < 0 for value in self.file_versions.values())
@@ -280,6 +283,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
         result = handler(self)
         if not self.global_hybrid_candidates:
             result.pop("global_hybrid_candidates", None)
+        if not self.split_multimodal_candidates:
+            result.pop("split_multimodal_candidates", None)
         if not self.include_public_document:
             result.pop("include_public_document", None)
         return result
@@ -325,9 +330,17 @@ class KnowledgeSearchHit(Contract):
 
 class KnowledgeSearchResult(Contract):
     hits: list[KnowledgeSearchHit]
+    image_hits: list[KnowledgeSearchHit] | None = None
     data_revisions: dict[int, str] = Field(min_length=1, max_length=100)
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_result(self, handler):
+        result = handler(self)
+        if self.image_hits is None:
+            result.pop("image_hits", None)
+        return result
 
     @field_validator("data_revisions", mode="before")
     @classmethod

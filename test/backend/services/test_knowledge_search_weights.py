@@ -4,9 +4,11 @@
 from dataclasses import replace
 
 import pytest
+from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import KnowledgeSearch, KnowledgeSearchResult
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
-from nexent.storage.models import Revision, SearchHit, VectorKey
+from nexent.storage.errors import Conflict
+from nexent.storage.models import Comparison, Revision, SearchHit, VectorKey
 from pydantic import ValidationError
 from runtime.knowledge_base.search import rank_candidates
 
@@ -36,10 +38,13 @@ def test_internal_search_contract_rejects_invalid_fusion_weight(weight):
 def test_global_candidate_policy_is_opt_in_and_requires_hybrid_without_rerank():
     base = {"knowledge_ids": [1, 2], "query": "query", "embedding_model": {"model_id": 2, "revision": "v1"}}
     assert "global_hybrid_candidates" not in KnowledgeSearch(**base).model_dump()
+    assert "split_multimodal_candidates" not in KnowledgeSearch(**base).model_dump()
     request = KnowledgeSearch(**base, search_mode="hybrid", global_hybrid_candidates=True)
     assert KnowledgeSearch.model_validate_json(request.model_dump_json()).global_hybrid_candidates is True
     with pytest.raises(ValidationError):
         KnowledgeSearch(**base, global_hybrid_candidates=True)
+    with pytest.raises(ValidationError):
+        KnowledgeSearch(**base, search_mode="hybrid", split_multimodal_candidates=True)
     with pytest.raises(ValidationError):
         KnowledgeSearch(**base, search_mode="hybrid", global_hybrid_candidates=True,
                         rerank_model={"model_id": 3, "revision": "v1"})
@@ -140,3 +145,57 @@ async def test_cleansed_text_restores_legacy_metadata_shape(search, metadata):
         "path_or_url": "source.txt", "language": "en",
         "metadata": metadata, "process_source": "Unstructured", "date": None,
     }
+
+
+def multimodal(request):
+    return KnowledgeSearch.model_validate({
+        **request.model_dump(), "search_mode": "hybrid", "top_k": 1,
+        "weight_accurate": .5, "global_hybrid_candidates": True,
+        "split_multimodal_candidates": True,
+    })
+
+
+async def test_multimodal_text_and_images_use_independent_limits_and_original_scores(search):
+    s, request, _, text, service = search
+    s.models.get.side_effect = None
+    s.models.get.return_value = ModelMetadata(model_type="multi_embedding", model_id=2, display_name=None, revision="v1")
+    text = replace(text, score=.4, payload={**text.payload, "media_kind": "text"})
+    image = replace(text, key=VectorKey("kb", "image"), score=.8,
+                    payload={**text.payload, "media_kind": "image"})
+    s.vectors.search.side_effect = [(replace(image, score=10),), (), (text,), (image,)]
+
+    result = await service.search(multimodal(request), s.actor)
+    wire = KnowledgeSearchResult.model_validate_json(result.model_dump_json())
+
+    text_hit, = wire.hits
+    image_hit, = wire.image_hits
+    assert text_hit.chunk_id == "one" and text_hit.score == pytest.approx(.25)
+    assert text_hit.score_details == {"accurate": 0.0, "semantic": .5}
+    assert image_hit.chunk_id == "image" and image_hit.score == .8
+    assert image_hit.score_details == {}
+    queries = [call.args[1] for call in s.vectors.search.call_args_list]
+    assert [query.limit for query in queries] == [1, 1, 1, 1]
+    assert [query.where.terms[-1] for query in queries[1:]] == [
+        Comparison("media_kind", "is_null", True), Comparison("media_kind", "eq", "text"),
+        Comparison("media_kind", "eq", "image"),
+    ]
+    assert s.models.invoke.await_count == 1
+    assert s.client.authorize_knowledge_search.await_count == 2
+
+
+async def test_multimodal_does_not_silently_exclude_unclassified_dense_records(search):
+    s, request, _, hit, service = search
+    s.models.get.side_effect = None
+    s.models.get.return_value = ModelMetadata(model_type="multi_embedding", model_id=2, display_name=None, revision="v1")
+    s.vectors.search.side_effect = [(), (hit,)]
+    with pytest.raises(Conflict):
+        await service.search(multimodal(request), s.actor)
+    assert s.vectors.search.call_count == 2
+
+
+async def test_multimodal_requires_the_pinned_multimodal_model(search):
+    s, request, _, _, service = search
+    with pytest.raises(Conflict):
+        await service.search(multimodal(request), s.actor)
+    s.vectors.search.assert_not_called()
+    s.models.invoke.assert_not_awaited()

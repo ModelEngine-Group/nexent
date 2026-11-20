@@ -71,11 +71,14 @@ def _public_document(hit):
     return document
 
 
-def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None):
+def rank_candidates(lexical, semantic, mode, query, *, weight_accurate=None, image_semantic=()):
     if mode != "hybrid":
         return sorted(lexical if mode == "accurate" else semantic, key=lambda h: (-h.score, _identity(h)))
     weight = weight_accurate if weight_accurate is not None else (0.7 if any(char.isdigit() for char in query) else 0.3)
-    maxima = [max((hit.score for hit in branch), default=1) for branch in (lexical, semantic)]
+    maxima = (
+        max((hit.score for hit in lexical), default=1),
+        max((hit.score for branch in (semantic, image_semantic) for hit in branch), default=1),
+    )
     merged = {}
     for branch, maximum, factor, name in zip((lexical, semantic), maxima, (weight, 1 - weight), ("accurate", "semantic"), strict=True):
         for hit in branch:
@@ -220,7 +223,7 @@ class KnowledgeSearchService:
 
     @staticmethod
     def _collect(vectors, grant, request, query_vector, limit, *, context):
-        lexical, semantic = [], []
+        lexical, semantic, images = [], [], []
         for resource in grant.knowledge_bases:
             port = vectors[resource.collection]
             try:
@@ -243,8 +246,21 @@ class KnowledgeSearchService:
                 model_scope = Junction("or", (Comparison("embedding_model_id", "eq", request.embedding_model.model_id),
                     Junction("and", (Comparison("embedding_model_id", "is_null", True), Comparison("embedding_revision", "is_null", True)))))
                 semantic_where = Junction("and", (terms[0], model_scope, *terms[1:]))
-                semantic.extend(port.search(resource.collection, SearchQuery(vector=query_vector, where=semantic_where, limit=limit), context=context))
-        return lexical, semantic
+                if request.split_multimodal_candidates:
+                    # A bounded probe detects unclassified dense rows even when
+                    # neither of the classified candidate sets would include them.
+                    unclassified = Junction("and", (*semantic_where.terms, Comparison("media_kind", "is_null", True)))
+                    if port.search(resource.collection, SearchQuery(vector=query_vector, where=unclassified, limit=1), context=context):
+                        raise Conflict(operation_id=context.operation_id)
+                    for kind, branch in (("text", semantic), ("image", images)):
+                        scoped = Junction("and", (*semantic_where.terms, Comparison("media_kind", "eq", kind)))
+                        hits = port.search(resource.collection, SearchQuery(vector=query_vector, where=scoped, limit=limit), context=context)
+                        if any(hit.payload.get("media_kind") != kind for hit in hits):
+                            raise ScopeDenied()
+                        branch.extend(hits)
+                else:
+                    semantic.extend(port.search(resource.collection, SearchQuery(vector=query_vector, where=semantic_where, limit=limit), context=context))
+        return lexical, semantic, images
 
     @staticmethod
     def _reranked(output, candidates):
@@ -259,6 +275,12 @@ class KnowledgeSearchService:
         try:
             async with asyncio.timeout(threshold):
                 grant = await self._grant(request, actor)
+                if request.split_multimodal_candidates:
+                    binding = request.embedding_model
+                    model = await self.models.get(binding.model_id, actor)
+                    if (model.model_type != "multi_embedding" or model.model_id != binding.model_id
+                        or normalize_model_revision(model.revision) != normalize_model_revision(binding.revision)):
+                        raise Conflict()
                 dimensions = None if request.search_mode == "accurate" else await self.models.embedding_dimensions(request.embedding_model, actor)
                 if request.rerank_model:
                     binding = request.rerank_model
@@ -276,14 +298,20 @@ class KnowledgeSearchService:
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
                     validate_read_ports(records, vectors, grant, actor)
                     views = await self._blocking(self._views, records, grant, context=context)
-                    lexical, semantic = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
+                    lexical, semantic, images = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
                     lexical = await self._blocking(self._visible, records, grant, request, lexical, views, False, context=context)
                     semantic = await self._blocking(self._visible, records, grant, request, semantic, views, True, context=context)
                     if request.global_hybrid_candidates:
                         lexical = sorted(lexical, key=lambda hit: -hit.score)[:request.top_k]
                         semantic = sorted(semantic, key=lambda hit: -hit.score)[:request.top_k]
+                    if request.split_multimodal_candidates:
+                        images = await self._blocking(self._visible, records, grant, request, images, views, True, context=context)
+                        images = sorted(images, key=lambda hit: -hit.score)[:request.top_k]
                     candidates = rank_candidates(lexical, semantic, request.search_mode, request.query,
-                                                 weight_accurate=request.weight_accurate)[:limit]
+                                                 weight_accurate=request.weight_accurate, image_semantic=images)
+                    if request.split_multimodal_candidates:
+                        candidates = [hit for hit in candidates if hit.payload.get("media_kind") != "image"]
+                    candidates = candidates[:limit]
                     if request.rerank_model and candidates:
                         output = await self._invoke(RerankInvocation(
                             model_id=request.rerank_model.model_id, expected_revision=request.rerank_model.revision,
@@ -294,11 +322,15 @@ class KnowledgeSearchService:
                         raise Conflict()
                     revisions = await self._blocking(self._data_revisions, records, grant, context=context)
                     candidates = await self._blocking(self._visible, records, grant, request, candidates, views, False, context=context)
+                    if request.split_multimodal_candidates:
+                        images = await self._blocking(self._visible, records, grant, request, images, views, True, context=context)
                     if await self._blocking(self._data_revisions, records, grant, context=context) != revisions:
                         raise Conflict()
                     hits = [self._dto(hit, include_public_document=request.include_public_document)
                             for hit in candidates[:request.top_k]]
-                    return KnowledgeSearchResult(hits=hits, data_revisions=revisions,
+                    image_hits = [self._dto(hit, include_public_document=request.include_public_document)
+                                  for hit in images] if request.split_multimodal_candidates else None
+                    return KnowledgeSearchResult(hits=hits, image_hits=image_hits, data_revisions=revisions,
                                                  embedding_model=request.embedding_model, rerank_model=request.rerank_model)
         except (TimeoutError, DeadlineExceeded) as error:
             logger.warning("knowledge_search_timeout operation_id=%s phase=query timeout_seconds=%s exception_type=%s",
