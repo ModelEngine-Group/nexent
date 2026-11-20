@@ -243,3 +243,14 @@ def test_image_filter_disabled(exa_search_tool, mock_observer):
     expected_images = ["https://example.com/image0.jpg"]
     mock_observer.add_message.assert_any_call("", ProcessType.PICTURE_WEB,
                                               json.dumps({"images_url": expected_images}, ensure_ascii=False))
+
+def test_data_process_service_comes_from_parameter(mock_observer, monkeypatch):
+    """The SDK must take data_process_service as a parameter, not read the environment"""
+    monkeypatch.setenv("DATA_PROCESS_SERVICE", "http://from-env")
+    with patch('exa_py.Exa', return_value=mock_exa_client):
+        tool = ExaSearchTool(exa_api_key="k", observer=mock_observer,
+                             data_process_service="http://from-param")
+        default_tool = ExaSearchTool(exa_api_key="k", observer=mock_observer)
+
+    assert tool.data_process_service == "http://from-param"
+    assert default_tool.data_process_service is None

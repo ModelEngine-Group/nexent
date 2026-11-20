@@ -38,7 +38,7 @@ class ToolResources:
                 # `document_paths` is intentionally hidden from the LLM and only
                 # populated via tool_params from the northbound interface.
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map", "data_process_service"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -52,6 +52,8 @@ class ToolResources:
                     "rerank_model", None) if tool_config.metadata else None
                 tools_obj.display_name_to_index_map = tool_config.metadata.get(
                     "display_name_to_index_map", {}) if tool_config.metadata else {}
+                tools_obj.data_process_service = tool_config.metadata.get(
+                    "data_process_service_url", None) if tool_config.metadata else None
                 # Internal access control: restrict results to documents whose
                 # path_or_url is in the allow list. Only the northbound interface
                 # may populate this; never the LLM.
@@ -63,6 +65,13 @@ class ToolResources:
                     tool_config.metadata.get("allowed_index_names")
                     if tool_config.metadata else None
                 )
+            elif class_name in ["ExaSearchTool", "TavilySearchTool", "LinkupSearchTool"]:
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "data_process_service"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.data_process_service = tool_config.metadata.get(
+                    "data_process_service_url", None) if tool_config.metadata else None
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()

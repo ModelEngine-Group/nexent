@@ -565,6 +565,7 @@ async def create_tool_config_list(
                 # Defense-in-depth whitelist: forward() will reject any index not in this list,
                 # even if the LLM fabricates an unauthorized index name.
                 "allowed_index_names": list(allowed_index_names),
+                "data_process_service_url": DATA_PROCESS_SERVICE,
             }
 
             if not allowed_index_names:
@@ -590,6 +591,14 @@ async def create_tool_config_list(
                     f"Please configure an embedding model for this knowledge base."
                 )
             tool_config.metadata["embedding_model"] = embedding_model
+        elif tool_config.class_name in [
+            "ExaSearchTool",
+            "TavilySearchTool",
+            "LinkupSearchTool",
+        ]:
+            tool_config.metadata = {
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+            }
         elif tool_config.class_name in LOCAL_RERANK_TOOL_CLASSES and not portable_evaluation:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
