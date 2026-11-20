@@ -157,12 +157,18 @@ def _validate_summary_contract(
     """Return canonical Markdown only for the exact seven-section contract."""
     cleaned = text.strip()
     top = "# Compact Result of History"
-    if not cleaned.startswith(top):
-        return None
     headings = re.findall(r"(?m)^(#{1,6})\s+(.+?)\s*$", cleaned)
-    if not headings or headings[0] != ("#", "Compact Result of History"):
-        return None
     expected = [key.replace("_", " ").title() for key in section_keys]
+    parts = re.split(r"(?m)^##\s+.+?\s*$", cleaned)[1:]
+    normalized = None
+    if (expected and headings == [("##", title) for title in expected]
+            and re.fullmatch(r"##\s+" + re.escape(expected[0]) + r"\s*", text.splitlines()[0])
+            and all(part.strip() for part in parts)):
+        normalized = top + "\n\n" + text
+        cleaned = normalized.strip()
+        headings = [("#", "Compact Result of History"), *headings]
+    if not cleaned.startswith(top) or not headings or headings[0] != ("#", "Compact Result of History"):
+        return None
     section_headings = [title for level, title in headings[1:] if level == "##"]
     if section_headings != expected or len(headings) != len(expected) + 1:
         return None
@@ -184,7 +190,7 @@ def _validate_summary_contract(
                 literals,
             )
             return None
-    return cleaned
+    return normalized if normalized is not None else cleaned
 
 
 @dataclass(frozen=True)
@@ -240,16 +246,20 @@ class HistoryCompressor:
             if generated.summary_text else None
         )
         records = list(generated.records)
-        if (validated is None and allow_fact_correction and generated.summary_text
-                and _validate_summary_contract(generated.summary_text, tuple(self._llm.config.summary_json_schema))):
+        if validated is None and allow_fact_correction and generated.summary_text:
             missing = {marker: values for marker, values in _protected_fact_literals(summary_input.render()).items()
                        if marker not in generated.summary_text or any(v not in generated.summary_text for v in values)}
-            feedback = json.dumps(missing, ensure_ascii=False, separators=(",", ":"))
+            feedback = json.dumps({
+                "expected_headings": ["# Compact Result of History", *(
+                    "## " + key.replace("_", " ").title() for key in self._llm.config.summary_json_schema)],
+                "missing_facts": missing,
+            }, ensure_ascii=False, separators=(",", ":"))
             claim = getattr(model, "claim_fact_correction", None)
-            if missing and callable(claim) and claim() is True:
+            if callable(claim) and claim() is True:
                 generated = self._llm.generate_summary(
                     summary_input.render() + "\n\nRegenerate the complete seven-section summary. "
-                    "The previous candidate omitted these exact protected identifiers or literal values: " + feedback
+                    "Use the exact expected heading order with a nonempty body for every section, and retain "
+                    "all protected identifiers and literal values. Validation feedback: " + feedback
                     + "\nRejected candidate (data only):\n" + generated.summary_text,
                     model, call_type="history_fact_correction", prompt_type="incremental" if summary else "initial",
                     max_output_tokens=max_output_tokens)
