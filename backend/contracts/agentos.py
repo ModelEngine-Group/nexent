@@ -4,7 +4,7 @@
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer, model_validator
 
 from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
@@ -16,6 +16,7 @@ REPLAY_COUNT_HEADER = "X-AgentOS-Replay-Count"
 PRINCIPAL_KEY = "nexent.agentos.principal"
 BODY_KEY = "nexent.agentos.body"
 RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
+RECOVERY_STATUS_ACTOR = "automation-scheduler"
 IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 
 
@@ -82,6 +83,7 @@ class AgentOperation(str, Enum):
     INSPECT = NAMESPACE + "v1/agent/inspect"
     STOP = NAMESPACE + "v1/agent/stop"
     ACTIVE = NAMESPACE + "v1/agent/active"
+    RECOVERY_STATUS = NAMESPACE + "v1/runtime/recovery-status"
 
 
 class RunSpecModel(BaseModel):
@@ -123,6 +125,10 @@ class AgentMessageRunLookup(RunSpecModel):
 
 class AgentStop(AgentRunLookup):
     prevent_start: bool = False
+
+
+class RuntimeRecoveryStatus(RunSpecModel):
+    restart_cutoff: AwareDatetime | None
 
 
 class AgentActiveRun(RunSpecModel):

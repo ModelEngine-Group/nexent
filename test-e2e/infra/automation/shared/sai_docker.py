@@ -70,6 +70,8 @@ def verification_image(repo: Path):
     sandbox = command(["docker", "image", "inspect", "nexent/nexent-sandbox:latest", "--format", "{{.Id}}"])
     image = None
     with tempfile.TemporaryDirectory(prefix="nexent-sai-image-") as scratch:
+        if Path(scratch).resolve().parent != Path(tempfile.gettempdir()).resolve():
+            raise RuntimeError('Verification image scratch directory escaped its owned root')
         definition = Path(scratch) / "Dockerfile"
         definition.write_text(
             "FROM nexent/nexent:latest\n"

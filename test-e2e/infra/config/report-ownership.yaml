@@ -115,6 +115,8 @@ feature_overrides:
   SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
+  KSM-CONFIG: sandbox
+  KSM-SYSTEM: sandbox
   SAI-001: runtime
   SDK-SQL-ROWS: runtime
   SEARCH-DEEPSEEK: runtime

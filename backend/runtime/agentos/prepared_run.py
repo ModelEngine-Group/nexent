@@ -30,6 +30,7 @@ from runtime.agentos.prepared_evaluation import (
     discard_prepared_workspace, load_prepared_run, prepare_run_snapshot, release_prepared_run,
 )
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
+from runtime.sandbox_runtime import OwnedSandboxRun, release_agentos_sandbox, reserve_agentos_sandbox
 from runtime.thread_management import agent_stream_producer_tasks, runtime_thread_manager
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ class _AdmissionSlot:
 
     token: str
     worker: Future | None = None
+    ownership: OwnedSandboxRun | None = None
+    lease_lost: asyncio.Event | None = None
 
     def release(self, _completed=None):
         if self.worker is not None and not self.worker.done():
@@ -53,9 +56,16 @@ async def _control_io(task, function, *args):
     return await run_blocking(task, function, *args, lane="control-io", owner="runtime")
 
 
-async def _wait_for_stop(identity):
+async def _wait_for_stop(identity, lease_lost=None):
     while not await _control_io("agentos-prepared-stop", stop_requested, identity):
-        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+        if lease_lost is None:
+            await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+        else:
+            try:
+                await asyncio.wait_for(lease_lost.wait(), timeout=RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+            except TimeoutError:
+                continue
+            return
 
 
 async def _snapshot_chunks(info):
@@ -167,16 +177,22 @@ async def _finish_producer(runner, monitor, identity, journal, status):
     await asyncio.gather(runner, monitor, return_exceptions=True)
     try:
         finished = await _control_io("agentos-prepared-finish", finish_execution, identity, status)
-        if finished:
-            await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
-    except (RedisError, SQLAlchemyError, RuntimeError):
+    except (SQLAlchemyError, RuntimeError):
         logger.exception("Prepared AgentOS terminal will be reconciled run_id=%s", identity.run_id)
+        return False
+    if finished:
+        try:
+            await _control_io("agentos-prepared-terminal", journal.repair_terminal, status)
+        except (RedisError, RuntimeError):
+            logger.exception("Prepared AgentOS journal will be reconciled run_id=%s", identity.run_id)
+    return finished
 
 
 async def _produce(payload, actor, identity, journal, slot=None):
     status = "failed"
     runner = asyncio.create_task(_run_snapshot(payload, actor, identity, journal, slot))
-    monitor = asyncio.create_task(_wait_for_stop(identity))
+    stop_watch = _wait_for_stop(identity, slot.lease_lost) if slot is not None and slot.lease_lost is not None else _wait_for_stop(identity)
+    monitor = asyncio.create_task(stop_watch)
     try:
         done, _ = await asyncio.wait((runner, monitor), return_when=asyncio.FIRST_COMPLETED)
         if runner in done:
@@ -191,7 +207,15 @@ async def _produce(payload, actor, identity, journal, slot=None):
         logger.exception("Prepared AgentOS run failed run_id=%s", identity.run_id)
     finally:
         # Keep joining the owned worker and terminal write during repeated shutdown cancellation.
-        cleanup = asyncio.create_task(_finish_producer(runner, monitor, identity, journal, status))
+        async def finalize():
+            settled = await _finish_producer(runner, monitor, identity, journal, status)
+            if slot is not None and slot.ownership is not None:
+                if settled:
+                    await release_agentos_sandbox(slot.ownership, slot.worker)
+                else:
+                    slot.ownership.coordinator.signal_lost()
+
+        cleanup = asyncio.create_task(finalize())
         cancelled = False
         while not cleanup.done():
             try:
@@ -235,10 +259,21 @@ async def _admit(payload, actor):
         key = f"{actor.tenant_id}:workbench_main"
     slot = _AdmissionSlot(agent_run_manager.reserve_agent_capacity(key, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS))
     try:
+        loop = asyncio.get_running_loop()
+        lost = asyncio.Event()
+        slot.ownership = await reserve_agentos_sandbox(
+            identity.tenant_id, identity.user_id, identity.conversation_id, identity.run_id, kind="CHAT",
+            cancel=lambda: loop.call_soon_threadsafe(lost.set),
+        )
+        if slot.ownership is not None:
+            slot.lease_lost = lost
         journal = await _start_journal(identity)
         producer = asyncio.create_task(_produce(payload, actor, identity, journal, slot), name=f"agentos-run:{identity.run_id}")
     except BaseException:
-        slot.release()
+        try:
+            await release_agentos_sandbox(slot.ownership)
+        finally:
+            slot.release()
         raise
     producer.add_done_callback(slot.release)
     agent_stream_producer_tasks.add(producer)

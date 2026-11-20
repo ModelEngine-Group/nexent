@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: KSM-T01-001
+  change_type: requirement
+  requirement_id: KSM-T01-001
+  title: Establish S1 sandbox configuration and unified execution identity
+  description: Implement T01 policy, owner/profile contracts and run ID propagation while retaining Docker compatibility, single Runtime deployment restrictions and zero database schema changes.
+  affected_features:
+    existing: [SAI-001, TFP-001]
+    added: [KSM-CONFIG]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [SAI-D3-001, TFP-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/agents/test_sandbox_config.py
+      - test/backend/agents/test_kubernetes_sandbox_config.py
+      - test/backend/agents/test_runtime_execution_identity.py
+      - test/backend/agents/test_runtime_sandbox_options.py
+      - test/backend/agents/test_sandbox_deployment_config.py
+      - test/backend/agents/test_create_agent_run_identity.py
+      - test/backend/services/test_agent_run_identity.py
+      - test/backend/services/test_agent_subscription_lifecycle.py
+      - test/sdk/core/agents/test_kubernetes_sandbox_contracts.py
+      - test/sdk/core/agents/test_nexent_agent_sandbox_construction.py
+    behaviors:
+      - Preserve Docker DB precedence, defaults, explicit local, invalid policy errors and input immutability.
+      - Resolve Kubernetes SYSTEM/error defaults, immutable trusted owner/profile, Pod conflicts, unsupported SESSION and unavailable execution without fallback.
+      - Preserve one execution ID through normal/background/evaluation preparation and workspace construction without changing public identifiers.
+      - Preserve deferred cold paths, cancellation and existing Docker sandbox behavior.
+    reason: T01 changes pure configuration and internal identity only; use isolated UT and existing Docker regression instead of manufacturing D1. Actual Pod, TLS, callback, lifecycle and deployment proof belongs to later S1 work packages.
+  no_case_change_reason: Existing SAI/TFP contracts remain unchanged. No new public endpoint or executable Kubernetes backend is delivered by T01; full S1 higher-boundary acceptance remains pending.
+  notes: Ownership is sandbox. No active automated D2-D5 Case is added or modified, so no new preparation binding is applicable. Local docker-desktop is now Ready on Kubernetes v1.34.1 with one node and only docker.io/hostpath storage; two-node RWX, actual Runtime SA and NetworkPolicy proofs remain BLOCKED. Existing unrelated untracked AIDP test assets fail full-worktree validation and are preserved; validate the tracked baseline plus this change separately and report both results.

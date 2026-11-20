@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "stage": "D5",
+  "module": "RUNTIME-SANDBOX",
+  "case": {
+    "case_id": "KSM-MULTIRUNTIME-D5-001",
+    "feature_id": "KSM-SYSTEM",
+    "business_rule_ids": [
+      "KSM-SYSTEM-R3",
+      "KSM-SYSTEM-R4"
+    ],
+    "title": "Competing Runtime replicas preserve run ownership through scaling and faults",
+    "type": "RELIABILITY",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Competing Runtime replicas preserve run ownership through scaling and faults",
+    "preconditions": [
+      "Two current Runtime replicas use shared Redis, a verified single-node workspace and a test business database without schema changes.",
+      "No legacy Runtime with global recovery/cleanup participates."
+    ],
+    "test_data": {
+      "resource_prefix": "ksm-disposable",
+      "profile": "controlled model; real Kubernetes/Redis/storage"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Race two replicas on one conversation and run longer than three lease TTLs.",
+        "expected": "Exactly one reservation and execution succeeds; compare-token renewals prevent duplicate admission."
+      },
+      {
+        "order": 2,
+        "action": "Start a new run after completion, then deliver old server-bound stream, completion and cancellation signals.",
+        "expected": "Old generation cannot alter the new run; the legacy conversation-only client stop still stops the current run."
+      },
+      {
+        "order": 3,
+        "action": "Start B while A owns active chat, automation and evaluation work; inject crashes at reservation, marker and business-record association windows.",
+        "expected": "Both recovery paths use exact IDs and proved owner death; B never globally fails/unlocks/deletes A; unknown associations remain conservative."
+      },
+      {
+        "order": 4,
+        "action": "Interrupt Redis or Kubernetes API, lose Redis keys and replace owner epochs.",
+        "expected": "Affected work stops admission and cancels best effort; missing keys and TTL expiry alone never permit takeover or replay."
+      },
+      {
+        "order": 5,
+        "action": "Delete or restart owner A while B runs, allowing A work to be interrupted.",
+        "expected": "No guarantee of A callback, upload or cleanup completion; B ownership is not mutated and a new owner never adopts or replays the old execution."
+      },
+      {
+        "order": 6,
+        "action": "Roll, expand and shrink the isolated deployment, saturate local admission and inspect remnants.",
+        "expected": "Replica/strategy restrictions are relaxed only after prerequisites pass; local Agent quotas remain local; no foreign resource or shared PVC is removed."
+      }
+    ],
+    "expected_results": [
+      "Zero concurrent executions for one business conversation and zero stale-generation mutation.",
+      "Zero false message/evaluation/automation failures, unlocks or cross-owner cleanup.",
+      "Scale-in/restart may interrupt owner work; all performed cleanup is owner-scoped and shared claims are preserved."
+    ],
+    "forbidden_side_effects": [
+      "No global Agent quota, transparent task migration/replay or independent sandbox autoscaler.",
+      "No takeover based solely on missing/expired Redis keys, missing Pod API result or unknown marker."
+    ],
+    "risk_type": "RELIABILITY",
+    "risk": "Scale, recovery or stale signals duplicate execution or corrupt another owner's live task.",
+    "condition": [
+      "Concurrent admission, long runs, owner restart, creation-response loss, Redis/API loss and scale-in."
+    ],
+    "metrics": [
+      "Concurrent execution count per conversation",
+      "Cross-owner mutations and orphan resource count",
+      "Owned and foreign resource inventory after termination"
+    ],
+    "thresholds": [
+      "Maximum concurrent execution per conversation equals one.",
+      "Cross-owner and stale-generation mutations equal zero.",
+      "No cross-owner cleanup or old-execution adoption; graceful shutdown completion is not required."
+    ],
+    "recovery_expectations": [
+      "Use exact protected business associations and prove old process death before recovery.",
+      "Unknown ownership remains blocked; no automatic business replay."
+    ],
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ],
+      "timeout_seconds": 900
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Complete the declared boundary and enforce all forbidden effects.",
+        "steps": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "expected_results": [
+          1,
+          2,
+          3
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}

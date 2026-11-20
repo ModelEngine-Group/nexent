@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from contracts.agentos import (
     BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentLegacyResume, AgentMessageRunLookup, AgentOperation, AgentResume, AgentRunLookup,
     AgentRunReference, AgentRunState, AgentStop, CompatibilityStop, DebugRunReference,
+    RECOVERY_STATUS_ACTOR, RunSpecModel, RuntimeRecoveryStatus,
 )
 from infrastructure.rdb.agent_execution import active_execution, read_execution, read_terminal_execution_for_message
 from infrastructure.rdb.conversation_state import conversation_belongs_to
@@ -20,6 +21,9 @@ from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
 from runtime.agentos import debug
 from runtime.agentos.legacy_resume import resume_legacy_run
+from runtime.identity import uses_distributed_runtime
+from runtime.sandbox_journal import SandboxCoordinationUnknown
+from runtime.sandbox_runtime import get_coordinator
 
 
 async def _control_io(task, function, *args, **kwargs):
@@ -52,6 +56,16 @@ async def find_active(payload: CompatibilityStop, actor) -> AgentActiveRun:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_EXECUTION_STORE_UNAVAILABLE"}) from exc
+    if run_id is None and uses_distributed_runtime():
+        def read_sandbox_reference():
+            return get_coordinator().current_reference(actor.tenant_id, actor.user_id, payload.conversation_id)
+
+        try:
+            reference = await _control_io("agentos-active-sandbox", read_sandbox_reference)
+        except (OSError, SandboxCoordinationUnknown) as exc:
+            raise HTTPException(status_code=503, detail={"code": "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN"}) from exc
+        if reference is not None and reference.phase != "TERMINAL":
+            run_id = reference.run_id
     return AgentActiveRun(run_id=run_id)
 
 
@@ -229,4 +243,20 @@ def create_run_lifecycle_router():
     router.add_api_route(
         AgentOperation.ACTIVE.value, handler(CompatibilityStop, find_active), methods=["POST"], include_in_schema=False,
     )
+
+    @router.post(AgentOperation.RECOVERY_STATUS.value, include_in_schema=False)
+    async def recovery_status(request: Request):
+        actor = request.scope.get(PRINCIPAL_KEY)
+        if actor is None or (actor.user_id, actor.tenant_id) != (RECOVERY_STATUS_ACTOR, RECOVERY_STATUS_ACTOR):
+            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+        try:
+            RunSpecModel.model_validate_json(request.scope[BODY_KEY])
+        except ValidationError:
+            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+        state = request.app.state
+        coordinator = getattr(state, "sandbox_coordinator", None)
+        if coordinator is None or coordinator.lost_coordination.is_set():
+            return JSONResponse({"code": "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN"}, status_code=503)
+        return RuntimeRecoveryStatus(restart_cutoff=state.sandbox_restart_cutoff)
+
     return router

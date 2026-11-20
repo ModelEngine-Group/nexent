@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "RUNTIME-SANDBOX",
+    "name": "Runtime sandbox"
+  },
+  "feature": {
+    "feature_id": "KSM-SYSTEM",
+    "name": "Kubernetes SYSTEM sandbox migration",
+    "status": "active",
+    "description": "S1 equivalent execution per Runtime owner, scoped running-state safety and no new database schema; graceful shutdown is out of scope.",
+    "business_rules": [
+      {
+        "rule_id": "KSM-SYSTEM-R1",
+        "description": "One lazy SYSTEM sandbox per trusted Runtime Pod UID uses a fixed immutable profile, TLS and scoped management permissions."
+      },
+      {
+        "rule_id": "KSM-SYSTEM-R2",
+        "description": "Existing Python, script, workspace, file delivery and host tools retain their Docker contracts with separate invocation kernels."
+      },
+      {
+        "rule_id": "KSM-SYSTEM-R3",
+        "description": "Run reservation, generations, protected exact business associations and conservative recovery prevent duplicate execution and cross-owner mutation."
+      },
+      {
+        "rule_id": "KSM-SYSTEM-R4",
+        "description": "Deployment restrictions remain until multi-instance proof passes. Runtime uses existing shutdown; no preStop drain, management credential or guarantee of completion during scale-in/restart."
+      }
+    ],
+    "required_test_stages": [
+      "D3",
+      "D4",
+      "D5"
+    ],
+    "source": {
+      "requirement_ids": [
+        "KSM-R01",
+        "KSM-R02",
+        "KSM-R03",
+        "KSM-R04",
+        "KSM-R05",
+        "KSM-R06",
+        "KSM-R07",
+        "KSM-R08",
+        "KSM-R09",
+        "KSM-R10",
+        "KSM-R11",
+        "KSM-R12"
+      ],
+      "spec_path": "docs/Developing/runtime-sandbox-kubernetes-migration/proposal.md",
+      "notes": "UT owns isolated contracts; real D3/D4/D5 prove execution, files, browser and running-state safety on one node. User removed graceful Runtime drain on 2026-11-13; KSM-DRAIN-D2-001 is retired. Existing D1 assets remain."
+    }
+  }
+}

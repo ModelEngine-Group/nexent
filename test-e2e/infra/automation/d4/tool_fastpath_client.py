@@ -1,4 +1,5 @@
-"""Credential-free receipts for the fixed deployed fast-path browser journey."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Credential-free receipts for the fixed deployed fast-path browser journeys."""
 
 import argparse
 import asyncio
@@ -83,13 +84,17 @@ async def cleanup_receipt(receipt):
     return {"cleaned": True}
 
 
-async def operate(operation, *, promoted=False, conversation=None):
+async def operate(operation, *, promoted=False, conversation=None, case_id=CASE_ID):
+    ksm = case_id == 'KSM-DOWNLOAD-D4-001'
+    if ksm:
+        from shared.ksm_download import deployment, responses, verify_download
+
     if operation == "setup":
         if receipt_path().exists():
             raise ValueError("Do not overwrite an existing owned TFP receipt")
         cfg = fixture_config()
-        fixture = await setup(CASE_ID)
-        receipt = {"fixture": fixture, "config": cfg, "runs": []}
+        fixture = await setup(case_id, verify_runtime=deployment) if ksm else await setup(case_id)
+        receipt = {"case_id": case_id, "fixture": fixture, "config": cfg, "runs": []}
         try:
             save_receipt(receipt)
         except BaseException as primary:
@@ -102,11 +107,14 @@ async def operate(operation, *, promoted=False, conversation=None):
     if operation == "cleanup" and not receipt_path().exists():
         return {"cleaned": True}
     receipt = read_receipt()
+    if receipt.get('case_id', CASE_ID) != case_id:
+        raise ValueError('Browser receipt belongs to another case')
     fixture, cfg = receipt["fixture"], receipt["config"]
     if operation == "cleanup":
         return await cleanup_receipt(receipt)
     if operation == "reset":
-        return await control(fixture["nonce"], "reset", responses=responses_for(cfg, fixture["nonce"], promoted))
+        scripts = responses(fixture['nonce']) if ksm else responses_for(cfg, fixture['nonce'], promoted)
+        return await control(fixture['nonce'], 'reset', responses=scripts)
     if not isinstance(conversation, int) or conversation <= 0:
         raise ValueError("A server-issued owned conversation ID is required")
     if operation == "record":
@@ -116,7 +124,7 @@ async def operate(operation, *, promoted=False, conversation=None):
             "owned_conversations",
             str(conversation),
             conversation,
-            owner_case_id=CASE_ID,
+            owner_case_id=case_id,
             cleanup={
                 "service": "runtime",
                 "identity": "tenant_a_admin",
@@ -132,6 +140,8 @@ async def operate(operation, *, promoted=False, conversation=None):
     assert len(matches) == 1 and matches[0]["promoted"] == promoted, "Run is not owned by this scenario"
     identity = await sign_in("tenant_a_admin")
     units = history_units(await wait_history(identity, conversation))
+    if ksm:
+        return await verify_download(identity, units, fixture, case_id)
     result = verify_result(units, cfg, fixture["nonce"], promoted)
     state = await control(fixture["nonce"], "state")
     assert state["calls"] == len(responses_for(cfg, fixture["nonce"], promoted))
@@ -154,8 +164,10 @@ async def main():
     parser.add_argument("operation", choices=["setup", "reset", "record", "inspect", "cleanup"])
     parser.add_argument("--promoted", action="store_true")
     parser.add_argument("--conversation", type=int)
+    parser.add_argument('--case-id', choices=[CASE_ID, 'KSM-DOWNLOAD-D4-001'], default=CASE_ID)
     args = parser.parse_args()
-    print(json.dumps(await operate(args.operation, promoted=args.promoted, conversation=args.conversation)))
+    print(json.dumps(await operate(args.operation, promoted=args.promoted, conversation=args.conversation,
+                                   case_id=args.case_id)))
 
 
 if __name__ == "__main__":

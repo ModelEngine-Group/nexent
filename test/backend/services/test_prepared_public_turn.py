@@ -390,15 +390,17 @@ async def test_explicit_workbench_resume_obeys_disabled_feature_before_lookup(fl
 
 
 @pytest.mark.asyncio
-async def test_event_store_rejection_does_not_create_a_visible_turn(flow):
+@pytest.mark.parametrize("code", ["AGENTOS_EVENT_STORE_UNAVAILABLE", "AGENTOS_SANDBOX_OWNERSHIP_UNKNOWN"])
+async def test_confirmed_unavailable_rejection_does_not_create_a_visible_turn(flow, code):
     operations, _, client, _ = flow
-    error = RuntimeUpstreamError(503, b'{"detail":{"code":"AGENTOS_EVENT_STORE_UNAVAILABLE"}}', {})
+    error = RuntimeUpstreamError(503, json.dumps({"detail": {"code": code}}).encode(), {})
     client.start_prepared_run.side_effect = error
 
     with pytest.raises(RuntimeUpstreamError):
         await prepared_turn.start_turn(PAYLOAD, AgentRequest.model_validate(PAYLOAD.request), *ACTOR, client)
 
     assert operations == ["stage", "close"]
+    client.start_prepared_run.assert_awaited_once()
     client.resume.assert_not_awaited()
 
 

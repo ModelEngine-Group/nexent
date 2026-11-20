@@ -996,6 +996,25 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
     assert result[0] == "hello world"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_id", [None, -123])
+async def test_evaluation_preserves_its_scope_when_dispatched_through_agentos(service_module, monkeypatch, conversation_id):
+    from management.services.agent import runtime_client
+
+    answer = types.SimpleNamespace(answer="answer", events=[])
+    dispatch = AsyncMock(return_value=answer)
+    monkeypatch.setattr(runtime_client, "forward_evaluation_case", dispatch)
+    result = await service_module._run_agent_to_final_answer(
+        1, "tenant", "user", "query", 1, conversation_id=conversation_id,
+    )
+
+    assert result == ("answer", [])
+    payload, user, tenant = dispatch.await_args.args
+    assert (user, tenant) == ("user", "tenant")
+    assert payload.conversation_id == (conversation_id or 0)
+    assert (payload.agent_id, payload.version_no, payload.query) == (1, 1, "query")
+
+
 def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
     first = service_module._evaluation_conversation_id(10, 20)
     second = service_module._evaluation_conversation_id(10, 21)

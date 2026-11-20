@@ -100,6 +100,35 @@ async def test_lost_ack_during_runtime_admission_settles_one_owned_run(payload, 
     runtime.finish.assert_called_once_with(runtime.begin.call_args_list[0].args[0], "completed")
 
 
+@pytest.mark.parametrize('debug', [False, True])
+@pytest.mark.asyncio
+async def test_admission_identity_reaches_worker_without_changing_response_ids(lifecycle, debug):
+    env = lifecycle
+    env.request.is_debug = debug
+    seen = []
+
+    async def source(request, **_kwargs):
+        seen.append(request.__dict__['_runtime_execution_run_id'])
+        env.channel.complete()
+        env.future.set_result(None)
+        yield 'data: done\n\n'
+
+    response = await env.start(source)
+    run_id = env.request.__dict__['_runtime_execution_run_id']
+    spec = env.service.runtime_thread_manager.submit.call_args.args[1]
+    assert spec.run_id == run_id
+    assert len(run_id) == 32
+    assert run_id != str(env.request.conversation_id)
+    if debug:
+        assert response.headers['run_id'].startswith('debug-')
+        assert response.headers['run_id'] != run_id
+    else:
+        assert response.headers['conversation_id'] == '123'
+        await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    _ = [chunk async for chunk in response.body_iterator]
+    assert seen == [run_id]
+
+
 @pytest.mark.asyncio
 async def test_preparation_failure_records_safe_terminal_and_releases_capacity(payload, runtime, mocker):
     runtime.prepare.side_effect = RuntimeError("private provider details")

@@ -1,0 +1,38 @@
+{{- if eq (default "docker" .Values.global.sandboxProvider) "kubernetes" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nexent-runtime-sandbox
+  namespace: {{ .Values.global.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nexent-runtime-sandbox
+  namespace: {{ .Values.global.namespace }}
+rules:
+  # Keep owner cleanup permissions while an enabled deployment drains into disabled mode.
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nexent-runtime-sandbox
+  namespace: {{ .Values.global.namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: nexent-runtime-sandbox
+    namespace: {{ .Values.global.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nexent-runtime-sandbox
+{{- end }}
