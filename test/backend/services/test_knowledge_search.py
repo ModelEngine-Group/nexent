@@ -207,3 +207,23 @@ async def test_embedding_revision_or_shape_never_reaches_vectors(search):
         with pytest.raises(error):
             await service.search(request, s.actor)
     s.vectors.search.assert_not_called()
+
+
+@pytest.mark.parametrize("chunk_index", [0, 7])
+def test_protected_image_search_preserves_published_chunk_index(chunk_index):
+    location = {
+        "kind": "image",
+        "page_number": 2,
+        "image_ref": {"space": "files", "key": "image.png", "version": "v1", "sha256": "c" * 64},
+    }
+    hit = SearchHit(VectorKey("kb", "image"), .5, "elasticsearch.cosine", {
+        "knowledge_id": 1, "file_id": "a" * 32, "file_version": 0, "content": "image",
+        "chunk_index": chunk_index, "location": location,
+    }, Revision("generation"))
+
+    result = KnowledgeSearchService._dto(hit, include_public_document=True)
+
+    assert result.location["chunk_index"] == chunk_index
+    assert result.location["page_number"] == 2
+    assert result.public_document is None and result.image_ref.key == "image.png"
+    assert "chunk_index" not in location

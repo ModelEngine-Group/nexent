@@ -178,13 +178,18 @@ class KnowledgeSearchService:
         details = dict(hit.scores)
         if hit.highlights:
             details["retrieval_highlight_terms"] = list(hit.highlights)
+        location = hit.payload.get("location", {})
+        image_ref = location.get("image_ref") if location.get("kind") == "image" else None
+        chunk_index = hit.payload.get("chunk_index")
+        if include_public_document and image_ref is not None and type(chunk_index) is int and chunk_index >= 0:
+            location = {**location, "chunk_index": chunk_index}
         return KnowledgeSearchHit(
             **{name: hit.payload[name] for name in ("knowledge_id", "file_id", "file_version", "content")},
-            filename=public_chunk_value(hit.payload.get("location", {}), "filename", hit.payload.get("filename", "")), location=hit.payload.get("location", {}),
+            filename=public_chunk_value(location, "filename", hit.payload.get("filename", "")),
+            location=location,
             chunk_id=hit.key.key, score=hit.score, score_kind=hit.score_kind,
             score_details=details,
-            image_ref=hit.payload.get("location", {}).get("image_ref")
-            if hit.payload.get("location", {}).get("kind") == "image" else None,
+            image_ref=image_ref,
             public_document=_public_document(hit) if include_public_document else None,
         )
 
