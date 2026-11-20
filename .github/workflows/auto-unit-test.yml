@@ -13,7 +13,13 @@ on:
       pytest_file_timeout:
         description: 'per-file timeout in seconds (0=disabled)'
         required: false
-        default: '300'
+        # Raised from 300 → 600 because trajectory cleanup tests that
+        # enumerate 1000 OTLP files consistently need ~350s on CI runners
+        # (self-hosted jason-workstation-2 has slower disk I/O than the
+        # development Docker image).  Anything under 600s is still faster
+        # than the overall job timeout and gives those slow-but-legitimate
+        # tests headroom without letting truly hung subprocesses run wild.
+        default: '600'
       codecov_os:
         description: 'Optional Codecov OS override; blank detects the executing runner architecture'
         required: false
@@ -62,6 +68,68 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # clean: false — skip git-clean so checkout does not trip over
+          # root-owned leftover files inside .pytest-tmp/ (some earlier
+          # tests spawn subprocesses that land files owned by root; the
+          # runner user cannot unlink them).  New temp dirs are already
+          # kept outside the repo tree (see test/conftest.py) so the old
+          # .pytest-tmp/ is now dead weight and nothing writes there.
+          clean: false
+
+      - name: Clean leftover pre-refactor paths (best-effort)
+        run: |
+          # Self-hosted runners (jason-workstation-2-container-*) keep
+          # persistent workspaces.  actions/checkout with clean: false
+          # preserves everything — but earlier refactors (#4314 Gateway
+          # independent image, #4160 split backend into API/DB/contracts)
+          # deleted directories that still linger on disk as un-tracked
+          # files from pre-refactor runs.  Regression guards such as
+          # test_management_relocation.py / test_gateway_layout.py assert
+          # these paths DO NOT EXIST, so leftover dirs turn into hard
+          # test failures that have nothing to do with the PR content.
+          #
+          # Strategy (two layers):
+          #   1) git clean -ffdx with excludes.  Clears every untracked /
+          #      ignored path that git sees, while skipping the small set
+          #      of known root-owned leftovers (.pytest-tmp, .pytest_cache)
+          #      that actions/checkout default clean: true also cannot
+          #      touch.  Covers all future refactors automatically.
+          #   2) Fallback chmod + rm for the excluded dirs themselves and
+          #      any path git clean could not remove.  Anything still
+          #      root-owned is logged but not a blocker — pytest no
+          #      longer writes to these paths (test/conftest.py moved
+          #      tmp_root outside the repo tree), so they are dead weight.
+          #
+          # Diagnostic: after both passes, print a ls of whatever untracked
+          # junk still remains so the next CI failure tells us exactly
+          # what was left behind.
+          echo "=== Layer 1: git clean -ffdx (excluding known root-owned dirs) ==="
+          git clean -ffdx -e .pytest-tmp -e .pytest_cache 2>&1 | head -50 || true
+          echo ""
+
+          echo "=== Layer 2: chmod + rm fallback for excluded / stubborn paths ==="
+          clean_tree() {
+            local target="$1"
+            [ -e "$target" ] || return 0
+            echo "  Removing leftover path: $target"
+            find "$target" -type d -exec chmod u+rwx {} + 2>/dev/null || true
+            find "$target" -type f -exec chmod u+rw {} + 2>/dev/null || true
+            rm -rf "$target" 2>/dev/null || echo "    (some files still unremovable — non-blocking)"
+          }
+          clean_tree ".pytest-tmp"
+          clean_tree ".pytest_cache"
+          # Legacy refactor paths — git clean already handled them on a
+          # clean checkout, but re-assert explicitly if anything was left.
+          clean_tree "backend/gateway/api"
+          clean_tree "backend/services/providers"
+          clean_tree "backend/management/security"
+          clean_tree "backend/utils"
+          echo ""
+
+          echo "=== Remaining untracked files (diagnostic) ==="
+          git clean -ffdxn 2>&1 | head -50 || true
+          echo "=== End diagnostic ==="
 
       - name: Install uv
         # astral-sh/setup-uv@v10.3.3
@@ -90,7 +158,7 @@ jobs:
         # Configure NEXENT_PYTEST_WORKERS in the runner environment; the default is the CPU count.
         env:
           NEXENT_PYTEST_TMPDIR: ${{ runner.temp }}/nexent-pytest-${{ github.run_id }}-${{ github.run_attempt }}
-          NEXENT_PYTEST_FILE_TIMEOUT: ${{ github.event.inputs.pytest_file_timeout || '300' }}
+          NEXENT_PYTEST_FILE_TIMEOUT: ${{ github.event.inputs.pytest_file_timeout || '600' }}
         run: |
           source backend/.venv/bin/activate && python test/run_all_test.py
           TEST_EXIT_CODE=$?
