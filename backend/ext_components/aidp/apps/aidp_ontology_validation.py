@@ -11,6 +11,7 @@ from fastapi import Path
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
+from contracts.roles import has_any_role
 from management.db.identity.user_tenant import get_user_role_by_tenant
 
 
@@ -55,8 +56,8 @@ def _require_ontology_manager(user_id: str, tenant_id: str) -> None:
     target KB permission so a KB owner can bind or annotate without acquiring
     platform-wide ontology rights.
     """
-    role = (get_user_role_by_tenant(user_id, tenant_id) or "USER").upper()
-    if role not in CAN_EDIT_ALL_USER_ROLES:
+    role = get_user_role_by_tenant(user_id, tenant_id)
+    if not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         raise _forbidden("当前用户没有本体库管理权限")
 
 

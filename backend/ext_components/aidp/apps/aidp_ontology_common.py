@@ -12,6 +12,7 @@ from nexent.core.concurrency import run_blocking
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.exceptions import AppException
+from contracts.roles import has_any_role
 from ext_components.aidp.apps.aidp_mgmt_common import _credentials
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
@@ -58,10 +59,10 @@ async def _load_bindings(
         lane="control-io",
         owner="config",
     )
-    role = (get_user_role_by_tenant(user_id, tenant_id) or "USER").upper()
+    role = get_user_role_by_tenant(user_id, tenant_id)
     # Ontology managers see every binding so the tab agrees with the trusted
     # binding count. Other callers only see knowledge bases they can read.
-    if readable_only and rows and role not in CAN_EDIT_ALL_USER_ROLES:
+    if readable_only and rows and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         allowed = await run_blocking(
             "aidp-ontology-binding-access",
             perms.filter_accessible_kds,
