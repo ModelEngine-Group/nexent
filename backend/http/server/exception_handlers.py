@@ -7,14 +7,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from contracts.errors.capabilities import NexentCapabilityError as _NCE
+from contracts.errors.domain import domain_error_body
 from contracts.errors.exceptions import (
     AppException,
     ManagementReadBusyError,
     QuotaExceededError,
     TokenExpiredError,
 )
-from management.utils.domain_errors import domain_error_body
-from management.utils.request_context import get_request_id
+from backend.http.server.request_context import get_request_id
 
 try:
     from ext_components.aidp.consts.aidp_exceptions import (

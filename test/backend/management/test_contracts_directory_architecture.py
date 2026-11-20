@@ -142,6 +142,7 @@ def test_error_definitions_have_one_canonical_directory():
         "trajectory.py",
         "capabilities.py",
         "ingestion.py",
+        "domain.py",
     }
     assert not any(
         (CONTRACTS / name).exists()
