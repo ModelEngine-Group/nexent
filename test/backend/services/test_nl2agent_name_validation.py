@@ -8,14 +8,14 @@ import re
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from pydantic import ValidationError
 
-from management.services.agent.creation import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from contracts.errors.exceptions import AgentDraftEditError
 from contracts.agent import AgentInfoRequest
-from services import nl2agent_service as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent as service
+from management.services.agent import nl2agent_tools as tools
 
 
 @pytest.mark.parametrize("name", [
@@ -58,7 +58,7 @@ def draft_boundary(mocker):
     mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
         "Authorization": "Bearer test", tools.NL2AGENT_AGENT_ID_HEADER: "170",
     }))
-    mocker.patch.object(tools, "get_current_user_id", return_value=("owner", "tenant-a"))
+    mocker.patch.object(tools, "authenticate_identity", return_value=SimpleNamespace(user_id="owner", tenant_id="tenant-a"))
     authorize = mocker.patch.object(service, "require_agent_draft_edit", return_value={
         "agent_id": 170, "name": None, "display_name": "Existing draft", "description": "",
     })

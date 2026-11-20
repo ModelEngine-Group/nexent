@@ -14,11 +14,11 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# Mock consts module before patching management.db.client to avoid ImportError
-# management.db.client imports from contracts.constants.environment, so we need to mock it first
+# Mock consts module before patching infrastructure.rdb.client to avoid ImportError
+# infrastructure.rdb.client imports from contracts.constants.environment, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
-# Set required constants that management.db.client might use
+# Set required constants that infrastructure.rdb.client might use
 consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
 consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
@@ -57,7 +57,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 from management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, analyze_cluster_coherence, merge_duplicate_documents_in_clusters
 from management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries, get_documents_from_es, process_documents_for_clustering
@@ -259,9 +259,7 @@ class TestSummarizeDocument:
 
     def test_summarize_document_with_model_success(self):
         """Test document summarization when model config exists and LLM returns value"""
-        with patch('management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
-             patch('management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
-            mock_get_model.return_value = {"id": 1}
+        with patch('management.services.knowledge_base.summary.invoke_chat_prompt_in_worker') as mock_llm:
             mock_llm.return_value = "Generated summary\n"
 
             result = summarize_document(
@@ -270,7 +268,7 @@ class TestSummarizeDocument:
                 language="en",
                 max_words=50,
                 model_id=1,
-                tenant_id="tenant"
+                tenant_id="tenant", user_id="actor"
             )
 
             assert result == "Generated summary"
@@ -305,9 +303,7 @@ class TestSummarizeCluster:
 
     def test_summarize_cluster_with_model_success(self):
         """Test cluster summarization when model config exists and LLM returns value"""
-        with patch('management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
-             patch('management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
-            mock_get_model.return_value = {"id": 1}
+        with patch('management.services.knowledge_base.summary.invoke_chat_prompt_in_worker') as mock_llm:
             mock_llm.return_value = "Cluster summary text  "
 
             result = summarize_cluster(
@@ -315,7 +311,7 @@ class TestSummarizeCluster:
                 language="en",
                 max_words=120,
                 model_id=1,
-                tenant_id="tenant"
+                tenant_id="tenant", user_id="actor"
             )
 
             assert result == "Cluster summary text"
@@ -354,7 +350,7 @@ class TestSummarizeClustersMapReduce:
                 document_samples=document_samples,
                 clusters=clusters,
                 model_id=1,
-                tenant_id="test_tenant"
+                tenant_id="test_tenant", user_id="actor"
             )
 
             assert isinstance(result, dict)
@@ -381,7 +377,7 @@ class TestSummarizeClustersMapReduce:
                 document_samples=document_samples,
                 clusters=clusters,
                 model_id=1,
-                tenant_id="test_tenant"
+                tenant_id="test_tenant", user_id="actor"
             )
 
             assert isinstance(result, dict)

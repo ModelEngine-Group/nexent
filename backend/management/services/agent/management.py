@@ -37,7 +37,7 @@ from management.db.agent.repository import (
     search_agent_id_by_agent_name,
     search_agent_info_by_agent_id,
 )
-from management.db.agent.version import batch_search_version_names, query_version_list
+from management.db.agent.version import batch_search_version_names, query_version_labels, query_version_list
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.skill import repository as skill_db
@@ -51,6 +51,7 @@ from management.services.agent.read import (
     apply_duplicate_name_availability_rules,
     check_agent_availability,
     project_agent_models,
+    load_agent_list_context,
 )
 from management.services.permission.asset_owner import (
     resolve_agent_list_permission,
@@ -181,7 +182,19 @@ def _order_agents_by_publish_time(
 
 
 async def list_all_agent_info_impl(
-    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None, *, inventory_read: bool = False
+    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None, *, inventory_read: bool = False, include_version_label: bool = False
+) -> list[dict]:
+    """Keep synchronous list reads and session ownership on a managed worker."""
+    from management.utils.managed_read import run_management_read
+
+    return await run_management_read(
+        "agent-list", _list_all_agent_info_sync, tenant_id, user_id, agent_ids,
+        inventory_read=inventory_read, include_version_label=include_version_label,
+    )
+
+
+def _list_all_agent_info_sync(
+    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None, *, inventory_read: bool = False, include_version_label: bool = False
 ) -> list[dict]:
     """
     list all agent info
@@ -222,9 +235,9 @@ async def list_all_agent_info_impl(
         # Get all agent IDs that are registered as A2A Server agents
         a2a_server_agent_ids = get_server_agent_ids(tenant_id)
 
-        model_cache: Dict[int, Optional[dict]] = {}
         enriched_agents: list[dict] = []
 
+        visible_agents = []
         for agent in agent_list:
             if agent.get("agent_origin") == "SYSTEM" or agent.get("system_key"):
                 continue
@@ -243,8 +256,13 @@ async def list_all_agent_info_impl(
                 ):
                     continue
 
+            visible_agents.append(agent)
+
+        read_context = load_agent_list_context(visible_agents, tenant_id)
+        model_cache = read_context.model_cache()
+        for agent in visible_agents:
             # Filter out deleted models (delete_flag='Y' in model_record_t)
-            model_projection = project_agent_models(agent, tenant_id, model_cache)
+            model_projection = project_agent_models(agent, tenant_id, model_cache, read_context=read_context)
             agent.update(model_projection.fields)
             agent["model_ids"] = model_projection.availability_model_ids
 
@@ -254,6 +272,7 @@ async def list_all_agent_info_impl(
                 tenant_id=tenant_id,
                 agent_info=agent,
                 model_cache=model_cache,
+                read_context=read_context,
             )
             agent["model_ids"] = model_projection.fields["model_ids"]
             _, unavailable_reasons = apply_deleted_model_reason(
@@ -290,6 +309,10 @@ async def list_all_agent_info_impl(
             except Exception as error:
                 logger.warning("Failed to load agent tags: %s", error)
 
+        version_labels = query_version_labels({
+            agent["agent_id"]: agent["current_version_no"] for agent in visible_agents
+            if agent.get("current_version_no") is not None
+        }, tenant_id) if include_version_label else {}
         simple_agent_list: list[dict] = []
         enrich_cas_usernames(
             [entry["raw_agent"] for entry in enriched_agents],
@@ -345,9 +368,13 @@ async def list_all_agent_info_impl(
                     "permission": permission,
                     "is_published": agent.get("current_version_no") is not None,
                     "current_version_no": agent.get("current_version_no"),
+                    **({"version_label": version_labels.get(agent["agent_id"])} if include_version_label else {}),
                     "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
                     "allow_chat_metadata": bool(
                         agent.get("allow_chat_metadata", False)
+                    ),
+                    "allow_mcp_header_passthrough": bool(
+                        agent.get("allow_mcp_header_passthrough", False)
                     ),
                     "model_params_override": agent.get("model_params_override"),
                     "enable_protocol_repair_retry": agent.get(

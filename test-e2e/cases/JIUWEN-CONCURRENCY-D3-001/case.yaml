@@ -1,0 +1,89 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-CONCURRENCY-D3-001
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-LOOP-OWNERSHIP-20261106
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-004
+  title: Deployed Jiuwen parallel roots and first-attempt sandbox children
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove deployed real-model concurrent and repeated roots have three successful first child attempts,
+    not a root answer repaired by retries.
+  preconditions:
+  - Operator-selected Local deployment uses the current Jiuwen backend image. The Case never redeploys or changes
+    Core.
+  - Machine-local configuration identifies an authorized saved three-child arithmetic sandbox assistant and its
+    configured real model. No source configuration is modified.
+  test_data:
+    profile: real_smoke
+    concurrent_roots: 2
+    rounds: 3
+    expected_child_results:
+    - '11'
+    - '22'
+    - '33'
+  steps:
+  - order: 1
+    action: Snapshot source Agent/model records and invoke two independent owned conversations concurrently using
+      the original assistant and real model.
+    expected: Both roots complete; each has exactly three matched child starts/ends and three completed child terminals,
+      no child failure, extra retry or cross-loop error; sandbox arithmetic results are correct.
+  - order: 2
+    action: Reload saved history and repeat explicit new tasks on the same two conversations for three rounds.
+    expected: Every first-attempt child remains successful and history contains the same invocation identities and
+      statuses; histories of the two conversations stay isolated.
+  - order: 3
+    action: Delete only the two Case-owned conversations and recheck original source records.
+    expected: Source Agent versions, model configuration and all pre-existing conversation/message/unit rows are
+      unchanged; test clients and private authentication state are reclaimed.
+  expected_results:
+  - Concurrent and repeated real roots each have exactly three successful first child attempts and correct arithmetic
+    without recovery masking failure.
+  - History preserves invocation identities and terminal statuses without cross-conversation mixing.
+  - Owned cleanup completes and original source/model/history records remain unchanged.
+  forbidden_side_effects:
+  - No response/provider substitution, unauthorized resource/configuration mutation, deployment switch or credential
+    disclosure.
+  - No accepted failed child terminal, extra delegation to mask failure, unowned conversation deletion or history
+    rewrite.
+  integration_boundary:
+  - Deployed authenticated runtime API, database history, Jiuwen Runner, real model outlet, parallel child factory
+    and configured sandbox.
+  observations:
+  - Sanitized per-run terminal/child identity summaries and source/history fingerprints.
+  cleanup:
+  - Close managed HTTP clients, delete only newly allocated owned conversations, verify original records; no credential
+    files are created.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+    timeout_seconds: 1100
+  acceptance:
+  - id: AC-01
+    description: Concurrent and repeated first child attempts succeed on the actual deployed stack.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Owned resources are cleaned while all source configuration and original history remain unchanged.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2

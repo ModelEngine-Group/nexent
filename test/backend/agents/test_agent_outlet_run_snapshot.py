@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from test_create_agent_info import model_bindings, run_preparation
+from infrastructure import agent_model_config
+from management.services.agent.preparation import compiler, run as run_preparation
+from management.services.model import run_bindings as model_bindings
 from test.backend.database.model_outlet_helpers import REGISTRY, profile  # noqa: F401
 
 
@@ -17,9 +19,9 @@ def test_exact_record_uses_frozen_profile_not_legacy_fields(monkeypatch):
     record = {'tenant_id': 'tenant', 'model_repo': 'ignored', 'model_name': 'ignored'}
     restore = Mock(return_value=snapshot)
     resolved = Mock(return_value='resolved-config')
-    monkeypatch.setattr(model_bindings, 'restore_model_snapshot', restore)
-    monkeypatch.setattr(model_bindings, '_resolved_model_config', resolved)
-    assert model_bindings.create_model_config_from_record(record) == 'resolved-config'
+    monkeypatch.setattr(agent_model_config, 'restore_model_snapshot', restore)
+    monkeypatch.setattr(agent_model_config, '_resolved_model_config', resolved)
+    assert agent_model_config.create_model_config_from_record(record) == 'resolved-config'
     restore.assert_called_once_with(record, 'tenant')
     resolved.assert_called_once_with(record, snapshot)
 
@@ -32,7 +34,12 @@ async def test_model_list_skips_failed_rows_and_restores_default_aliases(monkeyp
     monkeypatch.setattr(model_bindings, 'restore_model_snapshot', Mock(return_value=snapshot))
     monkeypatch.setattr(model_bindings, 'create_model_config_from_record', Mock(return_value='selected'))
     monkeypatch.setattr(model_bindings.tenant_config_manager, 'get_model_config', Mock(return_value=record))
-    monkeypatch.setattr(model_bindings, '_resolved_model_config', Mock(side_effect=lambda row, snap, cite_name=None: cite_name))
+    monkeypatch.setattr(model_bindings, 'get_config_snapshot', Mock(return_value={'LLM_INCLUDE_LOGPROBS': False}))
+    monkeypatch.setattr(
+        model_bindings,
+        '_resolved_model_config',
+        Mock(side_effect=lambda row, snap, cite_name=None, extra_body=None: cite_name),
+    )
     result = await model_bindings.create_model_config_list('tenant')
     assert result == ['selected', 'main_model', 'sub_model']
     model_bindings.create_model_config_from_record.assert_called_once_with(record)
@@ -72,7 +79,6 @@ async def test_run_captures_database_snapshot_and_validates_output_before_config
     preferences.merge_model_preferences = Mock(return_value=SimpleNamespace(parameter_values={'temperature': 0.4}))
     monkeypatch.setitem(sys.modules, preferences.__name__, preferences)
     selected = SimpleNamespace(cite_name='selected', resolved_profile=profile)
-    monkeypatch.setattr(run_preparation, '_build_run_workspace', Mock(return_value='/controlled/workspace'))
     monkeypatch.setattr(run_preparation, '_ensure_agent_reasoning_snapshot', Mock())
     monkeypatch.setattr(run_preparation, 'join_minio_file_description_to_query', AsyncMock(return_value='processed'))
     monkeypatch.setattr(run_preparation, 'create_model_config_list', AsyncMock(return_value=[selected]))
@@ -128,6 +134,7 @@ async def test_failed_default_does_not_supply_legacy_aliases(monkeypatch):
     monkeypatch.setattr(model_bindings, "get_model_records", Mock(return_value=[selected]))
     monkeypatch.setattr(model_bindings, "create_model_config_from_record", Mock(return_value="selected"))
     monkeypatch.setattr(model_bindings.tenant_config_manager, "get_model_config", Mock(return_value={"model_id": 99, "profile_schema_version": None}))
+    monkeypatch.setattr(model_bindings, "get_config_snapshot", Mock(return_value={"LLM_INCLUDE_LOGPROBS": False}))
     restore = Mock(side_effect=AssertionError("failed default must not be restored"))
     monkeypatch.setattr(model_bindings, "restore_model_snapshot", restore)
     assert await model_bindings.create_model_config_list("tenant") == ["selected"]
@@ -137,14 +144,30 @@ async def test_failed_default_does_not_supply_legacy_aliases(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("explicit", [False, True])
 async def test_missing_selected_snapshot_raises_domain_error_during_actual_config_compilation(monkeypatch, explicit):
-    from functools import partial
-    import test_create_agent_info as legacy
     from contracts.errors.exceptions import RunModelControlsError
 
-    original = legacy.create_agent_config
-    monkeypatch.setattr(legacy, "create_agent_config", partial(original,
-        override_model_id=123 if explicit else None, runtime_model_records={}))
+    monkeypatch.setattr(compiler, "search_agent_info_by_agent_id", Mock(
+        return_value={"name": "agent", "description": "", "model_ids": [123]},
+    ))
+    monkeypatch.setattr(compiler, "query_sub_agent_relations", Mock(return_value=[]))
+    monkeypatch.setattr(compiler, "_get_external_a2a_agents", Mock(return_value=[]))
+    monkeypatch.setattr(compiler, "create_tool_config_list", AsyncMock(return_value=[]))
+    monkeypatch.setattr(compiler, "_get_skill_script_tools", Mock(return_value=[]))
+    monkeypatch.setattr(compiler, "_get_skills_for_template", Mock(return_value=[]))
+    monkeypatch.setattr(compiler, "is_model_available", Mock(return_value=True))
+    monkeypatch.setattr(compiler, "get_config_snapshot",
+                        Mock(return_value={"RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS": 120}))
+    model_lookup = Mock(return_value={"model_id": 123, "display_name": "live-only"})
+    monkeypatch.setattr(compiler, "get_model_by_model_id", model_lookup)
+
     with pytest.raises(RunModelControlsError) as caught:
-        await legacy.TestCreateAgentConfig()._run_context_manager_case(
-            enable_context_manager=False, prepared_prompt="controlled prompt")
+        await compiler.create_agent_config(
+            agent_id=7, tenant_id="tenant", user_id="actor", allow_memory_search=False,
+            portable_evaluation=True, override_model_id=123 if explicit else None, runtime_model_records={},
+        )
+
     assert caught.value.code == "model_not_available"
+    if explicit:
+        model_lookup.assert_not_called()
+    else:
+        model_lookup.assert_called_once_with(123, tenant_id="tenant")

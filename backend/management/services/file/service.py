@@ -17,7 +17,8 @@ from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
-from contracts.constants.environment import DATA_PROCESS_SERVICE, MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.constants.environment import DATA_PROCESS_SERVICE, UPLOAD_FOLDER
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
@@ -29,8 +30,8 @@ from management.services.knowledge_base.service import ElasticSearchService, get
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 from management.services.file.upload import save_upload_file
-from infrastructure.ingestion.errors import ingestion_error_fields
-from infrastructure.observability.knowledge import trace_knowledge_operation
+from contracts.errors.ingestion import ingestion_error_fields
+from infrastructure.trace.knowledge import trace_knowledge_operation
 
 
 # Create upload directory
@@ -205,21 +206,22 @@ async def _validate_knowledge_file_sizes(
     files: List[UploadFile],
 ) -> None:
     """Reject oversized KB documents before any file is written to storage."""
+    limit_mb = get_config_snapshot().get("MAX_KNOWLEDGE_FILE_SIZE_MB")
+    limit_bytes = limit_mb * 1024 * 1024
     for upload in files:
         if not upload:
             continue
         file_size = await _get_upload_size(upload)
-        if file_size <= MAX_KNOWLEDGE_FILE_SIZE_BYTES:
+        if file_size <= limit_bytes:
             continue
 
         filename = upload.filename or "unknown"
-        limit_mb = MAX_KNOWLEDGE_FILE_SIZE_BYTES // (1024 * 1024)
         raise AppException(
             ErrorCode.FILE_TOO_LARGE,
             f"Knowledge base file '{filename}' exceeds the {limit_mb} MB limit",
             details={
                 "resource": "knowledge_file",
-                "limit_bytes": MAX_KNOWLEDGE_FILE_SIZE_BYTES,
+                "limit_bytes": limit_bytes,
                 "limit_mb": limit_mb,
                 "file_name": filename,
                 "actual_bytes": file_size,

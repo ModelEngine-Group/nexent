@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-MCP-VALUES-20261110
+  change_type: bugfix
+  bug_id: JIUWEN-MCP-VALUES-20261110
+  title: Preserve valid empty and explicit null MCP arguments
+  description: Disable destructive native MCP value cleanup without bypassing schema validation or managed dispatch.
+  observed_behavior: Jiuwen removes config empty arrays from NL2Agent Skill recommendations before wrapper validation.
+  expected_behavior: Valid empty arrays, empty objects and explicit null reach MCP unchanged; invalid inputs fail before dispatch.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing resource D3 uses scalar MCP arguments and creator D4 deliberately binds no resources.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-RESOURCES, AGENT-CORE-CONFIG]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [AGENT-CORE-GLOBAL-D3-001, JIUWEN-RESOURCES-D5-001]
+    modified: [JIUWEN-RESOURCES-D3-001]
+    added: [JIUWEN-CREATOR-RESOURCES-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve top-level and nested empty lists, objects, explicit null and falsy scalar JSON values without mutating inputs.
+    - The native schema validator still rejects missing fields, invalid types and extra fields before client dispatch.
+    - Preserve the existing observation, result and managed MCP transport behavior.
+    reason: Direct native-tool regressions prove the cleanup defect; real MCP and Workbench tests prove separate runtime and UI boundaries.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_mcp_values.py
+    - test/sdk/core/agents/test_jiuwen_mcp_transport.py
+    - test/sdk/core/agents/test_jiuwen_mcp_names.py
+  notes: >-
+    SPEC runtime-agent-core-factory AC-MV-01..03. Reuse resource ownership and its original
+    authorization, HTTP, model and cleanup regressions; no new D1. Extend existing D3 with
+    exact values observed by the actual remote MCP endpoint in native/text/parallel modes.
+    Existing real creator D4 explicitly excludes Skills, so the new D4 must recommend a
+    visible existing Skill with config=[], show the binding card, persist the owned draft's
+    binding and restore history without replay. The Case owns only a new marked draft and
+    conversation; original Skill/Agent/history records are protected. Preparation is
+    self-contained, with no deployment switching or source resource edits.

@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-CLARIFICATION-D4-001
+  feature_id: JIUWEN-MODEL-BRIDGE
+  requirement_ids:
+  - JIUWEN-CLARIFICATION-20261105
+  - AGENT-CORE-GLOBAL-20261105
+  - JIUWEN-HITL-HISTORY-20261106
+  business_rule_ids:
+  - JIUWEN-MODEL-BRIDGE-RULE-005
+  title: Fortune assistant real-model clarification resumes and reloads through the common UI
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove deployed real model, native terminal form, submitted answers and persisted history beyond controlled
+    worker/UT evidence.
+  preconditions:
+  - The operator-selected Local deployment runs current backend/Web images with global Jiuwen; an authorized saved
+    fortune assistant and its real model outlet are available. The Case never redeploys or changes Core itself.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Create an isolated copy of the saved fortune assistant using its original model/tools; open its real
+      configuration page.
+    expected: No Core field/control exists; deployment metadata reports Jiuwen and configuration/model/resources
+      match the source.
+  - order: 2
+    action: Ask the original missing-birth-information question through the real chat page, then reload the pending form from history.
+    expected: One actual ask_user terminal form renders; one real run completes awaiting_input without an error,
+      fake final answer or unrelated tool dispatch.
+      Pending history retains completed/awaiting_input with no error and permits submission without starting a run.
+  - order: 3
+    action: Fill required birth information using the actual form controls and submit once.
+    expected: The request includes structured answers and source unit identity; backend atomically saves the answer
+      and the real model produces a successful continuation without re-asking supplied facts.
+  - order: 4
+    action: Open the persisted conversation through its canonical history route, refresh and reopen it, then ask
+      a simple history follow-up.
+    expected: Submitted values restore read-only, loading causes no run or DB message rewrite, and an explicit follow-up
+      uses saved birth facts without replaying the form.
+      Both history API and page retain the original completed/awaiting_input terminal without JIUWEN_FINAL_OUTPUT_INVALID.
+  expected_results:
+  - Deployed configuration has no per-Agent Core and original assistant configuration/model/history stay unchanged.
+  - An actual real-model form completes, submitted answers persist with original form identity, and continuation
+    succeeds.
+  - Refresh/reopen and explicit follow-up preserve values and history without automatic runs or replay; owned test
+    resources are cleaned.
+  forbidden_side_effects:
+  - No response/endpoint substitution, credential output, source configuration mutation or writes outside owned
+    test resources.
+  - No duplicate form submission, history-triggered run, cross-conversation answer binding or deletion outside the
+    owned clone.
+  actor: Authorized owner of the saved fortune assistant
+  journey:
+  - Open deployed settings
+  - Request a fortune reading
+  - Submit missing birth facts
+  - Reload and reopen
+  - Continue from saved facts
+  final_business_result:
+  - The user completes one real clarification round and can reload and continue the same conversation.
+  failure_evidence:
+  - Safe wire summaries, assertions, database identity/hash audits, browser screenshot and trace.
+  cleanup:
+  - Delete only the cloned assistant and its owned conversations; verify source model/config/history hashes and
+    release private authentication files.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+    timeout_seconds: 900
+  acceptance:
+  - id: AC-01
+    description: Real deployed global Core and terminal human card use existing common UI.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Submit, reload and follow-up preserve persisted response identity with no replay.
+    steps:
+    - 3
+    - 4
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2

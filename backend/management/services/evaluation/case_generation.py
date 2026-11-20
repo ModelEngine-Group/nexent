@@ -11,7 +11,7 @@ from management.services.evaluation.common import (
     _QUERY_FORMAT_ERR_MSG,
     logger,
 )
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.clients.model import invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import render_evaluation_section
 
@@ -101,6 +101,8 @@ def _generate_test_queries(
     model_id: int,
     query_count: int = 10,
     language: str = "zh",
+    *,
+    user_id: str,
 ) -> list[str]:
     """Generate test queries from agent config via LLM.
 
@@ -128,10 +130,11 @@ def _generate_test_queries(
     )
 
     try:
-        response = call_llm_for_system_prompt(
+        response = invoke_chat_prompt_in_worker(
             model_id=model_id,
             user_prompt=prompt.user,
             system_prompt=prompt.system,
+            user_id=user_id,
             tenant_id=tenant_id,
         )
     except Exception as exc:

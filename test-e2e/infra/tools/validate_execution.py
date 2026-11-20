@@ -44,8 +44,8 @@ def _mock_service_issues(execution_path, raw) -> list[ValidationIssue]:
     return issues
 
 
-def inspect(root: Path, phase: str = "implementation", *, require_preparation_cases=()) -> tuple[list[ValidationIssue], dict]:
-    cases, issues = case_index(discover_documents(root, "cases"))
+def inspect(root: Path, phase: str = "implementation", *, require_preparation_cases=(), case_ids=None) -> tuple[list[ValidationIssue], dict]:
+    cases, issues = case_index(discover_documents(root, "cases", case_ids=case_ids))
     entries = {}
     entrypoints: dict[str, str] = {}
     for case_id, (stage, case, case_path) in sorted(cases.items()):
@@ -56,7 +56,11 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
             "contract_hash": case_contract_hash(stage, case), "execution": None,
         }
         entries[case_id] = record
-        issues.extend(ValidationIssue(case_path, "acceptance", problem) for problem in contract_issues(case))
+        def invalid(location, message):
+            return ValidationIssue(execution_path, location, message, "CASE_EXECUTION_INVALID", case_id)
+
+        issues.extend(ValidationIssue(case_path, "acceptance", problem, "CASE_EXECUTION_INVALID", case_id)
+                      for problem in contract_issues(case))
         if "acceptance" in case:
             record["acceptance"] = case["acceptance"]
         if not execution_path.is_file():
@@ -64,21 +68,25 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
                 issues.append(ValidationIssue(case_path, case_id, "Active automated case has no execution.yaml",
                                               "CASE_EXECUTION_MISSING", case_id))
             continue
-        raw = __import__("yaml").safe_load(execution_path.read_text(encoding="utf-8"))
+        try:
+            raw = yaml.safe_load(execution_path.read_text(encoding="utf-8"))
+        except (yaml.YAMLError, UnicodeError):
+            issues.append(invalid("", "Invalid execution YAML"))
+            continue
         if not isinstance(raw, dict) or set(raw) - EXECUTION_FIELDS or raw.get("schema_version") != "1.0":
-            issues.append(ValidationIssue(execution_path, "", "Invalid execution document fields or version"))
+            issues.append(invalid("", "Invalid execution document fields or version"))
             continue
         if raw.get("case_id") != case_id:
-            issues.append(ValidationIssue(execution_path, "case_id", "Execution Case ID differs from its directory"))
-        issues.extend(_mock_service_issues(execution_path, raw))
+            issues.append(invalid("case_id", "Execution Case ID differs from its directory"))
+        issues.extend(invalid(issue.location, issue.message) for issue in _mock_service_issues(execution_path, raw))
         required_acceptance = phase == "implementation" and case.get("automation") == "automated"
-        issues.extend(ValidationIssue(execution_path, "acceptance_bindings", problem)
+        issues.extend(invalid("acceptance_bindings", problem)
                       for problem in binding_issues(case, raw.get("acceptance_bindings"), required=required_acceptance))
         timeout_seconds = raw.get("timeout_seconds")
         if timeout_seconds is not None and (type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 7200):
-            issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
+            issues.append(invalid("timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
         if case.get("status") in {"retired", "skipped_by_policy", "manual"}:
-            issues.append(ValidationIssue(execution_path, "", "Inactive or manual case must not have executable metadata"))
+            issues.append(invalid("", "Inactive or manual case must not have executable metadata"))
         if (phase == "implementation"
                 and stage != "D1" and case.get("status") == "active"
                 and "preparation" not in raw):
@@ -87,15 +95,16 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
                                           "CASE_PREPARATION_MISSING", case_id))
         implementations = raw.get("implementations")
         if not isinstance(implementations, list) or not implementations:
-            issues.append(ValidationIssue(execution_path, "implementations", "At least one implementation is required"))
+            issues.append(invalid("implementations", "At least one implementation is required"))
             continue
         normalized = []
         for index, item in enumerate(implementations):
             if not isinstance(item, dict) or set(item) - IMPLEMENTATION_FIELDS or not {"framework", "file", "selector"}.issubset(item):
-                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Invalid implementation fields"))
+                issues.append(invalid(f"implementations/{index}", "Invalid implementation fields"))
                 continue
-            if item["framework"] not in FRAMEWORKS or not isinstance(item["file"], str) or not isinstance(item["selector"], str):
-                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Invalid framework, file or selector"))
+            if (not isinstance(item["framework"], str) or item["framework"] not in FRAMEWORKS
+                    or not isinstance(item["file"], str) or not isinstance(item["selector"], str)):
+                issues.append(invalid(f"implementations/{index}", "Invalid framework, file or selector"))
                 continue
             if index == 0:
                 resolved = (execution_path.parent / item["file"]).resolve()
@@ -137,13 +146,13 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
                 schema = json.loads((root / "test-e2e/infra/schemas/preparation.schema.json").read_text(encoding="utf-8"))
                 errors = list(Draft202012Validator(schema).iter_errors(raw["preparation"]))
                 if errors:
-                    issues.append(ValidationIssue(execution_path, "preparation", "Invalid preparation declaration"))
+                    issues.append(invalid("preparation", "Invalid preparation declaration"))
                 else:
                     record["execution"]["preparation"] = raw["preparation"]
     registry = {"schema_version": "1.0", "cases": [entries[key] for key in sorted(entries)]}
     from deployment_exceptions import CATALOG, catalog
     try:
-        catalog(root, registry["cases"])
+        catalog(root, registry["cases"] if case_ids is None else None)
     except (ValueError, OSError, yaml.YAMLError):
         issues.append(ValidationIssue(root / CATALOG, "deployment_exceptions",
                                       "Invalid deployment exception catalog or Case/profile reference"))

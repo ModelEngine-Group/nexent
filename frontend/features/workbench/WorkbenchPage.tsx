@@ -24,6 +24,7 @@ import type {
   Nl2SkillStreamEvent,
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
+import { useWorkbenchComposerDraft } from "./hooks/useWorkbenchComposerDraft";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
 import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pins";
 import {
@@ -105,8 +106,11 @@ type CreatedAgentResult = {
 };
 
 export default function WorkbenchPage() {
+  const { user } = useAuthorizationContext();
   return (
-    <Nl2AgentFlowProvider>
+    <Nl2AgentFlowProvider
+      draftScope={user ? JSON.stringify([user.tenantId, user.id]) : undefined}
+    >
       <WorkbenchSessionProvider>
         <HomeContent />
       </WorkbenchSessionProvider>
@@ -150,6 +154,8 @@ const HomeContent: FC = () => {
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
+  const [knowledgeRetryRevision, setKnowledgeRetryRevision] = useState(0);
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -367,6 +373,16 @@ const HomeContent: FC = () => {
   const numericConversationId = Number(activeConversationId);
   const isPersistedConversation =
     Number.isInteger(numericConversationId) && numericConversationId > 0;
+  const composerDraft = useWorkbenchComposerDraft({
+    runtime,
+    identity: user ? JSON.stringify([user.tenantId, user.id]) : undefined,
+    threadId: activeThreadId,
+    conversationId: isPersistedConversation ? activeConversationId : undefined,
+    enabled: ready && workbenchState.config.mode === "generic_chat" && !workbenchState.resolving,
+    isRunning: isThreadRunning,
+    mode: chatMode,
+    setMode: setChatMode,
+  });
   const localSnapshot =
     activeThreadId && !isPersistedConversation
       ? localThreadSnapshots.get(activeThreadId)
@@ -401,9 +417,36 @@ const HomeContent: FC = () => {
   const genericAgentVersion = workbenchBootstrap?.generic_agent?.version_no;
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useConversationScopedState<KnowledgeCapabilities | null>(
-      JSON.stringify([genericAgentId, genericAgentVersion]),
+      JSON.stringify([
+        user?.tenantId,
+        user?.id,
+        genericAgentId,
+        genericAgentVersion,
+      ]),
       null
     );
+
+  const [knowledgeSettled, setKnowledgeSettled] = useConversationScopedState(
+    JSON.stringify([
+      user?.tenantId,
+      user?.id,
+      genericAgentId,
+      genericAgentVersion,
+    ]),
+    false
+  );
+  const onKnowledgeOpenChange = useCallback(
+    (open: boolean) => {
+      setKnowledgePickerOpen(open);
+      if (open && !knowledgeCapabilities) setKnowledgeSettled(false);
+    },
+    [knowledgeCapabilities, setKnowledgeSettled]
+  );
+
+  const onKnowledgeRetry = useCallback(() => {
+    setKnowledgeSettled(false);
+    setKnowledgeRetryRevision((revision) => revision + 1);
+  }, [setKnowledgeSettled]);
 
   const [restoredLocalSnapshot, setRestoredLocalSnapshot] =
     useState(localSnapshot);
@@ -477,17 +520,23 @@ const HomeContent: FC = () => {
 
   useEffect(() => {
     const agentId = genericAgentId;
-    if (!agentId) return;
+    if (!knowledgePickerOpen || !agentId || knowledgeCapabilities) return;
 
     let cancelled = false;
     const versionNo = genericAgentVersion;
     void conversationService
       .getKnowledgeCapabilities(agentId, versionNo)
       .then((capabilities) => {
-        if (!cancelled) setKnowledgeCapabilities(capabilities);
+        if (!cancelled) {
+          setKnowledgeCapabilities(capabilities);
+          setKnowledgeSettled(true);
+        }
       })
       .catch((error) => {
-        if (!cancelled) setKnowledgeCapabilities(null);
+        if (!cancelled) {
+          setKnowledgeCapabilities(null);
+          setKnowledgeSettled(true);
+        }
         log.error(
           "[HomeContent] Failed to load knowledge capabilities:",
           error
@@ -497,7 +546,15 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [genericAgentId, genericAgentVersion, setKnowledgeCapabilities]);
+  }, [
+    knowledgePickerOpen,
+    knowledgeRetryRevision,
+    genericAgentId,
+    genericAgentVersion,
+    knowledgeCapabilities,
+    setKnowledgeCapabilities,
+    setKnowledgeSettled,
+  ]);
 
   useEffect(() => {
     const numericConversationId = Number(activeConversationId);
@@ -610,7 +667,7 @@ const HomeContent: FC = () => {
         let restoredPreview =
           readKnowledgeCache(activeThreadId)?.preview ?? null;
         try {
-          restoredPreview = await restoreKnowledgeDisplay(restoredScope);
+          restoredPreview = await restoreKnowledgeDisplay(restoredScope, false);
         } catch (error) {
           log.warn("Knowledge display lookup failed", error);
         }
@@ -1100,6 +1157,7 @@ const HomeContent: FC = () => {
         ? {
             workbenchConfig: effectiveWorkbenchConfig,
             workbenchConfigVersion: workbenchState.configVersion,
+            onMessageAccepted: composerDraft.acknowledge,
           }
         : {}),
       ...(activeThreadId
@@ -1124,6 +1182,7 @@ const HomeContent: FC = () => {
     activeConversationId,
     activeThreadId,
     chatMode,
+    composerDraft.acknowledge,
     handleNl2AgentState,
     handleNl2SkillEvent,
     resetNl2AgentFlow,
@@ -1500,6 +1559,8 @@ const HomeContent: FC = () => {
               runtimeMetadata={runtimeMetadata}
               onRuntimeMetadataChange={handleRuntimeMetadataChange}
               readOnly={
+                isLoadingModels ||
+                isLoadingWorkbenchBootstrap ||
                 !workbenchSendability.canSend ||
                 (workbenchState.config.mode === "agent_create" &&
                   isAgentCreationAwaitingDraft(
@@ -1514,11 +1575,11 @@ const HomeContent: FC = () => {
                   nl2AgentComposerDisabled)
               }
               readOnlyReason={
-                !isCreating && llmModels.length === 0
-                  ? isLoadingModels
-                    ? t("ui.localization.loadingModels")
-                    : t("ui.localization.noModels")
-                  : workbenchSendability.reason
+                isLoadingModels || isLoadingWorkbenchBootstrap
+                  ? t("common.loading")
+                  : !isCreating && llmModels.length === 0
+                    ? t("ui.localization.noModels")
+                    : workbenchSendability.reason
               }
               skillFiles={
                 workbenchState.config.mode === "skill_create" &&
@@ -1570,6 +1631,13 @@ const HomeContent: FC = () => {
               onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
               workbenchPresentation={{
                 mode: workbenchState.config.mode,
+                onKnowledgeOpenChange,
+                onKnowledgeRetry,
+                knowledgePending: knowledgePickerOpen && !knowledgeSettled,
+                knowledgeUnavailable:
+                  knowledgePickerOpen &&
+                  knowledgeSettled &&
+                  !knowledgeCapabilities,
                 onExitCreation: () => void changeCreationMode("generic_chat"),
                 actions: (
                   <CreationActions
@@ -1578,6 +1646,7 @@ const HomeContent: FC = () => {
                     mode={workbenchState.config.mode}
                     onExit={() => void changeCreationMode("generic_chat")}
                     disabled={isThreadRunning}
+                    draftAgentId={creationAgent?.agentId}
                     onSelect={(mode) => void changeCreationMode(mode)}
                   />
                 ),
@@ -1594,7 +1663,7 @@ const HomeContent: FC = () => {
           <AgentPicker
             disabled={isThreadRunning}
             open={agentPickerOpen}
-            agents={agents}
+            identity={JSON.stringify([user?.tenantId, user?.id])}
             selectedId={selectedAgent?.id}
             selectedIds={workbenchState.config.agent_mounts.map((mount) =>
               String(mount.agent_id)

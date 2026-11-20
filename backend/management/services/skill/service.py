@@ -6,13 +6,17 @@ import io
 import logging
 import os
 import zipfile
+from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Union
 
-from contracts.constants.environment import MAX_SKILL_UPLOAD_SIZE_BYTES, MAX_SKILL_UPLOAD_SIZE_MB, ROOT_DIR
+from contracts.constants.environment import ROOT_DIR
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
-from management.db.skill import repository as skill_db
 from management.db.identity.group import query_group_ids_by_user
+from management.db.skill import repository as skill_db
+from management.services.skill.local_config import SkillConfigPaths
+from management.services.skill.yaml_cache import skill_yaml_cache
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
 from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
@@ -264,7 +268,9 @@ class SkillService(SkillArchiveOperations):
                 return candidate
         return None
 
-    def _enrich_configs_from_yaml(self, skill: Dict[str, Any]) -> Dict[str, Any]:
+    def _enrich_configs_from_yaml(
+        self, skill: Dict[str, Any], *, path_context: SkillConfigPaths | None = None
+    ) -> Dict[str, Any]:
         """Read local config files and overlay onto skill.
 
         config/config.yaml → config_values (runtime defaults dict)
@@ -275,18 +281,20 @@ class SkillService(SkillArchiveOperations):
         the old DB value).
         """
         out = dict(skill)
-        local_dir = self._resolve_local_skills_dir_for_overlay()
+        local_dir = path_context.local_dir if path_context is not None else self._resolve_local_skills_dir_for_overlay()
         if not local_dir:
             return out
         name = out.get("name")
         if not name:
             return out
-        config_path = _local_skill_config_yaml_path(name, local_dir)
-        if os.path.isfile(config_path):
+        if path_context is not None:
+            (config_path, config_exists), (schema_path, schema_exists) = path_context.files_for(name)
+        else:
+            config_path = _local_skill_config_yaml_path(name, local_dir)
+            config_exists = os.path.isfile(config_path)
+        if config_exists:
             try:
-                with open(config_path, "rb") as f:
-                    raw = f.read()
-                out["config_values"] = _parse_skill_params_from_config_bytes(raw)
+                out["config_values"] = skill_yaml_cache.load(config_path, _parse_skill_params_from_config_bytes)
             except Exception as exc:
                 logger.warning(
                     "Could not parse local config.yaml for skill %s: %s", name, exc
@@ -294,12 +302,12 @@ class SkillService(SkillArchiveOperations):
         else:
             out.pop("config_values", None)
         # schema.yaml takes precedence over DB config_schemas
-        schema_path = _local_skill_schema_yaml_path(name, local_dir)
-        if os.path.isfile(schema_path):
+        if path_context is None:
+            schema_path = _local_skill_schema_yaml_path(name, local_dir)
+            schema_exists = os.path.isfile(schema_path)
+        if schema_exists:
             try:
-                with open(schema_path, "rb") as f:
-                    raw = f.read()
-                parsed = _parse_skill_schema_from_yaml_bytes(raw)
+                parsed = skill_yaml_cache.load(schema_path, _parse_skill_schema_from_yaml_bytes)
                 out["config_schemas"] = parsed
             except Exception as exc:
                 logger.warning(
@@ -309,21 +317,53 @@ class SkillService(SkillArchiveOperations):
             out.pop("config_schemas", None)
         return out
 
-    def list_skills(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_skills(
+        self, tenant_id: Optional[str] = None, *, include_content: bool = True, for_mount: bool = False
+    ) -> List[Dict[str, Any]]:
         """List all skills for a tenant.
 
         Args:
             tenant_id: Tenant ID for filtering skills. Uses instance tenant_id if not provided.
+            include_content: Include bodies for existing internal callers unless explicitly disabled.
+            for_mount: Omit Skill content and tool relations while retaining configuration metadata.
 
         Returns:
             List of skill info dicts
         """
+        return self._list_skills(tenant_id, include_content=include_content, for_mount=for_mount)
+
+    def _list_skills(
+        self,
+        tenant_id: str | None,
+        visibility: Callable[[dict[str, Any]], bool] | None = None,
+        *,
+        include_content: bool = True,
+        for_mount: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Filter database metadata before fetching relations or local configuration."""
         effective_tenant_id = tenant_id or self.tenant_id
         if not effective_tenant_id:
             raise SkillException("tenant_id is required")
         try:
-            skills = skill_db.list_skills(effective_tenant_id)
-            enriched = [self._enrich_configs_from_yaml(s) for s in skills]
+            if for_mount:
+                skills = skill_db.list_skill_mount_summaries(effective_tenant_id)
+                if visibility is not None:
+                    skills = [skill for skill in skills if visibility(skill)]
+            elif visibility is None:
+                skills = skill_db.list_skills(effective_tenant_id, include_content=include_content)
+            else:
+                skills = [
+                    skill for skill in skill_db.list_skills(
+                        effective_tenant_id, include_tool_ids=False, include_content=include_content
+                    )
+                    if visibility(skill)
+                ]
+                tool_ids = skill_db.get_tool_ids_by_skill_ids([skill["skill_id"] for skill in skills])
+                skills = [dict(skill, tool_ids=tool_ids.get(skill["skill_id"], [])) for skill in skills]
+            if not skills:
+                return []
+            path_context = SkillConfigPaths(self._resolve_local_skills_dir_for_overlay())
+            enriched = [self._enrich_configs_from_yaml(s, path_context=path_context) for s in skills]
             return enriched
         except Exception as e:
             logger.error(f"Error listing skills: {e}")
@@ -334,20 +374,23 @@ class SkillService(SkillArchiveOperations):
         *,
         tenant_id: Optional[str] = None,
         user_id: str,
+        include_content: bool = True,
+        for_mount: bool = False,
     ) -> List[Dict[str, Any]]:
         """List skills visible to a user and attach the resolved permission."""
         user_role = _get_user_role(user_id)
         user_group_ids = set(query_group_ids_by_user(user_id) or [])
-        visible_skills = [
-            skill
-            for skill in self.list_skills(tenant_id=tenant_id)
-            if can_view_skill(
+        visible_skills = self._list_skills(
+            tenant_id,
+            visibility=lambda skill: can_view_skill(
                 skill=skill,
                 user_id=user_id,
                 user_role=user_role,
                 user_group_ids=user_group_ids,
-            )
-        ]
+            ),
+            include_content=include_content,
+            for_mount=for_mount,
+        )
         for skill in visible_skills:
             skill["permission"] = resolve_skill_permission(
                 skill=skill,
@@ -524,14 +567,16 @@ class SkillService(SkillArchiveOperations):
         rewrite_name: bool = False,
     ) -> Dict[str, Any]:
         """Share parsing and persistence while keeping operation-specific policies."""
-        if len(content) > MAX_SKILL_UPLOAD_SIZE_BYTES:
+        limit_mb = get_config_snapshot().get("MAX_SKILL_UPLOAD_SIZE_MB")
+        limit_bytes = limit_mb * 1024 * 1024
+        if len(content) > limit_bytes:
             raise AppException(
                 ErrorCode.FILE_TOO_LARGE,
-                f"Skill upload exceeds the maximum size of {MAX_SKILL_UPLOAD_SIZE_MB} MB",
+                f"Skill upload exceeds the maximum size of {limit_mb} MB",
                 details={
                     "resource": "skill_upload",
-                    "limit_mb": MAX_SKILL_UPLOAD_SIZE_MB,
-                    "limit_bytes": MAX_SKILL_UPLOAD_SIZE_BYTES,
+                    "limit_mb": limit_mb,
+                    "limit_bytes": limit_bytes,
                     "actual_bytes": len(content),
                 },
             )

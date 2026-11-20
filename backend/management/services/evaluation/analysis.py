@@ -13,7 +13,7 @@ from management.db.evaluation.evaluator import get_evaluator
 from management.services.evaluation.common import (
     logger,
 )
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.clients.model import invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
 from nexent.core.agents.prompt.evaluation import (
     compose_analysis_report,
@@ -138,7 +138,7 @@ def _render_analysis_failures_block(failure_examples: list) -> str:
 
 
 def _call_analysis_llm_and_parse(
-    run: dict, prompt: AuxiliaryPrompt, tenant_id: str
+    run: dict, prompt: AuxiliaryPrompt, tenant_id: str, *, user_id: str
 ) -> dict:
     """Call the analysis LLM and parse the JSON response.
 
@@ -146,10 +146,11 @@ def _call_analysis_llm_and_parse(
     parsed response is not a dict; the caller is responsible for catching
     and logging the underlying ``Exception`` for observability.
     """
-    response = call_llm_for_system_prompt(
+    response = invoke_chat_prompt_in_worker(
         model_id=int(run["judge_model_id"]),
         user_prompt=prompt.user,
         system_prompt=prompt.system,
+        user_id=user_id,
         tenant_id=tenant_id,
     )
     data = json.loads(response) if isinstance(response, str) else response
@@ -163,6 +164,8 @@ def generate_analysis_report_impl(
     tenant_id: str,
     language: str = "zh",
     force: bool = False,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """Generate (or re-generate) the LLM root-cause analysis report.
 
@@ -259,7 +262,7 @@ def generate_analysis_report_impl(
 
     # ── LLM call + cache write ───────────────────────────────────────────
     try:
-        data = _call_analysis_llm_and_parse(run, prompt, tenant_id)
+        data = _call_analysis_llm_and_parse(run, prompt, tenant_id, user_id=user_id)
     except Exception as exc:
         # WARNING so ops can see the LLM failure independently of the stack
         # trace.  prompt_chars is an approximation of token consumption

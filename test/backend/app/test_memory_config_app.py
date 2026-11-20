@@ -26,10 +26,10 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
@@ -82,11 +82,8 @@ class TestMemoryEmbeddingStatus:
             "management.api.memory.memory_config.get_current_user_id",
             return_value=("u", "t"),
         ), patch(
-            "management.api.memory.memory_config.is_tenant_embedding_configured",
-            return_value=True,
-        ), patch(
-            "management.api.memory.memory_config.get_tenant_memory_index_name",
-            return_value="mem_repo_model_1024",
+            "management.api.memory.memory_config.get_tenant_embedding_status",
+            return_value={"configured": True, "current_es_index_name": "mem_repo_model_1024"},
         ):
             resp = client.get(
                 "/memory/config/embedding-status",
@@ -104,11 +101,8 @@ class TestMemoryEmbeddingStatus:
             "management.api.memory.memory_config.get_current_user_id",
             return_value=("u", "t"),
         ), patch(
-            "management.api.memory.memory_config.is_tenant_embedding_configured",
-            return_value=False,
-        ), patch(
-            "management.api.memory.memory_config.get_tenant_memory_index_name",
-            return_value=None,
+            "management.api.memory.memory_config.get_tenant_embedding_status",
+            return_value={"configured": False, "current_es_index_name": None},
         ):
             resp = client.get(
                 "/memory/config/embedding-status",

@@ -34,7 +34,7 @@ from contracts.knowledge import (
 )
 from contracts.roles import has_any_role
 from permissions.resource_access import resource_read_tenant
-from gateway.authentication.auth import get_current_user_context, get_current_user_id
+from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 from management.db.knowledge_base.file_lifecycle import get_file_record
 from management.db.knowledge_base.repository import (
     get_index_name_by_knowledge_name,
@@ -54,14 +54,13 @@ from management.services.knowledge_base.status import get_all_files_status
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
+from management.services.file.service import check_file_access
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.permission.identity.session import get_current_user_context, get_current_user_id
 from management.services.tag.library import TagManagementService
-from management.services.tag.projection import (
-    project_authorized_document_tags,
-)
-from management.utils.knowledge_permission import (
-    require_knowledge_base_edit_permission,
-    require_knowledge_base_read_permission,
-)
+from management.services.tag.projection import project_authorized_document_tags
+from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
 
@@ -834,6 +833,17 @@ async def delete_documents(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error delete indexing documents: {e}",
         )
+
+
+@router.get("/{index_name}/documents/error-info")
+async def get_document_error_info_by_query(
+    index_name: str = Path(..., description="Name of the index"),
+    path_or_url: str = Query(..., min_length=1, description="Path or URL of the document"),
+    file_id: Optional[str] = Query(None, description="Durable lifecycle file ID"),
+    authorization: Optional[str] = Header(None),
+):
+    """Look up an opaque document identifier without putting it in the route path."""
+    return await get_document_error_info(index_name, path_or_url, file_id, authorization)
 
 
 @router.get("/{index_name}/documents/{path_or_url:path}/error-info")

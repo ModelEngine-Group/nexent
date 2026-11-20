@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from fastmcp import FastMCP
 
 from tool_collection.mcp.nl2agent_mcp_service import nl2agent_mcp_service
-from tool_collection.mcp.nl2agent_mcp_tools import NL2A_MCP_TOOL_NAMES
+from infrastructure.nl2agent_tool_config import NL2A_MCP_TOOL_NAMES
 
 LOCAL_MCP_TOOL_NAME_OVERRIDES = {
     name: name

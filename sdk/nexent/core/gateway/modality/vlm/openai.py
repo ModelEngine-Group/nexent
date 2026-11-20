@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """OpenAI-compatible VLM adapter (protocol lives on the adapter)."""
 
 from __future__ import annotations
@@ -58,8 +60,8 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             model_factory=self.factory,
             flatten_messages_as_text=False,
             display_name=ctx.display_name,
-            temperature=ctx.temperature if ctx.temperature is not None else 0.7,
-            top_p=ctx.top_p if ctx.top_p is not None else 0.7,
+            temperature=ctx.temperature,
+            top_p=ctx.top_p,
             max_tokens=ctx.max_tokens if ctx.max_tokens is not None else 512,
         )
         self._model.frequency_penalty = ctx.frequency_penalty if ctx.frequency_penalty is not None else 0.5

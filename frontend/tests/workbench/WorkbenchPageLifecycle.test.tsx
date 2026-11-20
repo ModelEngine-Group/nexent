@@ -53,6 +53,7 @@ const runtime = {
   thread: {
     getState: () => ({ isRunning: false }),
     composer: {
+      subscribe: () => () => {},
       setRunConfig: view.setRunConfig,
       getState: () => ({
         text: view.drafts[view.threadId ?? ""] ?? "",
@@ -725,6 +726,10 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
   );
   view.bootstrap = { generic_agent: { agent_id: 5, version_no: 2 } };
   const page = render(<WorkbenchPage />);
+  expect(conversationService.getKnowledgeCapabilities).not.toHaveBeenCalled();
+  await act(async () =>
+    view.props?.workbenchPresentation?.onKnowledgeOpenChange?.(true)
+  );
   expect(
     conversationService.getKnowledgeCapabilities
   ).toHaveBeenCalledExactlyOnceWith(5, 2);
@@ -766,6 +771,16 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
     )
   );
   expect(view.props?.knowledgeCapabilities).toBeNull();
+  const attempts = vi.mocked(conversationService.getKnowledgeCapabilities).mock
+    .calls.length;
+  await act(async () =>
+    view.props?.workbenchPresentation?.onKnowledgeRetry?.()
+  );
+  await waitFor(() =>
+    expect(conversationService.getKnowledgeCapabilities).toHaveBeenCalledTimes(
+      attempts + 1
+    )
+  );
 });
 
 it.each([true, false])(
@@ -843,6 +858,42 @@ it("preserves completion synchronization after supporting partial policy saves",
   );
   expect(view.markGenerationCompleted).toHaveBeenCalledExactlyOnceWith(42);
   expect(view.markCompletionSynced).toHaveBeenCalledExactlyOnceWith(42);
+});
+
+it("binds the independent draft action to the active creation target and run lock", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("agent_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  await act(async () => {
+    await runConfig().onNl2AgentDraftCreated({
+      agentId: 42,
+      displayName: "Draft",
+    });
+  });
+  expect(
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        draftAgentId?: number;
+      }>
+    ).props.draftAgentId
+  ).toBe(42);
+  view.running = true;
+  page.rerender(<WorkbenchPage />);
+  expect(
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        disabled: boolean;
+      }>
+    ).props.disabled
+  ).toBe(true);
 });
 
 it("serializes creator snapshot reads so delayed policy saves cannot overwrite the latest value", async () => {

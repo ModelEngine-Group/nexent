@@ -30,7 +30,7 @@ from contracts.roles import (
     primary_role,
     roles_from_record,
 )
-from gateway.authentication.auth import (
+from management.services.permission.identity.session import (
     calculate_expires_at,
     ensure_cas_session_active_from_authorization,
     generate_session_jwt,
@@ -39,8 +39,8 @@ from gateway.authentication.auth import (
     require_active_account,
     resolve_tenant_id_from_user_tenant_record,
 )
-from infrastructure.security.passwords import hash_password, verify_password
-from management.db.client import get_db_session
+from management.utils.account_passwords import hash_password, verify_password
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import (
     change_password,
     create_account,
@@ -66,7 +66,6 @@ from management.db.identity.user_tenant import (
     get_user_tenant_by_user_id,
     insert_user_tenant,
 )
-from management.db.model.repository import create_model_record
 from management.db.models import RolePermission, UserAccount
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
@@ -83,7 +82,7 @@ from management.services.permission.identity.registration import (
 )
 from management.services.skill.transfer import init_skill_list_for_tenant
 from management.services.tool.configuration import init_tool_list_for_tenant
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
 

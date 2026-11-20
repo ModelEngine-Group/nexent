@@ -9,8 +9,8 @@ from sqlalchemy import Float, func, select
 from contracts.errors.codes import ErrorCode
 from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
 
 
@@ -131,6 +131,17 @@ def claim_agent_evaluation_run(
         )
         session.commit()
         return updated == 1
+
+
+def release_agent_evaluation_claim(agent_evaluation_id: int, tenant_id: str, user_id: str) -> None:
+    """Return an unsubmitted claim to the durable pending queue."""
+    with get_db_session() as session:
+        session.query(AgentEvaluation).filter(
+            AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
+            AgentEvaluation.tenant_id == tenant_id,
+            AgentEvaluation.status == EvalRunStatus.RUNNING,
+            AgentEvaluation.updated_by == user_id,
+        ).update({"status": EvalRunStatus.PENDING}, synchronize_session=False)
 
 
 def update_agent_evaluation_analysis_report(

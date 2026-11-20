@@ -14,7 +14,7 @@ import pytest
 
 def _install_storage_import_stubs() -> None:
     """Keep database tests independent from the SDK's optional model stack."""
-    nexent_pkg = sys.modules.setdefault("nexent", types.ModuleType("nexent"))
+    nexent_pkg = importlib.import_module("nexent")
     storage_pkg = sys.modules.setdefault("nexent.storage", types.ModuleType("nexent.storage"))
     storage_pkg.__path__ = []
     factory = sys.modules.setdefault(

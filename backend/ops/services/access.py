@@ -3,7 +3,7 @@
 
 from sqlalchemy import func, literal, select, union_all
 
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, KnowledgeRecord, McpRecord, ModelRecord
 from permissions.resource_access import require_inventory_scope
 

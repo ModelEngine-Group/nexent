@@ -42,10 +42,13 @@ usage() {
 用法：deploy/images/build.sh [选项]
 
 选项：
-  --images LIST              逗号分隔的镜像列表：all,main,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
+  --images LIST              逗号分隔的镜像列表：all,main,management,runtime,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              兼容参数，等同于只传一个 --images
   --all                      构建全部镜像
   --main                     构建 nexent/nexent
+  --management               构建 nexent/nexent-management
+  --runtime                  构建 nexent/nexent-runtime
+  --gateway                  构建 nexent/nexent-gateway
   --web                      构建 nexent/nexent-web
   --data-process             构建 nexent/nexent-data-process
   --mcp                      构建 nexent/nexent-mcp
@@ -74,10 +77,13 @@ USAGE
 Usage: deploy/images/build.sh [options]
 
 Options:
-  --images LIST              Comma-separated image list: all,main,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
+  --images LIST              Comma-separated image list: all,main,management,runtime,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              Compatibility alias for --images with one image
   --all                      Build all images
   --main                     Build nexent/nexent
+  --management               Build nexent/nexent-management
+  --runtime                  Build nexent/nexent-runtime
+  --gateway                  Build nexent/nexent-gateway
   --web                      Build nexent/nexent-web
   --data-process             Build nexent/nexent-data-process
   --mcp                      Build nexent/nexent-mcp
@@ -106,7 +112,10 @@ while [ $# -gt 0 ]; do
     --image) IMAGE="$2"; shift 2 ;;
     --images) IMAGES="$2"; shift 2 ;;
     --all) REQUESTED_IMAGES=(all); shift ;;
+    --gateway) REQUESTED_IMAGES+=("gateway"); shift ;;
     --main) REQUESTED_IMAGES+=("main"); shift ;;
+    --management) REQUESTED_IMAGES+=("management"); shift ;;
+    --runtime) REQUESTED_IMAGES+=("runtime"); shift ;;
     --web) REQUESTED_IMAGES+=("web"); shift ;;
     --data-process) REQUESTED_IMAGES+=("data-process"); shift ;;
     --mcp) REQUESTED_IMAGES+=("mcp"); shift ;;
@@ -156,7 +165,7 @@ add_image_if_missing() {
 }
 
 select_all_images() {
-  SELECTED_IMAGES=(main web data-process mcp terminal docs sandbox)
+  SELECTED_IMAGES=(main management runtime gateway web data-process mcp terminal docs sandbox)
 }
 
 select_images_from_csv() {
@@ -174,7 +183,7 @@ select_images_from_csv() {
       all)
         select_all_images
         ;;
-      main|web|data-process|mcp|terminal|docs|sandbox|sandbox-full)
+      main|management|runtime|gateway|web|data-process|mcp|terminal|docs|sandbox|sandbox-full)
         add_image_if_missing "$normalized"
         ;;
       *)
@@ -193,9 +202,12 @@ select_images_from_csv() {
 image_tui_multiselect() {
   [ -t 0 ] || return 1
 
-  local images=(main web data-process mcp terminal docs sandbox sandbox-full)
+  local images=(main management runtime gateway web data-process mcp terminal docs sandbox sandbox-full)
   local details=(
     "$(deployment_i18n image_build.detail.main)"
+    "Independent Management API and configuration"
+    "Independent AgentOS model and Agent execution Runtime"
+    "Independent authentication and streaming Gateway"
     "$(deployment_i18n image_build.detail.web)"
     "$(deployment_i18n image_build.detail.data_process)"
     "$(deployment_i18n image_build.detail.mcp)"
@@ -204,7 +216,7 @@ image_tui_multiselect() {
     "Sandbox runtime for LLM-generated Python execution"
     "Extended sandbox with Node, office, browser, and Anthropic skill dependencies"
   )
-  local selected=(1 1 0 0 0 0 0 0)
+  local selected=(1 1 1 1 1 0 0 0 0 0 0)
   local cursor=0
   local i key key_tail selection
 
@@ -511,7 +523,10 @@ build_one() {
 
 build_selected_image() {
   case "$1" in
+    gateway) build_one nexent-gateway "$DOCKERFILE_DIR/gateway/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
     main) build_one nexent "$DOCKERFILE_DIR/main/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
+    management) build_one nexent-management "$DOCKERFILE_DIR/main/Dockerfile" --target management "${PY_MIRROR_ARGS[@]}" ;;
+    runtime) build_one nexent-runtime "$DOCKERFILE_DIR/main/Dockerfile" --target runtime "${PY_MIRROR_ARGS[@]}" ;;
     web) build_one nexent-web "$DOCKERFILE_DIR/web/Dockerfile" \
       --build-arg MAX_KNOWLEDGE_FILE_SIZE_MB="${MAX_KNOWLEDGE_FILE_SIZE_MB:-100}" \
       "${WEB_MIRROR_ARGS[@]}" ;;
@@ -556,7 +571,10 @@ select_images_from_components() {
       ""|infrastructure|monitoring)
         ;;
       application)
+        add_image_if_missing gateway
         add_image_if_missing main
+        add_image_if_missing management
+        add_image_if_missing runtime
         add_image_if_missing web
         add_image_if_missing mcp
         ;;

@@ -8,18 +8,14 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
-from contracts.constants.environment import (
-    MAX_KNOWLEDGE_BASES_PER_TENANT,
-    MAX_KNOWLEDGE_BASES_PER_USER,
-    MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER,
-)
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, DuplicateError
 from contracts.roles import has_any_role, normalize_roles
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import KnowledgeRecord, UserTenant
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger("knowledge_db")
@@ -82,6 +78,8 @@ def _enforce_knowledge_limits(session, tenant_id: Optional[str], user_id: Option
     if not tenant_id:
         return
 
+    snapshot = get_config_snapshot()
+
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
         {"lock_key": f"knowledge-tenant-limit:{tenant_id}"},
@@ -94,16 +92,16 @@ def _enforce_knowledge_limits(session, tenant_id: Optional[str], user_id: Option
         )
         .count()
     )
-    if tenant_count >= MAX_KNOWLEDGE_BASES_PER_TENANT:
-        _raise_knowledge_limit_error("tenant", MAX_KNOWLEDGE_BASES_PER_TENANT, tenant_count)
+    if tenant_count >= snapshot.get("MAX_KNOWLEDGE_BASES_PER_TENANT"):
+        _raise_knowledge_limit_error("tenant", snapshot.get("MAX_KNOWLEDGE_BASES_PER_TENANT"), tenant_count)
 
     if not user_id:
         return
     role = _get_user_role_in_session(session, user_id, tenant_id)
     user_limit = (
-        MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
+        snapshot.get("MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER")
         if has_any_role(role, _PRIVILEGED_KNOWLEDGE_ROLES)
-        else MAX_KNOWLEDGE_BASES_PER_USER
+        else snapshot.get("MAX_KNOWLEDGE_BASES_PER_USER")
     )
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
