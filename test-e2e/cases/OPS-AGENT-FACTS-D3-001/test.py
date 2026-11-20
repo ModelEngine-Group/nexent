@@ -80,10 +80,7 @@ def _assert_first_answer_clock(clock, terminal):
     before, after = answers[run_id]
     assert before <= answered <= after
     assert terminal["ttft_ms"] == (answered - started) // 1_000_000
-    if terminal["is_root"]:
-        assert ended == []
-    else:
-        assert terminal["duration_ms"] == (ended[0] - started) // 1_000_000
+    assert ended == []
 
 
 def test_bulk_model_batch_failures_preserve_scoped_status(isolated_monitoring, record_property):
@@ -365,7 +362,7 @@ def model_peer(request):
             self.wfile.write(f"data: {json.dumps(reasoning)}\n\n".encode())
             self.wfile.flush()
             content = "<final_answer>ops-agent-ready</final_answer>"
-            if getattr(request, "param", None) in {"children", "tokens"}:
+            if getattr(request, "param", None) in {"children", "tokens", "children_traced"}:
                 model = payload["model"]
                 if model == "child-model":
                     content = "<final_answer>child-ready</final_answer>"
@@ -831,9 +828,9 @@ async def test_mixed_agent_results_merge_across_days_and_replay(isolated_monitor
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model_peer", ["children", "tokens"], indirect=True)
+@pytest.mark.parametrize("model_peer", ["children", "tokens", "children_traced"], indirect=True)
 async def test_real_parent_and_child_facts_publish_and_replay(
-    isolated_monitoring, model_peer, monkeypatch, record_property, request, first_answer_clock,
+    isolated_monitoring, model_peer, monkeypatch, record_property, request, first_answer_clock, tmp_path,
 ):
     from contracts.constants import environment
     from management.services.permission.identity import session as auth
@@ -858,9 +855,11 @@ async def test_real_parent_and_child_facts_publish_and_replay(
         stop_event=Event(), tenant_id=tenant, user_id="owner", conversation_id=124,
         workspace_run_id=uuid4().hex, history=[],
     )
-    metadata = AgentRunMetadata(tenant_id=tenant, agent_id=21, is_debug=False, monitoring_group_ids=(12, 13))
+    metadata = AgentRunMetadata(tenant_id=tenant, agent_id=21, is_debug=False, monitoring_group_ids=(12, 13),
+                                user_id="owner", conversation_id=124)
     threads = ThreadManager("ops-agent-children", {
-        lane: LanePolicy(lane, 2, 4) for lane in ("agent-run", "model-tool-io", "sandbox", "control-io")
+        lane: LanePolicy(lane, 2, 4)
+        for lane in ("agent-run", "model-tool-io", "sandbox", "control-io", "background-service")
     })
     events = []
     model_events = []
@@ -876,7 +875,10 @@ async def test_real_parent_and_child_facts_publish_and_replay(
 
         set_fact_sink(capture)
         threads.start()
+        trajectory = None
         try:
+            trajectory = _child_trajectory(threads, manager, monkeypatch, tmp_path,
+                                           enabled=request.node.callspec.params["model_peer"] == "children_traced")
             with agent_monitoring_context(metadata):
                 async with asyncio.timeout(30):
                     async for _ in agent_run(info, thread_manager=threads):
@@ -901,6 +903,7 @@ async def test_real_parent_and_child_facts_publish_and_replay(
                 assert event["tenant_id"] == tenant and event["initiator_group_ids"] == (12, 13)
                 assert root["started_at"] <= event["started_at"] <= event["ended_at"] <= root["ended_at"]
             assert root["duration_ms"] >= sum(event["duration_ms"] for event in children)
+            trajectory.verify(terminals)
             async with asyncio.timeout(15):
                 while True:
                     if token_run:
@@ -989,6 +992,8 @@ async def test_real_parent_and_child_facts_publish_and_replay(
                         await _verify_agent_ttft_history(client, service, tenant, day)))
             record_property("parent_child_metrics", json.dumps({"agents": expected, "combined": summary}))
         finally:
+            if trajectory is not None:
+                trajectory.close()
             await threads.shutdown(timeout=8)
             set_fact_sink(sink)
 
@@ -1363,5 +1368,202 @@ async def test_complete_main_timing_matches_raw_trajectory_and_published_queries
     finally:
         processor.shutdown()
         provider.shutdown()
+        await threads.shutdown(timeout=8)
+        assert threads.snapshot().active_count == 0
+
+
+def _child_trajectory(threads, manager, monkeypatch, directory, *, enabled):
+    """Own real local OTLP capture and verify each child against its exact frozen clock."""
+    from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+    from infrastructure.trace.trajectory_store import TrajectoryFileStore
+    from nexent.core.concurrency import ManagedThreadSpec
+    from nexent.monitor import get_agent_monitoring_context
+    from nexent.monitor.run_timing import RunTiming
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+
+    directory = directory / "child-trajectory"
+    TrajectoryFileStore.provision(directory)
+    processor = LocalTrajectoryProcessor(TrajectoryFileStore(directory, authorize=lambda _: None),
+                                         get_agent_monitoring_context)
+    provider = TracerProvider(sampler=processor.wrap_sampler(ALWAYS_ON), shutdown_on_exit=False)
+    provider.add_span_processor(processor)
+    monkeypatch.setattr(manager, "_config", MonitoringConfig(
+        enable_telemetry=enabled, provider="local_file", local_span_processor=processor, export_metrics=False,
+    ))
+    monkeypatch.setattr(manager, "_tracer", provider.get_tracer("child-complete-timing"))
+    processor.start(threads, ManagedThreadSpec("trajectory-writer", "child-timing", close_hook=processor.request_stop))
+    clocks = []
+
+    def clock(**kwargs):
+        result = RunTiming(**kwargs)
+        clocks.append(result)
+        return result
+
+    monkeypatch.setattr("nexent.core.agents.resources.subagents.RunTiming", clock)
+
+    def verify(terminals):
+        assert processor.force_flush(5000)
+        raw = [span for path in directory.rglob("*.otlp.jsonl") for line in path.read_text().splitlines()
+               for resource in json.loads(line)["resourceSpans"] for scope in resource["scopeSpans"]
+               for span in scope["spans"] if span["name"].startswith("agent.subagent.")]
+        children = {key: value for key, value in terminals.items() if not value["is_root"]}
+        assert len(clocks) == len({id(item) for item in clocks}) == len(children)
+        assert {item.run_id for item in clocks} == set(children)
+        by_id = {}
+        for span in raw:
+            attributes = {item["key"]: next(iter(item["value"].values())) for item in span["attributes"]}
+            by_id[attributes["nexent.agent_run_id"]] = (span, attributes)
+        assert set(by_id) == (set(children) if enabled else set())
+        for timing in clocks:
+            result = timing.finish()
+            fact = children[result.run_id]
+            assert fact["started_at"] == result.started_at.isoformat()
+            assert fact["ended_at"] == result.ended_at.isoformat()
+            assert fact["execution_started_at"] == result.execution_started_at.isoformat()
+            assert fact["duration_ms"] == result.duration_ms
+            if enabled:
+                span, attributes = by_id[result.run_id]
+                assert int(span["startTimeUnixNano"]) == result.started_at_ns
+                assert int(span["endTimeUnixNano"]) == result.ended_at_ns
+                assert int(attributes["nexent.duration_ms"]) == result.duration_ms
+        return [{"run_id": timing.run_id, "duration_ms": timing.finish().duration_ms,
+                 "raw_span": enabled} for timing in clocks]
+
+    def close():
+        processor.shutdown()
+        provider.shutdown()
+
+    return SimpleNamespace(verify=verify, close=close)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_peer", ["failed", "cancelled", "trajectory_off"], indirect=True)
+async def test_child_complete_timing_outcomes_publish_and_replay(
+    isolated_monitoring, model_peer, monkeypatch, tmp_path, request, record_property,
+):
+    """Run an actual child Core under an owning parent trace and persist its terminal result."""
+    from contextlib import contextmanager
+    from management.services.permission.identity import session as auth
+    from nexent.core.agents.orchestration.children import child_run_info, invoke_child
+    from nexent.core.agents.resources.subagents import SubAgentDefinition, SubAgentToolWrapper
+    from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope
+    from nexent.monitor.run_timing import RunTiming
+    from permissions import rbac
+
+    service, tenant = isolated_monitoring
+    base, requests, release = model_peer
+    mode = request.node.callspec.params["model_peer"]
+    parent_id = uuid4().hex
+    parent_clock = RunTiming(run_id=parent_id)
+    config = AgentConfig(name="child", agent_id=22, description="Controlled child", model_name="model",
+                         tools=[], max_steps=2)
+    parent = AgentRunInfo(query="Run child", observer=MessageObserver(), agent_config=config,
+                          model_config_list=[ModelConfig(cite_name="model", model_name="model", url=base,
+                                                         api_key="synthetic")],
+                          stop_event=Event(), history=[], user_id="owner", tenant_id=tenant, conversation_id=125,
+                          run_timing=parent_clock)
+    cancellation = RunCancellationScope(Event())
+    infos = []
+
+    @contextmanager
+    def invocation():
+        info = child_run_info(parent, config, cancellation)
+        assert info.run_timing is None
+        infos.append(info)
+        yield lambda task: invoke_child(info, task)
+
+    wrapper = SubAgentToolWrapper(SubAgentDefinition("child", "Controlled"), parent.observer, agent_id=22,
+                                  invocation_factory=invocation)
+    metadata = AgentRunMetadata(tenant_id=tenant, user_id="owner", conversation_id=125, agent_id=21,
+                                monitoring_run_id=parent_id, monitoring_root_run_id=parent_id,
+                                monitoring_group_ids=(12, 13))
+    threads = ThreadManager("child-outcomes", {
+        lane: LanePolicy(lane, 2, 3)
+        for lane in ("agent-run", "model-tool-io", "sandbox", "control-io", "background-service")
+    })
+    threads.start()
+    manager = get_monitoring_manager()
+    trajectory = _child_trajectory(threads, manager, monkeypatch, tmp_path, enabled=mode != "trajectory_off")
+    events = []
+    try:
+        async with runtime.producer_lifespan():
+            sink = get_fact_sink()
+
+            def capture(event):
+                if event["fact_kind"] == "agent":
+                    events.append(dict(event))
+                sink(event)
+
+            set_fact_sink(capture)
+
+            def execute():
+                with agent_monitoring_context(metadata):
+                    parent_clock.start()
+                    with manager.start_agent_run(metadata, run_timing=parent_clock):
+                        return wrapper(task="Produce an answer")
+
+            execution = threads.submit("agent-run", ManagedTaskSpec("child", "child-timing"), execute)
+            async with asyncio.timeout(20):
+                while not requests:
+                    assert not execution.future.done()
+                    await asyncio.sleep(0.02)
+                if mode == "cancelled":
+                    cancellation.cancel()
+                release.set()
+                result, = await asyncio.gather(asyncio.wrap_future(execution.future), return_exceptions=True)
+            if mode == "trajectory_off":
+                assert not isinstance(result, BaseException)
+            else:
+                assert isinstance(result, BaseException)
+            start, terminal = events
+            outcome = {"failed": "failed", "cancelled": "cancelled", "trajectory_off": "succeeded"}[mode]
+            assert terminal["outcome"] == outcome and len(requests) == 1
+            for field in ("agent_run_id", "root_run_id", "parent_run_id", "started_at", "execution_started_at"):
+                assert start[field] == terminal[field]
+            assert terminal["parent_run_id"] == terminal["root_run_id"] == parent_id
+            assert infos[0].run_timing is not parent_clock and infos[0].run_timing.run_id == terminal["fact_id"]
+            raw = trajectory.verify({terminal["fact_id"]: terminal})
+            hit = await _apply_and_read(service, tenant)
+            assert hit["_source"]["duration_ms"] == terminal["duration_ms"]
+            day = datetime.fromisoformat(terminal["execution_started_at"]).date()
+            assert hit["_source"]["statistic_date"] == day.isoformat()
+            service.tick()
+            original = _published_agent_day(service, tenant, day)
+            _, row = original
+            assert row["execution_count"] == row["duration_sample_count"] == 1
+            assert row["duration_sum_ms"] == terminal["duration_ms"]
+            assert row["succeeded_count"] == int(outcome == "succeeded")
+            assert row["failed_count"] == int(outcome == "failed")
+            await _submit_and_read(service, tenant, terminal)
+            service.tick()
+            assert _published_agent_day(service, tenant, day) == original
+            monkeypatch.setattr(auth, "get_current_user_context", lambda _: ("operator", tenant, "OPS"))
+            monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {"OPS": {"ops.dashboard:read"}})
+            monkeypatch.setattr(rbac, "_INITIALIZED", True)
+            from ops.api import application
+
+            monkeypatch.setattr(application, "OPS_MONITORING_ENABLED", True)
+            app = application.create_app()
+            app.state.monitoring = service
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
+                response = await client.get("/ops/v1/monitoring/agents/summary",
+                                            params={"start_date": day.isoformat(), "end_date": day.isoformat(),
+                                                    "agent_id": 22, "group_ids": [12, 13]},
+                                            headers={"Authorization": "Bearer ops"})
+                assert response.status_code == 200
+                metrics = response.json()["data"]
+                assert metrics["execution_count"] == metrics["duration_sample_count"] == 1
+                assert metrics["avg_duration_ms"] == terminal["duration_ms"]
+                assert metrics["succeeded_count"] == int(outcome == "succeeded")
+                assert metrics["failed_count"] == int(outcome == "failed")
+                assert metrics["avg_ttft_ms"] == terminal.get("ttft_ms")
+            record_property("child_timing", json.dumps({"mode": mode, "raw": raw, "metrics": metrics,
+                                                        "replay_count": 1}))
+            set_fact_sink(sink)
+    finally:
+        release.set()
+        cancellation.cancel()
+        trajectory.close()
         await threads.shutdown(timeout=8)
         assert threads.snapshot().active_count == 0

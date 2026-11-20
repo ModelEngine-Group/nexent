@@ -5,6 +5,8 @@ from datetime import date, datetime, timezone
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from ops.monitoring.agent import AGENT_MONITORING, AgentFact, accumulate_agent
 from ops.monitoring.runtime import MONITORING_KINDS, Producer
 
@@ -15,8 +17,12 @@ def event(**values):
                 record_revision=1, outcome="started", started_at="2026-10-31T23:59:59Z", **values)
 
 
-def test_main_full_start_preserves_actual_execution_day_partition_and_batch_dates():
+@pytest.mark.parametrize("child", [False, True])
+def test_main_full_start_preserves_actual_execution_day_partition_and_batch_dates(child):
     payload = event(execution_started_at="2026-11-01T00:00:00Z")
+    if child:
+        payload.update(fact_id="child", agent_run_id="child", call_context_id="child",
+                       parent_run_id="root", is_root=False)
     fact = AgentFact.model_validate(payload)
     assert fact.partition_anchor() == datetime(2026, 11, 1, tzinfo=timezone.utc)
     assert fact.statistic_day(ZoneInfo("UTC")) == date(2026, 11, 1)

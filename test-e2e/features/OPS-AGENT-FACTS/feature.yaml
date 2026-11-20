@@ -27,8 +27,10 @@ feature:
   - rule_id: OPS-AGENT-FACTS-RULE-09
     description: Agent TTFT measures actual execution start to its first nonblank public answer fragment, independently per main or child execution. Tools, thinking, missing answers, fallback placeholders and replay do not create samples. Merge measured sums and counts before computing nullable averages.
   - rule_id: OPS-AGENT-FACTS-RULE-10
-    description: Main Agent monitoring and trajectory consume one complete preparation-through-cleanup timing result independently of capture flags. Actual execution start preserves counting eligibility and date ownership; TTFT and child timing retain their existing boundaries.
+    description: Main Agent monitoring and trajectory consume one complete preparation-through-cleanup timing result independently of capture flags. Actual execution start preserves counting eligibility and date ownership; TTFT retains its actual execution boundary.
+  - rule_id: OPS-AGENT-FACTS-RULE-11
+    description: Each child invocation shares an independent complete allocation-through-release-and-output timing result between monitoring and trajectory, regardless of capture flags. Actual execution start retains counting and date ownership; parent, sibling and nested clocks never mix.
   required_test_stages: [D3]
   source:
-    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119]
+    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120]
     notes: Agent collection contract and shared Ops monitoring pipeline.

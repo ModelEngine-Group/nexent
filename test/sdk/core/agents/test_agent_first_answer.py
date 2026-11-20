@@ -12,6 +12,7 @@ import pytest
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
+from nexent.monitor import agent_fact
 from nexent.monitor.agent_fact import AgentRunObservation
 from nexent.monitor.facts import get_fact_sink, set_fact_sink
 from nexent.monitor.run_timing import RunTiming
@@ -34,12 +35,12 @@ def capture(monkeypatch):
                                     monitoring_parent_run_id=None if run_id == "root" else "root")
         with agent_monitoring_context(metadata):
             observation = AgentRunObservation.from_context(metadata)
-            timing = RunTiming(run_id=run_id, monotonic_clock_ns=lambda: clock.ms * 1_000_000)
+            timing = RunTiming(run_id=run_id, monotonic_clock_ns=agent_fact.monotonic_ns)
             timing.start()
             timings[run_id] = timing
-            with observation.measure(Event(), run_timing=timing if run_id == "root" else None):
+            with observation.measure(Event(), run_timing=timing):
                 yield observation
-            observation.report_terminal("completed", timing_result=timing.finish() if run_id == "root" else None)
+            observation.report_terminal("completed", timing_result=timing.finish())
 
     try:
         yield SimpleNamespace(clock=clock, events=events, observer=observer, run=run, timings=timings)

@@ -21,6 +21,7 @@ from nexent.monitor import (
 from nexent.monitor.agent_fact import AgentRunObservation
 from nexent.monitor.facts import get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
+from nexent.monitor.run_timing import RunTiming
 
 
 @pytest.fixture
@@ -42,6 +43,9 @@ def child_capture(monkeypatch):
     manager = get_monitoring_manager()
     monkeypatch.setattr(manager, "_config", MonitoringConfig(enable_telemetry=False, provider="local_file"))
     assert not manager.is_enabled and not local_capture_enabled(manager)
+    monkeypatch.setattr("nexent.core.agents.resources.subagents.RunTiming",
+                        lambda **kw: RunTiming(**kw, utc_clock_ns=lambda: 1793491199900000000 + clock.ns,
+                                                monotonic_clock_ns=lambda: clock.ns), raising=False)
     previous = get_fact_sink()
     set_fact_sink(sink)
 
@@ -107,9 +111,9 @@ def test_child_facts_reuse_observer_id_and_typed_result_after_cleanup(child_capt
     assert start["tenant_id"] == "tenant" and start["initiator_group_ids"] == (12, 13)
     assert start["record_revision"] == 1 and "duration_ms" not in start
     assert terminal["record_revision"] == 2 and terminal["outcome"] == outcome
-    assert terminal["duration_ms"] == 350 and terminal["started_at"] == start["started_at"]
+    assert terminal["duration_ms"] == 1830 and terminal["started_at"] == start["started_at"]
     assert terminal["ended_at"] >= start["started_at"]
-    assert fixture.phases == ["allocate", "validate", "prepare", "started", "run", "close", outcome, "release"]
+    assert fixture.phases == ["allocate", "validate", "prepare", "started", "run", "close", "release", outcome]
     assert "private task" not in str(fixture.events)
 
 
@@ -126,8 +130,10 @@ def test_child_failures_preserve_exception_and_only_measure_started_runs(child_c
     else:
         assert len(fixture.events) == 2
         assert fixture.events[1]["outcome"] == ("cancelled" if failure == "cancel" else "failed")
-        assert fixture.events[1]["duration_ms"] == 350
-    assert fixture.phases[-1] == "release" and "close" in fixture.phases
+        assert fixture.events[1]["duration_ms"] == 1830
+    assert "release" in fixture.phases and "close" in fixture.phases
+    if fixture.events:
+        assert fixture.phases.index("release") < len(fixture.phases) - 1
     assert child._observer.add_subagent_end.call_count == 1
 
 

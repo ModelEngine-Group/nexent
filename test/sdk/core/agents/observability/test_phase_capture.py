@@ -71,7 +71,8 @@ async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     )
     assert search.parent.span_id == preparation.context.span_id
     assert preparation.parent.span_id == root.context.span_id
-    assert root.start_time <= search.start_time <= search.end_time <= root.end_time
+    # Shared UTC boundaries retain microseconds; phase records retain nanoseconds.
+    assert root.start_time // 1000 <= search.start_time // 1000 <= search.end_time // 1000 <= root.end_time // 1000
     assert (
         search.start_time == record["started_at_ns"]
         and search.end_time == record["finished_at_ns"]

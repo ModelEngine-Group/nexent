@@ -1,9 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Collect source facts for the executed portion of an Agent run."""
+"""Collect execution facts using invocation-owned shared timing."""
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from threading import Lock
 from time import monotonic_ns
 
@@ -14,6 +14,7 @@ from .run_timing import RunTiming, RunTimingResult
 
 _OUTCOMES = {"completed": "succeeded", "failed": "failed", "stopped": "cancelled"}
 _active_observation: ContextVar["AgentRunObservation | None"] = ContextVar("agent_fact_observation", default=None)
+_child_scope: ContextVar["ChildRunScope | None"] = ContextVar("child_run_scope", default=None)
 
 
 def record_agent_answer(content, *, agent_id=None, invocation_id=None):
@@ -76,20 +77,16 @@ class AgentRunObservation:
 
     @contextmanager
     def measure(self, stop_event, *, run_timing: RunTiming | None = None):
-        """Keep actual-run eligibility and TTFT separate from complete main timing."""
+        """Keep actual-run eligibility and TTFT separate from complete invocation timing."""
         if stop_event.is_set():
             yield
             return
-        if self._identity["is_root"]:
-            if run_timing is None or run_timing.run_id != self._identity["agent_run_id"]:
-                raise ValueError("Main Agent observation requires its shared run timing")
-            started_at = run_timing.start()
-            execution_started_at = run_timing.mark_execution_started()
-        else:
-            started_at = datetime.now(timezone.utc)
-        started = {**self._identity, "started_at": started_at.isoformat()}
-        if self._identity["is_root"]:
-            started["execution_started_at"] = execution_started_at.isoformat()
+        if run_timing is None or run_timing.run_id != self._identity["agent_run_id"]:
+            raise ValueError("Agent observation requires its shared run timing")
+        started_at = run_timing.start()
+        execution_started_at = run_timing.mark_execution_started()
+        started = {**self._identity, "started_at": started_at.isoformat(),
+                   "execution_started_at": execution_started_at.isoformat()}
         emit_fact({**started, "record_revision": 1, "outcome": "started"})
         started_ns = monotonic_ns()
         self._started_ns = started_ns
@@ -98,26 +95,53 @@ class AgentRunObservation:
             yield
         finally:
             with self._lock:
-                duration_ms = (monotonic_ns() - started_ns) // 1_000_000 if not self._identity["is_root"] else None
                 self._started_ns = None
             _active_observation.reset(token)
             self._terminal = {**started, "record_revision": 2}
-            if not self._identity["is_root"]:
-                ended_at = max(started_at, datetime.now(timezone.utc))
-                self._terminal.update(ended_at=ended_at.isoformat(), duration_ms=duration_ms)
             if self._ttft_ms is not None:
                 self._terminal["ttft_ms"] = self._ttft_ms
 
     def report_terminal(self, attempt_outcome: str | None, *, timing_result: RunTimingResult | None = None) -> None:
         """Publish the measured execution with the worker's final outcome."""
         if self._terminal is not None:
-            if self._identity["is_root"]:
-                if (timing_result is None or timing_result.run_id != self._identity["agent_run_id"]
-                        or timing_result.started_at.isoformat() != self._terminal["started_at"]
-                        or timing_result.execution_started_at is None
-                        or timing_result.execution_started_at.isoformat() != self._terminal["execution_started_at"]):
-                    raise ValueError("Main Agent terminal requires the same complete timing result")
-                self._terminal.update(
-                    ended_at=timing_result.ended_at.isoformat(), duration_ms=timing_result.duration_ms,
-                )
+            if (timing_result is None or timing_result.run_id != self._identity["agent_run_id"]
+                    or timing_result.started_at.isoformat() != self._terminal["started_at"]
+                    or timing_result.execution_started_at is None
+                    or timing_result.execution_started_at.isoformat() != self._terminal["execution_started_at"]):
+                raise ValueError("Agent terminal requires the same complete timing result")
+            self._terminal.update(
+                ended_at=timing_result.ended_at.isoformat(), duration_ms=timing_result.duration_ms,
+            )
             emit_fact({**self._terminal, "outcome": _OUTCOMES.get(attempt_outcome, "unknown")})
+
+
+@dataclass
+class ChildRunScope:
+    """Carry one child invocation's clock and existing typed execution outcome."""
+
+    timing: RunTiming
+    observation: AgentRunObservation | None
+    attempt_outcome: str | None = None
+
+
+def get_child_run_scope():
+    return _child_scope.get()
+
+
+@contextmanager
+def child_run_scope(metadata, timing: RunTiming):
+    """Report after the complete child boundary and restore nested/parallel contexts."""
+    observation = (
+        AgentRunObservation.from_context(metadata) if metadata and metadata.monitoring_parent_run_id else None
+    )
+    scope = ChildRunScope(timing, observation)
+    token = _child_scope.set(scope)
+    try:
+        yield scope
+    finally:
+        try:
+            result = timing.finish()
+            if observation is not None:
+                observation.report_terminal(scope.attempt_outcome, timing_result=result)
+        finally:
+            _child_scope.reset(token)

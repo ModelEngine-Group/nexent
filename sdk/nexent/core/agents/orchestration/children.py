@@ -10,7 +10,8 @@ from nexent.core.agents.contracts.output import RunResult
 from nexent.core.agents.orchestration.execution import execute_adapter
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.monitor import get_agent_monitoring_context
-from nexent.monitor.agent_fact import AgentRunObservation
+from nexent.monitor.agent_fact import child_run_scope, get_child_run_scope
+from nexent.monitor.run_timing import RunTiming
 
 
 def child_run_info(parent, config, scope):
@@ -41,15 +42,24 @@ def invoke_child(info, task):
     """Select the configured Core and close its resources even after partial preparation."""
     if not isinstance(task, str) or not task.strip():
         raise ValueError("Child task must be a non-empty string")
+    metadata = get_agent_monitoring_context()
+    scope = get_child_run_scope()
+    if scope is not None and metadata is not None and scope.timing.run_id == metadata.monitoring_run_id:
+        return _invoke_child(info, task, scope)
+    timing = RunTiming(run_id=metadata.monitoring_run_id if metadata else None)
+    timing.start()
+    with child_run_scope(metadata, timing) as scope:
+        return _invoke_child(info, task, scope)
+
+
+def _invoke_child(info, task, scope):
     info.query = task
     info.run_role = "subagent"
     info.run_result = None
-    metadata = get_agent_monitoring_context()
-    observation = (
-        AgentRunObservation.from_context(metadata) if metadata and metadata.monitoring_parent_run_id else None
-    )
+    info.run_timing = scope.timing
+    observation = scope.observation
     try:
-        run_scope = observation.measure(info.stop_event) if observation is not None else None
+        run_scope = observation.measure(info.stop_event, run_timing=scope.timing) if observation is not None else None
         result = execute_adapter(info, run_scope=run_scope)
         info.attempt_outcome = info.run_result.status if isinstance(info.run_result, RunResult) else (
             "stopped" if info.stop_event.is_set() else "completed")
@@ -61,8 +71,7 @@ def invoke_child(info, task):
         info.attempt_outcome = "failed"
         raise
     finally:
-        if observation is not None:
-            observation.report_terminal(info.attempt_outcome)
+        scope.attempt_outcome = info.attempt_outcome
 
 
 def child_invocation_factory(parent):
