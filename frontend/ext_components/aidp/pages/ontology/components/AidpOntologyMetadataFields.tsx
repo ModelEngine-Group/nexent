@@ -32,7 +32,6 @@ import {
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
   METADATA_FIELD_LIMIT,
@@ -113,18 +112,6 @@ const FieldLabel: React.FC<{ label: string; help: string }> = ({
 const fieldKey = (field: AidpOntologyMetadataField): string =>
   String(field.id ?? field.field_name);
 
-const buildDemoPatch = (
-  created = false
-): Partial<AidpOntologyMetadataField> => {
-  const timestamp = nowText();
-  return {
-    extended_properties: [],
-    associated_chunk_count: 0,
-    ...(created ? { create_time: timestamp } : {}),
-    update_time: timestamp,
-  };
-};
-
 const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   domainId,
   autoOpenCreate = false,
@@ -133,7 +120,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const { message, modal } = App.useApp();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
-  const demo = useAidpOntologyDemoMode();
   const { user, isAuthzReady } = useAuthorizationContext();
   const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
   const [editForm] = Form.useForm<FieldFormValues>();
@@ -155,9 +141,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [demoExtras, setDemoExtras] = useState<
-    Record<string, Partial<AidpOntologyMetadataField>>
-  >({});
   const [visibleColumns, setVisibleColumns] = useState({
     createTime: true,
     updateTime: true,
@@ -198,14 +181,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     retry: false,
   });
 
-  const fields = useMemo(
-    () =>
-      (query.data?.value ?? []).map((field) => ({
-        ...field,
-        ...(demoExtras[fieldKey(field)] ?? {}),
-      })),
-    [demoExtras, query.data?.value]
-  );
+  const fields = useMemo(() => query.data?.value ?? [], [query.data?.value]);
   const limit = query.data?.limit ?? METADATA_FIELD_LIMIT;
   const total = query.data?.total_count ?? 0;
   const allCount = query.data?.all_count ?? total;
@@ -274,15 +250,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         field_name: values.field_name.trim(),
         field_type: values.field_type,
       });
-      if (demo) {
-        setDemoExtras((previous) => ({
-          ...previous,
-          [fieldKey(created)]: {
-            ...buildDemoPatch(true),
-            ...(previous[fieldKey(created)] ?? {}),
-          },
-        }));
-      }
       message.success(t("aidpKnowledge.ontologyMetadataFieldCreated"));
       setCreateOpen(false);
       setPage(1);
@@ -327,15 +294,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         } else {
           message.success(t("aidpKnowledge.ontologyMetadataFieldRenamed"));
         }
-      }
-      if (demo) {
-        setDemoExtras((previous) => ({
-          ...previous,
-          [fieldKey(editing)]: {
-            ...(previous[fieldKey(editing)] ?? {}),
-            ...buildDemoPatch(),
-          },
-        }));
       }
       message.success(t("aidpKnowledge.ontologyMetadataUpdated"));
       closeEdit();
@@ -666,21 +624,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           key: "column",
           label: t("aidpKnowledge.ontologyMetadataColumnIndex"),
           children: detailField.column_index ?? t("aidpKnowledge.ontologyDash"),
-        },
-        {
-          key: "chunks",
-          label: t("aidpKnowledge.ontologyMetadataColumnChunkCount"),
-          children:
-            demo && detailField.associated_chunk_count != null
-              ? t("aidpKnowledge.ontologyMetadataChunkCountValue", {
-                  count: detailField.associated_chunk_count,
-                })
-              : t("aidpKnowledge.ontologyDash"),
-        },
-        {
-          key: "created",
-          label: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
-          children: formatAuditTime(detailField.create_time),
         },
       ]
     : [];
@@ -1041,9 +984,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               bordered
               items={detailItems}
             />
-            <AidpOntologyGapNote>
-              {t("aidpKnowledge.ontologyMetadataDetailGap")}
-            </AidpOntologyGapNote>
           </div>
         )}
       </Drawer>
@@ -1052,7 +992,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         open={task.open}
         taskName={task.taskName}
         taskId={task.taskId}
-        demo={demo}
+        demo={false}
         initialState={task.initialState}
         onClose={() => setTask((previous) => ({ ...previous, open: false }))}
       />

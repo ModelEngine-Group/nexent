@@ -115,32 +115,15 @@ export interface AidpOntologyBindingListResponse {
 
 export type AidpMetadataFieldType = "string" | "number" | "date";
 
-export interface AidpMetadataExtendedProperty {
-  key: string;
-  value: string;
-}
-
-export interface AidpMetadataDemoTask {
-  state: "running" | "success" | "failed";
-  label?: string;
-}
-
 export interface AidpOntologyMetadataField {
   /** AIDP MetadataId; absent on older responses, which blocks ID-based writes. */
   id?: string | number | null;
   field_name: string;
   field_type: AidpMetadataFieldType;
   column_index?: number | null;
-  /** Demo-only values. AIDP has no persistence contract for them. */
-  candidates?: string[] | null;
-  extended_properties?: AidpMetadataExtendedProperty[] | null;
-  /** Demo-only total; AIDP has no per-field chunk count API. */
-  associated_chunk_count?: number | null;
+  /** AIDP does not return audit times for definitions; the columns show —. */
   create_time?: string | null;
   update_time?: string | null;
-  /** Demo-only mock status; never infer real task state from it. */
-  status?: string | null;
-  demo_task?: AidpMetadataDemoTask | null;
 }
 
 export interface AidpOntologyMetadataFieldListResponse {

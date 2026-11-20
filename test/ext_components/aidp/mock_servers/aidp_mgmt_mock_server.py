@@ -594,47 +594,9 @@ def _seed_ontology_data() -> None:
     )
 
     _ONTOLOGY_METADATA["1"] = [
-        {
-            "id": 101,
-            "fieldName": "doc_type",
-            "fieldType": "string",
-            "columnIndex": 1,
-            "candidates": ["FAQ", "Guide", "Policy"],
-            "extendedProperties": [{"key": "来源", "value": "内容团队"}],
-            "associatedChunkCount": 120,
-            "createTime": "2026-01-23 10:24:16",
-            "updateTime": "2026-01-24 09:12:40",
-            "status": "新增成功",
-        },
-        {
-            "id": 102,
-            "fieldName": "publish_year",
-            "fieldType": "number",
-            "columnIndex": 2,
-            "candidates": ["2020 ~ 2030"],
-            "extendedProperties": [],
-            "associatedChunkCount": 0,
-            "createTime": "2026-01-23 11:02:08",
-            "updateTime": "2026-01-23 11:02:08",
-            "status": "新增中",
-            "demoTask": {"state": "running", "label": "正在解析候选值"},
-        },
-        {
-            "id": 103,
-            "fieldName": "effective_date",
-            "fieldType": "time",
-            "columnIndex": 3,
-            "candidates": ["2025-01-01 ~ 2026-12-31"],
-            "extendedProperties": [],
-            "associatedChunkCount": 100000000,
-            "createTime": "2026-01-24 15:30:00",
-            "updateTime": "2026-01-24 15:31:22",
-            "status": "新增失败",
-            "demoTask": {
-                "state": "failed",
-                "label": "演示：AIDP 未返回逐字段失败原因",
-            },
-        },
+        {"id": 101, "fieldName": "doc_type", "fieldType": "string", "columnIndex": 1},
+        {"id": 102, "fieldName": "publish_year", "fieldType": "number", "columnIndex": 2},
+        {"id": 103, "fieldName": "effective_date", "fieldType": "date", "columnIndex": 3},
     ]
     _ONTOLOGY_RULES["1"] = [
         {
@@ -730,17 +692,7 @@ def _seed_ontology_data() -> None:
         }
     ]
     _ONTOLOGY_METADATA["2"] = [
-        {
-            "id": 201,
-            "fieldName": "channel",
-            "fieldType": "string",
-            "columnIndex": 1,
-            "candidates": ["电话", "在线", "邮件"],
-            "extendedProperties": [],
-            "associatedChunkCount": 4,
-            "createTime": "2026-02-10",
-            "status": "新增成功",
-        },
+        {"id": 201, "fieldName": "channel", "fieldType": "string", "columnIndex": 1},
     ]
 
     faq_file_uuid = "00000000-0000-4000-8000-000000000001"
@@ -4589,12 +4541,6 @@ def create_ontology_metadata(
         "fieldName": field_name,
         "fieldType": field_type,
         "columnIndex": len(fields) + 1,
-        "candidates": [],
-        "extendedProperties": [],
-        "associatedChunkCount": 0,
-        "createTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "新增成功",
     }
     fields.append(record)
     _save_state()
@@ -4635,10 +4581,6 @@ def batch_unbind_ontology_metadata(
     known = {str(item.get("id")) for item in fields}
     if not {str(value) for value in ids}.issubset(known):
         raise HTTPException(status_code=404, detail="Metadata field not found")
-    for item in fields:
-        if str(item.get("id")) in {str(value) for value in ids}:
-            item["status"] = "解绑中"
-            item["associatedChunkCount"] = 0
     _save_state()
     return JSONResponse(
         status_code=200,
@@ -4676,8 +4618,6 @@ def rename_ontology_metadata_by_id(
     if any(item["fieldName"] == new_name and item is not current for item in fields):
         raise HTTPException(status_code=400, detail="fieldName already exists")
     current["fieldName"] = new_name
-    current["status"] = "新增成功"
-    current["demoTask"] = None
     _save_state()
     return current
 

@@ -24,28 +24,16 @@ logger = logging.getLogger("aidp_ontology_metadata_service")
 
 
 def _normalize_field(item: dict[str, Any]) -> dict[str, Any]:
-    raw_chunk_count = item.get("associatedChunkCount")
-    if raw_chunk_count is None:
-        raw_chunk_count = item.get("associated_chunk_count")
+    """Project the confirmed AIDP metadata-field shape.
+
+    AIDP returns only id/field_name/field_type/column_index for definitions;
+    anything else the local mock used to carry is intentionally dropped.
+    """
     return {
         "id": item.get("id") or item.get("metadata_id"),
         "field_name": item.get("fieldName") or item.get("field_name"),
         "field_type": item.get("fieldType") or item.get("field_type"),
         "column_index": item.get("columnIndex") or item.get("column_index"),
-        "candidates": item.get("candidates") or item.get("candidate_values") or [],
-        "extended_properties": item.get("extendedProperties")
-        or item.get("extended_properties")
-        or [],
-        "associated_chunk_count": (
-            raw_chunk_count
-            if isinstance(raw_chunk_count, int)
-            and not isinstance(raw_chunk_count, bool)
-            else None
-        ),
-        "create_time": item.get("createTime") or item.get("create_time"),
-        "update_time": item.get("updateTime") or item.get("update_time"),
-        "status": item.get("status"),
-        "demo_task": item.get("demoTask") or item.get("demo_task"),
     }
 
 

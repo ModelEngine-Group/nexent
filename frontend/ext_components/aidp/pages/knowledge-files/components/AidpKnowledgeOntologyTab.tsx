@@ -205,22 +205,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
                 : value
         ),
     },
-    {
-      title: t("aidpKnowledge.ontologyMetadataColumnChunkCount"),
-      key: "chunk",
-      width: 150,
-      render: (_value, record) =>
-        demo && record.associated_chunk_count != null
-          ? record.associated_chunk_count
-          : "—",
-    },
-    {
-      title: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
-      dataIndex: "create_time",
-      key: "create_time",
-      width: 140,
-      render: (value: string | null | undefined) => (demo && value) || "—",
-    },
   ];
 
   const entityColumns: TableColumnsType<AidpOntologyEntity> = [
