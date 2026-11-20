@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 from ..configuration import (
     _build_otlp_headers,
     _require_choice,
@@ -14,6 +15,7 @@ from ..configuration import (
     parse_positive_int,
     validate_deployment_version,
 )
+
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.

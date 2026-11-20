@@ -27,6 +27,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
@@ -76,11 +77,11 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from management.services.knowledge_base.providers.shared_aidp import delete_aidp_kb_impl, get_bound_agents
 from management.db.identity.user_tenant import get_user_role_by_tenant
+from management.services.knowledge_base.providers.shared_aidp import delete_aidp_kb_impl, get_bound_agents
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.tag.library import TagManagementService
-from nexent.core.concurrency import run_blocking
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
