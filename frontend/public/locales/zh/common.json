@@ -2042,7 +2042,7 @@
   "aidpKnowledge.ontologyEntityDeleteContent": "删除后该实体将从本体库中移除。",
   "aidpKnowledge.ontologyEntityDeleteContentWithName": "确定删除实体「{{name}}」？删除后不会立即解除与知识库 Chunk 的关联，后续更新元数据时才会解除。",
   "aidpKnowledge.ontologyEntityDeleteFailed": "实体删除失败",
-  "aidpKnowledge.ontologyEntityDeleteGap": "删除实体是同步操作：上下位、同义关系会一并级联清理，知识库绑定不受影响；Chunk 上的本体标签不会立即删除，后续更新 Metadata 或触发标签同步任务时才会清理。",
+  "aidpKnowledge.ontologyEntityDeleteGap": "删除实体是同步操作：上下位、同义关系会一并级联清理；Chunk 上的本体标签不会立即删除，后续更新 Metadata 或触发标签同步任务时才会清理。",
   "aidpKnowledge.ontologyEntityDeleteTitle": "删除实体「{{name}}」？",
   "aidpKnowledge.ontologyEntityDeleteTitleFixed": "删除实体",
   "aidpKnowledge.ontologyEntityDeleted": "实体已删除",
