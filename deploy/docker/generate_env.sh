@@ -94,7 +94,6 @@ update_env_file() {
   update_env_var "RUNTIME_SERVICE_URL" "http://localhost:5014"
   update_env_var "ELASTICSEARCH_SERVICE" "http://localhost:5010/api"
   update_env_var "NEXENT_MCP_SERVER" "http://localhost:5011"
-  update_env_var "DATA_PROCESS_SERVICE" "http://localhost:5012/api"
   update_env_var "NORTHBOUND_API_SERVER" "http://localhost:5013/api"
   update_env_var "MCP_MANAGEMENT_API" "http://localhost:5015"
   update_env_var "MINIO_ENDPOINT" "http://localhost:9010"

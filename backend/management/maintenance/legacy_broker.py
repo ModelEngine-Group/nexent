@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Record legacy broker counts after publishers and workers have stopped."""
+"""Record legacy broker and file counts after publishers and workers have stopped."""
 
 import argparse
 import json
@@ -9,10 +9,10 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from contracts.knowledge_maintenance import BROKER_INVENTORY
+from contracts.knowledge_maintenance import BROKER_INVENTORY, LEGACY_INGESTION_INVENTORY
 from contracts.roles import has_any_role
 from management.services.knowledge_base.quota_authorization import quota_identity_roles
-from nexent.storage.errors import ScopeDenied
+from nexent.storage.errors import ScopeDenied, Unavailable
 from nexent.storage.models import OperationContext
 
 from infrastructure.agentos_identity import ServicePrincipal
@@ -22,13 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 def _read(actor, context):
-    with legacy_broker_ports(actor, context=context) as (identity, broker):
+    with legacy_broker_ports(actor, context=context) as (identity, broker, files):
         if not has_any_role(quota_identity_roles(identity, actor, context=context), {"SU"}):
             raise ScopeDenied()
-        evidence = broker.get(BROKER_INVENTORY, "queues", context=context)
+        broker_counts = broker.get(BROKER_INVENTORY, "queues", context=context)
+        inflight = files.get(LEGACY_INGESTION_INVENTORY, "files", context=context)
+        if inflight is None:
+            raise Unavailable(operation_id=context.operation_id)
         if not has_any_role(quota_identity_roles(identity, actor, context=context), {"SU"}):
             raise ScopeDenied()
-        return evidence
+        broker_counts.pop("id")
+        return {**broker_counts, "legacy_inflight_files": inflight["count"]}
 
 
 def main(argv=None):
@@ -48,7 +52,6 @@ def main(argv=None):
     try:
         actor = ServicePrincipal(args.user_id, args.tenant_id)
         evidence = _read(actor, context)
-        evidence.pop("id")
         broker_empty = not (
             any(evidence["queues"].values()) or evidence["shared_default_queue"]
             or evidence["shared_unacked"] or evidence["shared_unacked_index"]
@@ -62,7 +65,7 @@ def main(argv=None):
         with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as output:
             json.dump(result, output, ensure_ascii=True)
             output.write("\n")
-        return 0 if broker_empty else 3
+        return 0 if broker_empty and evidence["legacy_inflight_files"] == 0 else 3
     except KeyboardInterrupt:
         return 130
     except Exception as error:  # noqa: BLE001 -- Driver details and Redis URLs are private.

@@ -18,6 +18,7 @@ LEGACY_VECTOR_METADATA = 'legacy_knowledge_vector_metadata'
 LEGACY_INDEX_OWNER = 'legacy_knowledge_index_owner'
 LEGACY_TASKS = 'legacy_knowledge_tasks'
 BROKER_INVENTORY = 'legacy_broker_inventory'
+LEGACY_INGESTION_INVENTORY = 'legacy_ingestion_inventory'
 PENDING_CHECKS = ('legacy_vectors', 'legacy_tasks', 'runtime_visibility', 'model_dimensions')
 Issue = Annotated[str, Field(pattern=r'^[A-Z][A-Z0-9_]{0,79}$')]
 

@@ -7,6 +7,7 @@ from contracts.constants import environment
 from contracts.knowledge_maintenance import (
     BROKER_INVENTORY,
     LEGACY_INDEX_OWNER,
+    LEGACY_INGESTION_INVENTORY,
     LEGACY_TASKS,
 )
 from nexent.storage.errors import InvalidInput, ScopeDenied
@@ -14,6 +15,9 @@ from nexent.storage.models import StorageScope
 
 from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.legacy_index_owner import bind_legacy_index_owner
+from infrastructure.rdb.legacy_ingestion_inventory import (
+    bind_legacy_ingestion_inventory,
+)
 from infrastructure.redis.legacy_broker import LegacyBrokerRecords
 from infrastructure.redis.legacy_tasks import LegacyTaskRecords
 from infrastructure.tenant_quota_read import bind_quota_identity
@@ -37,13 +41,17 @@ def legacy_task_records(actor, knowledge_id, index_name, *, known_tasks, context
 
 @contextmanager
 def legacy_broker_ports(actor, *, context):
-    engine, identity, broker = record_engine(context), None, None
+    engine, identity, broker, inventory = record_engine(context), None, None, None
     try:
         identity = bind_quota_identity(actor, engine)
         broker = LegacyBrokerRecords(
             StorageScope("management", actor.tenant_id, actor.user_id, {BROKER_INVENTORY}),
             environment.REDIS_URL,
         )
-        yield identity, broker
+        scope = StorageScope(
+            "management", None, actor.user_id, {LEGACY_INGESTION_INVENTORY}, system=True,
+        )
+        inventory = bind_legacy_ingestion_inventory(scope, engine)
+        yield identity, broker, inventory
     finally:
-        close_owned(context, ([broker.close] if broker else []) + ([identity.close] if identity else []) + [engine.dispose])
+        close_owned(context, [port.close for port in (inventory, broker, identity) if port is not None] + [engine.dispose])

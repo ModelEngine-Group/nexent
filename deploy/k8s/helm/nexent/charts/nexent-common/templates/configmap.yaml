@@ -29,7 +29,6 @@ data:
   MANAGEMENT_FILE_STREAM_TIMEOUT_SECONDS: {{ .Values.config.fileStream.timeoutSeconds | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
-  DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
   NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
 
   # Service URLs (external)

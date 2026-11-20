@@ -24,7 +24,6 @@ from test.backend.app.test_agentos_prepared_evaluation import model_record
 @pytest.mark.parametrize("aliased", [False, True])
 @pytest.mark.asyncio
 async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(mocker, name, class_name, modality, slot, aliased):
-    from contracts.constants import environment
     from management.services.agent.preparation import tools
     from management.services.model import adapter
     from runtime.agentos import prepared_analysis
@@ -52,7 +51,7 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
 
     runtime_model = mocker.patch.object(prepared_analysis, "get_model_by_model_id", return_value=model)
     create_adapter = mocker.patch.object(prepared_analysis, "get_adapter_from_config")
-    mocker.patch.object(environment, "DATA_PROCESS_SERVICE", "http://runtime-processing")
+    mocker.patch.dict("os.environ", {"DATA_PROCESS_SERVICE": "http://runtime-processing"})
     rebound = prepared_analysis.materialize_analysis_tools(
         [ToolBinding.model_validate_json(encoded)], ServicePrincipal("user-a", "tenant-a"), run_id="a" * 32,
     )[reference.tool_id]

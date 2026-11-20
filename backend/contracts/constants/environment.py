@@ -26,7 +26,6 @@ ES_PASSWORD = os.getenv('ELASTIC_PASSWORD')
 ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 
 # Data Processing Service Configuration
-DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
 MANAGEMENT_AGENTOS_URL = os.getenv('MANAGEMENT_AGENTOS_URL', 'http://nexent-config:5010').rstrip('/')
 _FILE_CLEANSE_FLAG = os.getenv('MANAGEMENT_FILE_CLEANSE_ENABLED', 'false').lower()
