@@ -259,6 +259,16 @@ class ManagedContextRuntime:
             assemble=assemble, cancelled=lambda: stop_event is not None and stop_event.is_set() is True,
             estimate=self._estimate)
         if evidence is not None and evidence.maintenance_phase == "post_response":
+            history = self.context_manager.config.execution_history
+            if history is not None:
+                for _, item in self.context_manager._representation_overrides.values():
+                    key = item.content.get("execution_key")
+                    record = history.get(key) if key else None
+                    if record is not None:
+                        for name in ("summary", "preview"):
+                            if isinstance(item.content.get(name), str):
+                                record.model_view = {name: item.content[name]}
+                                break
             self.last_maintenance_evidence = evidence
             self._evidence.record_call(evidence)
         return evidence

@@ -579,7 +579,8 @@ class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
 
 
 class PreparedHistoryExecutionRecord(RunSpecModel):
-    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact"]
+    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result"]
+    unit_index: int | None = Field(default=None, strict=True, ge=0)
     content: str | None
     tool_call_id: str | None = None
     invocation_id: str | None = None
