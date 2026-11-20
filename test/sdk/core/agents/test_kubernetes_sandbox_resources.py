@@ -91,11 +91,12 @@ def test_lost_create_response_reads_same_name_without_duplicate(resources, statu
     api.read_namespaced_pod.assert_called_once_with(pod['metadata']['name'], owner.namespace, _request_timeout=10)
 
 
-def test_uncertain_creation_is_not_deleted_or_retried(resources):
+@pytest.mark.parametrize("lookup_status", [404, 503])
+def test_unconfirmed_creation_is_not_deleted_or_retried(resources, lookup_status):
     api, owner, profile, backend = resources
     pod, _ = backend.manifests(owner, profile)
     api.create_namespaced_pod.side_effect = ApiException(status=500)
-    api.read_namespaced_pod.side_effect = ApiException(status=503)
+    api.read_namespaced_pod.side_effect = ApiException(status=lookup_status)
     with pytest.raises(RuntimeError, match='unresolved'):
         backend.create_or_confirm(api, 'pod', owner.namespace, pod)
     api.delete_namespaced_pod.assert_not_called()

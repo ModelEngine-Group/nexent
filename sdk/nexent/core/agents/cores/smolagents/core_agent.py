@@ -59,6 +59,7 @@ from nexent.core.agents.cores.smolagents.output_protocol import (
     ProtocolErrorReason,
     RuntimeFinalAnswer,
     classify_model_output,
+    contains_runtime_record_echo,
     extract_clarification_form,
     has_meaningful_visible_content,
     is_raw_final_answer_candidate,
@@ -72,6 +73,7 @@ from nexent.core.agents.cores.smolagents.verification import (
     render_tool_input_refusal,
 )
 from nexent.core.agents.orchestration.delegation import DelegationError
+from nexent.core.agents.output.answer import contains_provider_tool_markup
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.agents.prompt.clarification import clarification_policy
 from nexent.core.agents.prompt.user_context import has_current_time_marker, render_user_context
@@ -1335,7 +1337,7 @@ Additional Args:
         """Check the complete proposal before any final-answer or execution branch."""
         policy = getattr(self, "_delegation", None)
         if policy is None or not policy.pending:
-            return
+            return False
         try:
             if self._use_structured_outputs_internally:
                 code = json.loads(output)["code"]
@@ -1346,7 +1348,7 @@ Additional Args:
                 code = None
         except (ValueError, TypeError, KeyError, AttributeError):
             code = None
-        policy.validate_code(code)
+        return policy.validate_code(_remove_parallel_executor_import(code) if isinstance(code, str) else code)
 
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
@@ -1536,7 +1538,21 @@ Additional Args:
         if self.stop_event.is_set():
             raise RunTerminated()
 
-        self._validate_delegation_output(model_output)
+        output_text = str(model_output or "")
+        rejected_format = None
+        if contains_provider_tool_markup(output_text):
+            rejected_format = ProtocolErrorReason.PROVIDER_TOOL_MARKUP
+        elif contains_runtime_record_echo(output_text):
+            rejected_format = ProtocolErrorReason.RUNTIME_HISTORY_ECHO
+        if rejected_format:
+            self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
+            raise ModelOutputProtocolError(
+                rejected_format,
+                getattr(self, "output_protocol", "code_action"),
+                logger=self.logger,
+            )
+
+        parent_preparation = self._validate_delegation_output(model_output)
 
         # Parse using the configured closed output protocol.
         try:
@@ -1919,6 +1935,8 @@ Additional Args:
         if self.enable_planning and not self.stop_event.is_set():
             self._implicit_advance_step()
 
+        if parent_preparation:
+            self._delegation.record_parent_preparation()
         yield ActionOutput(output=code_output.output, is_final_answer=False)
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
@@ -1946,12 +1964,22 @@ Additional Args:
         collaborators = getattr(self, "_delegation_collaborators", None)
         if collaborators is None:
             collaborators = list((getattr(self, "managed_agents", {}) or {}).values())
+        parallel_tool = getattr(self, "tools", {}).get("parallel_executor")
+        parallel_available = False
+        if parallel_tool is not None:
+            from nexent.core.tools.parallel_executor import ParallelExecutorTool
+
+            parallel_available = isinstance(parallel_tool, ParallelExecutorTool)
         self._delegation = DelegationPolicy(
             task, collaborators,
+            parallel_executor_available=parallel_available,
             enabled=(getattr(self, "output_protocol", "code_action") == "code_action"
                      and getattr(getattr(self, "observer", None), "enable_nl2a_wrapper", False) is not True),
         )
-        if self._delegation.pending and not self._delegation.names:
+        if self._delegation.pending and (
+            not self._delegation.names
+            or (self._delegation.parallel_required and not self._delegation.parallel_executor_available)
+        ):
             raise DelegationError("DELEGATION_UNAVAILABLE")
         for tool in (getattr(self, "managed_agents", {}) or {}).values():
             bind = getattr(tool, "set_success_callback", None)
@@ -2330,7 +2358,19 @@ Additional Args:
                 )
                 self._log_protocol_rejection(protocol_error, action_step)
                 action_has_executed = bool(getattr(action_step, "tool_calls", None))
-                if not getattr(self, "enable_protocol_repair_retry", False):
+                repair_enabled = getattr(self, "enable_protocol_repair_retry", False)
+                internal_markup = (
+                    protocol_error.protocol == "code_action"
+                    and protocol_error.reason in {
+                        ProtocolErrorReason.PROVIDER_TOOL_MARKUP, ProtocolErrorReason.RUNTIME_HISTORY_ECHO,
+                    }
+                )
+                # Reserved markup gets one correction before execution, even
+                # when general strict protocol repair is disabled.
+                retry_internal_markup = (
+                    internal_markup and not action_has_executed and self._consecutive_protocol_errors == 1
+                )
+                if not repair_enabled and not retry_internal_markup:
                     self._protocol_repair_messages.clear()
                     self._resolve_deferred_model_attempt(
                         getattr(action_step, "model_output_message", None), accepted=False
@@ -2342,7 +2382,7 @@ Additional Args:
                     self._record_output_protocol(
                         "controlled_protocol_failure",
                         reason=protocol_error.reason.value,
-                        final_answer_source="protocol_repair_disabled",
+                        final_answer_source="protocol_error_limit" if internal_markup else "protocol_repair_disabled",
                     )
                     logger.info(
                         "event=model_output_protocol_repair_disabled step_number=%s reason=%s",
@@ -2357,7 +2397,7 @@ Additional Args:
                         self.memory.steps.append(action_step)
                         yield action_step
                     raise ModelOutputProtocolExhaustedError(
-                        self._controlled_protocol_failure(repair_disabled=True)
+                        self._controlled_protocol_failure(repair_disabled=not internal_markup)
                     ) from protocol_error
                 if action_has_executed:
                     # Preserve completed tool evidence so a repair generation cannot

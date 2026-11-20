@@ -26,8 +26,8 @@
     "steps": [
       {
         "order": 1,
-        "action": "Run twenty simultaneous first acquisitions and inject a lost create response.",
-        "expected": "Exactly one owned Pod and Service become ready, verified using full UID and profile; foreign resources are rejected."
+        "action": "Run twenty simultaneous first acquisitions and inject a lost create response and a transient pinned HTTPS readiness failure.",
+        "expected": "Exactly one create request produces the owned Pod. The original Pod and Service are confirmed by UID and profile, the read-only readiness probe succeeds after retry, and foreign resources are rejected."
       },
       {
         "order": 2,

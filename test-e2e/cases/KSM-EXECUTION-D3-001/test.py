@@ -23,6 +23,8 @@ def test_KSM_EXECUTION_D3_001_real_runtime_execution():
     for owner in owners:
         assert owner['twenty_acquisitions'] == 1
         assert owner['lost_create_response'] and owner['foreign_resource_rejected']
+        assert owner['pod_create_requests'] == 1
+        assert owner['readiness_get_requests'] >= 2
         assert len(set(owner['kernels'])) == 3
         assert owner['parent_kernel'] in owner['kernels']
         assert owner['state_persisted'] and owner['child_release_preserved_parent']

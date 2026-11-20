@@ -371,11 +371,37 @@ def probe_core(owned):
         # All twenty real acquisitions use bounded Runtime-owned workers.
         original_factory = backend.api_factory
         lost = threading.Event()
+        pod_create_requests = []
+        readiness_requests = []
+        wait_pinned_jupyter = backend._wait_pinned_jupyter
+
+        def wait_with_publication_lag(connection, deadline, check_cancelled):
+            from requests.exceptions import ConnectionError
+
+            session = connection.tls_client.http
+            actual_get = session.get
+
+            def get_with_publication_lag(url, **kwargs):
+                assert url == connection.base_url + '/api/kernels'
+                readiness_requests.append(url)
+                if len(readiness_requests) == 1:
+                    raise ConnectionError('Controlled Service publication lag')
+                return actual_get(url, **kwargs)
+
+            session.get = get_with_publication_lag
+            try:
+                return wait_pinned_jupyter(connection, deadline, check_cancelled)
+            finally:
+                session.get = actual_get
+
+        backend._wait_pinned_jupyter = wait_with_publication_lag
+
         @contextmanager
         def lost_response_factory():
             with original_factory() as api:
                 original_create = api.create_namespaced_pod
                 def create_then_lose(*args, **kwargs):
+                    pod_create_requests.append(args[1]['metadata']['name'])
                     response = original_create(*args, **kwargs)
                     if not lost.is_set():
                         lost.set()
@@ -404,6 +430,8 @@ def probe_core(owned):
         connections = [future.result(timeout=130) for future in futures]
         backend.api_factory = original_factory
         assert len({id(connection) for connection in connections}) == 1
+        assert pod_create_requests == [backend.resource_name(config.owner)]
+        assert len(readiness_requests) >= 2
         root.run('controlled runtime callback')
         parent = getattr(root.python_executor, 'remote', None) or root.python_executor
         assert parent._nexent_backend == 'kubernetes'
@@ -460,7 +488,9 @@ def probe_core(owned):
         else:
             raise AssertionError('Closed callback capability remained usable')
         return {'owner_uid': coordinator.owner.pod_uid, 'pod_uid': connections[0].pod_uid,
-                'twenty_acquisitions': 1, 'lost_create_response': lost.is_set(), 'kernels': observed_kernels,
+                'twenty_acquisitions': 1, 'lost_create_response': lost.is_set(),
+                'pod_create_requests': len(pod_create_requests), 'readiness_get_requests': len(readiness_requests),
+                'kernels': observed_kernels,
                 'execution_windows': windows, 'foreign_resource_rejected': True,
                 'cancelled_child_preserved_parent': True,
                 'script_matrix': scripts,
@@ -468,6 +498,7 @@ def probe_core(owned):
                 'callback_statuses': callbacks[callback_start:], 'stale_context_rejected': True}
     finally:
         backend.api_factory = original_factory
+        backend._wait_pinned_jupyter = wait_pinned_jupyter
         factory._close_subagent_invocations()
         factory._cleanup_sandbox()
 
