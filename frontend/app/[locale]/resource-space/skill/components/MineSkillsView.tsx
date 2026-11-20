@@ -8,6 +8,7 @@ import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import RepositoryDisplayControls from "@/app/resource-space/components/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
+import { formatRegistryDate } from "@/lib/mcpTools";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { App, Button, Dropdown, Input, Popover } from "antd";
 import type { MenuProps } from "antd";
@@ -636,7 +637,8 @@ export function MineSkillCard({
   const repositoryStatus = latestRepository?.status ?? "not_shared";
   const canEdit = canEditSkill(skill);
   const canPublish = skill.can_publish === true;
-  const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
+  const updatedTime = skill.updated_at ?? skill.update_time;
+  const updatedAt = formatRepositoryDate(updatedTime);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const canApplyListing =
     canPublish && skill.latest_review?.status !== "pending_review";
@@ -724,6 +726,14 @@ export function MineSkillCard({
                 count: skill.downloads ?? 0,
               })}
             </span>
+            {updatedAt && updatedTime && (
+              <span className="inline-flex items-center gap-1">
+                <Clock size={12} aria-hidden />
+                {t("agentConfig.list.updatedAt", {
+                  date: formatRegistryDate(updatedTime),
+                })}
+              </span>
+            )}
           </>
         ) : updatedAt ? (
           <span className="inline-flex min-w-0 items-center gap-1 truncate">
