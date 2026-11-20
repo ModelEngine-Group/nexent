@@ -6257,7 +6257,7 @@
   "aidpKnowledge.detailSimilarity": "Similarity threshold",
   "aidpKnowledge.detailTabInformation": "Details",
   "aidpKnowledge.detailTabTasks": "Upload tasks",
-  "aidpKnowledge.detailTabSensitiveWords": "Sensitive words",
+  "aidpKnowledge.detailTabSensitiveWords": "Security guardrails",
   "aidpKnowledge.detailTaskStatus": "Status",
   "aidpKnowledge.detailTaskUpdatedAt": "Task updated",
   "aidpKnowledge.detailTasksEmpty": "No upload tasks in the last 30 days",

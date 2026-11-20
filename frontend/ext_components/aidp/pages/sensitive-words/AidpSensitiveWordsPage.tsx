@@ -326,7 +326,7 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
               </Tag>
             )}
             <Popover
-              trigger="click"
+              trigger="hover"
               placement="bottomLeft"
               content={helpContent}
             >

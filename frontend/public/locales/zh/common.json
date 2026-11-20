@@ -6194,7 +6194,7 @@
   "aidpKnowledge.detailSimilarity": "相似度阈值",
   "aidpKnowledge.detailTabInformation": "详细信息",
   "aidpKnowledge.detailTabTasks": "上传任务",
-  "aidpKnowledge.detailTabSensitiveWords": "敏感词",
+  "aidpKnowledge.detailTabSensitiveWords": "安全护栏",
   "aidpKnowledge.detailTaskStatus": "状态",
   "aidpKnowledge.detailTaskUpdatedAt": "任务更新时间",
   "aidpKnowledge.detailTasksEmpty": "近 30 天没有上传任务",
