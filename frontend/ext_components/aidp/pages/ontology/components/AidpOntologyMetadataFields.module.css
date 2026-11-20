@@ -208,3 +208,15 @@
 .typeSegmented :global(.ant-segmented-thumb) {
   display: none;
 }
+
+.fieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.helpIcon {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
+}

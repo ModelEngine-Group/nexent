@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -25,7 +25,11 @@ import {
   Tooltip,
   type TableColumnsType,
 } from "antd";
-import { SearchOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+  QuestionCircleOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
@@ -58,9 +62,6 @@ interface AidpOntologyMetadataFieldsProps {
 interface FieldFormValues {
   field_name: string;
   field_type: AidpMetadataFieldType;
-  demo_candidates?: string[];
-  demo_range_start?: string;
-  demo_range_end?: string;
 }
 
 interface CreateFormValues {
@@ -98,25 +99,26 @@ const formatAuditTime = (value?: string | null): string => {
 
 const nowText = () => new Date().toISOString().slice(0, 16).replace("T", " ");
 
+const FieldLabel: React.FC<{ label: string; help: string }> = ({
+  label,
+  help,
+}) => (
+  <span className={styles.fieldLabel}>
+    {label}
+    <Tooltip title={help}>
+      <QuestionCircleOutlined className={styles.helpIcon} aria-label={help} />
+    </Tooltip>
+  </span>
+);
+
 const fieldKey = (field: AidpOntologyMetadataField): string =>
   String(field.id ?? field.field_name);
 
 const buildDemoPatch = (
-  values: FieldFormValues,
   created = false
 ): Partial<AidpOntologyMetadataField> => {
-  const candidates = [...(values.demo_candidates ?? [])];
-  if (
-    values.field_type !== "string" &&
-    (values.demo_range_start || values.demo_range_end)
-  ) {
-    candidates.push(
-      `${values.demo_range_start || "—"} ~ ${values.demo_range_end || "—"}`
-    );
-  }
   const timestamp = nowText();
   return {
-    candidates,
     extended_properties: [],
     associated_chunk_count: 0,
     ...(created ? { create_time: timestamp } : {}),
@@ -149,6 +151,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
   const [saving, setSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -168,9 +171,29 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     initialState: "running",
   });
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setSearch((current) => (current === next ? current : next));
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
   const query = useQuery({
-    queryKey: [...scope.key, "ontology-metadata-fields", domainId],
-    queryFn: () => aidpOntologyService.listMetadataFields(domainId),
+    queryKey: [
+      ...scope.key,
+      "ontology-metadata-fields",
+      domainId,
+      { page, pageSize, search },
+    ],
+    queryFn: () =>
+      aidpOntologyService.listMetadataFields(
+        domainId,
+        page,
+        pageSize,
+        search || undefined
+      ),
     enabled: scope.enabled && !!domainId,
     staleTime: 0,
     retry: false,
@@ -185,18 +208,11 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     [demoExtras, query.data?.value]
   );
   const limit = query.data?.limit ?? METADATA_FIELD_LIMIT;
-  const atLimit = fields.length >= limit;
-  const filteredFields = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return fields;
-    return fields.filter((field) =>
-      field.field_name.toLowerCase().includes(needle)
-    );
-  }, [fields, search]);
-  const pagedFields = useMemo(
-    () => filteredFields.slice((page - 1) * pageSize, page * pageSize),
-    [filteredFields, page, pageSize]
-  );
+  const total = query.data?.total_count ?? 0;
+  const allCount = query.data?.all_count ?? total;
+  const hasMore = query.data?.has_more ?? false;
+  const totalReliable = query.data?.total_reliable !== false;
+  const atLimit = allCount >= limit;
   const missingIds = fields.filter(
     (field) => field.id === undefined || field.id === null
   );
@@ -236,7 +252,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     editForm.setFieldsValue({
       field_name: field.field_name,
       field_type: field.field_type,
-      demo_candidates: field.candidates ?? [],
     });
   };
 
@@ -264,10 +279,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         setDemoExtras((previous) => ({
           ...previous,
           [fieldKey(created)]: {
-            ...buildDemoPatch(
-              { field_name: values.field_name, field_type: values.field_type },
-              true
-            ),
+            ...buildDemoPatch(true),
             ...(previous[fieldKey(created)] ?? {}),
           },
         }));
@@ -322,7 +334,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           ...previous,
           [fieldKey(editing)]: {
             ...(previous[fieldKey(editing)] ?? {}),
-            ...buildDemoPatch(values),
+            ...buildDemoPatch(),
           },
         }));
       }
@@ -365,9 +377,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       content: (
         <div className={styles.confirmBody}>
           <p>{t("aidpKnowledge.ontologyMetadataDeleteConfirmContent")}</p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyMetadataDeleteGap")}
-          </AidpOntologyGapNote>
         </div>
       ),
       okText: t("aidpKnowledge.ontologyMetadataDeleteSubmit"),
@@ -391,6 +400,14 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               [field.field_name],
               result.task_id ?? null
             );
+          } else if ((result.failed_kbs ?? []).length > 0) {
+            message.warning(
+              t("aidpKnowledge.ontologyMetadataDeletePartial", {
+                count: result.failed_kbs?.length ?? 0,
+                kbs: (result.failed_kbs ?? []).join(", "),
+              }),
+              8
+            );
           } else {
             message.success(t("aidpKnowledge.ontologyMetadataFieldDeleted"));
           }
@@ -409,6 +426,62 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     });
   };
 
+  const handleBatchUnbind = () => {
+    if (selectedFields.length === 0) {
+      message.warning(t("aidpKnowledge.ontologyMetadataSelectDeleteRequired"));
+      return;
+    }
+    modal.confirm({
+      title: t("aidpKnowledge.ontologyMetadataBatchUnbindTitle"),
+      width: 520,
+      content: (
+        <div className={styles.confirmBody}>
+          <p>{t("aidpKnowledge.ontologyMetadataBatchUnbindContent")}</p>
+        </div>
+      ),
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
+      centered: true,
+      onOk: async () => {
+        setSaving(true);
+        try {
+          const result = await aidpOntologyService.batchUnbindMetadata(
+            domainId,
+            selectedFields.map((field) => field.id ?? field.field_name)
+          );
+          if (result.accepted) {
+            message.info(
+              t("aidpKnowledge.ontologyMetadataUnbindAccepted", {
+                taskId: result.task_id ?? "",
+              }),
+              8
+            );
+            openTask(
+              t("aidpKnowledge.ontologyMetadataUnbindTaskName"),
+              selectedFields.map((field) => field.field_name),
+              result.task_id ?? null
+            );
+          } else {
+            message.success(t("aidpKnowledge.ontologyMetadataUnbindDone"));
+          }
+          setSelectedKeys([]);
+          refresh();
+        } catch (error) {
+          message.error(
+            getAidpErrorMessage(
+              error,
+              t,
+              t("aidpKnowledge.ontologyMetadataUnbindFailed")
+            )
+          );
+          throw error;
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
+  };
+
   const handleBatchDelete = () => {
     if (selectedFields.length === 0) {
       message.warning(t("aidpKnowledge.ontologyMetadataSelectDeleteRequired"));
@@ -422,9 +495,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
       content: (
         <div className={styles.confirmBody}>
           <p>{t("aidpKnowledge.ontologyMetadataDeleteConfirmContent")}</p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyMetadataDeleteGap")}
-          </AidpOntologyGapNote>
         </div>
       ),
       okText: t("aidpKnowledge.ontologyMetadataDeleteSubmit"),
@@ -444,10 +514,14 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           const acceptedNames: string[] = [];
           let taskId: string | null = null;
           let failed = 0;
+          const failedKbs = new Set<string>();
           outcomes.forEach((outcome, index) => {
             if (outcome.status === "rejected") {
               failed += 1;
               return;
+            }
+            for (const kbs of outcome.value.failed_kbs ?? []) {
+              failedKbs.add(kbs);
             }
             if (outcome.value.accepted) {
               acceptedNames.push(selectedFields[index].field_name);
@@ -474,6 +548,15 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               t("aidpKnowledge.ontologyMetadataBatchDeletePartial", {
                 count: failed,
               })
+            );
+          }
+          if (failedKbs.size > 0) {
+            message.warning(
+              t("aidpKnowledge.ontologyMetadataDeletePartial", {
+                count: failedKbs.size,
+                kbs: Array.from(failedKbs).join(", "),
+              }),
+              8
             );
           }
           setSelectedKeys([]);
@@ -618,13 +701,17 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           className={tableStyles.searchInput}
           prefix={<SearchOutlined />}
           placeholder={t("aidpKnowledge.ontologyMetadataSearchPlaceholder")}
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPage(1);
-          }}
+          value={searchInput}
+          onChange={(event) => setSearchInput(event.target.value)}
         />
         <div className={tableStyles.toolbarActions}>
+          <Button
+            loading={saving}
+            disabled={!canManage || selectedFields.length === 0}
+            onClick={handleBatchUnbind}
+          >
+            {t("aidpKnowledge.ontologyMetadataUnbind")}
+          </Button>
           <Button
             loading={saving}
             disabled={!canManage || selectedFields.length === 0}
@@ -694,10 +781,10 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         </div>
       </div>
 
-      <AidpOntologyGapNote title={t("aidpKnowledge.ontologyMetadataGapTitle")}>
-        {demo
-          ? t("aidpKnowledge.ontologyMetadataDemoColumnsGap")
-          : t("aidpKnowledge.ontologyMetadataRealColumnsGap")}
+      <AidpOntologyGapNote
+        title={t("aidpKnowledge.ontologyMetadataLengthGapTitle")}
+      >
+        {t("aidpKnowledge.ontologyMetadataLengthGap")}
       </AidpOntologyGapNote>
       {missingIds.length > 0 && (
         <AidpOntologyGapNote>
@@ -733,7 +820,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             size="middle"
             className={tableStyles.table}
             columns={columns}
-            dataSource={pagedFields}
+            dataSource={fields}
             pagination={false}
             tableLayout="fixed"
             scroll={{ x: 920 }}
@@ -760,9 +847,9 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             currentPage={page}
             pageSize={pageSize}
             pageSizeOptions={PAGE_SIZE_OPTIONS}
-            total={filteredFields.length}
-            totalReliable
-            hasMore={page * pageSize < filteredFields.length}
+            total={total}
+            totalReliable={totalReliable}
+            hasMore={hasMore}
             selectedCount={selectedKeys.length}
             onPageChange={setPage}
             onPageSizeChange={(nextSize) => {
@@ -802,7 +889,12 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
         >
           <Form.Item
             name="field_name"
-            label={t("aidpKnowledge.ontologyMetadataFieldName")}
+            label={
+              <FieldLabel
+                label={t("aidpKnowledge.ontologyMetadataFieldName")}
+                help={t("aidpKnowledge.ontologyMetadataFieldNameHelp")}
+              />
+            }
             required
             rules={[
               {
@@ -818,11 +910,16 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               },
             ]}
           >
-            <Input maxLength={63} />
+            <Input maxLength={63} showCount />
           </Form.Item>
           <Form.Item
             name="field_type"
-            label={t("aidpKnowledge.ontologyMetadataValueType")}
+            label={
+              <FieldLabel
+                label={t("aidpKnowledge.ontologyMetadataValueType")}
+                help={t("aidpKnowledge.ontologyMetadataFieldTypeHelp")}
+              />
+            }
             required
             rules={[{ required: true }]}
           >
@@ -831,8 +928,8 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               className={styles.typeSegmented}
               options={[
                 { value: "string", label: typeLabel("string") },
-                { value: "date", label: typeLabel("date") },
                 { value: "number", label: typeLabel("number") },
+                { value: "date", label: typeLabel("date") },
               ]}
             />
           </Form.Item>
@@ -872,13 +969,16 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           initialValues={{
             field_name: editing?.field_name ?? "",
             field_type: editing?.field_type ?? "string",
-            demo_candidates: editing?.candidates ?? [],
           }}
         >
           <Form.Item
             name="field_name"
-            label={t("aidpKnowledge.ontologyMetadataFieldName")}
-            extra={t("aidpKnowledge.ontologyMetadataFieldNameHint")}
+            label={
+              <FieldLabel
+                label={t("aidpKnowledge.ontologyMetadataFieldName")}
+                help={t("aidpKnowledge.ontologyMetadataFieldNameHelp")}
+              />
+            }
             rules={[
               {
                 validator: async (_rule, value: string) => {
@@ -897,8 +997,12 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           </Form.Item>
           <Form.Item
             name="field_type"
-            label={t("aidpKnowledge.ontologyMetadataFieldType")}
-            extra={t("aidpKnowledge.ontologyMetadataTypeLocked")}
+            label={
+              <FieldLabel
+                label={t("aidpKnowledge.ontologyMetadataFieldType")}
+                help={t("aidpKnowledge.ontologyMetadataFieldTypeHelp")}
+              />
+            }
             rules={[{ required: true }]}
           >
             <Select
@@ -911,42 +1015,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             />
           </Form.Item>
 
-          <div className={styles.candidatePanel}>
-            <AidpOntologyGapNote>
-              {t("aidpKnowledge.ontologyMetadataDemoConfigGap")}
-            </AidpOntologyGapNote>
-            {editFieldType === "string" ? (
-              <Form.Item
-                name="demo_candidates"
-                label={t("aidpKnowledge.ontologyMetadataCandidates")}
-              >
-                <Select
-                  mode="tags"
-                  tokenSeparators={[",", "，"]}
-                  placeholder={t(
-                    "aidpKnowledge.ontologyMetadataCandidatesTagPlaceholder"
-                  )}
-                />
-              </Form.Item>
-            ) : (
-              <Space.Compact block>
-                <Form.Item
-                  name="demo_range_start"
-                  label={t("aidpKnowledge.ontologyMetadataRangeStart")}
-                  className={styles.rangeItem}
-                >
-                  <Input placeholder="2020-01-01" />
-                </Form.Item>
-                <Form.Item
-                  name="demo_range_end"
-                  label={t("aidpKnowledge.ontologyMetadataRangeEnd")}
-                  className={styles.rangeItem}
-                >
-                  <Input placeholder="2026-12-31" />
-                </Form.Item>
-              </Space.Compact>
-            )}
-          </div>
           {errorMessage && (
             <div className={drawerStyles.error} role="alert">
               {errorMessage}

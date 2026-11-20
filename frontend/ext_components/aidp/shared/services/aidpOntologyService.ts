@@ -246,12 +246,16 @@ class AidpOntologyService {
   }
 
   listMetadataFields(
-    domainId: string
+    domainId: string,
+    page = 1,
+    pageSize = 10,
+    search?: string
   ): Promise<AidpOntologyMetadataFieldListResponse> {
     return jsonRequest<AidpOntologyMetadataFieldListResponse>(
       buildUrl(API_ENDPOINTS.aidpMgmt.ontology.metadataFields(domainId), {
-        page: 1,
-        page_size: 100,
+        page,
+        page_size: pageSize,
+        search: search?.trim() || undefined,
       })
     );
   }
@@ -291,15 +295,23 @@ class AidpOntologyService {
     fieldRef: string | number
   ): Promise<{
     success?: boolean;
+    deleted?: boolean | null;
     accepted?: boolean;
     task_id?: string | null;
     status?: string | null;
+    failed_kbs?: string[];
+    dropped_kbs?: string[];
+    partial_failure?: boolean;
   }> {
     return jsonRequest<{
       success?: boolean;
+      deleted?: boolean | null;
       accepted?: boolean;
       task_id?: string | null;
       status?: string | null;
+      failed_kbs?: string[];
+      dropped_kbs?: string[];
+      partial_failure?: boolean;
     }>(API_ENDPOINTS.aidpMgmt.ontology.metadataField(domainId, fieldRef), {
       method: "DELETE",
     });

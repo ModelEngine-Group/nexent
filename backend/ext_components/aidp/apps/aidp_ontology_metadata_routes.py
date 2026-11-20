@@ -50,7 +50,13 @@ async def list_metadata_fields(
     domain_id: Annotated[str, _domain_id_path()],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 100,
+    search: Annotated[str | None, Query(max_length=128)] = None,
 ) -> JSONResponse:
+    """List metadata fields with Nexent-side search and pagination.
+
+    AIDP has no keyword parameter on this endpoint, so fetch the bounded field
+    set once and apply the filter/page here; the field limit keeps this small.
+    """
     await _auth(request)
     server_url, api_key = _credentials()
     envelope = await run_blocking(
@@ -59,11 +65,27 @@ async def list_metadata_fields(
         server_url,
         api_key,
         domain_id,
-        page=page,
-        page_size=page_size,
+        page=1,
+        page_size=100,
         lane="control-io",
         owner="config",
     )
+    fields = envelope["value"]
+    all_count = len(fields)
+    needle = (search or "").strip().lower()
+    if needle:
+        fields = [
+            field
+            for field in fields
+            if needle in str(field.get("field_name") or "").lower()
+        ]
+    total = len(fields)
+    start = (page - 1) * page_size
+    envelope["value"] = fields[start:start + page_size]
+    envelope["total_count"] = total
+    envelope["has_more"] = page * page_size < total
+    envelope["total_reliable"] = True
+    envelope["all_count"] = all_count
     envelope["limit"] = METADATA_FIELD_LIMIT
     return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
 
@@ -223,5 +245,16 @@ async def delete_metadata_field(
         acknowledged["id"] = metadata_id
         acknowledged["field_name"] = current.get("field_name")
         return JSONResponse(status_code=HTTPStatus.OK, content=acknowledged)
-    return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
+    failed_kbs = result.get("failed_kbs") or []
+    dropped_kbs = result.get("dropped_kbs") or []
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "success": result.get("deleted") is not False,
+            "deleted": result.get("deleted"),
+            "failed_kbs": failed_kbs,
+            "dropped_kbs": dropped_kbs,
+            "partial_failure": bool(failed_kbs),
+        },
+    )
 

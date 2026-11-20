@@ -146,6 +146,8 @@ export interface AidpOntologyMetadataField {
 export interface AidpOntologyMetadataFieldListResponse {
   value: AidpOntologyMetadataField[];
   total_count: number;
+  /** Total before the search filter, used for the field-limit gate. */
+  all_count?: number;
   has_more: boolean;
   total_reliable: boolean;
   limit: number;
