@@ -30,11 +30,12 @@ from data_process.utils import get_task_details as get_task_details_info
 from management.db.file.attachment import (
     delete_file,
     file_exists,
-    get_file_size_from_minio,
     get_file_stream,
     upload_file,
 )
 from management.services.file.upload import convert_office_to_pdf
+
+from infrastructure.file_reads import read_attachment_size
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
@@ -436,7 +437,7 @@ class DataProcessService:
                     )
 
                 # Step 4: Validate the uploaded PDF (header check + minimum size)
-                remote_size = get_file_size_from_minio(pdf_object_name)
+                remote_size = read_attachment_size(pdf_object_name)
                 if remote_size <= 0:
                     raise OfficeConversionException(
                         "PDF validation failed: cannot read remote file size")

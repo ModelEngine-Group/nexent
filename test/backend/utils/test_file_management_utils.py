@@ -24,8 +24,11 @@ def stub_project_modules(monkeypatch, tmp_path):
 
     # management.db.file.attachment
     attach_mod = types.ModuleType("management.db.file.attachment")
-    setattr(attach_mod, "get_file_size_from_minio", lambda object_name, bucket=None: 777)
     sys.modules["management.db.file.attachment"] = attach_mod
+
+    file_reads = types.ModuleType("infrastructure.file_reads")
+    file_reads.read_attachment_size = lambda object_name: 777
+    monkeypatch.setitem(sys.modules, file_reads.__name__, file_reads)
 
     # management.db.knowledge_base.repository
     knowledge_mod = types.ModuleType("management.db.knowledge_base.repository")
@@ -83,7 +86,7 @@ def test_get_file_size_minio_ok_and_request_error(fmu, monkeypatch):
     def raise_req(*a, **k):
         raise _ReqExc("x")
 
-    set_import_attribute(monkeypatch, fmu, "get_file_size_from_minio", raise_req)
+    set_import_attribute(monkeypatch, fmu, "read_attachment_size", raise_req)
     assert fmu.get_file_size("minio", "obj") == 0
 
 

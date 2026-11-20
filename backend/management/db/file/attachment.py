@@ -1,52 +1,29 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import io
-from contracts import file_types
 import os
 import uuid
 from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
-from infrastructure.object_storage.client import minio_client
+from contracts import file_types
 from contracts.constants.constants import S3_URL_PREFIX
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
-from infrastructure.object_storage.read_access import build_attachment_proxy_url
 
-from infrastructure.trace.knowledge import set_span_attributes, trace_knowledge_operation
+from infrastructure.object_storage.client import minio_client
+from infrastructure.object_storage.read_access import (
+    build_attachment_proxy_url,
+    normalize_object_location,
+)
+from infrastructure.trace.knowledge import (
+    set_span_attributes,
+    trace_knowledge_operation,
+)
 
 
 def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:
     """Upload bytes to an exact object key without generating attachment metadata."""
     return minio_client.upload_fileobj(io.BytesIO(content), object_name)
-
-
-def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
-    """
-    Normalize object_name + bucket from supported URL styles.
-
-    Supports:
-    - s3://bucket/key
-    - /bucket/key
-    - key (uses provided bucket or default bucket)
-    """
-    if not object_name:
-        return object_name, bucket
-
-    if object_name.startswith(S3_URL_PREFIX):
-        s3_path = object_name[len(S3_URL_PREFIX) :]
-        parts = s3_path.split("/", 1)
-        parsed_bucket = parts[0] if parts[0] else None
-        parsed_key = parts[1] if len(parts) > 1 else ""
-        return parsed_key, parsed_bucket or bucket
-
-    if object_name.startswith("/"):
-        path = object_name.lstrip("/")
-        parts = path.split("/", 1)
-        parsed_bucket = parts[0] if parts[0] else None
-        parsed_key = parts[1] if len(parts) > 1 else ""
-        return parsed_key, parsed_bucket or bucket
-
-    return object_name, bucket
 
 
 def build_s3_url(object_name: str, bucket: Optional[str] = None) -> str:
@@ -282,19 +259,6 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
     return response
 
 
-def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> int:
-    """
-    Get file size by object name
-    """
-    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
-    # Ensure minio_client is initialized before accessing storage_config
-    minio_client._ensure_initialized()
-    bucket = bucket or minio_client.storage_config.default_bucket
-    return minio_client.get_file_size(object_name, bucket)
-
-
-
-
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
     """
     Check if a file exists in the bucket.
@@ -307,7 +271,7 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
         bool: True if file exists, False otherwise
     """
     try:
-        object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+        object_name, bucket = normalize_object_location(object_name, bucket)
         return minio_client.file_exists(object_name, bucket)
     except Exception:
         return False
@@ -325,8 +289,8 @@ def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None
     Returns:
         Dict[str, Any]: Result containing success flag and error message (if any)
     """
-    source_object, bucket = _normalize_object_and_bucket(source_object, bucket)
-    dest_object, bucket = _normalize_object_and_bucket(dest_object, bucket)
+    source_object, bucket = normalize_object_location(source_object, bucket)
+    dest_object, bucket = normalize_object_location(dest_object, bucket)
     success, result = minio_client.copy_file(source_object, dest_object, bucket)
     if success:
         return {"success": True, "object_name": result}
@@ -371,7 +335,7 @@ def delete_file(object_name: str, bucket: Optional[str] = None) -> Dict[str, Any
     Returns:
         Dict[str, Any]: Delete result, containing success flag and error message (if any)
     """
-    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    object_name, bucket = normalize_object_location(object_name, bucket)
     if not bucket:
         minio_client._ensure_initialized()
         bucket = minio_client.storage_config.default_bucket
@@ -396,7 +360,7 @@ def get_file_stream(object_name: str, bucket: Optional[str] = None) -> Optional[
     Returns:
         Optional[BinaryIO]: Standard BinaryIO stream object, or None if failed
     """
-    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    object_name, bucket = normalize_object_location(object_name, bucket)
     success, result = minio_client.get_file_stream(object_name, bucket)
     if not success:
         return None

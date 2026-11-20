@@ -54,7 +54,7 @@ def test_select_message_pairs_without_selection_returns_all_messages():
 
 def test_rewrite_message_assets_registers_and_reuses_assets(mocker):
     mocker.patch("management.services.conversation.sharing.get_content_type", return_value="application/pdf")
-    mocker.patch("management.services.conversation.sharing.get_file_size_from_minio", return_value=123)
+    mocker.patch("management.services.conversation.sharing.read_attachment_size", return_value=123)
     snapshot = {
         "message": [
             {
@@ -105,7 +105,7 @@ def test_rewrite_message_assets_registers_and_reuses_assets(mocker):
 
 def test_register_asset_falls_back_when_metadata_lookup_fails(mocker):
     mocker.patch("management.services.conversation.sharing.get_content_type", side_effect=RuntimeError("minio error"))
-    mocker.patch("management.services.conversation.sharing.get_file_size_from_minio", side_effect=RuntimeError("minio error"))
+    mocker.patch("management.services.conversation.sharing.read_attachment_size", side_effect=RuntimeError("minio error"))
 
     asset_map = {}
     asset = service._register_asset(
@@ -150,7 +150,7 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
         ],
     )
     mocker.patch("management.services.conversation.sharing.get_content_type", return_value="application/pdf")
-    mocker.patch("management.services.conversation.sharing.get_file_size_from_minio", return_value=10)
+    mocker.patch("management.services.conversation.sharing.read_attachment_size", return_value=10)
     mock_create_share = mocker.patch(
         "management.services.conversation.sharing.create_conversation_share",
         return_value={"title": "Conversation title"},

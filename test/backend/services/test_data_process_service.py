@@ -1279,7 +1279,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -1384,7 +1384,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -1451,7 +1451,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -1478,7 +1478,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -1505,7 +1505,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -1535,7 +1535,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -1590,7 +1590,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('data_process.services.tasks.upload_file')
-    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.read_attachment_size')
     @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')

@@ -5,9 +5,42 @@
 import logging
 from urllib.parse import quote
 
-from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import (
+    ASSET_OWNER_ATTACHMENTS_PREFIX,
+    ASSET_OWNER_TENANT_ID,
+    S3_URL_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_object_location(object_name: str, bucket: str | None = None) -> tuple[str, str | None]:
+    """
+    Normalize object_name + bucket from supported URL styles.
+
+    Supports:
+    - s3://bucket/key
+    - /bucket/key
+    - key (uses provided bucket or default bucket)
+    """
+    if not object_name:
+        return object_name, bucket
+
+    if object_name.startswith(S3_URL_PREFIX):
+        s3_path = object_name[len(S3_URL_PREFIX) :]
+        parts = s3_path.split("/", 1)
+        parsed_bucket = parts[0] if parts[0] else None
+        parsed_key = parts[1] if len(parts) > 1 else ""
+        return parsed_key, parsed_bucket or bucket
+
+    if object_name.startswith("/"):
+        path = object_name.lstrip("/")
+        parts = path.split("/", 1)
+        parsed_bucket = parts[0] if parts[0] else None
+        parsed_key = parts[1] if len(parts) > 1 else ""
+        return parsed_key, parsed_bucket or bucket
+
+    return object_name, bucket
 
 
 def can_read_object(object_name: str, user_id: str, tenant_id: str | None) -> bool:

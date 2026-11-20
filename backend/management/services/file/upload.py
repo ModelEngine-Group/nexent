@@ -5,10 +5,12 @@
 import logging
 import os
 import subprocess
+
 import requests
-from nexent.core.concurrency import run_blocking
 from contracts.constants.environment import LIBREOFFICE_PROFILE_DIR
-from management.db.file.attachment import get_file_size_from_minio
+from nexent.core.concurrency import run_blocking
+
+from infrastructure.file_reads import read_attachment_size
 
 logger = logging.getLogger("file_management_utils")
 
@@ -18,7 +20,7 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
     """Query the actual size(bytes) of the file."""
     try:
         if source_type == "minio":
-            return get_file_size_from_minio(path_or_url)
+            return read_attachment_size(path_or_url)
 
         elif source_type == "local":
             # For local files, use os.path.getsize to get file size
@@ -40,8 +42,10 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
 
 
 from infrastructure.file_processing.conversion import (
-    ensure_secure_libreoffice_profile_dir,
     convert_office_to_pdf as _convert_office_to_pdf,
+)
+from infrastructure.file_processing.conversion import (
+    ensure_secure_libreoffice_profile_dir,
 )
 
 

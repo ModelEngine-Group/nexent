@@ -9,10 +9,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from contracts.file_types import get_content_type
-from management.db.file.attachment import get_file_size_from_minio
 from management.db.conversation.repository import get_conversation
-from management.db.conversation.share import create_conversation_share, create_conversation_share_assets, get_active_conversation_share, get_share_asset
+from management.db.conversation.share import (
+    create_conversation_share,
+    create_conversation_share_assets,
+    get_active_conversation_share,
+    get_share_asset,
+)
 from management.services.conversation.service import get_conversation_history_service
+
+from infrastructure.file_reads import read_attachment_size
 
 logger = logging.getLogger("conversation_share_service")
 
@@ -106,7 +112,7 @@ def _register_asset(
     size = reference.get("size")
     if size is None:
         try:
-            size = get_file_size_from_minio(object_name)
+            size = read_attachment_size(object_name)
         except Exception:
             size = 0
 

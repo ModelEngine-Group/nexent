@@ -105,6 +105,10 @@ file_download_module.read_download = AsyncMock()
 file_download_module.byte_chunks = MagicMock()
 sys.modules["management.services.file.download"] = file_download_module
 
+file_reads_module = types.ModuleType("infrastructure.file_reads")
+file_reads_module.read_attachment_size = MagicMock(return_value=0)
+sys.modules[file_reads_module.__name__] = file_reads_module
+
 # management.services.knowledge_base.task_state - stub to avoid importing redis dependency
 redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
 redis_service_module.get_redis_service = MagicMock()

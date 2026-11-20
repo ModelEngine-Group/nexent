@@ -163,9 +163,12 @@ sys.modules["management.db.knowledge_base.repository"] = knowledge_db_mod
 attachment_db_mod = types.ModuleType("management.db.file.attachment")
 attachment_db_mod.build_s3_url = MagicMock(return_value="s3://bucket/file")
 attachment_db_mod.get_file_url = MagicMock(return_value={"success": True, "url": "https://proxy.example/file"})
-attachment_db_mod.get_file_size_from_minio = MagicMock(return_value=0)
 attachment_db_mod._build_mcp_presigned_url = MagicMock(side_effect=lambda url: url)
 sys.modules["management.db.file.attachment"] = attachment_db_mod
+
+file_reads_module = types.ModuleType("infrastructure.file_reads")
+file_reads_module.read_attachment_size = MagicMock(return_value=0)
+sys.modules[file_reads_module.__name__] = file_reads_module
 
 # Mock nexent.multi_modal.utils
 nexent_utils_mod = types.ModuleType("nexent.multi_modal.utils")
@@ -1928,10 +1931,11 @@ class TestNormalizeAttachmentsErrorHandling:
         with patch(
             "management.services.northbound.validate_urls_access",
             side_effect=PermissionError("Access denied: You don't have permission to access this file")
-        ):
+        ), patch.object(ns, "read_attachment_size") as read_size:
             with pytest.raises(PermissionError) as exc_info:
                 ns._normalize_northbound_attachments(["s3://bucket/attachments/other/file.txt"], "user123", "tenant123")
             assert "Access denied" in str(exc_info.value)
+        read_size.assert_not_called()
 
     def test_normalize_attachments_s3_url_success(self):
         """Test successful normalization of an s3:// URL with assertions on collaborator calls."""
@@ -1940,7 +1944,8 @@ class TestNormalizeAttachmentsErrorHandling:
                     "success": True,
                     "url": "https://proxy.example/file"
                 }) as mock_get_url, \
-                patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+                patch("management.services.northbound.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")), \
+                patch.object(ns, "read_attachment_size", return_value=123) as read_size:
             result = ns._normalize_northbound_attachments(
                 ["s3://nexent/attachments/user123/report.pdf"],
                 "user123",
@@ -1956,12 +1961,13 @@ class TestNormalizeAttachmentsErrorHandling:
             object_name="attachments/user123/report.pdf",
             expires=86400,
         )
+        read_size.assert_called_once_with("attachments/user123/report.pdf")
         assert result == [{
             "name": "report.pdf",
             "object_name": "attachments/user123/report.pdf",
             "url": "/nexent/attachments/user123/report.pdf",
             "type": "file",
-            "size": 0,
+            "size": 123,
             "description": "",
             "presigned_url": "https://proxy.example/file",
         }]

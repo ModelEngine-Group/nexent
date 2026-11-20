@@ -39,7 +39,7 @@ from management.db.conversation.repository import (
     get_conversation_list,
     get_conversation_messages,
 )
-from management.db.file.attachment import get_file_size_from_minio, get_file_url
+from management.db.file.attachment import get_file_url
 from management.db.identity.token import log_token_usage
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
 from management.services.agent.management import get_agent_by_name_impl
@@ -73,6 +73,7 @@ from management.thread_management import config_thread_manager
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.multi_modal.utils import parse_s3_url
 
+from infrastructure.file_reads import read_attachment_size
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("northbound_service")
@@ -340,7 +341,7 @@ def _normalize_northbound_attachments(
 
         # Get file size from MinIO
         try:
-            file_size = get_file_size_from_minio(object_name)
+            file_size = read_attachment_size(object_name)
         except Exception:
             file_size = 0
 

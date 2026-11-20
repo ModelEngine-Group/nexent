@@ -78,14 +78,12 @@ install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 # Patch minio_client before importing
 with patch('management.db.file.attachment.minio_client', minio_client_mock):
     from management.db.file.attachment import (
-        _normalize_object_and_bucket,
         build_s3_url,
         copy_file,
         delete_file,
         download_file,
         file_exists,
         generate_object_name,
-        get_file_size_from_minio,
         get_file_stream,
         get_file_url,
         list_files,
@@ -95,6 +93,8 @@ with patch('management.db.file.attachment.minio_client', minio_client_mock):
 
 
 from contracts.file_types import get_content_type
+
+from infrastructure.object_storage.read_access import normalize_object_location
 
 
 class TestGenerateObjectName:
@@ -492,63 +492,6 @@ class TestGetFileUrl:
         assert result['error'] == 'URL generation failed'
 
 
-class TestGetFileSizeFromMinio:
-    """Test cases for get_file_size_from_minio function"""
-
-    def test_get_file_size_from_minio_success(self):
-        """Test successful file size retrieval"""
-        minio_client_mock.get_file_size.return_value = 1024
-
-        size = get_file_size_from_minio('attachments/test.txt', 'bucket')
-
-        assert size == 1024
-        minio_client_mock.get_file_size.assert_called_once_with('attachments/test.txt', 'bucket')
-
-    def test_get_file_size_from_minio_uses_default_bucket(self):
-        """Test get_file_size_from_minio uses default bucket when not specified"""
-        minio_client_mock.get_file_size.return_value = 2048
-
-        size = get_file_size_from_minio('attachments/test.txt')
-
-        assert size == 2048
-        assert minio_client_mock.get_file_size.call_args_list[-1] == call(
-            'attachments/test.txt', 'test-bucket'
-        )
-
-    @patch('management.db.file.attachment.minio_client')
-    def test_get_file_size_from_minio_calls_ensure_initialized(self, mock_client):
-        """Test get_file_size_from_minio calls _ensure_initialized before accessing storage_config.
-
-        Regression test: prior to the fix, accessing storage_config without calling
-        _ensure_initialized() first would raise AttributeError when the MinioClient
-        singleton was not yet initialized (lazy init).
-        """
-        # Simulate uninitialized client: _storage_client is None, so _ensure_initialize
-        # must be called before storage_config can be accessed.
-        mock_client._storage_client = None
-        mock_client._ensure_initialized = MagicMock(return_value=False)
-        mock_client.storage_config.default_bucket = 'default-bucket'
-        mock_client.get_file_size.return_value = 4096
-
-        size = get_file_size_from_minio('attachments/test.txt')
-
-        mock_client._ensure_initialized.assert_called_once()
-        assert size == 4096
-        mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'default-bucket')
-
-    @patch('management.db.file.attachment.minio_client')
-    def test_get_file_size_from_minio_with_explicit_bucket(self, mock_client):
-        """Test get_file_size_from_minio uses explicit bucket when provided."""
-        mock_client._ensure_initialized = MagicMock()
-        mock_client.get_file_size.return_value = 2048
-
-        size = get_file_size_from_minio('attachments/test.txt', bucket='explicit-bucket')
-
-        mock_client._ensure_initialized.assert_called_once()
-        mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
-
-
-
 class TestListFiles:
     """Test cases for list_files function"""
 
@@ -833,13 +776,13 @@ class TestCopyFile:
 class TestS3UrlHelpers:
     """Test cases for S3 URL helpers and normalization."""
 
-    def test_normalize_object_and_bucket_s3_url(self):
-        object_name, bucket = _normalize_object_and_bucket("s3://my-bucket/path/to/file.txt")
+    def test_normalize_object_location_s3_url(self):
+        object_name, bucket = normalize_object_location("s3://my-bucket/path/to/file.txt")
         assert object_name == "path/to/file.txt"
         assert bucket == "my-bucket"
 
-    def test_normalize_object_and_bucket_slash_path(self):
-        object_name, bucket = _normalize_object_and_bucket("/my-bucket/path/to/file.txt")
+    def test_normalize_object_location_slash_path(self):
+        object_name, bucket = normalize_object_location("/my-bucket/path/to/file.txt")
         assert object_name == "path/to/file.txt"
         assert bucket == "my-bucket"
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from botocore.exceptions import ReadTimeoutError
+from botocore.exceptions import ClientError, ReadTimeoutError
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from nexent.storage.models import ObjectRef, OperationContext
 
@@ -30,4 +30,42 @@ def test_exact_read_port_and_body_timeout_close_once(mocker):
     assert 0 < configured.call_args.args[0] <= 5
     raw.get_object.assert_called_once_with(Bucket='owned', Key='knowledge_base/a:colon')
     body.close.assert_called_once()
+    raw.close.assert_called_once()
+
+
+@pytest.mark.parametrize(('name', 'bucket', 'key'), [
+    ('attachments/a:colon', 'owned', 'attachments/a:colon'),
+    ('s3://legacy/attachments/a:colon', 'legacy', 'attachments/a:colon'),
+    ('/legacy/attachments/a:colon', 'legacy', 'attachments/a:colon'),
+])
+def test_attachment_size_requests_one_head_and_closes(mocker, name, bucket, key):
+    from infrastructure import file_reads
+
+    raw = Mock()
+    raw.head_object.return_value = {'ContentLength': 123, 'ETag': 'revision'}
+    configured = mocker.patch.object(file_reads, '_configured_client', return_value=raw)
+    mocker.patch.object(file_reads, '_configured_environment', return_value=SimpleNamespace(MINIO_DEFAULT_BUCKET='owned'))
+
+    assert file_reads.read_attachment_size(name) == 123
+    assert 0 < configured.call_args.args[0] <= 5
+    raw.head_object.assert_called_once_with(Bucket=bucket, Key=key)
+    raw.get_object.assert_not_called()
+    raw.close.assert_called_once()
+
+
+@pytest.mark.parametrize('error', [
+    ClientError({'Error': {'Code': '404'}}, 'HeadObject'),
+    ReadTimeoutError(endpoint_url='https://private.invalid'),
+])
+def test_attachment_size_preserves_zero_without_another_request(mocker, error):
+    from infrastructure import file_reads
+
+    raw = Mock()
+    raw.head_object.side_effect = error
+    mocker.patch.object(file_reads, '_configured_client', return_value=raw)
+    mocker.patch.object(file_reads, '_configured_environment', return_value=SimpleNamespace(MINIO_DEFAULT_BUCKET='owned'))
+
+    assert file_reads.read_attachment_size('attachments/missing') == 0
+    raw.head_object.assert_called_once_with(Bucket='owned', Key='attachments/missing')
+    raw.get_object.assert_not_called()
     raw.close.assert_called_once()
