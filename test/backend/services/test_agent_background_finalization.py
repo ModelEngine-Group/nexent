@@ -99,4 +99,4 @@ async def test_journal_write_failure_leaves_execution_terminal_for_reconciliatio
 
     terminal.finish.assert_called_once_with(IDENTITY, "completed")
     terminal.journal.repair_terminal.assert_called_once_with("completed")
-    assert "terminal will be reconciled" in caplog.text
+    assert "Prepared AgentOS journal will be reconciled" in caplog.text

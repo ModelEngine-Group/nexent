@@ -102,7 +102,10 @@ assert len(classes) == 76
 assert len(TableBase.metadata.tables) == 71
 assert len(SimpleTableBase.metadata.tables) == 5
 assert models.OuterApiTool is models.OuterApiService
-assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
+from infrastructure.rdb.automation_ownership import AgentAutomationRun
+from infrastructure.rdb.evaluation_ownership import AgentEvaluation
+assert models.AgentEvaluation is AgentEvaluation
+assert models.AgentAutomationRun is AgentAutomationRun
 assert models.ModelMonitoringRecord.__module__ == 'infrastructure.rdb.model_monitoring'
 assert models.TrajectoryExecution.__module__ == 'management.db.trajectory.models'
 assert models.TrajectoryStatistics.__module__ == 'management.db.trajectory.models'
