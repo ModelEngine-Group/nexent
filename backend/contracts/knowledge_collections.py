@@ -8,7 +8,7 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchAuthorization,
     ModelVersion,
 )
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 
 class CollectionSetup(Contract):
@@ -82,6 +82,14 @@ class PinnedKnowledgeCollections(KnowledgeCollectionsAuthorization):
 class KnowledgeCollectionsDescribe(PinnedKnowledgeCollections):
     view: Literal['resources', 'inventory'] = 'resources'
     include_statistics: bool = False
+    include_vector_media: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_describe(self, handler):
+        result = handler(self)
+        if not self.include_vector_media:
+            result.pop("include_vector_media", None)
+        return result
 
 
 class KnowledgeCollectionsUsage(PinnedKnowledgeCollections):
@@ -133,6 +141,12 @@ class KnowledgeModelDisplay(Contract):
     is_multimodal: bool = False
 
 
+class KnowledgeVectorMedia(Contract):
+    text: int = Field(ge=0)
+    image: int = Field(ge=0)
+    unclassified: int = Field(ge=0)
+
+
 class KnowledgeCollectionDescription(KnowledgeCollectionLookup):
     present: bool
     dimensions: int | None = Field(default=None, gt=0, le=2**31 - 1)
@@ -140,11 +154,20 @@ class KnowledgeCollectionDescription(KnowledgeCollectionLookup):
     statistics: KnowledgeCollectionMetrics | None = None
     statistics_error: Literal['unavailable', 'conflict', 'not_found', 'unsupported', 'invalid_input'] | None = None
     model_display: KnowledgeModelDisplay | None = None
+    vector_media: KnowledgeVectorMedia | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_description(self, handler):
+        result = handler(self)
+        if self.vector_media is None:
+            result.pop("vector_media", None)
+        return result
 
     @model_validator(mode='after')
     def confirmed_presence(self):
         if self.present and self.metric != 'cosine' or not self.present and any(
-            value is not None for value in (self.dimensions, self.metric, self.statistics, self.statistics_error, self.model_display)
+            value is not None for value in (self.dimensions, self.metric, self.statistics, self.statistics_error,
+                                             self.model_display, self.vector_media)
         ):
             raise ValueError('Collection metadata must match confirmed presence')
         if self.statistics is not None and self.statistics_error is not None:

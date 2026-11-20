@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import KnowledgeBaseState
 from contracts.errors.exceptions import RuntimeUpstreamError
+from contracts.knowledge_collections import KnowledgeCollectionsDescribed
 from management.services.knowledge_base.runtime_inspection import (
     RuntimeKnowledgeInspector,
 )
@@ -75,6 +76,19 @@ async def test_report_uses_standard_runtime_and_model_reads_without_guessed_dime
     assert s.frames[0].actor_id=='user-a' and s.frames[0].manifest_revision=='a'*64
     assert s.client.get_model.await_count==2
     assert all(call.args[1:]==('user-a','tenant-a') for call in s.client.inspect_knowledge_base.await_args_list)
+
+
+async def test_report_gets_vector_media_over_agentos_with_current_resource_revision(inspection):
+    s = inspection
+    s.client.describe_knowledge_collections = AsyncMock(return_value=KnowledgeCollectionsDescribed(items=[{
+        "knowledge_id": 1, "expected_revision": s.state.knowledge_revision, "present": True, "metric": "cosine",
+        "vector_media": {"text": 2, "image": 3, "unclassified": 4},
+    }]))
+    result = await s.service.scan(1, s.actor, s.frames.append, include_vector_media=True, context=context())
+    assert result["vector_collection_present"] and result["vector_media"]["unclassified"] == 4
+    query, user, tenant = s.client.describe_knowledge_collections.await_args.args
+    assert query.include_vector_media and query.expected_revisions == {1: s.state.knowledge_revision}
+    assert (user, tenant) == (s.actor.user_id, s.actor.tenant_id)
 
 
 async def test_missing_dimensions_remain_unknown_and_do_not_select_another_model(inspection):

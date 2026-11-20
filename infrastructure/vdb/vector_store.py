@@ -588,9 +588,13 @@ class ElasticsearchVectorStore:
         return scan_vectors(self, binding, where, page, context=context,
                             include_vector=include_vector, allow_missing_vector=allow_missing_vector)
 
-    def count(self, collection, where, *, context):
+    def count(self, collection, where, *, context, vectors_only=False):
+        if type(vectors_only) is not bool:
+            raise InvalidInput()
         binding = self._binding(collection, maintenance=True)
         query = self._filter(binding, where)
+        if vectors_only:
+            query["bool"]["filter"].append({"exists": {"field": "embedding"}})
         with self._client(context) as client:
             result = self._call(
                 client, "count", context, index=binding.index, query=query

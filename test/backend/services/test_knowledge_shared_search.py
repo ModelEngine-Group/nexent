@@ -137,7 +137,8 @@ async def test_multimodal_returns_authorized_hits_from_two_collections(mixed):
         port = s.vectors[name]
         hit, = port.search.return_value
         hit = replace(hit, payload={**hit.payload, "media_kind": kind})
-        port.search.side_effect = [(hit,), (), (hit,) if kind == "text" else (), (hit,) if kind == "image" else ()]
+        port.count.return_value = 0
+        port.search.side_effect = [(hit,), (hit,) if kind == "text" else (), (hit,) if kind == "image" else ()]
     request = KnowledgeSearch.model_validate({
         **s.request.model_dump(), "search_mode": "hybrid", "top_k": 1,
         "global_hybrid_candidates": True, "split_multimodal_candidates": True,

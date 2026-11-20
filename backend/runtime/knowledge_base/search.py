@@ -269,10 +269,10 @@ class KnowledgeSearchService:
                     Junction("and", (Comparison("embedding_model_id", "is_null", True), Comparison("embedding_revision", "is_null", True)))))
                 semantic_where = Junction("and", (terms[0], model_scope, *terms[1:]))
                 if request.split_multimodal_candidates:
-                    # A bounded probe detects unclassified dense rows even when
-                    # neither of the classified candidate sets would include them.
-                    unclassified = Junction("and", (*semantic_where.terms, Comparison("media_kind", "is_null", True)))
-                    if port.search(resource.collection, SearchQuery(vector=query_vector, where=unclassified, limit=1), context=context):
+                    unknown_kind = Junction("or", (Comparison("media_kind", "is_null", True),
+                        Junction("and", (Comparison("media_kind", "ne", "text"), Comparison("media_kind", "ne", "image")))))
+                    unclassified = Junction("and", (*semantic_where.terms, unknown_kind))
+                    if port.count(resource.collection, unclassified, vectors_only=True, context=context):
                         raise Conflict(operation_id=context.operation_id)
                     for kind, branch in (("text", semantic), ("image", images)):
                         scoped = Junction("and", (*semantic_where.terms, Comparison("media_kind", "eq", kind)))

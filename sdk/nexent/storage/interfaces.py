@@ -227,7 +227,8 @@ class VectorStore(StoragePort, Protocol):
         self, collection: str, where: Comparison | Junction, *, context: OperationContext
     ) -> tuple[DeleteReceipt, ...]: ...
 
-    def count(self, collection: str, where: Comparison | Junction | None, *, context: OperationContext) -> int: ...
+    def count(self, collection: str, where: Comparison | Junction | None, *,
+              context: OperationContext, vectors_only: bool = False) -> int: ...
 
 
 @dataclass(frozen=True)

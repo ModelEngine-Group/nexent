@@ -168,6 +168,16 @@ def test_count_always_filters_tenant_and_collection(store):
     }
 
 
+def test_vector_only_count_adds_presence_constraint_without_returning_payload(store):
+    port, client, _ = store
+    client.count.return_value = {"count": 4}
+    assert port.count("kb", None, context=context(), vectors_only=True) == 4
+    assert client.count.call_args.kwargs["query"]["bool"]["filter"] == [
+        {"term": {"_si_tenant": "tenant-a"}}, {"term": {"_si_collection": "kb"}},
+        {"exists": {"field": "embedding"}},
+    ]
+
+
 def test_partial_delete_keeps_confirmed_page_when_next_page_is_unavailable(store):
     from elastic_transport import ConnectionError
 

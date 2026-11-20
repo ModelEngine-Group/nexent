@@ -9,7 +9,7 @@ from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import KnowledgeSearch, KnowledgeSearchResult
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from nexent.storage.errors import Conflict
-from nexent.storage.models import Comparison, Revision, SearchHit, VectorKey
+from nexent.storage.models import Comparison, Junction, Revision, SearchHit, VectorKey
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from pydantic import ValidationError
 from runtime.knowledge_base.search import rank_candidates
@@ -167,7 +167,8 @@ async def test_multimodal_text_and_images_use_independent_limits_and_original_sc
     text = replace(text, score=.4, payload={**text.payload, "media_kind": "text"})
     image = replace(text, key=VectorKey("kb", "image"), score=.8,
                     payload={**text.payload, "media_kind": "image"})
-    s.vectors.search.side_effect = [(replace(image, score=10),), (), (text,), (image,)]
+    s.vectors.count.return_value = 0
+    s.vectors.search.side_effect = [(replace(image, score=10),), (text,), (image,)]
 
     result = await service.search(multimodal(request), s.actor)
     wire = KnowledgeSearchResult.model_validate_json(result.model_dump_json())
@@ -179,23 +180,28 @@ async def test_multimodal_text_and_images_use_independent_limits_and_original_sc
     assert image_hit.chunk_id == "image" and image_hit.score == .8
     assert image_hit.score_details == {}
     queries = [call.args[1] for call in s.vectors.search.call_args_list]
-    assert [query.limit for query in queries] == [1, 1, 1, 1]
+    assert [query.limit for query in queries] == [1, 1, 1]
     assert [query.where.terms[-1] for query in queries[1:]] == [
-        Comparison("media_kind", "is_null", True), Comparison("media_kind", "eq", "text"),
-        Comparison("media_kind", "eq", "image"),
+        Comparison("media_kind", "eq", "text"), Comparison("media_kind", "eq", "image"),
     ]
+    assert s.vectors.count.call_args.kwargs["vectors_only"] is True
+    assert s.vectors.count.call_args.args[1].terms[-1] == Junction("or", (
+        Comparison("media_kind", "is_null", True),
+        Junction("and", (Comparison("media_kind", "ne", "text"), Comparison("media_kind", "ne", "image"))),
+    ))
     assert s.models.invoke.await_count == 1
     assert s.client.authorize_knowledge_search.await_count == 2
 
 
 async def test_multimodal_does_not_silently_exclude_unclassified_dense_records(search):
-    s, request, _, hit, service = search
+    s, request, _, _, service = search
     s.models.get.side_effect = None
     s.models.get.return_value = ModelMetadata(model_type="multi_embedding", model_id=2, display_name=None, revision="v1")
-    s.vectors.search.side_effect = [(), (hit,)]
+    s.vectors.search.return_value = ()
+    s.vectors.count.return_value = 1
     with pytest.raises(Conflict):
         await service.search(multimodal(request), s.actor)
-    assert s.vectors.search.call_count == 2
+    assert s.vectors.search.call_count == 1
 
 
 async def test_multimodal_requires_the_pinned_multimodal_model(search):

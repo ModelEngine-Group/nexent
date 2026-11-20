@@ -139,7 +139,8 @@ async def _scan_runtime(args, scope, context, emit):
     )
 
     return await RuntimeKnowledgeInspector().scan(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
-        lambda page: emit({'kind': 'runtime_page', **page.model_dump(mode='json')}), page_size=args.page_size, context=context)
+        lambda page: emit({'kind': 'runtime_page', **page.model_dump(mode='json')}), page_size=args.page_size,
+        include_vector_media=getattr(args, 'include_vector_media', False), context=context)
 
 
 async def inspect_runtime(args):
@@ -154,6 +155,9 @@ def main(argv=None):
     for command in actions:
         description = 'Read-only knowledge inventory'
         inspect = commands.add_parser(command, help=description)
+        if command == 'inspect-runtime':
+            inspect.add_argument('--include-vector-media', action='store_true',
+                help='Count stored text, image, and unclassified vectors without reading documents')
         if command == 'archive-tasks':
             inspect.add_argument('--legacy-quiesced', action='store_true', required=True,
                 help='Operator confirms old admission and workers are stopped and drained; export includes private contents')

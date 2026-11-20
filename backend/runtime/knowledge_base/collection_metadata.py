@@ -15,6 +15,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionsDescribed,
     KnowledgeCollectionsGrant,
     KnowledgeModelDisplay,
+    KnowledgeVectorMedia,
 )
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import (
@@ -27,6 +28,8 @@ from nexent.storage.errors import (
     Unavailable,
 )
 from nexent.storage.models import (
+    Comparison,
+    Junction,
     OperationContext,
     VectorCollectionInfo,
     VectorCollectionStatistics,
@@ -61,6 +64,18 @@ def _metrics(result, collection, context):
             embedding_model_name=next(iter(fields['model'].top_values), ''))
     except ValidationError as error:
         raise Unavailable(operation_id=context.operation_id) from error
+
+
+def _vector_media(vectors, resource, *, context):
+    collection = resource.collection
+    scope = Comparison("knowledge_id", "eq", resource.knowledge_id)
+    total = vectors.count(collection, scope, vectors_only=True, context=context)
+    text, image = (vectors.count(collection,
+        Junction("and", (scope, Comparison("media_kind", "eq", kind))),
+        vectors_only=True, context=context) for kind in ("text", "image"))
+    if text + image > total:
+        raise Conflict(operation_id=context.operation_id)
+    return KnowledgeVectorMedia(text=text, image=image, unclassified=total-text-image)
 
 
 class KnowledgeCollectionMetadataService:
@@ -102,6 +117,8 @@ class KnowledgeCollectionMetadataService:
                     if not isinstance(info, VectorCollectionInfo) or info.collection != resource.collection:
                         raise Unavailable(operation_id=context.operation_id)
                     values.update(dimensions=info.dimensions, metric=info.metric)
+                    if request.include_vector_media:
+                        values["vector_media"] = _vector_media(vectors, resource, context=context)
                     if request.include_statistics:
                         try:
                             values['statistics'] = _metrics(vectors.statistics(resource.collection, SUMMARY_FIELDS,

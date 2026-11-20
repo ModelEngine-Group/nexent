@@ -11,6 +11,7 @@ from contracts.agentos_knowledge import (
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeUpstreamError
+from contracts.knowledge_collections import KnowledgeCollectionsDescribe
 from contracts.knowledge_maintenance import RuntimeInspectionPage
 from management.services.knowledge_base.search_authorization import (
     KnowledgeSearchAuthorizationPolicy,
@@ -54,14 +55,14 @@ class RuntimeKnowledgeInspector:
         if metadata.model_id != model_id: raise Conflict()
         return metadata
 
-    async def scan(self, knowledge_id, actor, emit, *, page_size=100, context):
+    async def scan(self, knowledge_id, actor, emit, *, page_size=100, include_vector_media=False, context):
         try:
             async with asyncio.timeout(context.remaining()):
-                return await self._scan(knowledge_id, actor, emit, page_size=page_size, context=context)
+                return await self._scan(knowledge_id, actor, emit, page_size=page_size, include_vector_media=include_vector_media, context=context)
         except (TimeoutError, RuntimeServiceTimeoutError) as error:
             raise DeadlineExceeded(operation_id=context.operation_id) from error
 
-    async def _scan(self, knowledge_id, actor, emit, *, page_size, context):
+    async def _scan(self, knowledge_id, actor, emit, *, page_size, include_vector_media, context):
         if type(knowledge_id) is not int or knowledge_id <= 0: raise InvalidInput()
         PageRequest(limit=page_size)
         resource = await self._resource(knowledge_id, actor, context)
@@ -94,7 +95,22 @@ class RuntimeKnowledgeInspector:
             cursor = state.next_cursor
         if await self._resource(knowledge_id, actor, context) != resource: raise Conflict()
         if await self._model(resource.embedding_model_id, actor) != model: raise Conflict()
+        media = {}
+        if include_vector_media:
+            response = await self.client.describe_knowledge_collections(KnowledgeCollectionsDescribe(
+                knowledge_ids=[knowledge_id], expected_revisions={knowledge_id: resource.revision},
+                include_vector_media=True), actor.user_id, actor.tenant_id)
+            if len(response.items) != 1:
+                raise Conflict()
+            item = response.items[0]
+            if (item.knowledge_id != knowledge_id or item.expected_revision != resource.revision
+                or item.present and item.vector_media is None):
+                raise Conflict()
+            if await self._resource(knowledge_id, actor, context) != resource:
+                raise Conflict()
+            media = {"vector_collection_present": item.present, "vector_media": (
+                item.vector_media.model_dump(mode="json") if item.vector_media else None)}
         context.remaining()
         return {'files': count, 'visible_files': visible, 'manifest_revision': revision,
             'knowledge_revision': resource.revision, 'embedding_model': binding.model_dump() if binding else None,
-            'embedding_dimensions': dimensions, 'issues': issues}
+            'embedding_dimensions': dimensions, 'issues': issues, **media}

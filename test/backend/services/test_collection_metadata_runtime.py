@@ -94,6 +94,24 @@ async def test_batch_preserves_order_empty_model_and_only_two_authorization_roun
     s.display.assert_not_called()
 
 
+async def test_vector_media_inventory_only_counts_physical_embeddings_for_selected_kb(boundary):
+    s = boundary
+    for port in s.vectors.values():
+        port.count = Mock(side_effect=[6, 3, 2])
+    s.request.include_vector_media = True
+    result = await invoke(s)
+    assert [item.vector_media.model_dump() for item in result.items] == [
+        {"text": 3, "image": 2, "unclassified": 1}, {"text": 3, "image": 2, "unclassified": 1},
+    ]
+    for key, port in s.vectors.items():
+        total, text, image = port.count.call_args_list
+        assert total.args[1].value == key
+        assert [query.args[1].terms[-1].value for query in (text, image)] == ["text", "image"]
+        assert all(query.kwargs["vectors_only"] for query in (total, text, image))
+        port.statistics.assert_not_called()
+    s.display.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_statistics_uses_finite_neutral_summaries(boundary):
     s = boundary
