@@ -32,12 +32,17 @@ async def test_jsonl_pages_use_managed_worker_and_finished_marker(cli):
     def page(*args, **kwargs):
         observed.append(current_thread().name)
         kwargs['context'].remaining()
-        return s.page.model_copy(update={'next_cursor': 'next' if len(observed) == 1 else None})
+        state = 'publisher_evidence_missing' if len(observed) == 1 else 'immutable_version'
+        return s.page.model_copy(update={
+            'next_cursor': 'next' if len(observed) == 1 else None,
+            'files': [SourceFinding(file_id='b' * 32, source_deletion_evidence=state)],
+        })
     s.inspector.page.side_effect = page
     result = await module.inspect_sources(s.args)
     lines = [json.loads(line) for line in s.args.output.read_text().splitlines()]
     assert [line['kind'] for line in lines] == ['source_inventory_start', 'source_page', 'source_page', 'source_inventory_finished']
     assert result['scan_complete'] and result['files'] == 2 and result['migration_ready'] is False
+    assert result['source_deletion_evidence_counts'] == {'publisher_evidence_missing': 1, 'immutable_version': 1}
     assert result['pending_checks'] and all(name != 'MainThread' for name in observed)
     assert s.inspector.page.call_args_list[1].kwargs['cursor'] == 'next'
     assert s.factory.call_args.kwargs['cancellation_scope'].cancelled

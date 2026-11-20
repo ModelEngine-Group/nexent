@@ -150,8 +150,19 @@ class KnowledgeSourceInspector:
                         break
                 item.candidate_source = ObjectReference(space='files', key=key, version=metadata.ref.version.value, sha256=digest.hexdigest())
                 item.candidate_storage_object_id = ledger['storage_object_id']
-                if alias_key is not None and not {'SOURCE_SIZE_MISMATCH', 'SOURCE_HASH_MISMATCH'}.intersection(item.issues):
+                if {'SOURCE_SIZE_MISMATCH', 'SOURCE_HASH_MISMATCH'}.intersection(item.issues):
+                    return
+                if alias_key is not None:
                     item.issues.append('SOURCE_ALIAS_PROVEN')
+                version = metadata.ref.version.value
+                if version.startswith('version:') and version not in {'version:', 'version:null'}:
+                    item.source_deletion_evidence = 'immutable_version'
+                elif version.startswith('etag:') or version == 'version:null':
+                    item.source_deletion_evidence = (
+                        'confirmed_publisher'
+                        if row['upload_owner_service'] and row['source_upload_sha256'] == digest.hexdigest()
+                        else 'publisher_evidence_missing'
+                    )
             except NotFound:
                 item.issues.append('SOURCE_MISSING')
             except Conflict:

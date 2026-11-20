@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from collections import Counter
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
@@ -43,6 +44,7 @@ def _emit(stream, value):
 def _scan_sources(args, scope, context, emit):
     inspector = KnowledgeSourceInspector(cancellation_scope=scope)
     cursor, revision, count, issues = None, None, 0, 0
+    deletion_evidence = Counter()
     while True:
         page = inspector.page(args.knowledge_id, ServicePrincipal(args.user_id, args.tenant_id),
             cursor=cursor, page_size=args.page_size, context=context)
@@ -51,9 +53,10 @@ def _scan_sources(args, scope, context, emit):
         context.remaining()
         emit({'kind': 'source_page', **page.model_dump(mode='json')})
         count += len(page.files); issues += sum(bool(item.issues) for item in page.files)
+        deletion_evidence.update(item.source_deletion_evidence for item in page.files)
         cursor = page.next_cursor
         if cursor is None: break
-    return {'files': count, 'files_with_issues': issues}
+    return {'files': count, 'files_with_issues': issues, 'source_deletion_evidence_counts': dict(deletion_evidence)}
 
 
 def _scan_vectors(args, scope, context, emit):

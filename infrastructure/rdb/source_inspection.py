@@ -16,7 +16,7 @@ from infrastructure.storage.catalog import (
 
 files, ledger = KnowledgeFileLifecycle.__table__, KnowledgeStorageObject.__table__
 FILE_FIELDS = ('file_id', 'tenant_id', 'knowledge_id', 'index_name', 'version', 'source_generation',
-    'source_space', 'source_key', 'source_revision', 'source_sha256', 'source_upload_sha256',
+    'source_space', 'source_key', 'source_revision', 'source_sha256', 'source_upload_sha256', 'upload_owner_service',
     'bucket_name', 'object_name', 'local_source_path', 'storage_object_id', 'file_size', 'status',
     'deletion_request', 'ingestion_request', 'process_task_id', 'forward_task_id', 'parent_task_id', 'delete_flag')
 LEDGER_FIELDS = ('storage_object_id', 'tenant_id', 'knowledge_id', 'index_name', 'bucket_name', 'object_name',

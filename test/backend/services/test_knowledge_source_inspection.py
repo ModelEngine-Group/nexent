@@ -276,3 +276,31 @@ def test_report_cannot_remove_unfinished_migration_checks(inspection):
     data = report.model_dump()
     data['pending_checks'] = ()
     with pytest.raises(ValidationError): type(report).model_validate(data)
+
+
+
+@pytest.mark.parametrize(("revision", "publisher", "sha", "expected"), [
+    ("version:one", None, None, "immutable_version"),
+    ("version:null", None, None, "publisher_evidence_missing"),
+    ("etag:one", None, None, "publisher_evidence_missing"),
+    ("etag:one", "nexent-config", None, "publisher_evidence_missing"),
+    ("etag:one", "nexent-config", "match", "confirmed_publisher"),
+    ("version:one", None, "mismatch", "unverified"),
+])
+def test_retirement_report_separates_source_provenance_from_rebuild_issues(
+    inspection, revision, publisher, sha, expected,
+):
+    s = inspection
+    upload_hash = {"match": s.digest, "mismatch": "f" * 64}.get(sha)
+    s.update(source_revision=revision, upload_owner_service=publisher, source_upload_sha256=upload_hash)
+    s.objects.stat.return_value = ObjectMetadata(
+        ObjectRef("files", s.row["object_name"], Revision(revision)), len(s.data), "text/plain",
+    )
+    page = inspect(s)
+    item, = page.files
+
+    assert item.source_deletion_evidence == expected
+    assert item.issues == (["SOURCE_HASH_MISMATCH"] if sha == "mismatch" else [])
+    assert "nexent-config" not in page.model_dump_json()
+    s.objects.delete.assert_not_called()
+    s.objects.copy.assert_not_called()

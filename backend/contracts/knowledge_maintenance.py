@@ -21,6 +21,7 @@ BROKER_INVENTORY = 'legacy_broker_inventory'
 LEGACY_INGESTION_INVENTORY = 'legacy_ingestion_inventory'
 PENDING_CHECKS = ('legacy_vectors', 'legacy_tasks', 'runtime_visibility', 'model_dimensions')
 Issue = Annotated[str, Field(pattern=r'^[A-Z][A-Z0-9_]{0,79}$')]
+SourceDeletionEvidence = Literal['unverified', 'immutable_version', 'confirmed_publisher', 'publisher_evidence_missing']
 
 
 class SourceFinding(Contract):
@@ -31,6 +32,7 @@ class SourceFinding(Contract):
     candidate_source: ObjectReference | None = None
     observed_size: int | None = Field(default=None, ge=0)
     candidate_storage_object_id: int | None = Field(default=None, gt=0)
+    source_deletion_evidence: SourceDeletionEvidence = 'unverified'
 
 
 class SourceInspectionPage(Contract):
