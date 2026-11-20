@@ -213,6 +213,7 @@ class HistoryCompressor:
         model: Any,
         *, source_history=None, source_owner=None, allow_fact_correction=False,
         candidate_feedback: Callable[[HistorySummaryCandidate], dict | None] | None = None,
+        capacity_goal: dict | None = None,
     ) -> HistoryCompressionResult:
         if not turns and summary is None:
             return HistoryCompressionResult()
@@ -220,6 +221,15 @@ class HistoryCompressor:
         if source_history is not None and source_owner is not None:
             source_index = source_history.structured_source_index(source_owner)
         summary_input = HistorySummaryInput.from_items(summary, turns, source_index=source_index)
+        generation_input = summary_input.render()
+        if capacity_goal:
+            generation_input += (
+                "\n\nHistory recovery capacity goal: "
+                + json.dumps(capacity_goal, ensure_ascii=False, separators=(",", ":"))
+                + "\nThese are local estimates of the complete rendered history and input frame, "
+                "not a provider completion-token allowance. Shorten the complete summary to meet "
+                "the history target while preserving all facts and original source references."
+            )
         def candidate_for(markdown):
             return HistorySummaryCandidate(
                 summary={"markdown": markdown},
@@ -242,7 +252,7 @@ class HistoryCompressor:
             ),
         )
         generated = self._llm.generate_summary(
-            summary_input.render(), model,
+            generation_input, model,
             call_type="history_incremental" if summary else "history_summary",
             prompt_type="incremental" if summary else "initial",
             max_output_tokens=max_output_tokens,
@@ -269,7 +279,7 @@ class HistoryCompressor:
             claim = getattr(model, "claim_fact_correction", None)
             if callable(claim) and claim() is True:
                 generated = self._llm.generate_summary(
-                    summary_input.render() + "\n\nRegenerate the complete seven-section summary. "
+                    generation_input + "\n\nRegenerate the complete seven-section summary. "
                     "Use the exact expected heading order with a nonempty body for every section, and retain "
                     "all protected identifiers and literal values. "
                     + ("Make the summary shorter to meet the rendered history capacity target; "

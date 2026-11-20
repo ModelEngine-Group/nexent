@@ -35,10 +35,15 @@ case:
   - order: 4
     action: Reject an oversized historical full frame against an owned HTTP/SSE provider, then exercise accepted
       summary, missing fixed title, invalid-format correction, valid but expanded summary with one capacity correction,
-      still-oversized correction, persistently invalid summary and main-request authentication failure.
+      still-oversized correction, positive-but-unfitting ordinary next iteration, persistently invalid summary
+      and main-request authentication failure. Inspect every recovery summary request's current capacity goal.
     expected: Only a valid history-only candidate with actual reduction and full-frame fit commits. Invalid candidates
       leave no checkpoint and prepare reentry makes no extra request. A later main failure retains the accepted
-      old checkpoint. Only the fixed missing H1 is normalized without a model call; other invalid text may use the same single format-or-fact correction claim and strict validation. All actual bodies omit output limits and resources close.
+      old checkpoint. Only the fixed missing H1 is normalized without a model call; other invalid text may use the same single format-or-fact correction claim and strict validation.
+      Every recovery generation, including the first, correction and ordinary next iteration, carries the current
+      local rendered-history capacity target; the next iteration updates history cost. These targets are not provider
+      output allowances, main requests contain no recovery hint, and the existing claim/three-subrequest budget remains.
+      All actual bodies omit output limits and resources close.
   - order: 5
     action: Recover source-backed structured bulk over actual HTTP/SSE, then serialize/restore an internal checkpoint
       for a new owner and continue. Repeat real user_message, native tool_result and canonical execution_result

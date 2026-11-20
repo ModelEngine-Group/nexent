@@ -46,6 +46,8 @@ change:
       without rendering originals.
     - Share one correction claim between invalid contract/facts and valid but ineffective history candidates;
       use actual rendered capacity feedback within the existing three summary subrequests and transactional checks.
+    - Carry a freshly measured local rendered-history goal in every existing history-only recovery generation,
+      including the first and ordinary later iterations, and retain it for format/fact correction without another claim.
     reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
       required. No duplicate D1.
     test_selectors:
@@ -95,5 +97,9 @@ change:
     Preserve positive-but-unfitting iterations and the total three-summary-subrequest budget, not a new physical
     attempt limit; retain transport retries and all usage. No C/O, output-cap, protected-content or 5-percent
     criterion change. Existing owned HTTP/SSE Case adds correction-fit and still-oversized rollback variants.
+    v15 actual position2 carried a target but still exceeded C; position3 lacked a target and expanded again.
+    Every original recovery generation must receive its current local rendered goal, explicitly distinguished
+    from provider completion-token allowances. Normal maintenance/main prompts and all call/claim limits remain.
+    The missing hint does not prove the full cause of provider behavior or guarantee a future fitting response.
     Original full failed frame/live revision and claim were not captured; readonly delta bounds and static
     control-flow inference stay labeled as such. New real-container/two-runtime/Phoenix acceptance remains pending.'
