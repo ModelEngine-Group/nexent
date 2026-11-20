@@ -3,16 +3,18 @@
 """Regression for prepared repository files when installation upload fails."""
 
 import io
-from unittest.mock import MagicMock, patch
 import zipfile
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from test.backend.configuration.helpers import system_config_snapshot
 from test.backend.services.test_skill_service import create_test_service, skill_service
 
 
 @pytest.mark.parametrize("failure_stage", ["save", "upload"])
-def test_repository_install_cleans_prepared_files_before_database_write(failure_stage):
+def test_repository_install_cleans_prepared_files_before_database_write(failure_stage, mocker):
+    mocker.patch.object(skill_service, "get_config_snapshot", return_value=system_config_snapshot())
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
         archive.writestr("sample/SKILL.md", "---\nname: sample\ndescription: Sample\n---\nBody")
