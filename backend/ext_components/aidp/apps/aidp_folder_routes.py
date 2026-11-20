@@ -25,7 +25,7 @@ from ext_components.aidp.apps.aidp_mgmt_common import (
     _normalize_folder_path,
 )
 from ext_components.aidp.services import aidp_permission_service as perms
-from ext_components.aidp.services.aidp_service import (
+from ext_components.aidp.services.aidp_folder_service import (
     create_aidp_folder_impl,
     delete_aidp_folder_impl,
     get_aidp_folder_tree_impl,
