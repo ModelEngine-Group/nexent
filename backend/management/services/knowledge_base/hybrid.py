@@ -145,13 +145,12 @@ async def search_runtime_hybrid(
             resources = await run_blocking("runtime-public-hybrid-resources", resolve, lane="control-io", owner=__name__)
             model_id = resources[0]["embedding_model_id"]
             model = await _resolve_model(client, index_names[0], model_id, actor)
-            if any(row["embedding_model_id"] != model_id for row in resources):
-                raise Conflict(operation_id=context.operation_id)
             collections = {row["knowledge_id"]: row["index_name"] for row in resources}
             request = KnowledgeSearch(
                 knowledge_ids=list(collections), query=query, search_mode="hybrid", top_k=top_k,
                 weight_accurate=weight, global_hybrid_candidates=True, merge_display_ids=True,
                 split_multimodal_candidates=model.model_type == "multi_embedding", include_public_document=True,
+                first_collection_embedding=any(row["embedding_model_id"] != model_id for row in resources[1:]),
                 embedding_model=ModelVersion(model_id=model.model_id, revision=model.revision),
                 expected_revisions={row["knowledge_id"]: knowledge_search_revision(row) for row in resources},
             )

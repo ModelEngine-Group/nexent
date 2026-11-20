@@ -253,6 +253,7 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     split_multimodal_candidates: bool = False
     merge_display_ids: bool = False
     include_public_document: bool = False
+    first_collection_embedding: bool = False
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
@@ -268,6 +269,10 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
             raise ValueError("Separate media candidates require global hybrid search")
         if self.merge_display_ids and not self.global_hybrid_candidates:
             raise ValueError("Display ID fusion requires global hybrid search")
+        if self.first_collection_embedding and not (
+            self.global_hybrid_candidates and self.include_public_document and self.expected_revisions
+        ):
+            raise ValueError("First-collection embedding requires pinned public hybrid search")
         if self.file_versions and (
             set(self.file_versions) != set(self.file_ids)
             or any(type(value) is not int or value < 0 for value in self.file_versions.values())
@@ -292,6 +297,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
             result.pop("merge_display_ids", None)
         if not self.include_public_document:
             result.pop("include_public_document", None)
+        if not self.first_collection_embedding:
+            result.pop("first_collection_embedding", None)
         return result
 
     @field_validator("file_ids")

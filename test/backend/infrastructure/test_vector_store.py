@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Scoped vector protocol and provider write outcomes, without any model calls."""
 
+from dataclasses import replace
 from time import monotonic
 from unittest.mock import Mock
 
@@ -303,6 +304,22 @@ def test_collection_description_accepts_elasticsearch_implicit_object_type(store
     mapping["properties"]["payload"].pop("type")
     client.indices.get_mapping.return_value = {binding.index: {"mappings": mapping}}
     assert port.describe_collection("kb", context=context()).dimensions == 2
+
+
+def test_read_only_dense_search_checks_discovered_mapping_dimensions(store):
+    port, client, factory = store
+    pinned = port._bindings["kb"]
+    client.indices.get_mapping.return_value = {pinned.index: {"mappings": pinned.mapping()}}
+    unpinned = replace(pinned, dimensions=None, writable=False, allow_unembedded=True)
+    reader = ElasticsearchVectorStore(port.scope, (unpinned,), factory)
+    client.search.return_value = {"hits": {"hits": []}}
+    assert reader.search("kb", SearchQuery(vector=(1.0, 0.0)), context=context()) == ()
+    assert client.search.call_args.kwargs["knn"]["query_vector"] == (1.0, 0.0)
+    assert client.search.call_args.kwargs["knn"]["filter"]["bool"]["filter"][0] == {"term": {"_si_tenant": "tenant-a"}}
+    client.search.reset_mock()
+    with pytest.raises(InvalidInput):
+        reader.search("kb", SearchQuery(vector=(0.0, 1.0, 0.0)), context=context())
+    client.search.assert_not_called()
 
 
 def test_partial_shard_result_is_not_a_successful_search(store):

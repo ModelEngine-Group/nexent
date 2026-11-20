@@ -5,12 +5,14 @@ import asyncio
 from contextlib import contextmanager
 from dataclasses import replace
 from time import monotonic
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from pydantic import ValidationError
 from contracts.agentos import ModelResult
 from contracts.agentos_knowledge import (
     KnowledgeFileDelete,
+    KnowledgeJobLookup,
     KnowledgeSearch,
     KnowledgeSearchGrant,
 )
@@ -82,6 +84,73 @@ async def test_modes_use_model_invoke_and_return_only_authoritative_generation(s
     assert s.closed == [True]
     assert s.client.authorize_knowledge_search.await_count == 2
     assert all(c.args[1:] == ("user", "tenant") for c in s.client.authorize_knowledge_search.call_args_list)
+
+
+@pytest.mark.parametrize("options", [{"global_hybrid_candidates": False}, {"include_public_document": False},
+                                     {"expected_revisions": {}}])
+def test_first_collection_embedding_requires_pinned_public_hybrid(options):
+    payload = dict(knowledge_ids=[1], query="worker", embedding_model={"model_id": 2, "revision": "v1"},
+                   search_mode="hybrid", global_hybrid_candidates=True, include_public_document=True,
+                   expected_revisions={1: "a" * 64}, first_collection_embedding=True)
+    with pytest.raises(ValidationError, match="pinned public hybrid search"):
+        KnowledgeSearch.model_validate(payload | options)
+
+
+@pytest.mark.parametrize("secondary_dimensions", [2, 3])
+async def test_mixed_public_search_keeps_lexical_and_uses_compatible_vectors(search, secondary_dimensions):
+    s, request, grant, hit, service = search
+    secondary = grant.knowledge_bases[0].model_copy(update={
+        "knowledge_id": 2, "collection": "other", "embedding_model_id": 3, "revision": "b" * 64,
+    })
+    grant.knowledge_bases.append(secondary)
+    request = KnowledgeSearch.model_validate(request.model_dump() | {
+        "knowledge_ids": [1, 2], "search_mode": "hybrid", "global_hybrid_candidates": True,
+        "include_public_document": True, "expected_revisions": {1: "a" * 64, 2: "b" * 64},
+    })
+    with pytest.raises(Conflict):
+        await service.search(request, s.actor)
+
+    request = KnowledgeSearch.model_validate(request.model_dump() | {"first_collection_embedding": True})
+    with pytest.raises(Conflict):
+        await service.search(request.model_copy(update={"embedding_model": request.embedding_model.model_copy(
+            update={"model_id": 3})}), s.actor)
+    s.models.invoke.assert_not_awaited()
+
+    other = Mock()
+    other.scope = replace(s.vectors.scope, namespaces={"other"})
+    other.describe_collection.return_value = VectorCollectionInfo("other", secondary_dimensions, "cosine")
+    upload = s.request.model_copy(update={"knowledge_id": 2, "file_id": "b" * 32})
+    job = await s.db(s.policy.submit, upload, context=s.context)
+    lookup = KnowledgeJobLookup(knowledge_id=2, file_id=upload.file_id, file_version=0, job_id=job.job_id)
+    claimed = await s.db(s.policy.claim, lookup, owner_id="second-writer", lease_seconds=60, context=s.context)
+    assert await s.db(s.policy.begin_execution, claimed, context=s.context)
+    assert await s.db(s.policy.complete, claimed, chunk_count=2, context=s.context)
+    base_payload = {**hit.payload, "knowledge_id": 2, "file_id": upload.file_id,
+                    "embedding_model_id": 3, "embedding_revision": "v3"}
+    text = replace(hit, key=VectorKey("other", "text"), generation=Revision(claimed["attempt_id"]),
+                   payload=base_payload | {"content": "other text"})
+    vector = replace(text, key=VectorKey("other", "vector"), payload=base_payload | {"content": "other vector"})
+    foreign = replace(vector, key=VectorKey("other", "foreign"), payload=base_payload | {"embedding_model_id": 4})
+    other.search.side_effect = lambda collection, query, **kwargs: (vector, foreign) if query.vector else (text,)
+
+    @contextmanager
+    def ports(actor, grant, dimensions, *, context):
+        assert dimensions is None
+        yield {1: s.records, 2: s.records}, {"kb": s.vectors, "other": other}
+
+    service.ports = ports
+    result = await service.search(request, s.actor)
+
+    s.models.invoke.assert_awaited_once()
+    assert s.models.invoke.await_args.args[0].model_id == 2
+    assert {item.chunk_id for item in result.hits} == ({"one", "text", "vector"} if secondary_dimensions == 2
+                                                      else {"one", "text"})
+    queries = [call.args[1] for call in other.search.call_args_list]
+    assert queries[0].mode == "weighted_text"
+    if secondary_dimensions == 2:
+        assert queries[1].where.terms[1].terms[0].value == 3
+    else:
+        assert len(queries) == 1
 
 
 async def test_stale_candidates_never_reach_rerank(search):

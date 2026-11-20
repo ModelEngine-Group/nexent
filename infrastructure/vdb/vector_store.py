@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from contextlib import contextmanager
+from dataclasses import replace
 
 from elastic_transport import TransportError
 from elasticsearch import ApiError
@@ -87,6 +88,8 @@ class ElasticsearchVectorStore:
         self._factory = client_factory
         if any(binding.dimensions is None for binding in bindings):
             self.capabilities = CapabilitySet(frozenset({"vector.count", "vector.delete", "vector.collection.exists", "vector.scan.payload", "vector.get.payload", "vector.delete.key"}))
+        if all(binding.dimensions is not None or not binding.writable and binding.allow_unembedded for binding in bindings):
+            self.capabilities = CapabilitySet(self.capabilities.supported | {"vector.search.dense"})
         if any(binding.allow_unembedded for binding in bindings):
             self.capabilities = CapabilitySet(self.capabilities.supported | {
                 "vector.put", "vector.collection.ensure", "vector.collection.describe",
@@ -516,7 +519,7 @@ class ElasticsearchVectorStore:
     def search(self, collection, query, *, context):
         if not isinstance(query, SearchQuery):
             raise InvalidInput()
-        binding = self._binding(collection, maintenance=query.mode in {"text", "weighted_text"})
+        binding = self._binding(collection, maintenance=True)
         if (
             type(query.limit) is not int
             or not 1 <= query.limit <= 1000
@@ -526,6 +529,13 @@ class ElasticsearchVectorStore:
         filters = self._filter(binding, query.where)
         options = {"index": binding.index, "size": query.limit}
         if query.mode == "dense" and query.text is None:
+            if binding.dimensions is None:
+                if binding.writable or not binding.allow_unembedded:
+                    raise CapabilityUnsupported()
+                info = self._describe_collection(binding, context=context)
+                if info.dimensions is None:
+                    raise CapabilityUnsupported()
+                binding = replace(binding, dimensions=info.dimensions)
             options["knn"] = {
                 "field": "embedding",
                 "query_vector": vector(binding, query.vector),

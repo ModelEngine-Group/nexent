@@ -159,7 +159,9 @@ class KnowledgeSearchService:
                 or len({g.collection for g in grant.knowledge_bases}) != len(grant.knowledge_bases)
                 or any(g.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID} for g in grant.knowledge_bases)):
             raise ScopeDenied()
-        if any(g.embedding_model_id != request.embedding_model.model_id for g in grant.knowledge_bases):
+        primary = request.embedding_model.model_id
+        if (grant.knowledge_bases[0].embedding_model_id != primary or
+            not request.first_collection_embedding and any(g.embedding_model_id != primary for g in grant.knowledge_bases)):
             raise Conflict()
         if request.expected_revisions and any(
             request.expected_revisions[g.knowledge_id] != g.revision for g in grant.knowledge_bases
@@ -195,12 +197,13 @@ class KnowledgeSearchService:
 
     def _visible(self, records, grant, request, hits, views, require_embedding, *, context, first_only=False):
         self._stable_views(views, context=context)
-        allowed = {g.collection: g.knowledge_id for g in grant.knowledge_bases}
+        allowed = {g.collection: g for g in grant.knowledge_bases}
         result = []
         for hit in hits:
             data = hit.payload
             knowledge_id, file_id, file_version = data.get("knowledge_id"), data.get("file_id"), data.get("file_version")
-            if allowed.get(hit.key.collection) != knowledge_id or knowledge_id not in records:
+            resource = allowed.get(hit.key.collection)
+            if resource is None or resource.knowledge_id != knowledge_id or knowledge_id not in records:
                 raise ScopeDenied()
             if (file_id is None) != (file_version is None):
                 raise ScopeDenied()
@@ -210,13 +213,18 @@ class KnowledgeSearchService:
                 raise ScopeDenied()
             if request.file_versions and request.file_versions[file_id] != file_version:
                 raise ScopeDenied()
-            matches_model = (hit.payload.get("embedding_model_id") == request.embedding_model.model_id
-                and normalize_model_revision(hit.payload.get("embedding_revision"))
-                == normalize_model_revision(request.embedding_model.revision))
-            if require_embedding and not matches_model and (
-                hit.payload.get("embedding_model_id") is not None or hit.payload.get("embedding_revision") is not None
-                or not views[knowledge_id].has_manual_create(hit, context=context)):
-                continue
+            if require_embedding:
+                model_id, revision = data.get("embedding_model_id"), data.get("embedding_revision")
+                if model_id is None and revision is None:
+                    if not views[knowledge_id].has_manual_create(hit, context=context):
+                        continue
+                elif model_id != resource.embedding_model_id:
+                    continue
+                elif model_id == request.embedding_model.model_id:
+                    if normalize_model_revision(revision) != normalize_model_revision(request.embedding_model.revision):
+                        continue
+                elif not isinstance(revision, str) or not revision.strip():
+                    continue
             if (hit.generation
                 and (reference is None or policy.is_visible(reference, hit.generation.value, context=context))
                 and views[knowledge_id].allows_candidate(hit, context=context)):
@@ -263,7 +271,9 @@ class KnowledgeSearchService:
                 info = port.describe_collection(resource.collection, context=context)
             except NotFound:
                 continue
-            if query_vector is not None and info.dimensions is not None and info.dimensions != len(query_vector):
+            different_dimensions = (query_vector is not None and info.dimensions is not None
+                                    and info.dimensions != len(query_vector))
+            if different_dimensions and not request.first_collection_embedding:
                 raise Conflict()
             terms = [Comparison("knowledge_id", "eq", resource.knowledge_id)]
             if request.file_ids:
@@ -275,8 +285,8 @@ class KnowledgeSearchService:
             where = Junction("and", tuple(terms))
             if request.search_mode in {"accurate", "hybrid"}:
                 lexical.extend(port.search(resource.collection, SearchQuery(text=request.query, mode="weighted_text", where=where, limit=limit), context=context))
-            if request.search_mode in {"semantic", "hybrid"} and info.dimensions is not None:
-                model_scope = Junction("or", (Comparison("embedding_model_id", "eq", request.embedding_model.model_id),
+            if query_vector is not None and info.dimensions is not None and not different_dimensions:
+                model_scope = Junction("or", (Comparison("embedding_model_id", "eq", resource.embedding_model_id),
                     Junction("and", (Comparison("embedding_model_id", "is_null", True), Comparison("embedding_revision", "is_null", True)))))
                 semantic_where = Junction("and", (terms[0], model_scope, *terms[1:]))
                 if request.split_multimodal_candidates:
@@ -330,7 +340,9 @@ class KnowledgeSearchService:
                         input=[request.query]), actor)
                     query_vector = embedding_vectors(output, 1, dimensions)[0]
                 limit = request.top_k * (RERANK_OVERSEARCH_MULTIPLIER if request.rerank_model else 1)
-                with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
+                # Public hybrid search can read collections with different mappings using the first query vector.
+                collection_dimensions = None if request.first_collection_embedding else dimensions
+                with self.ports(actor, grant, collection_dimensions, context=context) as (records, vectors):
                     validate_read_ports(records, vectors, grant, actor)
                     views = await self._blocking(self._views, records, grant, context=context)
                     observed = None

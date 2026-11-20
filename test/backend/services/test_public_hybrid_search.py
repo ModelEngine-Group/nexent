@@ -84,12 +84,16 @@ async def test_runtime_hybrid_preserves_envelope_and_query_authority(runtime_sea
     s.vectors.hybrid_search.assert_not_called()
 
 
-async def test_runtime_hybrid_blocks_mixed_models_before_retrieval(runtime_search):
+async def test_runtime_hybrid_uses_first_model_for_mixed_collections(runtime_search):
     s = runtime_search
     s.resources["shared"]["embedding_model_id"] = 8
-    with pytest.raises(Conflict):
-        await runtime_query(s)
-    s.client.search_knowledge.assert_not_awaited()
+    result = await runtime_query(s)
+    request, user, tenant = s.client.search_knowledge.await_args.args
+    assert request.first_collection_embedding and request.embedding_model.model_id == 7
+    assert request.knowledge_ids == [1, 2] and set(request.expected_revisions) == {1, 2}
+    assert (user, tenant) == (s.actor.user_id, s.actor.tenant_id)
+    assert result["total"] == 2
+    s.client.get_model.assert_awaited_once_with(7, user_id=user, tenant_id=tenant)
     s.vectors.hybrid_search.assert_not_called()
 
 
