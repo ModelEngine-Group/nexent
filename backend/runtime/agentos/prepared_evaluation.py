@@ -356,20 +356,26 @@ def _build_run_monitoring_catalog(actor: ServicePrincipal, mcp: PreparedMCP, deb
     Omitted when monitoring is off, for debug runs, or when no MCP tools were
     materialized; capture failures must never interrupt the business run.
     """
-    from management.db.mcp.remote import get_mcp_records_by_tenant
-    from management.services.agent.monitoring_catalog import build_run_monitoring_catalog_from_db
-
     if not mcp.used_urls:
         return None
-    local_server_url = get_tenant_local_mcp_server(actor.tenant_id) if LOCAL_MCP_SERVER else None
-    return build_run_monitoring_catalog_from_db(
-        actor.tenant_id,
-        mcp.used_urls,
-        get_mcp_records_by_tenant(tenant_id=actor.tenant_id),
-        local_server_url,
-        enabled=OPS_MONITORING_ENABLED,
-        is_debug=debug,
-    )
+    try:
+        # Management modules are absent from the Runtime image target; degrade
+        # to an omitted catalog instead of failing run preparation.
+        from management.db.mcp.remote import get_mcp_records_by_tenant
+        from management.services.agent.monitoring_catalog import build_run_monitoring_catalog_from_db
+
+        local_server_url = get_tenant_local_mcp_server(actor.tenant_id) if LOCAL_MCP_SERVER else None
+        return build_run_monitoring_catalog_from_db(
+            actor.tenant_id,
+            mcp.used_urls,
+            get_mcp_records_by_tenant(tenant_id=actor.tenant_id),
+            local_server_url,
+            enabled=OPS_MONITORING_ENABLED,
+            is_debug=debug,
+        )
+    except Exception as error:
+        logger.warning("event=monitoring_catalog_build_failed error=%s", type(error).__name__)
+        return None
 
 
 def prepare_run_snapshot(
