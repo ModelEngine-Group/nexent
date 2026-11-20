@@ -87,20 +87,21 @@ def bind_legacy_file_id_occupancy(actor_id, file_id, engine):
     )
 
 
-def reserve_legacy_file_identity(actor, plan, engine, *, context):
-    """Serialize reservations for the original row without changing its identity."""
+def _mapping_evidence(actor, plan):
     snapshot = plan.legacy_snapshot
     if snapshot is None or snapshot.previous_file_id is None:
         raise InvalidInput()
     if snapshot.tenant_id != actor.tenant_id or plan.user_id != actor.user_id:
         raise ScopeDenied()
-    original_id = snapshot.previous_file_id
-    values = {
-        "original_file_id": original_id, "standard_file_id": plan.file_id,
+    return {
+        "original_file_id": snapshot.previous_file_id, "standard_file_id": plan.file_id,
         "tenant_id": actor.tenant_id, "knowledge_id": plan.knowledge_id,
         "lifecycle_revision": snapshot.lifecycle_revision, "source_generation": plan.file_version,
         "plan_sha256": legacy_ingestion_plan_hash(plan),
     }
+
+
+def _legacy_identity_store(actor, engine, *, writable):
     lifecycle, table, lifecycle_audit = ingestion_catalog()
     identity = DatasetDefinition(
         LEGACY_FILE_IDENTITIES, "original_file_id",
@@ -108,9 +109,9 @@ def reserve_legacy_file_identity(actor, plan, engine, *, context):
               for column in legacy_file_identities.columns if column.name != "activated_at"),
         frozenset({"management"}), frozenset({"management"}), tenant_field="tenant_id",
     )
-    store = SQLRecordStore(
+    return SQLRecordStore(
         StorageScope("management", actor.tenant_id, actor.user_id, {INGESTION_DATASET, LEGACY_FILE_IDENTITIES}),
-        DatasetCatalog((replace(lifecycle, write_roles=frozenset()), identity)),
+        DatasetCatalog((replace(lifecycle, write_roles=lifecycle.write_roles if writable else frozenset()), identity)),
         {INGESTION_DATASET: table, LEGACY_FILE_IDENTITIES: legacy_file_identities}, engine,
         revision_fields={INGESTION_DATASET: "version", LEGACY_FILE_IDENTITIES: "version"},
         audit_mappings={
@@ -118,6 +119,15 @@ def reserve_legacy_file_identity(actor, plan, engine, *, context):
             LEGACY_FILE_IDENTITIES: RecordAudit("create_time", "update_time", "created_by", "updated_by"),
         },
     )
+
+
+def reserve_legacy_file_identity(actor, plan, engine, *, context):
+    """Serialize reservations for the original row without changing its identity."""
+    values = _mapping_evidence(actor, plan)
+    original_id = values["original_file_id"]
+    snapshot = plan.legacy_snapshot
+    table = files
+    store = _legacy_identity_store(actor, engine, writable=False)
     try:
         with store.transaction(context=context) as transaction:
             source = sa.select(table.c.file_id).where(
@@ -150,6 +160,61 @@ def reserve_legacy_file_identity(actor, plan, engine, *, context):
             if not receipt.matched or receipt.outcome is not WriteOutcome.CONFIRMED:
                 raise Conflict()
             return transaction.get(LEGACY_FILE_IDENTITIES, original_id, context=context)
+    finally:
+        store.close()
+
+
+def activate_legacy_file_identity(actor, plan, apply, engine, *, context):
+    """Change the primary key, admit ingestion, and publish the alias in one commit."""
+    evidence = _mapping_evidence(actor, plan)
+    original_id = evidence["original_file_id"]
+    target_id = evidence["standard_file_id"]
+    identities = legacy_file_identities
+    store = _legacy_identity_store(actor, engine, writable=True)
+    try:
+        with store.transaction(context=context) as tx:
+            # Match reservation's lifecycle-first lock order.
+            original = tx._where(INGESTION_DATASET, original_id)
+            source = tx._execute(tx._connection, sa.select(files.c.file_id).where(original).with_for_update(), context)
+            has_source = source.scalar_one_or_none() is not None
+            mapping = tx._where(LEGACY_FILE_IDENTITIES, original_id)
+            registration = tx._execute(
+                tx._connection, sa.select(identities).where(mapping).with_for_update(), context,
+            ).mappings().one_or_none()
+            if registration is None or any(registration[name] != value for name, value in evidence.items()):
+                raise Conflict()
+            if registration["activated_at"] is not None:
+                if has_source:
+                    raise Conflict()
+                row = tx.get(INGESTION_DATASET, target_id, context=context)
+                if row is None:
+                    raise Conflict()
+                return apply(tx, row)
+            if not has_source:
+                raise Conflict()
+            occupied = sa.select(files.c.file_id).where(files.c.file_id == target_id)
+            if tx._execute(tx._connection, occupied, context).scalar_one_or_none() is not None:
+                raise Conflict()
+            # The journal checks the original audit timestamp before updating it.
+            move = files.update().where(
+                original, files.c.knowledge_id == plan.knowledge_id,
+                files.c.version == evidence["lifecycle_revision"],
+                files.c.source_generation == evidence["source_generation"],
+                files.c.status.in_(("UPLOADED", "COMPLETED", "FAILED")),
+                files.c.ingestion_request.is_(None), files.c.deletion_request.is_(None),
+            ).values(file_id=target_id, update_time=files.c.update_time).returning(files.c.file_id)
+            if tx._execute(tx._connection, move, context).scalar_one_or_none() != target_id:
+                raise Conflict()
+            admitted = apply(tx, tx.get(INGESTION_DATASET, target_id, context=context))
+            if admitted["stage"] != "INGEST_ACCEPTED":
+                raise Conflict()
+            activate = identities.update().where(mapping).values(
+                activated_at=sa.func.now(), update_time=sa.func.now(),
+                updated_by=actor.user_id, version=identities.c.version + 1,
+            )
+            if tx._execute(tx._connection, activate, context).rowcount != 1:
+                raise Conflict()
+            return admitted
     finally:
         store.close()
 

@@ -34,6 +34,7 @@ def records(monkeypatch):
                 kind,
                 primary_key=source.primary_key,
                 nullable=source.nullable,
+                onupdate=source.onupdate.arg if source.onupdate is not None else None,
             )
         )
     table = sa.Table("ingestion_files", sa.MetaData(), *columns)

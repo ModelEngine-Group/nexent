@@ -170,7 +170,8 @@ class IngestionJournal:
             if self.request(row) != intent: raise Conflict()
             return row
         if (LegacyIngestionSnapshot.capture(row, resource_revision=snapshot.resource_revision, legacy_quiesced=True,
-                task_archive_sha256=snapshot.task_archive_sha256, source_binding=snapshot.source_binding) != snapshot
+                task_archive_sha256=snapshot.task_archive_sha256, source_binding=snapshot.source_binding,
+                previous_file_id=snapshot.previous_file_id) != snapshot
             or intent.attempt != row['processing_attempt'] + 1
             or bool(snapshot.task_references) != bool(snapshot.task_archive_sha256)):
             raise Conflict()

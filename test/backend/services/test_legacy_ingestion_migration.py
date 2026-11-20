@@ -21,6 +21,7 @@ from nexent.storage.models import FieldPatch, OperationContext
 from pydantic import ValidationError
 
 from infrastructure.rdb.knowledge_ingestion import (
+    activate_legacy_file_identity,
     bind_legacy_file_id_occupancy,
     reserve_legacy_file_identity,
 )
@@ -222,6 +223,9 @@ def reservation(historical, monkeypatch):
     h.m.service.reserve_identity = lambda actor, plan, *, context: reserve_legacy_file_identity(
         actor, plan, h.engine, context=context,
     )
+    h.m.service.activate_identity = lambda actor, plan, apply, *, context: activate_legacy_file_identity(
+        actor, plan, apply, h.engine, context=context,
+    )
     return h, table
 
 
@@ -279,3 +283,52 @@ async def test_reservation_rechecks_source_version_inside_storage_transaction(re
         await h.m.service.reserve_file_id(plan, s.actor, context=context())
     with h.engine.connect() as connection:
         assert connection.execute(identities.select()).mappings().all() == []
+
+
+
+async def test_activation_moves_the_row_and_admits_ingestion_once(reservation):
+    h, identities = reservation
+    s = h.m.s
+    plan = await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+        context=context())
+    with pytest.raises(Conflict):
+        await h.m.service.activate_file_id(plan, s.actor, context=context())
+    await h.m.service.reserve_file_id(plan, s.actor, context=context())
+
+    activated = await h.m.service.activate_file_id(plan, s.actor, context=context())
+    assert activated['file_id'] == h.target_id and activated['stage'] == 'INGEST_ACCEPTED'
+    assert activated['version'] == h.row['version'] + 1
+    assert activated['ingestion_request'] == plan.model_dump(mode='json')
+    assert await h.m.service.activate_file_id(plan, s.actor, context=context()) == activated
+    assert await h.m.service.inspect(plan, s.actor, context=context()) == activated
+
+    with h.engine.connect() as conn:
+        mapping = conn.execute(identities.select()).mappings().one()
+        assert mapping['activated_at'] is not None and mapping['version'] == 2
+        assert conn.execute(h.table.select()).mappings().one()['file_id'] == h.target_id
+    s.cleanse.submit.assert_not_called()
+
+
+async def test_activation_rolls_back_rekey_when_admission_cannot_commit(reservation):
+    h, identities = reservation
+    s = h.m.s
+    plan = await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, map_legacy_file_id=True,
+        context=context())
+    await h.m.service.reserve_file_id(plan, s.actor, context=context())
+    original = h.m.service.activate_identity
+
+    def fail_admission(actor, plan, apply, *, context):
+        def fail_after_journaling(records, row):
+            applied = apply(records, row)
+            assert applied['file_id'] == h.target_id and applied['stage'] == 'INGEST_ACCEPTED'
+            raise Conflict()
+        return original(actor, plan, fail_after_journaling, context=context)
+
+    h.m.service.activate_identity = fail_admission
+    with pytest.raises(Conflict):
+        await h.m.service.activate_file_id(plan, s.actor, context=context())
+    with h.engine.connect() as conn:
+        mapping = conn.execute(identities.select()).mappings().one()
+        assert mapping['activated_at'] is None and mapping['version'] == 1
+        row = conn.execute(h.table.select()).mappings().one()
+        assert row['file_id'] == h.old_id and row['ingestion_request'] is None

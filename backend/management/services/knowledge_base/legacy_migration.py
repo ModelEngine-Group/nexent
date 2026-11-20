@@ -35,11 +35,18 @@ from management.services.knowledge_base.source_inspection import (
     KnowledgeSourceInspector,
 )
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
+from nexent.storage.errors import (
+    Conflict,
+    DeadlineExceeded,
+    InvalidInput,
+    NotFound,
+    ScopeDenied,
+)
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.knowledge_ingestion import (
+    activate_legacy_identity,
     knowledge_ingestion_ports,
     legacy_file_id_occupied,
     reserve_legacy_identity,
@@ -60,7 +67,7 @@ async def _deadline(context):
 class LegacyMigrationService:
     def __init__(self, *, ports=knowledge_ingestion_ports, client=None, sources=None, parser_version=None,
                  cancellation_scope=None, tasks=legacy_task_records, file_id_occupied=legacy_file_id_occupied,
-                 reserve_identity=reserve_legacy_identity):
+                 reserve_identity=reserve_legacy_identity, activate_identity=activate_legacy_identity):
         self.ports = ports
         self.client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
         self.sources = sources or KnowledgeSourceInspector(cancellation_scope=cancellation_scope)
@@ -68,6 +75,7 @@ class LegacyMigrationService:
         self.tasks, self.cancellation_scope = tasks, cancellation_scope
         self.file_id_occupied = file_id_occupied
         self.reserve_identity = reserve_identity
+        self.activate_identity = activate_identity
 
     @staticmethod
     async def _blocking(method, *args):
@@ -206,22 +214,56 @@ class LegacyMigrationService:
             raise Conflict()
         if check_parser and plan.parser_version != self.parser_version: raise Conflict()
 
+    async def _revalidate_mapping(self, plan, actor, context, task_archive):
+        snapshot = plan.legacy_snapshot
+        current = await self.plan(plan.knowledge_id, snapshot.previous_file_id, actor, legacy_quiesced=True,
+            context=context, task_archive=task_archive, bind_observed_source=snapshot.source_binding is not None,
+            map_legacy_file_id=True)
+        if current != plan:
+            raise Conflict()
+
     async def reserve_file_id(self, plan, actor, *, context, task_archive=None):
         self._plan(plan, actor, mapping=True)
-        snapshot = plan.legacy_snapshot
         async with _deadline(context):
-            current = await self.plan(plan.knowledge_id, snapshot.previous_file_id, actor, legacy_quiesced=True,
-                context=context, task_archive=task_archive, bind_observed_source=snapshot.source_binding is not None,
-                map_legacy_file_id=True)
-            if current != plan:
-                raise Conflict()
+            await self._revalidate_mapping(plan, actor, context, task_archive)
             return await self._blocking(self._reserve, plan, actor, context)
 
     def _reserve(self, plan, actor, context):
         return self.reserve_identity(actor, plan, context=context)
 
+    def _activate(self, plan, actor, context):
+        with self.ports(actor.tenant_id, actor.user_id, context=context) as (_, resources):
+            resource = KnowledgeSearchAuthorizationPolicy(resources, user_id=actor.user_id).authorize(
+                KnowledgeSearchAuthorization(knowledge_ids=[plan.knowledge_id]),
+                edit=True, context=context,
+            ).knowledge_bases[0]
+            if (resource.revision != plan.legacy_snapshot.resource_revision
+                or resource.embedding_model_id != plan.embedding_model.model_id):
+                raise Conflict()
+
+            def apply(records, row):
+                return IngestionJournal(records).admit_legacy(plan, row, context=context)
+
+            return self.activate_identity(actor, plan, apply, context=context)
+
+    async def activate_file_id(self, plan, actor, *, context, task_archive=None):
+        self._plan(plan, actor, mapping=True)
+        original_id = plan.legacy_snapshot.previous_file_id
+        async with _deadline(context):
+            try:
+                await self._blocking(self._selected, plan.knowledge_id, original_id, actor, context)
+            except NotFound:
+                # The transaction confirms the existing mapping before replaying its receipt.
+                pass
+            else:
+                await self._revalidate_mapping(plan, actor, context, task_archive)
+            return await self._blocking(self._activate, plan, actor, context)
+
     async def inspect(self, plan, actor, *, context):
-        self._plan(plan, actor, check_parser=False)
+        mapping = isinstance(plan, KnowledgeIngestionIntent) and plan.legacy_snapshot is not None and (
+            plan.legacy_snapshot.previous_file_id is not None
+        )
+        self._plan(plan, actor, check_parser=False, mapping=mapping)
         def observe():
             context.remaining()
             with self.ports(actor.tenant_id, actor.user_id, context=context) as (records, resources):

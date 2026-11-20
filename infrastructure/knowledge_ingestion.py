@@ -10,6 +10,7 @@ from nexent.storage.models import StorageScope
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
 from infrastructure.rdb.composition import close_owned, record_engine
 from infrastructure.rdb.knowledge_ingestion import (
+    activate_legacy_file_identity,
     bind_ingestion_records,
     bind_legacy_file_id_occupancy,
     reserve_legacy_file_identity,
@@ -27,6 +28,14 @@ def ingestion_dispatch_ports(*, context):
         close_owned(
             context, ([records.close] if records is not None else []) + [engine.dispose]
         )
+
+
+def activate_legacy_identity(actor, plan, apply, *, context):
+    engine = record_engine(context)
+    try:
+        return activate_legacy_file_identity(actor, plan, apply, engine, context=context)
+    finally:
+        close_owned(context, [engine.dispose])
 
 
 def reserve_legacy_identity(actor, plan, *, context):

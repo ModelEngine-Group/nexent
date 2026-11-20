@@ -72,12 +72,15 @@ async def run(args, *, service=None):
                     state, row = 'planned', None
                 else:
                     plan = load_plan(args.plan)
-                    identity = plan.legacy_snapshot.previous_file_id if args.action == 'reserve-file-id' else plan.file_id
+                    identity = plan.legacy_snapshot.previous_file_id if args.action in {'reserve-file-id', 'activate-file-id'} else plan.file_id
                     if (plan.user_id != actor.user_id or plan.legacy_snapshot.tenant_id != actor.tenant_id
                         or plan.knowledge_id != args.knowledge_id or identity != args.file_id): raise ScopeDenied()
                     if args.action == 'reserve-file-id':
                         row = await service.reserve_file_id(plan, actor, context=context, **archive)
                         state = 'identity_reserved'
+                    elif args.action == 'activate-file-id':
+                        row = await service.activate_file_id(plan, actor, context=context, **archive)
+                        state = 'identity_activated'
                     else:
                         row = await getattr(service, args.action)(plan, actor, context=context, **archive)
                         state = 'restored' if args.action == 'restore' else 'observed'
@@ -91,8 +94,8 @@ async def run(args, *, service=None):
                 'lifecycle_revision':row.get('version', row.get('lifecycle_revision')) if row else None,'intent_matches_plan':matches,
                 'migration_complete':args.action in {'inspect','admit','execute'} and matches is True and row['stage']=='COMPLETE' and row['status']=='COMPLETED',
                 'retirement_complete':False}
-            if state == 'identity_reserved':
-                result['original_file_id'] = row['original_file_id']
+            if state in {'identity_reserved', 'identity_activated'}:
+                result['original_file_id'] = plan.legacy_snapshot.previous_file_id
             _emit(stream,result);return result
     except TimeoutError as error:
         raise DeadlineExceeded(operation_id=context.operation_id) from error
@@ -103,7 +106,7 @@ async def run(args, *, service=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan','reserve-file-id','inspect','admit','execute','restore'])
+    parser.add_argument('action', choices=['plan','reserve-file-id','activate-file-id','inspect','admit','execute','restore'])
     parser.add_argument('--tenant-id',required=True);parser.add_argument('--user-id',required=True)
     parser.add_argument('--knowledge-id',required=True,type=int);parser.add_argument('--file-id',required=True)
     parser.add_argument('--output',required=True,type=Path);parser.add_argument('--plan',type=Path)
@@ -114,7 +117,7 @@ def main(argv=None):
     parser.add_argument('--legacy-quiesced',action='store_true',help='Operator confirms old admission and workers are stopped and drained')
     parser.add_argument('--timeout',type=int,default=300)
     args = parser.parse_args(argv)
-    historical_id = args.map_legacy_file_id or args.action == 'reserve-file-id'
+    historical_id = args.map_legacy_file_id or args.action in {'reserve-file-id', 'activate-file-id'}
     if (args.action != 'inspect' and not args.legacy_quiesced or not 1 <= args.timeout <= 3600 or args.knowledge_id <= 0
         or any(not value.strip() or len(value)>100 for value in (args.user_id,args.tenant_id))
         or not is_historical_file_id(args.file_id) or historical_id == is_canonical_file_id(args.file_id)
@@ -122,7 +125,7 @@ def main(argv=None):
         or args.action!='plan' and args.plan is None or args.action=='plan' and args.plan is not None
         or args.task_archive is not None and args.action in {'inspect','restore'}
         or args.bind_observed_source and args.action != 'plan'):
-        parser.error('Select a file, actor, tenant and deadline. Use plan --map-legacy-file-id or reserve-file-id with a historical ID.')
+        parser.error('Select a file, actor, tenant and deadline. Use an original ID with plan --map-legacy-file-id, reserve-file-id or activate-file-id.')
     try:
         print(json.dumps(asyncio.run(run(args))));return 0
     except (TimeoutError,DeadlineExceeded) as error:
