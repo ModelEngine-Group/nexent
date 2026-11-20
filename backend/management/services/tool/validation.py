@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
+from contracts.agentos import EvaluationAnalysisTool
 from contracts.constants.environment import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
@@ -48,7 +49,8 @@ from nexent.core.ext_components.aidp.retrieval_config import validate_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
 
-from infrastructure.object_storage.client import minio_client
+from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.object_storage.analysis_files import AnalysisFileStorage
 
 
 async def _call_mcp_tool(
@@ -344,32 +346,13 @@ def _validate_local_tool(
                 filtered_params["api_key"] = AIDP_API_KEY
                 filtered_params["tenant_id"] = AIDP_TENANT_ID
             tool_instance = tool_class(**filtered_params)
-        elif tool_name == "analyze_image":
+        elif tool_name in {"analyze_image", "analyze_audio", "analyze_video"}:
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation"
                 )
             selected_model_id = instantiation_params.get("selected_model_id")
-            image_to_text_model = get_vlm_adapter(
-                tenant_id, selected_model_id, slot="vlm"
-            )
-            vlm_display_name = getattr(image_to_text_model, "display_name", None)
-            set_monitoring_context(tenant_id=tenant_id)
-            set_monitoring_operation("tool_validation", display_name=vlm_display_name)
-            params = {
-                **instantiation_params,
-                "vlm_model": image_to_text_model,
-                "storage_client": minio_client,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
-            }
-            tool_instance = tool_class(**params)
-        elif tool_name in ["analyze_audio", "analyze_video"]:
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(
-                    f"Tenant ID and User ID are required for {tool_name} validation"
-                )
-            selected_model_id = instantiation_params.get("selected_model_id")
-            slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+            slot = EvaluationAnalysisTool(tool_name).slot
             understanding_model = get_vlm_adapter(
                 tenant_id, selected_model_id, slot=slot
             )
@@ -379,7 +362,7 @@ def _validate_local_tool(
             params = {
                 **instantiation_params,
                 "vlm_model": understanding_model,
-                "storage_client": minio_client,
+                "storage_client": AnalysisFileStorage(ServicePrincipal(user_id, tenant_id), role="management"),
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
             tool_instance = tool_class(**params)

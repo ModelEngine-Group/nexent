@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from contracts.agentos import ToolBinding
 from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.object_storage.analysis_files import AnalysisFileStorage
 from management.services.agent.preparation import evaluation_snapshot
 from nexent.core.agents.contracts.config import ToolConfig
 from test.common.local_agent_tools import create_local_tool
@@ -24,7 +25,6 @@ from test.backend.app.test_agentos_prepared_evaluation import model_record
 @pytest.mark.asyncio
 async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(mocker, name, class_name, modality, slot, aliased):
     from contracts.constants import environment
-    from infrastructure.object_storage import client as storage
     from management.services.agent.preparation import tools
     from management.services.model import adapter
     from runtime.agentos import prepared_analysis
@@ -59,8 +59,9 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
     assert rebound.name == name
     runtime_model.assert_called_once_with(9, "tenant-a")
     assert create_adapter.call_args.args == (model, modality, slot, "tenant-a")
-    assert rebound.metadata["storage_client"] is storage.minio_client
+    assert isinstance(rebound.metadata["storage_client"], AnalysisFileStorage)
     tool_instance = create_local_tool(rebound)
+    assert tool_instance.mm._storage_client is rebound.metadata["storage_client"]
     assert tool_instance.name == canonical_name
     assert tool_instance.selected_model_id == 9
     assert (tool_instance.llm_model if slot == "llm" else tool_instance.vlm_model) is create_adapter.return_value

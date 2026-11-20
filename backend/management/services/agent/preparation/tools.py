@@ -34,6 +34,7 @@ from nexent.core.agents.prompt import get_builtin_tool_descriptions
 from nexent.core.concurrency import run_blocking
 
 from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
+from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import (
     LOCAL_PARAMETER_OVERRIDES_METADATA,
@@ -43,6 +44,7 @@ from infrastructure.local_tool_execution import (
     LOCAL_SEARCH_TUNING_METADATA,
 )
 from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
+from infrastructure.object_storage.analysis_files import AnalysisFileStorage
 from infrastructure.object_storage.client import minio_client
 from infrastructure.shared_aidp_tool import (
     SCOPED_SHARED_AIDP_CATALOG_ID,
@@ -508,7 +510,8 @@ async def create_tool_config_list(
             if kb_overrides and "document_paths" in kb_overrides:
                 document_paths = kb_overrides.get("document_paths")
 
-        if (portable_evaluation or tool_config.class_name == "AnalyzeTextFileTool") and EvaluationAnalysisTool.for_class_name(tool_config.class_name) is not None:
+        analysis_kind = EvaluationAnalysisTool.for_class_name(tool_config.class_name)
+        if analysis_kind is not None and (portable_evaluation or analysis_kind is EvaluationAnalysisTool.TEXT):
             from management.services.agent.preparation.analysis import (
                 prepare_analysis_tool,
             )
@@ -615,25 +618,11 @@ async def create_tool_config_list(
             tool_config.metadata = {
                 "rerank_model": rerank_model,
             }
-        elif tool_config.class_name == "AnalyzeImageTool":
+        elif analysis_kind is not None:
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm"),
-                "storage_client": minio_client,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
-            }
-        elif tool_config.class_name == "AnalyzeAudioTool":
-            selected_model_id = param_dict.get("selected_model_id")
-            tool_config.metadata = {
-                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm4"),
-                "storage_client": minio_client,
-                "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
-            }
-        elif tool_config.class_name == "AnalyzeVideoTool":
-            selected_model_id = param_dict.get("selected_model_id")
-            tool_config.metadata = {
-                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3"),
-                "storage_client": minio_client,
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot=analysis_kind.slot),
+                "storage_client": AnalysisFileStorage(ServicePrincipal(user_id, tenant_id), role="management"),
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
         elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"] and not portable_evaluation:

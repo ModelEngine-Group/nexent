@@ -17,6 +17,7 @@ from infrastructure.agent_model_config import (
 )
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.model_adapter import get_adapter_from_config
+from infrastructure.object_storage.analysis_files import AnalysisFileStorage
 from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.model_records import get_model_by_model_id
 
@@ -82,10 +83,11 @@ def materialize_analysis_tools(
     if not bindings:
         return {}
 
-    from infrastructure.object_storage.client import minio_client
-
     tools = {}
     validate = partial(_validate_analysis_urls, actor=actor)
+    storage = AnalysisFileStorage(
+        actor, role="runtime", cancelled=cancellation_scope.stop_event if cancellation_scope is not None else None,
+    )
     for binding in bindings:
         if (
             binding.version != "1"
@@ -96,7 +98,7 @@ def materialize_analysis_tools(
         kind, catalog_name = EvaluationAnalysisTool.binding_identity(binding.tool_id)
         settings = AnalysisToolBinding.model_validate(binding.parameters)
         model = _analysis_adapter(kind, settings, actor, cancellation_scope)
-        metadata = {"storage_client": minio_client, "validate_url_access": validate}
+        metadata = {"storage_client": storage, "validate_url_access": validate}
         if kind is EvaluationAnalysisTool.TEXT:
             import httpx
 
