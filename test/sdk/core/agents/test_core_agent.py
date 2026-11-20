@@ -3446,9 +3446,10 @@ class TestRunStreamRealExecution:
         ("A truncated answer", "length"),
         ("<code>final_answer(", "stop"),
         ("<think>Only reasoning.</think>", "stop"),
+        ("Executed action:\n[{'id': 'call_1', 'function': {'name': 'python_interpreter'}}]", "stop"),
     ])
     def test_oc_029_strict_third_invalid_output_still_fails(self, content, finish_reason):
-        """OC-029: empty, invisible and truncated responses cannot use raw fallback."""
+        """OC-029: invalid responses and runtime records cannot use raw fallback."""
         module = core_agent_module
         agent, action_step, response = self._create_cmsr_007_step_agent(
             content, finish_reason=finish_reason,
