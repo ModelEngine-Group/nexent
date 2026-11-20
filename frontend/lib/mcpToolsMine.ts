@@ -1,4 +1,19 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
+
+export function isMineMcpCurrentlyListed(
+  item:
+    | { kind: "local"; service: McpServiceItem }
+    | { kind: "community"; service: CommunityMcpCard },
+  onlineService?: CommunityMcpCard
+): boolean {
+  const approved =
+    (onlineService?.reviewStatus || item.service.reviewStatus) === "approved";
+  return item.kind === "local"
+    ? (item.service.isListedInRepository ?? approved)
+    : approved;
+}
 
 // ---------------------------------------------------------------------------
 // Review status helpers

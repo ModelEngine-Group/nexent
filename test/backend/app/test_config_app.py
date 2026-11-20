@@ -136,6 +136,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.automation.agent_automation": {"router": APIRouter(), "conversation_automation_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
+            "management.api.repository.reviews": {"router": APIRouter()},
             "management.api.configuration.config_sync": {"router": APIRouter()},
             "management.api.knowledge_base.datamate": {"router": APIRouter()},
             "management.api.knowledge_base.vectordatabase": {"router": APIRouter()},

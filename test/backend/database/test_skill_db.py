@@ -155,6 +155,7 @@ class MockSkillInfo:
         self.config_schemas = kwargs.get('config_schemas', {})
         self.config_values = kwargs.get('config_values', {})
         self.source = kwargs.get('source', 'custom')
+        self.source_repository_id = kwargs.get('source_repository_id')
         self.group_ids = kwargs.get('group_ids', '')
         self.ingroup_permission = kwargs.get('ingroup_permission')
         self.created_by = kwargs.get('created_by', 'creator1')
@@ -1413,7 +1414,8 @@ class TestCreateSkill:
         result = create_skill(skill_data, 'tenant1')
 
         session.add.assert_called()
-        session.commit.assert_called()
+        mock_ctx.__exit__.assert_called_once_with(None, None, None)
+        session.commit.assert_not_called()
 
     def test_create_skill_truncates_description_to_database_limit(self, monkeypatch, mock_session):
         """Long third-party descriptions must not make skill uploads fail."""
@@ -1517,7 +1519,8 @@ class TestCreateSkill:
         assert len(relations) == 3
         assert all(relation.created_by == 'installer' for relation in relations)
         assert all(relation.updated_by == 'installer' for relation in relations)
-        session.commit.assert_called()
+        mock_ctx.__exit__.assert_called_once_with(None, None, None)
+        session.commit.assert_not_called()
 
 
 # ===== update_skill Tests =====
@@ -1883,7 +1886,8 @@ class TestDeleteSkill:
         assert result is True
         assert skill_to_delete.delete_flag == 'Y'
         assert skill_to_delete.updated_by == 'deleter1'
-        session.commit.assert_called()
+        mock_ctx.__exit__.assert_called_once_with(None, None, None)
+        session.commit.assert_not_called()
 
     def test_delete_skill_without_updated_by(self, monkeypatch, mock_session):
         """Test deleting a skill without specifying updated_by."""

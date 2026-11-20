@@ -615,3 +615,11 @@ def test_install_api_rejects_target_name_over_100_characters(
 
     assert response.status_code == 422
     install.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def isolate_latest_review_projection(monkeypatch):
+    """Keep API unit tests isolated from the new application-summary database query."""
+    module = types.ModuleType("management.services.repository.reviews")
+    module.attach_latest_reviews = MagicMock()
+    monkeypatch.setitem(sys.modules, "management.services.repository.reviews", module)

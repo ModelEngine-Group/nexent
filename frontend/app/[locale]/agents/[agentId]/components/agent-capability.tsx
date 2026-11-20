@@ -98,7 +98,7 @@ export function AgentToolCapability({
       <Button
         type="link"
         disabled={isReadOnly}
-        onClick={() => router.push(`/${locale}/mcp-space`)}
+        onClick={() => router.push(`/${locale}/resource-space?tab=mcp`)}
         className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
       >
         <span className="inline-flex items-center gap-1">

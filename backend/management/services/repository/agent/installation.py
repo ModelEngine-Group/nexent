@@ -2,9 +2,10 @@
 
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.constants import STATUS_SHARED
-from contracts.constants.constants import SYSTEM_TENANT_ID
 from contracts.agent import AgentRepositorySnapshot
+from contracts.authentication import AuthenticatedIdentity
+from contracts.constants.constants import STATUS_SHARED, SYSTEM_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
 from contracts.knowledge import KnowledgeBaseResolution
 from contracts.skill import SkillResolution
 from management.db.agent.repository import delete_agent_by_id
@@ -93,7 +94,9 @@ async def import_agent_from_repository_impl(
     user_id: Optional[str] = None,
     return_root_id: bool = False,
 ) -> Dict[int, int] | Dict[str, int]:
-    """Import an agent tree from a marketplace repository listing into the current tenant."""
+    """Import an agent tree using the identity resolved by the HTTP boundary."""
+    if not user_id:
+        raise UnauthorizedError("Authenticated user is required for repository import")
     record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
@@ -129,7 +132,7 @@ async def import_agent_from_repository_impl(
         results = await install_official_agents(
             [bundle_name],
             tenant_id=tenant_id,
-            user_id=user_id or "repository-import",
+            user_id=user_id,
             authorization=authorization,
             model_ids=model_ids,
             embedding_model_ids=embedding_model_ids,
@@ -164,18 +167,19 @@ async def import_agent_from_repository_impl(
         raise ValueError("Repository listing has no agent snapshot")
 
     snapshot = AgentRepositorySnapshot.model_validate(agent_info_json)
+    identity = AuthenticatedIdentity(user_id=user_id, tenant_id=tenant_id)
     if snapshot.skills:
         result = await import_agent_with_skills_impl(
             snapshot,
             snapshot.skills,
-            authorization,
+            identity,
             skill_resolutions=skill_resolutions,
             resolve_name_conflicts=True,
         )
     else:
         result = await import_agent_impl(
             snapshot,
-            authorization,
+            identity,
             resolve_name_conflicts=True,
         )
 

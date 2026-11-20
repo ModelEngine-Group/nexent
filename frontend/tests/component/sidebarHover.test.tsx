@@ -54,6 +54,10 @@ vi.mock("@/hooks/useNotifications", () => ({
     isPending: false,
   }),
 }));
+vi.mock("@/lib/auth", () => ({
+  getEffectiveRoutePath: (path: string) =>
+    path.replace(/^\/(zh|en)(?=\/|$)/, "") || "/",
+}));
 vi.mock("@/lib/authEvents", () => ({ authEvents: { on: () => () => {} } }));
 vi.mock("@/components/auth/avatarDropdown", () => ({
   AvatarDropdown: ({
@@ -280,6 +284,26 @@ test("unmount releases the pinned layout reservation for standalone pages", () =
   expect(onPinnedChange).toHaveBeenLastCalledWith(true);
   unmount();
   expect(onPinnedChange).toHaveBeenLastCalledWith(false);
+});
+
+test("shows only the unified repository even when legacy routes are authorized", () => {
+  state.routes = [
+    "/resource-space",
+    "/agent-space",
+    "/mcp-space",
+    "/skill-space",
+  ];
+  setup();
+  expect(
+    screen.getByRole("button", { name: "sidebar.resourceSpace" })
+  ).toBeInTheDocument();
+  for (const name of [
+    "sidebar.agentSpace",
+    "sidebar.mcpSpace",
+    "sidebar.skillSpace",
+  ]) {
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  }
 });
 
 test.each([

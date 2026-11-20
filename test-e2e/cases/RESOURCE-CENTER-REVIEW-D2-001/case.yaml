@@ -1,0 +1,123 @@
+schema_version: '1.0'
+stage: D2
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-REVIEW-D2-001
+  feature_id: RESOURCE-CENTER-REVIEW
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-REVIEW-RULE-004
+  title: 混合列表全局分页、状态all与边界
+  type: API-IT
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 混合列表全局分页、状态all与边界
+  preconditions:
+  - 配置隔离测试后端和一次性schema权限，运行固定脚本；不使用已有业务记录。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    rows: 38
+    page_size: 10
+    equal_timestamp: 至少三类各2条同时间；另3条submitted_at=null；not_shared及非授权行另置且不计入27
+  steps:
+  - order: 1
+    action: 以有审核资格用户查询统一列表；fixture同授权范围内27条他人、9条本人、2条未知提交人，另有范围外记录
+    expected: total=38,total_pages=4；包含原授权范围内本人、他人及未知提交人记录；状态all含pending/shared/rejected，不含not_shared。
+  - order: 2
+    action: 在fixture数据不变时顺序读四页，与独立排序oracle比较，再按单类型、名称空白trim和状态交集查询
+    expected: 按submitted_at DESC NULLS LAST、resource_type ASC、review_id DESC稳定排序；历史null保持null且末尾；静态38条无重复遗漏；所有过滤先于count/page。
+  - order: 3
+    action: 查询空集、page=99、page=0、page_size=0/101、未知类型/状态以及无新URL角色
+    expected: 空集total_pages=0，越界页items=[]且total正确；非法参数400，无新URL403；每一资源类型分别套用其原有审核资格和范围。
+  - order: 4
+    action: 两页之间插入新提交或处理一条待审，再查询下一页并刷新第一页
+    expected: 每次响应的items/count来自当次同一快照；允许跨请求页位移动、total变化，不宣称跨页全量一致；刷新第一页可见当前状态。
+  - order: 5
+    action: 同fixture切mine用户查询并分别按类型/状态/名称筛选，再伪造scope=all_authorized
+    expected: mine只读该认证用户9条本人申请并按相同范围统计；他人/未知/跨租户均不进入count或空页信息；伪造scope参数400。
+  expected_results:
+  - total=38,total_pages=4；包含原授权范围内本人、他人及未知提交人记录；状态all含pending/shared/rejected，不含not_shared。
+  - 按submitted_at DESC NULLS LAST、resource_type ASC、review_id DESC稳定排序；历史null保持null且末尾；静态38条无重复遗漏；所有过滤先于count/page。
+  - 空集total_pages=0，越界页items=[]且total正确；非法参数400，无新URL403；每一资源类型分别套用其原有审核资格和范围。
+  - 每次响应的items/count来自当次同一快照；允许跨请求页位移动、total变化，不宣称跨页全量一致；刷新第一页可见当前状态。
+  - mine只读该认证用户9条本人申请并按相同范围统计；他人/未知/跨租户均不进入count或空页信息；伪造scope参数400。
+  forbidden_side_effects:
+  - 不得逐表分页后拼接导致total或页内顺序错误。
+  - 不把MCP缺省pending当成status=all。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-004
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: total=38,total_pages=4；包含原授权范围内本人、他人及未知提交人记录；状态all含pending/shared/rejected，不含not_shared。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 按submitted_at DESC NULLS LAST、resource_type ASC、review_id DESC稳定排序；历史null保持null且末尾；静态38条无重复遗漏；所有过滤先于count/page。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 空集total_pages=0，越界页items=[]且total正确；非法参数400，无新URL403；每一资源类型分别套用其原有审核资格和范围。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 每次响应的items/count来自当次同一快照；允许跨请求页位移动、total变化，不宣称跨页全量一致；刷新第一页可见当前状态。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: mine只读该认证用户9条本人申请并按相同范围统计；他人/未知/跨租户均不进入count或空页信息；伪造scope参数400。
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  contract:
+    protocol: HTTP JSON; preserve router prefix
+    request_expectations:
+    - 以有审核资格用户查询统一列表；fixture同授权范围内27条他人、9条本人、2条未知提交人，另有范围外记录
+    - 在fixture数据不变时顺序读四页，与独立排序oracle比较，再按单类型、名称空白trim和状态交集查询
+    - 查询空集、page=99、page=0、page_size=0/101、未知类型/状态以及无新URL角色
+    - 两页之间插入新提交或处理一条待审，再查询下一页并刷新第一页
+    - 同fixture切mine用户查询并分别按类型/状态/名称筛选，再伪造scope=all_authorized
+    response_expectations:
+    - total=38,total_pages=4；包含原授权范围内本人、他人及未知提交人记录；状态all含pending/shared/rejected，不含not_shared。
+    - 按submitted_at DESC NULLS LAST、resource_type ASC、review_id DESC稳定排序；历史null保持null且末尾；静态38条无重复遗漏；所有过滤先于count/page。
+    - 空集total_pages=0，越界页items=[]且total正确；非法参数400，无新URL403；每一资源类型分别套用其原有审核资格和范围。
+    - 每次响应的items/count来自当次同一快照；允许跨请求页位移动、total变化，不宣称跨页全量一致；刷新第一页可见当前状态。
+    - mine只读该认证用户9条本人申请并按相同范围统计；他人/未知/跨租户均不进入count或空页信息；伪造scope参数400。

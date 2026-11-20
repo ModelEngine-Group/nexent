@@ -1,4 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
+  hashKey,
   useMutation,
   useQuery,
   useQueryClient,
@@ -9,13 +12,11 @@ import type {
   AgentRepositoryListingListParams,
   AgentRepositoryListingCreatePayload,
   AgentRepositoryListingStatus,
-  MyEditableAgentListParams,
 } from "@/types/agentRepository";
 
 export const AGENT_REPOSITORY_LISTINGS_QUERY_KEY = "agentRepositoryListings";
 export const AGENT_REPOSITORY_TAG_STATS_QUERY_KEY = "agentRepositoryTagStats";
 export const AGENT_REPOSITORY_DETAIL_QUERY_KEY = "agentRepositoryListingDetail";
-export const MY_EDITABLE_AGENTS_QUERY_KEY = "myEditableAgents";
 export const AGENTS_LIST_QUERY_KEY = "agents";
 const IMPORT_PRECHECK_QUERY_KEY = "repositoryImportPrecheck";
 
@@ -24,7 +25,6 @@ export async function invalidateAgentRepositoryCaches(
 ) {
   const keys = [
     [AGENT_REPOSITORY_LISTINGS_QUERY_KEY],
-    [MY_EDITABLE_AGENTS_QUERY_KEY],
     [AGENT_REPOSITORY_DETAIL_QUERY_KEY],
     [AGENTS_LIST_QUERY_KEY],
   ] as const;
@@ -36,11 +36,22 @@ export async function invalidateAgentRepositoryCaches(
 
 export function useAgentRepositoryListings(
   params?: AgentRepositoryListingListParams,
-  enabled = true
+  enabled = true,
+  keepPageVisible = false
 ) {
   return useQuery({
     queryKey: [AGENT_REPOSITORY_LISTINGS_QUERY_KEY, params],
     queryFn: () => agentRepositoryService.fetchAgentRepositoryListings(params),
+    placeholderData: keepPageVisible
+      ? (previousData, previousQuery) => {
+          const previousParams = previousQuery?.queryKey[1] as
+            AgentRepositoryListingListParams | undefined;
+          return hashKey([{ ...previousParams, page: undefined }]) ===
+            hashKey([{ ...params, page: undefined }])
+            ? previousData
+            : undefined;
+        }
+      : undefined,
     staleTime: 60_000,
     refetchOnMount: "always",
     enabled,
@@ -52,19 +63,6 @@ export function useAgentRepositoryTagStats(enabled = true) {
     queryKey: [AGENT_REPOSITORY_TAG_STATS_QUERY_KEY],
     queryFn: () => agentRepositoryService.fetchAgentRepositoryTagStats(),
     staleTime: 60_000,
-    enabled,
-  });
-}
-
-export function useMyEditableAgents(
-  params?: MyEditableAgentListParams,
-  enabled = true
-) {
-  return useQuery({
-    queryKey: [MY_EDITABLE_AGENTS_QUERY_KEY, params],
-    queryFn: () => agentRepositoryService.fetchMyEditableAgents(params),
-    staleTime: 60_000,
-    refetchOnMount: "always",
     enabled,
   });
 }

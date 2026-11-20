@@ -2,6 +2,7 @@
 
 
 from typing import Any
+from management.db.repository_transactions import after_repository_commit
 from typing import Dict
 from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING
 from typing import Optional
@@ -20,6 +21,7 @@ _REVIEW_STATUS_TO_EVENT_TYPE = {
     STATUS_REJECTED: EVENT_TYPE_REPOSITORY_REVIEW_REJECTED,
 }
 
+@after_repository_commit
 def create_repository_review_notification(
     *,
     resource_type: str,
@@ -35,7 +37,7 @@ def create_repository_review_notification(
     Reusable by agent / skill / mcp repository flows.
 
     Args:
-        resource_type: One of VALID_RESOURCE_TYPES (e.g. agent_repository).
+        resource_type: Notification link target (e.g. agent_repository or resource_review).
         review_status: Listing status after review (`shared` or `rejected`).
         receiver_user_id: Publisher user who should receive the notification.
         details: i18n interpolation details (e.g. listing name, reviewer reason).
@@ -69,6 +71,7 @@ def create_repository_review_notification(
     )
 
 
+@after_repository_commit
 def create_repository_pending_review_notification(
     *,
     resource_type: str,
@@ -82,7 +85,7 @@ def create_repository_pending_review_notification(
     Notifies all ADMIN users in the publisher tenant that a listing awaits review.
 
     Args:
-        resource_type: One of VALID_RESOURCE_TYPES (e.g. agent_repository).
+        resource_type: Notification link target (e.g. agent_repository or resource_review).
         tenant_id: Publisher tenant whose admins should receive the notification.
         unique_id: Related resource primary key (e.g. agent_repository_id).
         details: i18n interpolation details (e.g. listing name).

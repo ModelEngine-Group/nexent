@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D2 contract test: create agent converges name+display_name into a single display name.
 
 Static local source contract verification only. No network calls, no external model service.
@@ -15,7 +16,7 @@ CASE_ID = "API-AUTO-A311B5BCB0E23EFF"
 
 CREATE_AGENT_MODAL = "components/agent/CreateAgentModal.tsx"
 AGENT_CONFIG_SERVICE = "services/agentConfigService.ts"
-MY_AGENT_VIEW = "app/[locale]/agent-space/my-agent.tsx"
+AGENTS_PAGE = "app/[locale]/agents/page.tsx"
 
 CREATE_PAYLOAD_KEYS = {
     "display_name",
@@ -87,7 +88,7 @@ def _name_attrs(form_block: str) -> list[str]:
 def test_create_agent_single_display_name_contract() -> None:
     modal = _read(CREATE_AGENT_MODAL)
     service = _read(AGENT_CONFIG_SERVICE)
-    view = _read(MY_AGENT_VIEW)
+    view = _read(AGENTS_PAGE)
 
     result_type = _extract_block(modal, "interface CreatedAgentResult")
     result_fields = _top_level_keys(result_type)
@@ -122,7 +123,7 @@ def test_create_agent_single_display_name_contract() -> None:
     assert "result.data?.agent_id" in modal
     assert "Number(result.data.agent_id)" in modal
 
-    sig_start = view.index("handleAgentCreated = async")
+    sig_start = view.index("const handleCreate = ")
     sig_end = view.index("=>", sig_start) + 2
     signature = view[sig_start:sig_end]
     params_open = signature.index("(") + 1
@@ -131,11 +132,13 @@ def test_create_agent_single_display_name_contract() -> None:
     assert destructure == "agentId", (
         f"onCreated callback must destructure only agentId, got {destructure!r}"
     )
-    assert ": CreatedAgentResult" in signature
+    assert "{ agentId: number }" in signature
 
     body_start = view.index("{", sig_end)
     handle_block = _brace_block(view, body_start)
-    # The editor is now a dynamic route; the callback still uses only agentId.
-    assert "agents/${agentId}" in handle_block
+    # The editor is a dynamic route on the agent management page; the callback
+    # still uses only agentId and preserves the onboarding guide marker.
+    assert "`${pathname}/${agentId}" in handle_block
+    assert "onboarding=1" in handle_block
     assert "displayName" not in handle_block
     assert "result.data" not in handle_block

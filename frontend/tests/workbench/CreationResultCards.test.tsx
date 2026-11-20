@@ -108,7 +108,7 @@ it("restores a saved Skill card from the user's Skills after reopening history",
   );
   expect(
     await screen.findByRole("link", { name: "查看我的 Skills" })
-  ).toHaveAttribute("href", "/zh/skill-space?tab=mine");
+  ).toHaveAttribute("href", "/zh/resource-space?tab=skill&view=mine");
   expect(screen.queryByRole("button", { name: "保存 Skill" })).toBeNull();
   expect(onSave).not.toHaveBeenCalled();
   expect(fetchMyEditableSkills).toHaveBeenCalledWith(

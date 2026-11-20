@@ -2,6 +2,7 @@
 
 
 from typing import Any, Dict, Optional
+from management.db.repository_transactions import repository_transaction, repository_unit_of_work
 
 from contracts.agent import AgentRepositorySnapshot
 from contracts.constants.constants import (
@@ -74,6 +75,8 @@ def _validate_repository_status_transition(
     transition = (current_status, new_status)
 
     if has_any_role(user_role, {'SU'}):
+        if current_status == new_status:
+            return None
         if transition not in _SU_STATUS_TRANSITIONS:
             raise ValueError(
                 f"Invalid status transition from '{current_status}' to '{new_status}'"
@@ -85,6 +88,8 @@ def _validate_repository_status_transition(
             raise UnauthorizedError("Not authorized to update this repository listing")
         if has_any_role(user_role, {'DEV'}) and not has_any_role(user_role, {'ADMIN'}) and record.get("publisher_user_id") != user_id:
             raise UnauthorizedError("Not authorized to update this repository listing")
+        if current_status == new_status:
+            return None
         if has_any_role(user_role, {'ADMIN'}) and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
             return None
         if transition not in _PUBLISHER_STATUS_TRANSITIONS:
@@ -103,6 +108,7 @@ def _validate_repository_status_transition(
     )
 
 
+@repository_transaction
 def update_agent_repository_status_impl(
     *,
     agent_repository_id: int,
@@ -134,18 +140,31 @@ def update_agent_repository_status_impl(
     current_status = record.get("status")
     publisher_updates: Optional[Dict[str, str]] = None
     submitted_by: Optional[str] = None
+    user_role = _get_user_role(user_id)
+    publisher_updates = _validate_repository_status_transition(
+        user_role=user_role,
+        current_status=current_status,
+        new_status=status,
+        record=record,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
     if current_status != status:
-        user_role = _get_user_role(user_id)
-        publisher_updates = _validate_repository_status_transition(
-            user_role=user_role,
-            current_status=current_status,
-            new_status=status,
-            record=record,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
         if status == STATUS_PENDING_REVIEW:
             submitted_by = _resolve_submitter_email(user_id)
+
+    if status in (STATUS_SHARED, STATUS_REJECTED):
+        from management.services.repository.reviews import decide_legacy_review
+        return decide_legacy_review("agent", agent_repository_id, user_id, tenant_id, user_role, status, content)
+    if status == STATUS_PENDING_REVIEW:
+        from management.services.repository.reviews import save_submission
+        payload = {field: record.get(field) for field in (
+            "agent_id", "version_no", "name", "display_name", "description", "author", "version_name",
+            "agent_info_json", "icon_url", "tags", "tool_count")}
+        payload["content"] = content or ""
+        payload["submitted_by"] = _resolve_submitter_email(user_id)
+        return save_submission("agent", record["agent_id"], tenant_id, user_id, user_role, payload,
+                               version_no=record["version_no"], repository_id=agent_repository_id)
 
     rows_affected = update_agent_repository_status_by_id(
         repository_id=agent_repository_id,
@@ -188,6 +207,15 @@ def update_agent_repository_status_impl(
         notify_content=notify_content,
     )
 
+    if status == STATUS_PENDING_REVIEW and (updated.get("submission_revision") or 0) > (record.get("submission_revision") or 0):
+        deactivate_notifications(event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+            resource_type=RESOURCE_TYPE_AGENT_REPOSITORY, unique_id=agent_repository_id, updated_by=user_id)
+        create_repository_pending_review_notification(resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+            tenant_id=tenant_id, unique_id=agent_repository_id, created_by=user_id,
+            details={"name": updated.get("display_name") or updated.get("name"),
+                     "agent_repository_id": agent_repository_id, "agent_id": updated.get("agent_id"),
+                     "content": updated.get("submit_description") or ""})
+
     enrich_repository_identities([updated], "agent")
     return _to_summary_item(updated)
 
@@ -215,14 +243,14 @@ def _handle_review_status_notifications(
         create_repository_review_notification(
             resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
             review_status=new_status,
-            receiver_user_id=updated["publisher_user_id"],
+            receiver_user_id=updated.get("submitted_user_id") or updated["publisher_user_id"],
             details=details,
             tenant_id=updated.get("publisher_tenant_id"),
             unique_id=agent_repository_id,
             created_by=user_id,
         )
 
-    if current_status == STATUS_PENDING_REVIEW:
+    if current_status == STATUS_PENDING_REVIEW and new_status != STATUS_PENDING_REVIEW:
         deactivate_notifications(
             event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
             resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
@@ -378,6 +406,7 @@ async def _build_repository_data_from_agent(
     return repository_data
 
 
+@repository_transaction
 async def create_agent_repository_listing_impl(
     agent_id: int,
     tenant_id: str,
@@ -397,6 +426,8 @@ async def create_agent_repository_listing_impl(
     if version_no < 0:
         raise ValueError("version_no must be >= 0")
 
+    from management.db.repository_transactions import current_repository_session, lock_repository_source
+    lock_repository_source(current_repository_session(), "agent", tenant_id, agent_id)
     repository_data = await _build_repository_data_from_agent(
         agent_id,
         tenant_id,
@@ -416,59 +447,6 @@ async def create_agent_repository_listing_impl(
         except FileNotFoundError as exc:
             raise ValueError("Repository icon upload not found") from exc
 
-    existing = get_agent_repository_by_agent_id(
-        agent_id,
-        version_no,
-        publisher_tenant_id=tenant_id,
-    )
-    if not existing:
-        repository_id = insert_agent_repository_record(
-            repository_data=repository_data,
-            publisher_tenant_id=tenant_id,
-            publisher_user_id=user_id,
-        )
-        is_updated = False
-    else:
-        repository_id = int(existing["agent_repository_id"])
-        updates: Dict[str, Any] = {
-            "status": STATUS_PENDING_REVIEW,
-            "content": repository_data["content"],
-        }
-        for key in ("icon_url", "tags", "tool_count"):
-            if key in repository_data:
-                updates[key] = repository_data[key]
-        affected = update_agent_repository_by_id(
-            repository_id=repository_id,
-            publisher_tenant_id=tenant_id,
-            user_id=user_id,
-            updates=updates,
-        )
-        if affected == 0:
-            raise ValueError("Failed to update repository listing")
-        is_updated = True
-
-    record = get_agent_repository_by_id(
-        repository_id,
-        tenant_id,
-    )
-    if not record:
-        raise ValueError("Failed to load repository listing after write")
-    _reset_repository_peer_statuses(
-        agent_repository_id=repository_id,
-        agent_id=agent_id,
-        status=repository_data["status"],
-        publisher_tenant_id=tenant_id,
-    )
-    create_repository_pending_review_notification(
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        tenant_id=tenant_id,
-        unique_id=repository_id,
-        details={
-            "name": record.get("display_name") or record.get("name"),
-            "agent_repository_id": repository_id,
-            "agent_id": record.get("agent_id"),
-            "content": record.get("content") or "",
-        },
-        created_by=user_id,
-    )
-    return _to_detail_item(record, is_updated=is_updated)
+    from management.services.repository.reviews import save_submission
+    return save_submission("agent", agent_id, tenant_id, user_id, _get_user_role(user_id),
+                           repository_data, version_no=version_no)

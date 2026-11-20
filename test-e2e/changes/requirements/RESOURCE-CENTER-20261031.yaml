@@ -1,0 +1,93 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-CENTER-20261031
+  change_type: requirement
+  requirement_id: RESOURCE-CENTER-REQ-20261031
+  title: 统一资源仓库四Tab与审核接口设计
+  description: 2026-11-04：独立审核表、提交只存快照、通过后发布、未提交18增列仅本地一次性清理；共享设计依赖只读。新正式合同已修订，固定脚本适配与新运行验收尚未完成。
+  affected_features:
+    existing:
+    - F-069
+    - F-070
+    - F-071
+    - F-079
+    - F-080
+    - F-086
+    - F-087
+    - AGENT-REPO-SORT-MAIN-TAG
+    added:
+    - RESOURCE-CENTER-ACCESS
+    - RESOURCE-CENTER-REVIEW
+    - RESOURCE-CENTER-LIFECYCLE
+    - RESOURCE-CENTER-MANAGE
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-072
+    - API-084
+    - API-090
+    - AGENT-REPO-SORT-MAIN-TAG-D4-001
+    - NAV-MENU-D1-001
+    - NAV-MENU-D4-001
+    added:
+    - RESOURCE-CENTER-ACCESS-D2-001
+    - RESOURCE-CENTER-ACCESS-D4-001
+    - RESOURCE-CENTER-ACCESS-D5-001
+    - RESOURCE-CENTER-REVIEW-D2-001
+    - RESOURCE-CENTER-REVIEW-D2-002
+    - RESOURCE-CENTER-REVIEW-D3-001
+    - RESOURCE-CENTER-REVIEW-D4-001
+    - RESOURCE-CENTER-LIFECYCLE-D2-001
+    - RESOURCE-CENTER-LIFECYCLE-D3-001
+    - RESOURCE-CENTER-LIFECYCLE-D5-001
+    - RESOURCE-CENTER-LIFECYCLE-D3-002
+    - RESOURCE-CENTER-MANAGE-D2-001
+    - RESOURCE-CENTER-MANAGE-D3-001
+    - RESOURCE-CENTER-MANAGE-D4-001
+    - RESOURCE-CENTER-MANAGE-D4-002
+    - RESOURCE-CENTER-LIFECYCLE-D5-002
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 复用旧接口与状态UT，验证新URL注册、mine/all_authorized范围；不新增排除本人或自审限制。
+    - 新增混合查询过滤/count/全局排序、null时间、Unicode意见长度与错误码UT。
+    - 补充三类旧新写入映射、revision原子条件、提交时间/上架时间与故障回滚UT。
+    - 补充Skill来源批量映射、只读/历史未知/引用保护及前端缓存/失败保留/批量部分失败UT。
+    - 验证我的 MCP 批删只发送一次请求，排除只读项，区分本地与仓库的同号记录，并保留部分失败项。后端验证参数、登录和单删权限。
+    - 复审补充：共享Session/UNSET与NULL、请求级分页快照、响应丢失恢复、安装三态与通知失败边界。
+    - 新URL登记与原有审核范围兼容、无审核资格仅本人、submitted_user_id实际提交身份，新旧审核路由沿用现有操作资格。
+    - AC-002并行兼容：新版内部URL生成器、通知和返回路径使用新深链；保留旧页面、链接、角色登记和普通后端API。
+    - AC-002外部直达：统一URL构造/解析、URL优先、登录后恢复、前进后退、逐入口Tab/view/类型ID映射，尤其本人结果通知与他人待审通知不同目标。
+    - 实现方案补充：通知列表从既有unique_id兼容返回字符串仓库ID、事件参数映射；审核all保留行/pending才移出；三类详情fixture。
+    - 新申请不可变、通过发布/驳回不写仓库、删除实体增列；传统UT与独立PostgreSQL验证不等于正式Case通过。
+    test_selectors:
+    - test/backend/management/test_repository_review_contracts.py
+    - frontend/tests/component/resourceRepositoryRoutes.test.tsx
+    - test/backend/management/test_repository_transactions.py
+    - test/backend/services/test_repository_same_status_authorization.py
+    - test/backend/services/test_repository_skill_upload_cleanup.py
+    - test/backend/services/test_repository_mcp_pending_notifications.py
+    - test/backend/services/test_mcp_record_edit_permission.py
+    - test/backend/app/test_mcp_management_app.py
+    - test/backend/services/test_mcp_management_service.py
+    - frontend/tests/component/mcpMineBatchDelete.test.tsx
+    - frontend/tests/component/resourceReviewCache.test.tsx
+    - frontend/tests/component/resourceRepositoryCard.test.tsx
+    - test/backend/management/test_resource_review_submissions.py
+    reason: 保留传统 UT 与正式 D1-D5 的独立证明边界；选择器已覆盖已实现契约、事务、授权回归、安装清理、MCP轮次通知和前端缓存/卡片兼容。新增与最新修改将在功能及UI收尾后集中执行，登记选择器不代表PASS。正式Case另记实际执行证据。
+  notes: '2026-11-03 implementation batch 1 adds metadata models, an additive migration, review contracts and route
+    helpers. Legacy pages, links and grants are retained per latest user instruction; old-route deletion is deferred.
+    MCP review credentials are masked. Backend UT 34 passed and frontend UT 25 passed; no formal Case PASS is claimed.
+    The following design-stage note is historical: No product code, fixed script, execution binding or runtime PASS
+    is claimed. All new automated Cases are blocked until implementation. Deployment-mode switching is not part
+    of the new Cases; migration is checked on an isolated DB. Design review: D3-002 now proves runtime dual-write
+    only; new D5-002 owns migration risk. No automatic environment redeployment or exactly-once notification claim.
+    User-confirmed permission revision: register the new URL directly to roles; do not implement a historical permission
+    conversion platform. All repository users see the review Tab; scope is mine or all_authorized, not a Tab visibility
+    grant. User explicitly removes old page URL compatibility and all active hardcoded links; route-reference-audit.md
+    records the design-time inventory. Product route changes are pending. Latest correction supersedes previous
+    others-only/self-review restrictions: authorized reviewers keep original scope including self; no new self-review
+    prohibition.'

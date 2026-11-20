@@ -1,0 +1,126 @@
+schema_version: '1.0'
+stage: D3
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-LIFECYCLE-D3-001
+  feature_id: RESOURCE-CENTER-LIFECYCLE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-LIFECYCLE-RULE-007
+  - RESOURCE-CENTER-LIFECYCLE-RULE-008
+  title: 三类业务时间、意见与提交轮次持久化
+  type: INTEGRATION
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 三类业务时间、意见与提交轮次持久化
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    timeline: 每步持久化前后快照；使用可控制时钟或可区分的fixture时间，避免sleep比较
+    types:
+    - agent
+    - skill
+    - mcp
+  steps:
+  - order: 1
+    action: 三类型首次提交并修改本地配置
+    expected: 只新增审核申请，仓库不变；审核详情仍为提交快照。
+  - order: 2
+    action: 提交相同内容及不同内容
+    expected: 相同返回原review_id且时间不变；不同409，不替换快照。
+  - order: 3
+    action: 驳回后重新提交，再审核通过
+    expected: 驳回不写仓库；重提新ID，通过后从新申请快照发布。
+  - order: 4
+    action: 下架后查询申请和仓库最新排序
+    expected: 已通过记录仍可查；上架时间取reviewed_at，计数和下架不改该时间。
+  - order: 5
+    action: 认证CAS身份提交并读取本人范围
+    expected: 使用映射内部ID；历史迁入明确使用创建人ID，邮箱变化不影响权限。
+  expected_results:
+  - 只新增审核申请，仓库不变；审核详情仍为提交快照。
+  - 相同返回原review_id且时间不变；不同409，不替换快照。
+  - 驳回不写仓库；重提新ID，通过后从新申请快照发布。
+  - 已通过记录仍可查；上架时间取reviewed_at，计数和下架不改该时间。
+  - 使用映射内部ID；历史迁入明确使用创建人ID，邮箱变化不影响权限。
+  forbidden_side_effects:
+  - 不得绕过审核表提前覆盖仓库内容或修改已完成申请。
+  - 失败事务不得留下仓库半写入或丢失申请数据。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-007
+    - AC-008
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 只新增审核申请，仓库不变；审核详情仍为提交快照。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 相同返回原review_id且时间不变；不同409，不替换快照。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 驳回不写仓库；重提新ID，通过后从新申请快照发布。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 已通过记录仍可查；上架时间取reviewed_at，计数和下架不改该时间。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: 使用映射内部ID；历史迁入明确使用创建人ID，邮箱变化不影响权限。
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  integration_boundary:
+  - HTTP → real service/adapters → migrated PostgreSQL; repository snapshots and local Skill relations are real.
+  - Use sandbox storage for Skill archives and record notification enqueue after commit; no substituted database
+    or repository adapters.
+  observations:
+  - create_time固定；每次进入pending设submitted_at并增revision；每次批准设published_at，其他动作不变；提交新轮清review_comment且保留本轮说明。
+  - 有效内容替换递增revision；纯无变化请求不伪装新提交；Agent相同版本旧路径不擅自替换冻结agent_info_json。
+  - 历史时间保持null，legacy_note标明旧备注而不复制两字段；后续动作写新字段，空审核意见明确保存null，不残留上架说明为审核意见。
+  - UNSET/保留与NULL/清空可区分；说明不被覆盖；仓库、源对象及受影响同源记录共用同一Session，任一步失败全部回滚，无内部提前commit。
+  - 每轮submitted_user_id等于真实认证提交人；审核和撤回不改；新轮以新实际提交人重算mine/all_authorized；display邮箱变化不改用户ID授权。
+  cleanup:
+  - 按run_id清理本Case创建的仓库记录、源资源、归档及通知；不触及基线资源。
+  - 保存脱敏请求、逐步DB断言和清理结果；清理失败不得报告PASS。

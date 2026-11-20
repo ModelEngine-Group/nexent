@@ -37,7 +37,7 @@ case:
     - /agents
     - /newchat
     - /workbench
-    - /agent-space
+    - /resource-space
     locales:
     - zh
     - en
@@ -82,8 +82,8 @@ case:
       #191919 at15% opacity remains visible in all states. Menu icons retain20px size
       and8px label gaps. The40px logo has a4px gap to the18px bold brand title, which
       truncates with a full-name tooltip. Header bottom spacing is8px. Selected navigation
-      icons are #2673e5. Pin/PinOff, Sparkles and FolderCog identify pin, Skill and
-      resource management. Pinned toggle is blue on transparent background. Popup
+      icons are #2673e5. Pin/PinOff, Globe and FolderCog identify pin, the unified
+      repository and resource management. Pinned toggle is blue on transparent background. Popup
       holds expansion without profile-route prefetch requests; existing navigation
       and close behavior remain usable. Sidebar background matches lab(97.0939% -.108689
       -.749958); unselected hover uses70% sidebar accent and selected items use full

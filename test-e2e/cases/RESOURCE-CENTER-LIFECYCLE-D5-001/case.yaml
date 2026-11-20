@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D5
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-LIFECYCLE-D5-001
+  feature_id: RESOURCE-CENTER-LIFECYCLE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-LIFECYCLE-RULE-008
+  - RESOURCE-CENTER-LIFECYCLE-RULE-009
+  title: 审核并发、提交竞争与事务故障不污染新轮次
+  type: RELIABILITY
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 审核并发、提交竞争与事务故障不污染新轮次
+  preconditions:
+  - 隔离测试后端具备一次性schema权限，固定并发/故障脚本与执行配置就绪；统一验证阶段执行，不提前宣称PASS。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  - 决策成功场景使用已登记新URL且具有对应decision_types资格的审核者，本人/他人提交均沿用原有操作规则；本人查看场景使用独立mine身份。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 同review_id并发通过/通过和通过/驳回
+    expected: 唯一成功，其余409；仓库发布和审核结果一致，无重复通知尝试。
+  - order: 2
+    action: 同源并发提交相同及不同快照
+    expected: 一条待审；相同申请返回原ID，不同内容409，快照不被覆盖。
+  - order: 3
+    action: 发布仓库与保存审核结果间注入异常
+    expected: 仓库和审核记录全部回滚，申请仍待审，提交前无通知。
+  - order: 4
+    action: 响应丢失后重试决策及并发下架
+    expected: 重复决策409；GET原review_id恢复结果，下架与审批按源锁串行，完成历史不变。
+  expected_results:
+  - 唯一成功，其余409；仓库发布和审核结果一致，无重复通知尝试。
+  - 一条待审；相同申请返回原ID，不同内容409，快照不被覆盖。
+  - 仓库和审核记录全部回滚，申请仍待审，提交前无通知。
+  - 重复决策409；GET原review_id恢复结果，下架与审批按源锁串行，完成历史不变。
+  forbidden_side_effects:
+  - 不得绕过审核表提前覆盖仓库内容或修改已完成申请。
+  - 失败事务不得留下仓库半写入或丢失申请数据。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-008
+    - AC-009
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 唯一成功，其余409；仓库发布和审核结果一致，无重复通知尝试。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 一条待审；相同申请返回原ID，不同内容409，快照不被覆盖。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 仓库和审核记录全部回滚，申请仍待审，提交前无通知。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 重复决策409；GET原review_id恢复结果，下架与审批按源锁串行，完成历史不变。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  risk_type: RELIABILITY
+  risk: 审核并发、提交竞争与事务故障不污染新轮次
+  condition:
+  - 真实产品鉴权与PostgreSQL；使用可重复的同步屏障/受控故障，不用睡眠推断竞争已发生。
+  metrics:
+  - 成功/拒绝请求数、跨租户泄露数、事务后状态及通知事件数
+  thresholds:
+  - 无进程崩溃的同步竞争场景每轮成功数=1，其余409；DB状态对应唯一成功决策，提交后通知尝试数=1。
+  - 重新提交后的revision递增；旧审核409，不污染新提交说明、内容及状态；锁顺序一致，无死锁遗留。
+  - 失败事务整体回滚，失败通知0；恢复后当前revision可成功且通知只在提交后；不能因通知投递失败把已提交决策重复执行。
+  - 数据库已提交决策不回滚；重试409且不二次审核或通知重放，查询可恢复当前结果；通知失败有可检索日志，崩溃窗口允许漏通知，不声称必达或exactly-once。
+  recovery_expectations:
+  - 移除故障后以当前revision重试可正常完成；清理run_id数据且无遗留锁或待恢复事务。

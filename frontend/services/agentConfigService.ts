@@ -232,6 +232,7 @@ type AgentListApiItem = {
   model_params_override?: Agent["model_params_override"];
   icon_url?: string;
   repository_info?: Agent["repository_info"];
+  latest_review?: Agent["latest_review"];
 };
 
 const formatAgentListItem = (agent: AgentListApiItem): Agent =>
@@ -265,6 +266,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     model_params_override: agent.model_params_override ?? null,
     icon_url: agent.icon_url,
     repository_info: agent.repository_info,
+    latest_review: agent.latest_review,
   }) as unknown as Agent;
 
 export type AgentListFilters = {

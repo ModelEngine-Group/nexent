@@ -1,6 +1,11 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AgentVersionDetail, fetchAgentVersionDetail, type AgentVersion } from "@/services/agentVersionService";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AgentVersionDetail,
+  fetchAgentVersionDetail,
+  type AgentVersion,
+} from "@/services/agentVersionService";
 
 /**
  * Hook to fetch agent version info using React Query
@@ -10,7 +15,8 @@ import { AgentVersionDetail, fetchAgentVersionDetail, type AgentVersion } from "
 export function useAgentVersionDetail(
   agentId: number | null,
   versionNo: number | null,
-  enabled = true
+  enabled = true,
+  cacheTime = 0
 ) {
   const queryClient = useQueryClient();
 
@@ -36,8 +42,8 @@ export function useAgentVersionDetail(
       }
       return res.data as AgentVersionDetail;
     },
-    staleTime: 0,  // 改为 0，确保每次都重新获取
-    gcTime: 0,  // 缓存立即过期
+    staleTime: cacheTime,
+    gcTime: cacheTime,
     enabled: isEnabled,
   });
 
@@ -47,6 +53,8 @@ export function useAgentVersionDetail(
     ...query,
     agentVersionDetail,
     invalidate: () =>
-      queryClient.invalidateQueries({ queryKey: ["agentVersionDetail", agentId, versionNo] }),
+      queryClient.invalidateQueries({
+        queryKey: ["agentVersionDetail", agentId, versionNo],
+      }),
   };
 }

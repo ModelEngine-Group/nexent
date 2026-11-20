@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Label resolvers for agent repository preset tags.
  * Presets live in const/agentRepository.ts; localized labels come from i18n.
@@ -110,8 +112,8 @@ const REQUIREMENT_TYPE_I18N: Record<string, string> = {
 const REQUIREMENT_ACTIVATE_PATH: Record<string, string> = {
   model: "/models",
   knowledge_base: "/knowledges",
-  mcp: "/mcp-space",
-  skill: "/skill-space",
+  mcp: "/resource-space?tab=mcp",
+  skill: "/resource-space?tab=skill",
 };
 
 const REQUIREMENT_TYPE_ORDER = [

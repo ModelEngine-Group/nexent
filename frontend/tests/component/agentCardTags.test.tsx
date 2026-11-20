@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentCardTags } from "@/app/agent-space/components/AgentCardTags";
+import { AgentCardTags } from "@/components/resource/AgentCardTags";
 
 let width = 180;
 let callbacks: (() => void)[] = [];

@@ -4,6 +4,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const baseUrl = process.env.NEXENT_E2E_BASE_URL ?? "http://localhost:3000";
 type ResourceKind = "agent" | "skill" | "mcp";
+type RepositoryView = "repository" | "mine";
 type ListingRequest = { size: number; page: number };
 const json = (route: Route, data: unknown) =>
   route.fulfill({
@@ -16,11 +17,9 @@ async function mockRepository(page: Page, kind: ResourceKind, mine = false) {
   const requests: ListingRequest[] = [];
   const writes: string[] = [];
   const endpoint = mine
-    ? kind === "agent"
-      ? "/agent/list/page"
-      : kind === "skill"
-        ? "/repository/skill/mine"
-        : "/mcp/list"
+    ? kind === "skill"
+      ? "/repository/skill/mine"
+      : "/mcp/list"
     : kind === "mcp"
       ? "/mcp-tools/community/list"
       : `/repository/${kind}`;
@@ -73,7 +72,7 @@ async function mockRepository(page: Page, kind: ResourceKind, mine = false) {
             auth_provider: "local",
             group_ids: [],
             permissions: [],
-            accessibleRoutes: ["/agent-space", "/skill-space", "/mcp-space"],
+            accessibleRoutes: ["/resource-space"],
           },
         },
       });
@@ -145,7 +144,7 @@ async function mockRepository(page: Page, kind: ResourceKind, mine = false) {
         status: "success",
         data: { items: [], services: [], total: 0 },
       });
-    if (path.includes("mine") || path.includes("/agent/list"))
+    if (path.includes("mine"))
       return json(route, {
         items: [],
         pagination: { page: 1, page_size: 12, total: 0, total_pages: 0 },
@@ -155,98 +154,128 @@ async function mockRepository(page: Page, kind: ResourceKind, mine = false) {
   return { requests, writes };
 }
 
-for (const kind of ["agent", "skill", "mcp"] as const) {
-  for (const tab of ["repository", "mine"] as const) {
-    test(`${kind} ${tab} keeps fixed card slots and scrolls without moving its tabs`, async ({
-      page,
-    }) => {
-      test.setTimeout(90_000);
-      const mine = tab === "mine";
-      const fixture = await mockRepository(page, kind, mine);
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto(`${baseUrl}/zh/${kind}-space?tab=${tab}`);
-      const content = page.getByTestId("repository-tab-content");
-      const headings = content
-        .getByRole("heading", { level: 2 })
-        .filter({ hasText: `Layout ${kind}` });
-      const expectedCount = mine ? 11 : 12;
-      await expect(headings).toHaveCount(expectedCount);
-      for (const viewport of [
-        { width: 1440, height: 900 },
-        { width: 1024, height: 480 },
-      ]) {
-        await page.setViewportSize(viewport);
-        await expect(headings).toHaveCount(expectedCount);
-        await expect
-          .poll(() =>
-            headings.evaluateAll((nodes) =>
-              nodes.flatMap((heading) => {
-                const card = heading.closest(".group")!;
-                const box = card.getBoundingClientRect();
-                return [...card.querySelectorAll("span,button")]
-                  .filter((element) => {
-                    const bounds = element.getBoundingClientRect();
-                    return (
-                      bounds.width > 0 &&
-                      bounds.height > 0 &&
-                      (bounds.bottom > box.bottom + 1 ||
-                        bounds.right > box.right + 1 ||
-                        bounds.left < box.left - 1)
-                    );
-                  })
-                  .map((element) => element.textContent);
-              })
-            )
-          )
-          .toEqual([]);
-      }
-      // The full page header and all three tabs must stay outside the scrolling list.
-      const tabs = page.getByRole("tablist");
-      const header = page.locator("section").filter({
-        has: page.getByRole("heading", { level: 1 }),
-      });
-      await expect(page.getByRole("tab")).toHaveCount(3);
-      const before = {
-        tabs: await tabs.boundingBox(),
-        title: await page.getByRole("heading", { level: 1 }).boundingBox(),
-        header: await header.boundingBox(),
-        firstCard: await headings.first().boundingBox(),
-      };
-      const pagination = content.locator(".ant-pagination-item-2").last();
-      await expect(pagination).not.toBeInViewport();
-      await pagination.scrollIntoViewIfNeeded();
-      await expect(pagination).toBeInViewport();
-      expect(
-        await content.evaluate((element) => element.scrollTop)
-      ).toBeGreaterThan(0);
-      expect((await tabs.boundingBox())?.y).toBeCloseTo(before.tabs!.y, 0);
-      expect(
-        (await page.getByRole("heading", { level: 1 }).boundingBox())?.y
-      ).toBeCloseTo(before.title!.y, 0);
-      const headerAfter = await header.boundingBox();
-      expect(headerAfter!.y).toBeCloseTo(before.header!.y, 0);
-      expect(headerAfter!.height).toBeCloseTo(before.header!.height, 0);
-      await expect(header).toBeInViewport();
-      expect((await headings.first().boundingBox())!.y).toBeLessThan(
-        before.firstCard!.y
-      );
-      await expect(tabs).toBeInViewport();
-      await pagination.click();
-      await expect(headings.first()).toContainText(
-        `Layout ${kind} ${mine ? 12 : 13} `
-      );
-      await expect(headings).toHaveCount(mine ? 3 : 2);
-      if (!(mine && kind === "mcp")) {
-        const expectedSize = mine && kind === "agent" ? 11 : 12;
-        expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
-        expect(
-          fixture.requests.every((request) => request.size === expectedSize)
-        ).toBe(true);
-        expect(fixture.requests.some((request) => request.page === 2)).toBe(
-          true
-        );
-      }
-      expect(fixture.writes).toEqual([]);
-    });
+test("agent, MCP and skill repository cards use the same dimensions", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const sizes: Array<{ width: number; height: number }> = [];
+  for (const kind of ["agent", "mcp", "skill"] as const) {
+    await page.unroute("**/api/**");
+    await mockRepository(page, kind);
+    await page.goto(`${baseUrl}/zh/resource-space?tab=${kind}&view=repository`);
+    const heading = page.getByRole("heading", { name: new RegExp(`^Layout ${kind}`) }).first();
+    const card = heading.locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' group ')][1]");
+    await expect(card).toBeVisible();
+    const bounds = (await card.boundingBox())!;
+    sizes.push({ width: bounds.width, height: bounds.height });
   }
+  for (const size of sizes.slice(1)) {
+    expect(size.width).toBeCloseTo(sizes[0].width, 0);
+    expect(size.height).toBeCloseTo(sizes[0].height, 0);
+  }
+});
+
+// The unified repository hosts every listing view; the personal agent view
+// retired, so agents only keep the repository combination.
+const layoutCombinations: Array<{
+  kind: ResourceKind;
+  view: RepositoryView;
+}> = [
+  { kind: "agent", view: "repository" },
+  { kind: "skill", view: "repository" },
+  { kind: "skill", view: "mine" },
+  { kind: "mcp", view: "repository" },
+  { kind: "mcp", view: "mine" },
+];
+
+for (const { kind, view } of layoutCombinations) {
+  test(`${kind} ${view} keeps fixed card slots and scrolls without moving its tabs`, async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const mine = view === "mine";
+    const fixture = await mockRepository(page, kind, mine);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${baseUrl}/zh/resource-space?tab=${kind}&view=${view}`);
+    const content = page.locator(".resource-repository-content");
+    const headings = content
+      .getByRole("heading", { level: 2 })
+      .filter({ hasText: `Layout ${kind}` });
+    const expectedCount = mine ? 11 : 12;
+    await expect(headings).toHaveCount(expectedCount);
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 480 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await expect(headings).toHaveCount(expectedCount);
+      await expect
+        .poll(() =>
+          headings.evaluateAll((nodes) =>
+            nodes.flatMap((heading) => {
+              const card = heading.closest(".group")!;
+              const box = card.getBoundingClientRect();
+              return [...card.querySelectorAll("span,button")]
+                .filter((element) => {
+                  const bounds = element.getBoundingClientRect();
+                  return (
+                    bounds.width > 0 &&
+                    bounds.height > 0 &&
+                    (bounds.bottom > box.bottom + 1 ||
+                      bounds.right > box.right + 1 ||
+                      bounds.left < box.left - 1)
+                  );
+                })
+                .map((element) => element.textContent);
+            })
+          )
+        )
+        .toEqual([]);
+    }
+    // The unified page header and its four resource tabs must stay outside
+    // the scrolling list.
+    const tabs = page.getByRole("tablist");
+    const header = page.locator("main.resource-space");
+    await expect(page.getByRole("tab")).toHaveCount(4);
+    const before = {
+      tabs: await tabs.boundingBox(),
+      title: await page.getByRole("heading", { level: 1 }).boundingBox(),
+      header: await header.boundingBox(),
+      firstCard: await headings.first().boundingBox(),
+    };
+    const pagination = content.locator(".ant-pagination-item-2").last();
+    await expect(pagination).not.toBeInViewport();
+    await pagination.scrollIntoViewIfNeeded();
+    await expect(pagination).toBeInViewport();
+    expect(
+      await content.evaluate((element) => element.scrollTop)
+    ).toBeGreaterThan(0);
+    expect((await tabs.boundingBox())?.y).toBeCloseTo(before.tabs!.y, 0);
+    expect(
+      (await page.getByRole("heading", { level: 1 }).boundingBox())?.y
+    ).toBeCloseTo(before.title!.y, 0);
+    const headerAfter = await header.boundingBox();
+    expect(headerAfter!.y).toBeCloseTo(before.header!.y, 0);
+    expect(headerAfter!.height).toBeCloseTo(before.header!.height, 0);
+    await expect(header).toBeInViewport();
+    expect((await headings.first().boundingBox())!.y).toBeLessThan(
+      before.firstCard!.y
+    );
+    await expect(tabs).toBeInViewport();
+    await pagination.click();
+    await expect(headings.first()).toContainText(
+      `Layout ${kind} ${mine ? 12 : 13} `
+    );
+    await expect(headings).toHaveCount(mine ? 3 : 2);
+    if (!(mine && kind === "mcp")) {
+      expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
+      expect(
+        fixture.requests.every((request) => request.size === 12)
+      ).toBe(true);
+      expect(fixture.requests.some((request) => request.page === 2)).toBe(
+        true
+      );
+    }
+    expect(fixture.writes).toEqual([]);
+  });
 }

@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 import psycopg2
@@ -12,6 +13,26 @@ from contracts.constants.environment import NEXENT_POSTGRES_PASSWORD, POSTGRES_D
 
 
 logger = logging.getLogger("infrastructure.rdb.client")
+
+# Session bound by an outer transaction owner. get_db_session() joins it when
+# called without an explicit session; the binding lives here so the
+# infrastructure layer never depends on higher-level transaction helpers.
+_ambient_session: ContextVar[Optional[Any]] = ContextVar("rdb_ambient_session", default=None)
+
+
+def current_ambient_session():
+    """Return the ambient session bound by an outer transaction owner, if any."""
+    return _ambient_session.get()
+
+
+@contextmanager
+def bound_ambient_session(session):
+    """Bind a session as ambient so nested get_db_session() calls join it."""
+    token = _ambient_session.set(session)
+    try:
+        yield session
+    finally:
+        _ambient_session.reset(token)
 
 
 class PostgresClient:
@@ -65,22 +86,25 @@ db_client = PostgresClient()
 @contextmanager
 def get_db_session(db_session=None):
     """
-    param db_session: Optional session to use, if None, a new session will be created.
-    Provide a transactional scope around a series of operations.
+    param db_session: Optional session to use, if None, a new session will be
+    created, or the ambient session bound by an outer transaction owner is
+    joined. Provide a transactional scope around a series of operations.
     """
-    session = db_client.session_maker() if db_session is None else db_session
+    shared_session = db_session if db_session is not None else current_ambient_session()
+    owns_session = shared_session is None
+    session = db_client.session_maker() if owns_session else shared_session
     try:
         yield session
-        if db_session is None:
+        if owns_session:
             session.commit()
     except Exception as e:
-        if db_session is None:
+        if owns_session:
             session.rollback()
         # SQL exception text may contain credential parameters from identity lookup.
         logger.error("Database operation failed (%s)", type(e).__name__)
         raise e
     finally:
-        if db_session is None:
+        if owns_session:
             session.close()
 
 

@@ -1,0 +1,8 @@
+# RESOURCE-CENTER-MANAGE 关联用例
+
+此页由结构化用例生成，不手工编辑。
+
+- D2 [RESOURCE-CENTER-MANAGE-D2-001](../../cases/RESOURCE-CENTER-MANAGE-D2-001/case.yaml) · blocked
+- D3 [RESOURCE-CENTER-MANAGE-D3-001](../../cases/RESOURCE-CENTER-MANAGE-D3-001/case.yaml) · blocked
+- D4 [RESOURCE-CENTER-MANAGE-D4-001](../../cases/RESOURCE-CENTER-MANAGE-D4-001/case.yaml) · blocked
+- D4 [RESOURCE-CENTER-MANAGE-D4-002](../../cases/RESOURCE-CENTER-MANAGE-D4-002/case.yaml) · blocked

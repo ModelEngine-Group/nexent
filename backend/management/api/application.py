@@ -23,6 +23,7 @@ from management.api.conversation.workbench_pins import router as workbench_pins_
 from management.api.conversation.conversation_share import router as conversation_share_router
 from management.api.agent.agent_repository import agent_repository_router
 from management.api.skill.skill_repository import skill_repository_router
+from management.api.repository.reviews import router as repository_reviews_router
 from management.api.configuration.config_sync import router as config_sync_router
 from management.api.knowledge_base.datamate import router as datamate_router
 from management.api.knowledge_base.vectordatabase import router as vectordatabase_router
@@ -186,6 +187,7 @@ async def thread_capacity():
     return config_thread_manager.snapshot()
 
 
+app.include_router(repository_reviews_router)
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)

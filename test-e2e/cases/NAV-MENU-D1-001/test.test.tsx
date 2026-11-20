@@ -6,7 +6,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 
 const state = vi.hoisted(() => ({
-  routes: ["/", "/newchat", "/agents", "/agent-space", "/workbench"],
+  routes: ["/", "/newchat", "/agents", "/resource-space", "/workbench"],
   speed: true,
   workbench: false,
   authenticated: true,
@@ -38,7 +38,7 @@ vi.mock("@/hooks/useNotifications", () => ({
 vi.mock("@/components/navigation/NotificationBell", () => ({ NotificationBell: ({ onMarkRead, onMarkAllRead }: { onMarkRead: (id: number) => void; onMarkAllRead: () => void }) => <><button onClick={() => onMarkRead(17)}>read notification</button><button onClick={onMarkAllRead}>read all</button></> }));
 
 beforeEach(() => {
-  state.routes = ["/", "/newchat", "/agents", "/agent-space", "/workbench"];
+  state.routes = ["/", "/newchat", "/agents", "/resource-space", "/workbench"];
   state.speed = true;
   state.workbench = false;
   state.authenticated = true;
@@ -50,11 +50,13 @@ test("[NAV-MENU-D1-001] children retain permissions, localized routes and nested
   render(<SideNavigation />);
   const nav = within(screen.getByRole("navigation"));
   expect(nav.queryByRole("button", { name: "sidebar.agentDev" })).toBeNull();
-  expect(nav.queryByRole("button", { name: "sidebar.resourceSpace" })).toBeNull();
   expect(nav.queryByRole("button", { name: "sidebar.modelConfig" })).toBeNull();
+  // The retired personal agent view renders no sidebar button even if a stale
+  // authorization entry still reports /agent-space.
+  expect(nav.queryByRole("button", { name: "sidebar.agentSpace" })).toBeNull();
   expect(nav.getByRole("button", { name: "sidebar.agentConfig" })).toHaveAttribute("aria-current", "page");
-  fireEvent.click(nav.getByRole("button", { name: "sidebar.agentSpace" }));
-  expect(state.push).toHaveBeenCalledWith("/zh/agent-space");
+  fireEvent.click(nav.getByRole("button", { name: "sidebar.resourceSpace" }));
+  expect(state.push).toHaveBeenCalledWith("/zh/resource-space");
   fireEvent.click(nav.getByRole("button", { name: "sidebar.startChat" }));
   expect(state.push).toHaveBeenCalledWith("/zh/newchat");
   expect(screen.queryByRole("button", { name: "notifications.bell.label" })).toBeNull();

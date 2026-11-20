@@ -18,7 +18,7 @@ from management.services.skill import service as skill_service
 def metadata(skill_id=1, creator="viewer"):
     return dict(
         skill_id=skill_id, name=f"Skill {skill_id}", tenant_id="tenant-a",
-        description="Mount description", tags=["test"], source="local",
+        description="Mount description", tags=["test"], source="local", source_repository_id=None,
         config_schemas=[{"name": "region", "type": "string", "required": True}],
         config_values={"region": "west"}, group_ids=[], ingroup_permission="PRIVATE",
         created_by=creator, updated_by=creator, create_time=None, update_time=None,

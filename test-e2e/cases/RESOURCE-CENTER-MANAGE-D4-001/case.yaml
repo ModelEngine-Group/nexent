@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D4
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-MANAGE-D4-001
+  feature_id: RESOURCE-CENTER-MANAGE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-MANAGE-RULE-003
+  - RESOURCE-CENTER-MANAGE-RULE-011
+  title: 仓库视图、业务时间与既有安装复制流程
+  type: E2E
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 仓库视图、业务时间与既有安装复制流程
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    mcp: 使用受控安装fixture，不要求真实外网MCP或模型；实际fixture能力在脚本实施时绑定
+  steps:
+  - order: 1
+    action: 三类仓库分别切卡片/列表、搜索标签、分页和默认/最热/最新排序
+    expected: 卡片与表格同源同权限；筛选/排序改变回第一页；最新按真实published_at且null末尾，历史显示未记录；默认/最热原口径保持，旧Agent版本类型徽标保留。
+  - order: 2
+    action: 检查列表、详情和空态；新安装/复制后刷新
+    expected: 保留原安装/复制累计数和三类既有内部视图；无调用/对话次数列、占位或采集请求；update_time不冒充上架时间。
+  - order: 3
+    action: Agent复制执行预检冲突处理；Skill冲突重命名；MCP URL及容器两条安装入口
+    expected: 既有导入/安装流程与端口选择保留；MCP共享字段尊重白名单；成功刷新原计数，本地健康/开关与审核状态分别显示。
+  - order: 4
+    action: 打开上架申请输入说明，分别输入1000/1001字符并取消；再取消通过/驳回确认框
+    expected: 新页面说明选填、上限1000 Unicode code points；取消不发送变更请求，不改变状态、轮次或时间；原创建/配置入口返回衔接保持。
+  expected_results:
+  - 卡片与表格同源同权限；筛选/排序改变回第一页；最新按真实published_at且null末尾，历史显示未记录；默认/最热原口径保持，旧Agent版本类型徽标保留。
+  - 保留原安装/复制累计数和三类既有内部视图；无调用/对话次数列、占位或采集请求；update_time不冒充上架时间。
+  - 既有导入/安装流程与端口选择保留；MCP共享字段尊重白名单；成功刷新原计数，本地健康/开关与审核状态分别显示。
+  - 新页面说明选填、上限1000 Unicode code points；取消不发送变更请求，不改变状态、轮次或时间；原创建/配置入口返回衔接保持。
+  forbidden_side_effects:
+  - 不因页面合并改版创建/配置/调试/API发布流程。
+  - 不得以历史update_time推断上架时间或新增调用次数接口。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-003
+    - AC-011
+    design_status: Designed; product, script and runtime evidence PENDING.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 卡片与表格同源同权限；筛选/排序改变回第一页；最新按真实published_at且null末尾，历史显示未记录；默认/最热原口径保持，旧Agent版本类型徽标保留。（SPEC AC-003,
+      AC-011）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 保留原安装/复制累计数和三类既有内部视图；无调用/对话次数列、占位或采集请求；update_time不冒充上架时间。（SPEC AC-003, AC-011）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 既有导入/安装流程与端口选择保留；MCP共享字段尊重白名单；成功刷新原计数，本地健康/开关与审核状态分别显示。（SPEC AC-003, AC-011）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 新页面说明选填、上限1000 Unicode code points；取消不发送变更请求，不改变状态、轮次或时间；原创建/配置入口返回衔接保持。（SPEC AC-003, AC-011）
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  actor: 具备Case指定能力的租户用户及审核员
+  journey:
+  - 三类仓库分别切卡片/列表、搜索标签、分页和默认/最热/最新排序
+  - 检查列表、详情和空态；新安装/复制后刷新
+  - Agent复制执行预检冲突处理；Skill冲突重命名；MCP URL及容器两条安装入口
+  - 打开上架申请输入说明，分别输入1000/1001字符并取消；再取消通过/驳回确认框
+  final_business_result:
+  - 卡片与表格同源同权限；筛选/排序改变回第一页；最新按真实published_at且null末尾，历史显示未记录；默认/最热原口径保持，旧Agent版本类型徽标保留。
+  - 保留原安装/复制累计数和三类既有内部视图；无调用/对话次数列、占位或采集请求；update_time不冒充上架时间。
+  - 既有导入/安装流程与端口选择保留；MCP共享字段尊重白名单；成功刷新原计数，本地健康/开关与审核状态分别显示。
+  - 新页面说明选填、上限1000 Unicode code points；取消不发送变更请求，不改变状态、轮次或时间；原创建/配置入口返回衔接保持。
+  failure_evidence:
+  - 脱敏截图、浏览器控制台、网络请求及响应、run_id和实际被测commit；不保存凭据。

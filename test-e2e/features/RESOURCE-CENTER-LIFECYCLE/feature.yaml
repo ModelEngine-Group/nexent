@@ -1,0 +1,29 @@
+schema_version: '1.0'
+module:
+  id: RESOURCE-CENTER
+  name: 资源仓库与统一审核
+feature:
+  feature_id: RESOURCE-CENTER-LIFECYCLE
+  name: 审核轮次、业务时间与兼容迁移
+  status: planned
+  description: 资源仓库统一设计；设计阶段，尚未实施或执行业务验收。
+  business_rules:
+  - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-007
+    description: AC-007：提交写审核表真实submitted_at；通过时reviewed_at作为发布时间，仓库列表关联读取；安装/复制/下架不改变历史审核时间，旧无关联资源时间未知。
+  - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-008
+    description: AC-008：每次申请独立review_id和不可变快照；新申请使用认证内部用户ID；同源只能一条待审，相同返回原申请，内容变化409；完成后重提新增申请，不覆盖旧意见。
+  - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-009
+    description: AC-009：pending条件决策最多一次；通过发布快照及保存审核结果同事务，驳回不写仓库；失败整体回滚且无通知；下架与审核按同源锁串行。
+  - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-010
+    description: AC-010：旧页面保留并接入共享服务；旧仓库ID只映射唯一授权申请，不伪造仓库ID或混用review_id；首次申请响应不再保证非空仓库ID，依赖该契约的调用方适配后才能上线。
+  - rule_id: RESOURCE-CENTER-LIFECYCLE-RULE-016
+    description: AC-016：新增审核表，仅迁移pending_review；说明取content、时间取update_time、提交人取资源创建人ID；旧18列仅本地一次性清理，不进入正式迁移，Skill来源列保留；异常回滚、重复执行不重复导入，旧写入者切换前停写。
+  required_test_stages:
+  - D2
+  - D3
+  - D5
+  source:
+    requirement_ids:
+    - RESOURCE-CENTER-REQ-20261031
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    notes: 2026-10-31 full requirement design. Existing repository Features and D1 Cases remain unchanged.

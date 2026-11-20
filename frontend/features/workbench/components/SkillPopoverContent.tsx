@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -157,7 +159,7 @@ export function SkillPopoverContent({
         <button
           type="button"
           className="text-sm leading-[22px] text-[#191919] hover:text-[#197BD5]"
-          onClick={() => router.push("/skill-space?tab=mine")}
+          onClick={() => router.push("/resource-space?tab=skill&view=mine")}
         >
           {t("chat.skillsPopover.manageSkills")}
         </button>

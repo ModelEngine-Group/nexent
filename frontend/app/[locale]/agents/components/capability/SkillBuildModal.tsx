@@ -13,6 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   Modal,
+  Drawer,
   Tabs,
   Form,
   Input,
@@ -64,6 +65,7 @@ const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
 ]);
 
 interface SkillBuildModalProps {
+  repositoryLayout?: boolean;
   isOpen: boolean;
   onCancel: () => void;
   onSuccess: () => void | Promise<void>;
@@ -157,6 +159,7 @@ export default function SkillBuildModal({
   onBeforeEditSave,
   zIndex = 1000,
   initialTab = "interactive",
+  repositoryLayout = false,
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
@@ -988,9 +991,10 @@ export default function SkillBuildModal({
     return t("skillManagement.mode.create");
   };
 
+  const Panel = repositoryLayout ? Drawer : Modal;
   return (
     <>
-      <Modal
+      <Panel
         title={
           <div>
             <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
@@ -1006,28 +1010,43 @@ export default function SkillBuildModal({
           </div>
         }
         open={isOpen}
-        onCancel={handleModalClose}
+        {...(repositoryLayout
+          ? { onClose: handleModalClose, size: "min(1180px, 100vw)" }
+          : {
+              onCancel: handleModalClose,
+              centered: true,
+              width: "min(1180px, calc(100vw - 32px))",
+            })}
         destroyOnHidden
         zIndex={zIndex}
-        centered
-        width="min(1180px, calc(100vw - 32px))"
-        styles={{
-          container: {
-            display: "flex",
-            flexDirection: "column",
-            maxHeight: modalViewportFrame,
-            overflow: "hidden",
-          },
-          body: {
-            display: "flex",
-            flex: "1 1 auto",
-            flexDirection: "column",
-            height: modalBodyFrame,
-            maxHeight: modalBodyFrame,
-            minHeight: 0,
-            overflow: "hidden",
-          },
-        }}
+        styles={
+          repositoryLayout
+            ? {
+                body: {
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
+                  overflow: "hidden",
+                },
+              }
+            : {
+                container: {
+                  display: "flex",
+                  flexDirection: "column",
+                  maxHeight: modalViewportFrame,
+                  overflow: "hidden",
+                },
+                body: {
+                  display: "flex",
+                  flex: "1 1 auto",
+                  flexDirection: "column",
+                  height: modalBodyFrame,
+                  maxHeight: modalBodyFrame,
+                  minHeight: 0,
+                  overflow: "hidden",
+                },
+              }
+        }
         footer={[
           <Button key="cancel" onClick={handleModalClose}>
             {t("common.cancel")}
@@ -1107,7 +1126,7 @@ export default function SkillBuildModal({
             resize: none !important;
           }
         `}</style>
-      </Modal>
+      </Panel>
       <ResourceTagAssignmentModal
         open={assignTagsOpen}
         onClose={() => {

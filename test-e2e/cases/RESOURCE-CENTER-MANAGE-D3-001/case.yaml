@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D3
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-MANAGE-D3-001
+  feature_id: RESOURCE-CENTER-MANAGE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-MANAGE-RULE-011
+  - RESOURCE-CENTER-MANAGE-RULE-012
+  - RESOURCE-CENTER-MANAGE-RULE-013
+  title: Skill来源持久化、多副本及引用保护
+  type: INTEGRATION
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: Skill来源持久化、多副本及引用保护
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 从两个同名仓库Skill安装到真实SkillInfo，第二次同源用重命名创建副本
+    expected: 各副本持久化正确source_repository_id；同源多副本可区分；下载累计按既有成功规则增加，冲突失败不增加。
+  - order: 2
+    action: 给一个副本加Agent引用，另建只读/历史无来源副本；查询跨用户及跨租户可见列表
+    expected: 只返回当前用户有权看到的副本，历史未知不猜测；引用副本保留删除保护，只读副本不可卸载。
+  - order: 3
+    action: 卸载无引用且可编辑的特定skill_id，重新读源条目与其余副本
+    expected: 仅目标本地副本被删除，原仓库与其他副本及累计下载数不变；引用保护失败返回原服务错误且不半删。
+  expected_results:
+  - 各副本持久化正确source_repository_id；同源多副本可区分；下载累计按既有成功规则增加，冲突失败不增加。
+  - 只返回当前用户有权看到的副本，历史未知不猜测；引用副本保留删除保护，只读副本不可卸载。
+  - 仅目标本地副本被删除，原仓库与其他副本及累计下载数不变；引用保护失败返回原服务错误且不半删。
+  forbidden_side_effects:
+  - 不得为了卸载便利解除已有Agent引用。
+  - 不得减少累计下载量或误删同名来源。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-011
+    - AC-012
+    - AC-013
+    design_status: Designed; product, script and runtime evidence PENDING.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 各副本持久化正确source_repository_id；同源多副本可区分；下载累计按既有成功规则增加，冲突失败不增加。（SPEC AC-011, AC-012, AC-013）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 只返回当前用户有权看到的副本，历史未知不猜测；引用副本保留删除保护，只读副本不可卸载。（SPEC AC-011, AC-012, AC-013）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 仅目标本地副本被删除，原仓库与其他副本及累计下载数不变；引用保护失败返回原服务错误且不半删。（SPEC AC-011, AC-012, AC-013）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  integration_boundary:
+  - HTTP → real service/adapters → migrated PostgreSQL; repository snapshots and local Skill relations are real.
+  - Use sandbox storage for Skill archives and record notification enqueue after commit; no substituted database
+    or repository adapters.
+  observations:
+  - 各副本持久化正确source_repository_id；同源多副本可区分；下载累计按既有成功规则增加，冲突失败不增加。
+  - 只返回当前用户有权看到的副本，历史未知不猜测；引用副本保留删除保护，只读副本不可卸载。
+  - 仅目标本地副本被删除，原仓库与其他副本及累计下载数不变；引用保护失败返回原服务错误且不半删。
+  cleanup:
+  - 按run_id清理本Case创建的仓库记录、源资源、归档及通知；不触及基线资源。
+  - 保存脱敏请求、逐步DB断言和清理结果；清理失败不得报告PASS。

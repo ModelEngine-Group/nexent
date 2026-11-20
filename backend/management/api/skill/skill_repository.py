@@ -8,6 +8,7 @@ from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, Una
 from contracts.skill import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from contracts.tag import TagAssignmentFilter
 from fastapi import APIRouter, Body, Header, HTTPException, Query
+from contracts.errors.exceptions import SkillException
 from services.skill_repository_service import (
     count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
@@ -55,6 +56,8 @@ async def list_skill_repository_listings_api(
     ),
     tag: Optional[str] = Query(None, description="Filter by an exact tag"),
     sort_by_update_time: bool = Query(False, description="Sort by repository update time descending"),
+    include_installations: bool = Query(False, description="Include visible installed copies"),
+    sort_by_published_time: bool = Query(False, description="Sort by actual approval time descending"),
     authorization: str = Header(None),
 ):
     """List all skill marketplace repository listings with optional filters."""
@@ -71,6 +74,10 @@ async def list_skill_repository_listings_api(
             "search": search,
             "sort_by_update_time": sort_by_update_time,
         }
+        if sort_by_published_time:
+            filters["sort_by_published_time"] = True
+        if include_installations:
+            filters["include_installations"] = True
         predicates = _parse_tag_predicates(tag_predicates)
         if predicates:
             filters["tag_predicates"] = predicates
@@ -151,6 +158,8 @@ async def list_my_editable_skills_api(
         if predicates:
             filters["tag_predicates"] = predicates
         result = list_my_editable_skills_impl(**filters)
+        from management.services.repository.reviews import attach_latest_reviews
+        attach_latest_reviews(result["items"], "skill", "skill_id", user_id, tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized my editable skills access attempt: {str(e)}")
@@ -312,3 +321,37 @@ async def install_skill_from_repository_api(
                 "duplicate_skills": e.duplicate_names,
             },
         )
+
+
+@skill_repository_router.delete("/{skill_repository_id}/installations/{skill_id}")
+def uninstall_repository_copy_api(skill_repository_id: int, skill_id: int, authorization: str = Header(None)):
+    from management.services.repository.skill_installations import uninstall_repository_copy
+
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        ensure_skill_repository_access(user_id)
+        uninstall_repository_copy(skill_repository_id, skill_id, tenant_id, user_id)
+        return {"success": True}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ForbiddenError, UnauthorizedError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, SkillException) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@skill_repository_router.delete("/local/{skill_id}")
+def delete_local_skill_api(skill_id: int, authorization: str = Header(None)):
+    from management.services.repository.skill_installations import uninstall_repository_copy
+
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        ensure_skill_repository_access(user_id)
+        uninstall_repository_copy(None, skill_id, tenant_id, user_id)
+        return {"success": True}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ForbiddenError, UnauthorizedError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, SkillException) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
