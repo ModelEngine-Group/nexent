@@ -10,6 +10,12 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def test_backend_dockerfile_does_not_declare_exposed_ports():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    instructions = [line.strip().split(maxsplit=1) for line in dockerfile.splitlines()]
+    assert all(not parts or parts[0].upper() != "EXPOSE" for parts in instructions)
+
+
 @pytest.mark.parametrize("service,peer", [("management", "runtime"), ("runtime", "management")])
 def test_independent_target_installs_deployment_plugins_without_peer_sources(service, peer):
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
@@ -22,10 +28,18 @@ def test_independent_target_installs_deployment_plugins_without_peer_sources(ser
     assert (ROOT / "backend/tool_collection/langchain").is_dir()
 
 
-def test_management_image_contains_ops_router_dependencies():
+def test_independent_images_do_not_package_other_service_implementations():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
-    management = dockerfile.split("FROM backend-common AS management\n", 1)[1].split("\nFROM ", 1)[0]
-    assert "COPY backend/ops /opt/backend/ops" in management.splitlines()
+    common_and_services = dockerfile.split("FROM backend-common AS final", 1)[0]
+    copies = [line.split() for line in common_and_services.splitlines() if line.startswith("COPY ")]
+    for parts in copies:
+        assert all(
+            not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
+            for source in parts[1:-1]
+        )
+    runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
+    common = dockerfile.split("FROM base AS backend-common\n", 1)[1].split("\nFROM ", 1)[0]
+    assert "COPY deploy/sql/" not in runtime + common
 
 
 @pytest.mark.parametrize("service", ["management", "runtime"])

@@ -22,6 +22,8 @@ from fastapi import Depends, Path, Query
 from contracts.constants.environment import (
     DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
     DOCUMENT_DELETE_RETRY_INTERVAL_S,
+    REDIS_BACKEND_URL,
+    REDIS_URL,
 )
 from management.db.file.attachment import delete_file
 from management.db.knowledge_base.file_lifecycle import (
@@ -52,12 +54,23 @@ from management.services.knowledge_base.task_state import get_redis_service
 from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
 
-# Worker task control is optional when Redis or the worker package is unavailable.
-try:
-    from data_process.app import app as celery_app
-except Exception as error:  # noqa: BLE001 - preserve optional worker integration
-    celery_app = None
-    logger.debug("Celery task control is unavailable: %s", error)
+def _create_worker_control():
+    """Use Celery remote control when installed, without importing worker tasks."""
+    if not (REDIS_URL and REDIS_BACKEND_URL):
+        return None
+    try:
+        from celery import Celery
+    except ImportError:
+        return None
+    return Celery(
+        "nexent",
+        broker=REDIS_URL,
+        backend=REDIS_BACKEND_URL,
+        broker_transport_options={"master_name": "mymaster"},
+    )
+
+
+celery_app = _create_worker_control()
 
 
 class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):

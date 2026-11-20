@@ -28,6 +28,14 @@ cleanup() {
 docker network create "$prefix" >/dev/null
 trap cleanup EXIT
 
+for image in "$@"; do
+  ports="$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')"
+  if [ "$ports" != "null" ] && [ "$ports" != "{}" ]; then
+    echo "$image declares exposed ports: $ports" >&2
+    exit 1
+  fi
+done
+
 docker run -d --name "$prefix-postgres" --network "$prefix" --network-alias postgres \
   -e POSTGRES_USER=root -e POSTGRES_DB=nexent -e "POSTGRES_PASSWORD=$password" postgres:15-alpine >/dev/null
 docker run -d --name "$prefix-redis" --network "$prefix" --network-alias redis redis:7-alpine >/dev/null
@@ -59,9 +67,19 @@ docker run -d --name "$prefix-management" --network "$prefix" --network-alias ma
   "${env_args[@]}" --mount "type=bind,source=$repo/deploy/sql,target=/opt/nexent/sql,readonly" \
   --entrypoint /opt/nexent/scripts/start-backend.sh "$1" python -m backend.http.config_service >/dev/null
 wait_ready "$prefix-management" 5010
-docker exec "$prefix-management" sh -ec 'test ! -d /opt/backend/runtime'
+docker exec "$prefix-management" sh -ec '
+  test ! -d /opt/backend/runtime
+  test ! -d /opt/backend/ops
+  test ! -d /opt/backend/data_process
+  test ! -d /opt/backend/services
+'
 
 docker run -d --name "$prefix-runtime" --network "$prefix" --network-alias runtime \
   "${env_args[@]}" --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
 wait_ready "$prefix-runtime" 5014
-docker exec "$prefix-runtime" sh -ec 'test ! -d /opt/backend/management'
+docker exec "$prefix-runtime" sh -ec '
+  test ! -d /opt/backend/management
+  test ! -d /opt/backend/ops
+  test ! -d /opt/backend/data_process
+  test ! -e /opt/nexent/scripts/run-sql-migrations.sh
+'
