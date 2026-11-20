@@ -1,44 +1,25 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""An injected execution ID reaches both workspace tools and the SDK run object."""
+"""The signed run ID selects a stable Runtime workspace and tool scope."""
 
-import sys
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
-
-import pytest
-
-from test.backend.agents import test_create_agent_info as legacy
-from test.backend.configuration.helpers import system_config_snapshot
+from contracts.constants import environment
+from contracts.agentos import PreparedAgentRun
+from infrastructure.agentos_identity import ServicePrincipal
+from runtime.agentos import prepared_evaluation
+from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
 
 
-@pytest.mark.asyncio
-async def test_run_identity_is_not_regenerated_inside_builder(monkeypatch, tmp_path):
-    module = sys.modules[legacy.create_agent_run_info.__module__]
-    from management.services.agent.preparation import inputs
-
-    monkeypatch.setattr(inputs, 'AGENT_WORKSPACE_ROOT', str(tmp_path))
-    monkeypatch.setattr(module, 'AGENT_WORKSPACE_ROOT', str(tmp_path))
-    monkeypatch.setattr(module, 'get_config_snapshot', Mock(return_value=system_config_snapshot()))
-    monkeypatch.setattr(module, 'join_minio_file_description_to_query', AsyncMock(return_value='q'))
-    monkeypatch.setattr(module, 'create_model_config_list', AsyncMock(return_value=[]))
-    config = SimpleNamespace(sandbox_policy=None, model_name='model')
-    compiler = AsyncMock(return_value=config)
-    monkeypatch.setattr(module, 'create_agent_config', compiler)
-    monkeypatch.setattr(module, 'get_remote_mcp_server_list', AsyncMock(return_value=[]))
-    monkeypatch.setattr(module, 'get_tenant_local_mcp_server', Mock(return_value='http://mcp/sse'))
-    monkeypatch.setattr(module, 'filter_mcp_servers_and_tools', Mock(return_value=[]))
-    monkeypatch.setattr(module, 'apply_root_model_preferences', Mock())
-    monkeypatch.setattr(module, '_ensure_agent_reasoning_snapshot', Mock())
-    builder = Mock(return_value=SimpleNamespace())
-    monkeypatch.setattr(module, 'build_run_info', builder)
-    run_id = 'a' * 32
-    for _ in range(2):
-        await legacy.create_agent_run_info(
-            1, [], 'q', [], 'tenant', 'user', override_version_no=1, execution_run_id=run_id,
-        )
-    paths = [call.kwargs['workspace_path'] for call in builder.call_args_list]
-    assert paths[0] == paths[1] == str(tmp_path / 'user' / run_id)
-    assert all(call.kwargs['workspace_run_id'] == run_id for call in builder.call_args_list)
-    contexts = [call.kwargs['runtime_file_context'] for call in compiler.await_args_list]
-    assert all(ctx['run_id'] == run_id and ctx['workspace_path'] == paths[0] for ctx in contexts)
+def test_run_identity_is_not_regenerated_inside_builder(mocker, tmp_path):
+    request = evaluation_payload()
+    request.update(run_id="a" * 32, conversation_id=7)
+    payload = PreparedAgentRun.model_validate(request)
+    actor = ServicePrincipal("user-a", "tenant-a")
+    mocker.patch.object(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model_record())
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    mocker.patch.object(prepared_evaluation, "get_coordinator", return_value=None)
+    mocker.patch("runtime.model.parameters.read_agent_model_overrides", return_value={})
+    first = prepared_evaluation.prepare_run_snapshot(payload, actor)
+    retry = prepared_evaluation.prepare_run_snapshot(payload, actor)
+    assert first.workspace_run_id == retry.workspace_run_id == payload.run_id
+    assert first.workspace_path == retry.workspace_path == str(tmp_path / actor.user_id / payload.run_id)
