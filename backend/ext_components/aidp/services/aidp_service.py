@@ -2896,6 +2896,7 @@ def search_aidp_chunks_impl(
                 for key, value in (metadata if isinstance(metadata, dict) else {}).items()
                 if not key.startswith("_")
             },
+            "metadata_json": hit.get("metadata_json") or {},
             "score": hit.get("score"),
         }
         if tags:

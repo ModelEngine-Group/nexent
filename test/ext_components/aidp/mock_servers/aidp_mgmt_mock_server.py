@@ -2061,7 +2061,12 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             "file_url": image_file_url,
             "page_ids": pages,
             "metadata": {"section": f"part-{index + 1}", "source": file_name},
+            "metadata_json": {},
         }
+        # User-defined metadata from the bound ontology domain; the page shows
+        # this field instead of AIDP's system metadata.
+        if index in (0, 4):
+            chunk["metadata_json"] = {"部门": "研发", "密级": "内部"}
         # Newer AIDP builds return ontology auto-tags on `tag`; only some
         # chunks carry them, so the page must treat the field as optional.
         if index in (0, 2):
@@ -2324,7 +2329,12 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             "file_url": image_file_url,
             "page_ids": pages,
             "metadata": {"section": f"part-{index + 1}", "source": file_name},
+            "metadata_json": {},
         }
+        # User-defined metadata from the bound ontology domain; the page shows
+        # this field instead of AIDP's system metadata.
+        if index in (0, 4):
+            chunk["metadata_json"] = {"部门": "研发", "密级": "内部"}
         # Newer AIDP builds return ontology auto-tags on `tag`; only some
         # chunks carry them, so the page must treat the field as optional.
         if index in (0, 2):

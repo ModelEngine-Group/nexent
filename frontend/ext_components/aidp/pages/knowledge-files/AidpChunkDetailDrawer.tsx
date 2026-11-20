@@ -112,16 +112,18 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
       ? pageChunks[position + 1]
       : null;
 
+  // Only the user-defined metadata is surfaced; AIDP's system metadata
+  // (chapter/page_index/parent_chunk...) stays out of the page.
   const metadataEntries = useMemo(
     () =>
-      Object.entries(chunk?.metadata ?? {}).filter(
+      Object.entries(chunk?.metadata_json ?? {}).filter(
         ([key, value]) =>
           key.trim().length > 0 &&
           value !== null &&
           value !== undefined &&
           formatMetadataValue(value) !== ""
       ),
-    [chunk?.metadata]
+    [chunk?.metadata_json]
   );
   // Ontology auto-tags arrive only on newer AIDP builds; absent means empty.
   const tags = Array.isArray(chunk?.tag)

@@ -22,7 +22,6 @@ import time
 from http import HTTPStatus
 from typing import Annotated, List, Literal, Optional
 from urllib.parse import quote
-from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
@@ -353,21 +352,37 @@ class SetPermissionRequest(BaseModel):
         return self
 
 
+# AIDP reports file_uuid in two shapes across deployments: 32-char hex
+# without dashes (the 2026-11-20 contract run) and the standard 36-char UUID
+# with dashes (earlier environments). Every UUID the page sends came from an
+# AIDP response, so the proxy forwards it verbatim and only enforces this
+# loose shape instead of normalizing through uuid.UUID (which would rewrite
+# the 32-hex form and break the upstream lookup).
+AIDP_FILE_UUID_PATTERN = r"^[0-9a-fA-F-]{32,36}$"
+AidpFileUuid = Annotated[
+    str,
+    Field(
+        pattern=AIDP_FILE_UUID_PATTERN,
+        description="AIDP file UUID exactly as returned upstream",
+    ),
+]
+
+
 class RemoveAidpDocumentsRequest(BaseModel):
 
-    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+    file_uuids: List[AidpFileUuid] = Field(..., min_length=1, description="AIDP file UUIDs")
 
 
 class RetryAidpDocumentsRequest(BaseModel):
     """AIDP accepts one or more failed file UUIDs in a single retry request."""
 
-    file_uuids: List[UUID] = Field(..., min_length=1)
+    file_uuids: List[AidpFileUuid] = Field(..., min_length=1)
 
 
 class DownloadAidpDocumentRequest(BaseModel):
     """AIDP file selected for download."""
 
-    file_uuid: UUID = Field(..., description="AIDP file UUID")
+    file_uuid: AidpFileUuid = Field(..., description="AIDP file UUID")
 
 
 def _normalize_chunk_text(value: str) -> str:
@@ -416,7 +431,7 @@ class CreateAidpChunkRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    file_uuid: UUID = Field(..., description="AIDP file UUID the chunk belongs to")
+    file_uuid: AidpFileUuid = Field(..., description="AIDP file UUID the chunk belongs to")
     chunk_text: str = Field(..., description="Chunk text (1-10240 characters)")
 
     @field_validator("chunk_text")
@@ -443,7 +458,7 @@ class RetryAidpSummariesRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+    file_uuids: List[AidpFileUuid] = Field(..., min_length=1, description="AIDP file UUIDs")
 
 
 class RemoveAidpChunksRequest(BaseModel):
@@ -1349,7 +1364,7 @@ def _stream_aidp_preview(aidp_response: httpx.Response) -> StreamingResponse:
 async def preview_document(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
+    file_uuid: Annotated[str, Path(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
 ) -> StreamingResponse:
     """Stream one AIDP document inline so the browser can render it.
 
@@ -1373,7 +1388,7 @@ async def preview_document(
 async def list_chunks(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[UUID, Query(description="AIDP file UUID")],
+    file_uuid: Annotated[str, Query(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 20,
 ) -> JSONResponse:
@@ -1426,7 +1441,7 @@ async def list_chunks(
 async def search_chunks(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[UUID, Query(description="AIDP file UUID")],
+    file_uuid: Annotated[str, Query(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
     file_name: Annotated[
         str,
         Query(
@@ -1634,7 +1649,7 @@ async def update_chunk(
 async def get_file_summary(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
+    file_uuid: Annotated[str, Path(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
 ) -> JSONResponse:
     """Read one file's summary; the KB and file are addressed by path."""
     user_id, tenant_id = await _auth(request)

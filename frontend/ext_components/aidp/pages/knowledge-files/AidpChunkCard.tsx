@@ -64,7 +64,9 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
   const tags = Array.isArray(chunk.tag)
     ? chunk.tag.filter((tag) => typeof tag === "string" && tag.trim())
     : [];
-  const metadataEntries = Object.entries(chunk.metadata ?? {}).filter(
+  // Only the user-defined metadata is surfaced; AIDP's system metadata
+  // (chapter/page_index/parent_chunk...) stays out of the page.
+  const metadataEntries = Object.entries(chunk.metadata_json ?? {}).filter(
     ([key, value]) =>
       key.trim().length > 0 &&
       value !== null &&

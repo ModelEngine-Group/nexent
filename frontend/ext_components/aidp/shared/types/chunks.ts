@@ -16,8 +16,10 @@ export interface AidpChunk {
   file_url?: string;
   /** Source page numbers; the contract exposes no in-page coordinates. */
   page_ids?: number[];
-  /** Read-only custom metadata configured on the AIDP side. */
+  /** System metadata AIDP derives while parsing (not shown in the page). */
   metadata?: Record<string, unknown>;
+  /** User-defined metadata from the bound ontology domain; default `{}`. */
+  metadata_json?: Record<string, unknown>;
   /**
    * Ontology entity tags produced by AIDP's auto-tagging task. Only newer
    * AIDP builds return this field; treat it as optional and absent-as-empty.
