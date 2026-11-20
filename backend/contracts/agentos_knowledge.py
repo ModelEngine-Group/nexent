@@ -14,6 +14,7 @@ from pydantic import (
     Field,
     JsonValue,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -248,6 +249,7 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     query: str = Field(min_length=1)
     search_mode: Literal["accurate", "semantic", "hybrid"] = "semantic"
     weight_accurate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    global_hybrid_candidates: bool = False
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
@@ -257,6 +259,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
 
     @model_validator(mode="after")
     def pinned_resources(self):
+        if self.global_hybrid_candidates and (self.search_mode != "hybrid" or self.rerank_model is not None):
+            raise ValueError("Global candidates require hybrid search without reranking")
         if self.file_versions and (
             set(self.file_versions) != set(self.file_ids)
             or any(type(value) is not int or value < 0 for value in self.file_versions.values())
@@ -269,6 +273,13 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
         ):
             raise ValueError("Expected a SHA256 revision for every requested knowledge resource")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_search(self, handler):
+        result = handler(self)
+        if not self.global_hybrid_candidates:
+            result.pop("global_hybrid_candidates", None)
+        return result
 
     @field_validator("file_ids")
     @classmethod

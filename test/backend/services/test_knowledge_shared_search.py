@@ -106,6 +106,30 @@ async def test_same_request_reads_own_and_asset_journals_without_changing_actor(
     assert s.calls==[(s.actor.user_id,s.actor.tenant_id)]*2
 
 
+@pytest.mark.parametrize(("global_candidates", "winner", "score", "branches"), [
+    (False, 2, .88, {"accurate": .8, "semantic": 1.0}),
+    (True, 1, .60, {"accurate": 1.0, "semantic": 0.0}),
+])
+async def test_global_cutoff_is_applied_to_each_visible_branch_before_fusion(mixed, global_candidates, winner, score, branches):
+    s = mixed
+    for collection, lexical, semantic in (("collection", 1.0, .1), ("shared", .8, 1.0)):
+        port = s.vectors[collection]
+        hit, = port.search.return_value
+        port.search.side_effect = [(replace(hit, score=lexical),), (replace(hit, score=semantic),)]
+    request = KnowledgeSearch.model_validate({
+        **s.request.model_dump(), "search_mode": "hybrid", "top_k": 1,
+        "weight_accurate": .6, "global_hybrid_candidates": global_candidates,
+    })
+
+    result = await s.service.search(request, s.actor)
+
+    hit, = result.hits
+    assert hit.knowledge_id == winner and hit.score == pytest.approx(score)
+    assert hit.score_details == branches
+    assert [port.search.call_count for port in s.vectors.values()] == [2, 2]
+    assert s.s.models.invoke.await_count == 1
+
+
 async def test_shared_sample_uses_resource_record_scope_and_actor_model_scope(mixed):
     s=mixed
     result=await s.sample.sample(KnowledgeSample(knowledge_id=2,expected_revision="a"*64),s.actor)

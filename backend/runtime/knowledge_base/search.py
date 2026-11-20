@@ -250,6 +250,9 @@ class KnowledgeSearchService:
                     lexical, semantic = await self._blocking(self._collect, vectors, grant, request, query_vector, limit, context=context)
                     lexical = await self._blocking(self._visible, records, grant, request, lexical, views, False, context=context)
                     semantic = await self._blocking(self._visible, records, grant, request, semantic, views, True, context=context)
+                    if request.global_hybrid_candidates:
+                        lexical = sorted(lexical, key=lambda hit: -hit.score)[:request.top_k]
+                        semantic = sorted(semantic, key=lambda hit: -hit.score)[:request.top_k]
                     candidates = rank_candidates(lexical, semantic, request.search_mode, request.query,
                                                  weight_accurate=request.weight_accurate)[:limit]
                     if request.rerank_model and candidates:

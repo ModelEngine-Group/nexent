@@ -32,6 +32,18 @@ def test_internal_search_contract_rejects_invalid_fusion_weight(weight):
                         weight_accurate=weight)
 
 
+def test_global_candidate_policy_is_opt_in_and_requires_hybrid_without_rerank():
+    base = {"knowledge_ids": [1, 2], "query": "query", "embedding_model": {"model_id": 2, "revision": "v1"}}
+    assert "global_hybrid_candidates" not in KnowledgeSearch(**base).model_dump()
+    request = KnowledgeSearch(**base, search_mode="hybrid", global_hybrid_candidates=True)
+    assert KnowledgeSearch.model_validate_json(request.model_dump_json()).global_hybrid_candidates is True
+    with pytest.raises(ValidationError):
+        KnowledgeSearch(**base, global_hybrid_candidates=True)
+    with pytest.raises(ValidationError):
+        KnowledgeSearch(**base, search_mode="hybrid", global_hybrid_candidates=True,
+                        rerank_model={"model_id": 3, "revision": "v1"})
+
+
 @pytest.mark.parametrize("query,weight", [("ordinary", 0), ("error 404", 0), ("ordinary", 0.5),
                                          ("error 404", 0.5), ("ordinary", 1), ("error 404", 1)])
 def test_explicit_weight_overrides_digit_policy_and_keeps_branch_details(query, weight):
