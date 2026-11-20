@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression protection for tenant ownership on relation creation/restoration."""
 
 import pytest
@@ -41,6 +43,11 @@ def test_read_filters_both_relation_and_external_tenants(mocker, reader):
     mocker.patch.object(session, "query", return_value=query)
     mocker.patch.object(legacy.a2a_db, "_get_db_session", return_value=session)
     assert getattr(legacy.a2a_db, reader)(100, "tenant-1") == []
-    tenant_checks = [arg for arg in filters.call_args.args if arg._name == "tenant_id"]
-    assert len(tenant_checks) == 2
-    assert all(arg._val == "tenant-1" for arg in tenant_checks)
+    tenant_values = []
+    for expression in filters.call_args.args:
+        if isinstance(expression, legacy._MockCol):
+            if expression._name == "tenant_id":
+                tenant_values.append(expression._val)
+        elif getattr(expression.left, "key", None) == "tenant_id":
+            tenant_values.append(expression.right.value)
+    assert tenant_values == ["tenant-1", "tenant-1"]

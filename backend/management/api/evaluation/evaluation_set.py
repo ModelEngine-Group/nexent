@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 from pydantic import BaseModel, Field
 
-from management.configuration.runtime import get_config_snapshot
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import CASE_ANSWER_MAX_LEN, CASE_QUERY_MAX_LEN, MAX_EVALUATION_SETS, SET_NAME_MAX_LEN, SET_NAME_MIN_LEN
 from contracts.errors.exceptions import AppException, UnauthorizedError

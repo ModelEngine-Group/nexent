@@ -122,3 +122,28 @@ def build_run_monitoring_catalog(tenant_id, used_mcp_urls, mcp_records, local_se
     except Exception as error:
         logger.warning("event=monitoring_catalog_build_failed error=%s", type(error).__name__)
         return None
+
+
+def build_run_monitoring_catalog_from_db(tenant_id, used_mcp_urls, mcp_rows, local_server_url, *, enabled, is_debug):
+    """Assemble the per-run catalog from unified infrastructure MCP record rows.
+
+    ``mcp_rows`` are ``McpRecord`` dicts keyed by persistence column names
+    (``mcp_server``/``mcp_name``); they are mapped to the catalog record shape
+    and delegated to :func:`build_run_monitoring_catalog`. Container records
+    keep ``container_id``/``config_json`` so container classification survives.
+    """
+    mapped = [
+        {
+            "remote_mcp_server": row.get("mcp_server"),
+            "remote_mcp_server_name": row.get("mcp_name"),
+            "status": row.get("status"),
+            "mcp_id": row.get("mcp_id"),
+            "container_id": row.get("container_id"),
+            "config_json": row.get("config_json"),
+        }
+        for row in (mcp_rows or [])
+        if isinstance(row, dict)
+    ]
+    return build_run_monitoring_catalog(
+        tenant_id, used_mcp_urls, mapped, local_server_url, enabled=enabled, is_debug=is_debug,
+    )

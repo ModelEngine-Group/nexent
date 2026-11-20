@@ -124,7 +124,7 @@ class BusinessImportGuard(importlib.abc.MetaPathFinder):
             or fullname.startswith('management.db.')
             or fullname.startswith('management.services.permission.identity')
             or fullname in {'management.services', 'management.services.permission'}
-            or fullname.startswith('management.configuration.')
+            or fullname.startswith('infrastructure.system_configuration.')
             or fullname == 'nexent' or fullname.startswith('nexent.')
         )
         if not allowed_shared_import and fullname.split('.')[0] in {

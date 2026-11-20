@@ -125,6 +125,8 @@ class ManagedMCPToolCollection:
         async with AsyncExitStack() as stack:
             connections = []
             for parameters in self.server_parameters:
+                parameters = parameters.copy()
+                allowed_tools = parameters.pop("allowed_tools", None)
                 try:
                     connection = await asyncio.wait_for(
                         stack.enter_async_context(
@@ -148,12 +150,15 @@ class ManagedMCPToolCollection:
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
                     ) from exc
-                connections.append(connection)
+                connections.append((*connection, allowed_tools))
 
             tools = []
             # Connections mirror server_parameters order: exactly one per entry.
-            for parameters, (session, mcp_tools) in zip(self.server_parameters, connections):
+            for parameters, (session, mcp_tools, allowed_tools) in zip(self.server_parameters, connections):
+                matched = set()
                 for mcp_tool in mcp_tools:
+                    if allowed_tools is not None and mcp_tool.name not in allowed_tools:
+                        continue
 
                     def call_tool(
                         arguments=None,
@@ -162,11 +167,17 @@ class ManagedMCPToolCollection:
                     ):
                         return self._call_tool(__session, __name, arguments)
 
-                    adapted = adapter.adapt(call_tool, mcp_tool)
+                    tool = adapter.adapt(call_tool, mcp_tool)
                     # Non-invasive binding: managed_forward resolves the monitoring
                     # server identity from this URL at invocation time.
-                    adapted._nexent_mcp_server_url = parameters.get("url")
-                    tools.append(adapted)
+                    tool._nexent_mcp_server_url = parameters.get("url")
+                    if allowed_tools is not None:
+                        if mcp_tool.name in matched or tool.name != allowed_tools[mcp_tool.name]:
+                            raise ValueError("MCP tool discovery does not match the authorized binding")
+                        matched.add(mcp_tool.name)
+                    tools.append(tool)
+                if allowed_tools is not None and matched != allowed_tools.keys():
+                    raise ValueError("Authorized MCP tool is missing from discovery")
 
             close_event = asyncio.Event()
             with self._lock:
@@ -438,6 +449,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             result["headers"] = {"Authorization": mcp_host_item["authorization"]}
         elif "headers" in mcp_host_item:
             result["headers"] = mcp_host_item["headers"]
+
+        if "allowed_tools" in mcp_host_item:
+            result["allowed_tools"] = mcp_host_item["allowed_tools"]
 
         if "httpx_client_factory" in mcp_host_item:
             httpx_client_factory = mcp_host_item["httpx_client_factory"]

@@ -75,7 +75,7 @@ def _project_python_files(root):
 def naming(monkeypatch):
     dependency(monkeypatch, "contracts.constants.environment", LANGUAGE={"ZH": "zh", "EN": "en"})
     dependency(monkeypatch, "management.db.agent.repository", query_all_agent_info_by_tenant_id=lambda tenant: [])
-    dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
+    dependency(monkeypatch, "management.clients.model", invoke_chat_prompt=lambda **kw: "fresh")
     dependency(
         monkeypatch, "management.services.agent.prompt",
         load_default_generation_prompt=lambda language: {},
@@ -96,24 +96,26 @@ def test_ac003_duplicate_scope_and_suffix(naming, field):
 
 @pytest.mark.parametrize("field", ["name", "display_name"])
 @pytest.mark.parametrize("failure", ["exception", "duplicate", "empty"])
-def test_ac003_five_attempts_then_suffix(naming, monkeypatch, field, failure):
+@pytest.mark.asyncio
+async def test_ac003_five_attempts_then_suffix(naming, monkeypatch, field, failure):
     calls = []
 
-    def generate(**kwargs):
+    async def generate(**kwargs):
         calls.append(kwargs)
         if failure == "exception":
             raise RuntimeError("unavailable")
         return "same" if failure == "duplicate" else ""
 
-    monkeypatch.setattr(naming, "call_llm_for_system_prompt", generate)
-    assert naming.regenerate_agent_value(
-        field, "same", ["same"], "task", 12, "tenant", agents_cache=[]
+    monkeypatch.setattr(naming, "invoke_chat_prompt", generate)
+    assert await naming.regenerate_agent_value(
+        field, "same", ["same"], "task", 12, "tenant", agents_cache=[], user_id="actor"
     ) == "same_1"
     assert len(calls) == 5
     assert all(call["model_id"] == 12 and call["tenant_id"] == "tenant" for call in calls)
 
 
-def test_ac003_default_prompt_and_output_normalization(naming, monkeypatch):
+@pytest.mark.asyncio
+async def test_ac003_default_prompt_and_output_normalization(naming, monkeypatch):
     observed = {}
 
     def resolve(language):
@@ -125,9 +127,13 @@ def test_ac003_default_prompt_and_output_normalization(naming, monkeypatch):
 
     monkeypatch.setattr(naming, "load_default_generation_prompt", resolve)
     calls = []
-    monkeypatch.setattr(naming, "call_llm_for_system_prompt", lambda **kw: calls.append(kw) or " fresh \nignored")
-    assert naming.regenerate_agent_value(
-        "name", "old", ["z", "a"], "task", 12, "tenant", language="en"
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return " fresh \nignored"
+
+    monkeypatch.setattr(naming, "invoke_chat_prompt", generate)
+    assert await naming.regenerate_agent_value(
+        "name", "old", ["z", "a"], "task", 12, "tenant", language="en", user_id="actor"
     ) == "fresh"
     assert observed == {"language": "en"}
     assert calls[0]["system_prompt"] == "old=old"
@@ -375,7 +381,8 @@ def test_ac012_permission_requirements_share_resolver(monkeypatch):
     dependency(monkeypatch, "management.db.identity.group", query_group_ids_by_user=lambda user_id: [])
     dependency(monkeypatch, "management.db.identity.user_tenant", get_user_tenant_by_user_id=lambda user_id: {})
     dependency(monkeypatch, "permissions.models", Resource=object)
-    dependency(monkeypatch, "permissions.dac", ResourceAccessControl=object)
+    dependency(monkeypatch, "permissions.dac", ResourceAccessControl=object,
+               resolve_knowledge_permissions=lambda *args, **kwargs: {})
     module = load_source(
         monkeypatch,
         "backend/management/services/knowledge_base/permission.py",
@@ -443,6 +450,7 @@ def test_ac016_management_services_are_grouped_by_business_package():
         if path.is_dir() and not path.name.startswith("__")
     )
 
+    # Northbound remains a Management ingress facade after its image is retired.
     assert root_modules == ["__init__.py", "northbound.py"]
     assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)

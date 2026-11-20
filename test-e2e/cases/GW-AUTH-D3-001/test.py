@@ -28,8 +28,7 @@ from gateway.application import create_gateway_app
 from gateway.security.management_client import lookup_identity
 from gateway.configuration import GatewaySettings
 from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
-from runtime.api.identity_routes import is_runtime_service_request
-from gateway.downstream.middleware import GatewayIdentityMiddleware
+from backend.http.server.app_factory import create_app
 from gateway.mcp.credential_client import resolve_mcp_identity
 from gateway.mcp.identity_router import TenantMCPRouter
 from gateway.security.identity import sign_delegation
@@ -66,6 +65,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     secret = "local-gateway-auth-d3-fixture-not-a-deployment-secret"
     monkeypatch.setattr(environment, "JWT_SECRET", secret)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
     accounts = {
         user: {"delete_flag": "N", "token_version": 3, "email": "fixture@example.test", "user_roles": [role]}
         for user, role in (("u1", "USER"), ("u2", "USER"), ("su", "SU"))
@@ -103,12 +103,10 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
             result = await manager.shutdown(timeout=2)
             assert result.stuck_execution_ids == ()
 
-    management = FastAPI(root_path="/api", lifespan=management_lifespan)
-    management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
+    management = create_app(enable_monitoring=False, lifespan=management_lifespan,
+                            gateway_identity_audience="management")
     management.include_router(lookup_routes.router)
-    runtime = FastAPI(root_path="/api")
-    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True,
-                           internal_runtime_request=is_runtime_service_request)
+    runtime = create_app(enable_monitoring=False, gateway_identity_audience="runtime")
     reached = []
     context_checks = []
 
@@ -128,10 +126,10 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     management.add_middleware(ObserveContext)
     runtime.add_middleware(ObserveContext)
 
-    @runtime.post("/agent/run")
+    @management.post("/agent/run")
     async def execute():
         identity = identity_context.get()
-        reached.append(("runtime", identity["user_id"]))
+        reached.append(("management", identity["user_id"]))
         return identity
 
     @management.get("/nb/v1/agents")
@@ -149,12 +147,6 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     async def current_user():
         identity = identity_context.get()
         reached.append(("current-user", identity["user_id"]))
-        return identity
-
-    @runtime.post("/agent/internal/northbound/run")
-    async def dispatch():
-        identity = identity_context.get()
-        reached.append(("dispatch", identity["user_id"]))
         return identity
 
     @runtime.websocket("/voice/stt/ws")
@@ -248,8 +240,8 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 response = await client.post(runtime_url + "/api/agent/run", headers={"Authorization": "Bearer " + credential()})
                 assert response.status_code == 401
                 principal = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
-                wrong_service = sign_identity(principal, "management", "POST", "/api/agent/run", b"")
-                response = await client.post(runtime_url + "/api/agent/run", headers={IDENTITY_HEADER: wrong_service})
+                wrong_service = sign_identity(principal, "runtime", "POST", "/api/agent/run", b"")
+                response = await client.post(management_url + "/api/agent/run", headers={IDENTITY_HEADER: wrong_service})
                 assert response.status_code == 401 and reached == baseline
                 accounts["u1"]["token_version"] = 4
                 response = await client.post(gateway_url + "/api/agent/run", headers={"Authorization": "Bearer " + credential()})
@@ -268,7 +260,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 monkeypatch.setattr(internal_tokens, "JWT_SECRET", secret)
                 response = await client.post(runtime_url + "/api/agent/internal/northbound/run", headers={
                     "Authorization": "Bearer " + internal_tokens.generate_internal_runtime_jwt("u1", "t1")})
-                assert response.status_code == 200 and response.json()["kind"] == "internal"
+                assert response.status_code == 401 and reached == baseline
                 response = await client.post(runtime_url + "/api/agent/internal/northbound/run", headers={
                     "Authorization": "Bearer " + credential()})
                 assert response.status_code == 401
@@ -294,4 +286,4 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 assert ws.close_code == 1000
     assert identity_context.get() is None
     assert context_checks and all(context_checks)
-    assert reached == [("runtime", "u1"), ("runtime", "u2"), ("current-user", "su"), ("northbound", "u1"), ("dispatch", "u1"), ("voice", "u2")]
+    assert reached == [("management", "u1"), ("management", "u2"), ("current-user", "su"), ("northbound", "u1"), ("voice", "u2")]

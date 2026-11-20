@@ -319,9 +319,10 @@ async def generate_evaluator_api(
 ):
     """Generate an evaluator configuration from a natural language description."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        data = generate_evaluator_by_llm_impl(
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = await generate_evaluator_by_llm_impl(
             description=payload.description,
+            user_id=user_id,
             tenant_id=tenant_id,
             model_id=payload.model_id,
             agent_id=payload.agent_id,

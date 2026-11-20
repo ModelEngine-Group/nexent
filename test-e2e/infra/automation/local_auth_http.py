@@ -35,7 +35,7 @@ def native_runtime():
         from contracts.errors.exceptions import AppException
         from management.services.permission.identity import session as helpers
         from management.api.identity import user_management as routes
-        from management.configuration.runtime import stop_system_configuration
+        from infrastructure.system_configuration.runtime import stop_system_configuration
         from management.db import models
         from infrastructure.rdb.client import db_client
         from management.services.permission.identity import authentication as auth

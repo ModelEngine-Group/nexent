@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-VALIDATION-TIMEOUT-20261111
+  change_type: test-fix
+  title: Bound local AgentOS verification and reclaim timed-out processes
+  description: >-
+    Apply the explicit Case timeout to local run_cases commands with one shared
+    deadline. Reuse owned process-tree cleanup and report timeout and cleanup
+    failures without accepting stale successful JUnit. Daily keeps its outer
+    worker deadline and process group. AgentOS loopback clients use finite read
+    deadlines and server shutdown is bounded; production SSE policy is unchanged.
+    Add actual header/body stall and closure checks and retain all existing Cases.
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AOS-TRANSPORT-D3-001]
+    retired: []

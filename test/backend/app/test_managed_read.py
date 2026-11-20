@@ -66,7 +66,7 @@ async def test_managed_handler_keeps_http_contract_and_event_loop_responsive():
 
 @pytest.mark.asyncio
 async def test_full_read_lane_returns_retryable_error_without_starting_handler():
-    from management.utils.exception_handlers import register_exception_handlers
+    from backend.http.server.exception_handlers import register_exception_handlers
 
     manager = ThreadManager(service_name="full-read-test", lane_policies={
         "control-io": LanePolicy(name="control-io", max_workers=1, max_queue_size=0),
