@@ -26,7 +26,7 @@ from nexent.core.model_service.compatibility.invocation_options import LegacyInv
 from nexent.core.model_service.contracts import ModelMessage, ModelRequest, ToolCall, ToolDefinition
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.registry import AuthenticationRegistry
-from nexent.core.model_service.service import ModelService, ModelServiceError
+from nexent.core.model_service.service import RETRY_UNCOMMITTED_WITHOUT_STOP, ModelService, ModelServiceError
 from nexent.core.model_service.errors import model_error_message
 from nexent.core.models.capacity_budget import parse_context_budget_snapshot
 from nexent.core.models.message_utils import merge_system_messages
@@ -103,6 +103,7 @@ class LegacyChatModel(Model):
 
     supports_deferred_attempt_commit = True
     supports_suppressed_attempt_stream = True
+    supports_runtime_stop_recovery = True
 
     def __init__(
         self, profile, service, *, observer=None, cancellation_scope=None, flatten_messages_as_text=False,
@@ -346,10 +347,11 @@ class LegacyChatModel(Model):
     def generate(
         self, messages, stop_sequences=None, response_format=None, tools_to_call_from=None,
         *, _defer_attempt_commit=False, _suppress_attempt_stream=False, _retry_empty_response=True,
+        _retry_without_runtime_stop=False,
         context_budget_snapshot=None, context_rebuild=None, **kwargs,
     ):
         if any(type(value) is not bool for value in (
-            _defer_attempt_commit, _suppress_attempt_stream, _retry_empty_response
+            _defer_attempt_commit, _suppress_attempt_stream, _retry_empty_response, _retry_without_runtime_stop
         )):
             raise ValueError("Attempt controls must be booleans")
         options = LegacyInvocationOptions(
@@ -357,9 +359,15 @@ class LegacyChatModel(Model):
             context_budget_snapshot if context_budget_snapshot is not None else self.context_budget_snapshot,
             self.capacity_snapshot,
         )
+        empty_response_policy = "retry_uncommitted" if _retry_empty_response else "fail"
+        if (
+            _retry_empty_response and _retry_without_runtime_stop and stop_sequences
+            and "stop" not in kwargs and self.profile.parameter_values.get("stop") is None
+        ):
+            empty_response_policy = RETRY_UNCOMMITTED_WITHOUT_STOP
         events = self._events(
             messages, options, tools_to_call_from, suppress_stream=_suppress_attempt_stream,
-            empty_response_policy="retry_uncommitted" if _retry_empty_response else "fail",
+            empty_response_policy=empty_response_policy,
             context_rebuild=context_rebuild,
         )
         try:
@@ -393,6 +401,7 @@ class LegacyChatModel(Model):
                 result.model_attempt_id = self.last_attempt_id
                 result.model_attempt_number = event.attempt
                 result.model_attempt_commit_deferred = _defer_attempt_commit and not _suppress_attempt_stream
+                result.runtime_stop_omitted = event.runtime_stop_omitted
                 result.refusal = message.refusal
                 if not _defer_attempt_commit and not _suppress_attempt_stream:
                     self.observer.commit_model_attempt(self.last_attempt_id, event.attempt)

@@ -3414,6 +3414,25 @@ class TestRunStreamRealExecution:
         assert agent.model.call_args.kwargs["stop_sequences"] == expected_stops
 
     @pytest.mark.parametrize("content", [
+        "<code>print(1)",
+        "<code>print(1)</code>\n<RESULT>invented result</RESULT>",
+    ])
+    def test_rsr_004_stopless_retry_still_uses_strict_code_protocol(self, content):
+        module = core_agent_module
+        agent, action_step, response = self._create_cmsr_007_step_agent(content)
+        agent.enable_protocol_repair_retry = True
+        agent.model.supports_runtime_stop_recovery = True
+        agent.python_executor = MagicMock()
+        response.runtime_stop_omitted = True
+
+        with pytest.raises(module.ModelOutputProtocolError):
+            list(agent._step_stream(action_step))
+
+        assert agent.model.call_args.kwargs["_retry_without_runtime_stop"] is True
+        agent.python_executor.assert_not_called()
+        agent.observer.commit_model_attempt.assert_not_called()
+
+    @pytest.mark.parametrize("content", [
         "A complete plain answer.",
     ])
     def test_oc_028_strict_third_visible_output_becomes_answer(self, monkeypatch, content):

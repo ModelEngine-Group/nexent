@@ -136,6 +136,7 @@ class ModelEvent(ProfileContract):
     usage: TokenUsage | None = None
     finish_reason: NonBlankString | None = None
     error: ModelError | None = Field(default=None, repr=False)
+    runtime_stop_omitted: bool = Field(default=False, exclude=True)
 
     @model_validator(mode="after")
     def validate_payload(self) -> Self:
