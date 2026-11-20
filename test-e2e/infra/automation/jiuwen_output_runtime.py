@@ -4,8 +4,10 @@
 
 import json
 import uuid
+from types import SimpleNamespace
 
 from sqlalchemy import select
+from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from jiuwen_context_runtime import context_database as context_database
@@ -21,7 +23,7 @@ async def persist_output(monkeypatch, info, output):
     from management.db.conversation.repository import (
         create_conversation, create_conversation_message, get_conversation_history,
     )
-    from management.services.agent import prepared_projection
+    from management.services.agent import prepared_projection, runtime_client
     from management.services.agent.agentos_events import present_public_resume
 
     # The SDK run has already drained. Control only retained-journal delivery and
@@ -44,12 +46,25 @@ async def persist_output(monkeypatch, info, output):
     async def resume(request, user_id, tenant_id):
         assert request.run_id == reference.run_id and request.conversation_id == conversation
         assert (user_id, tenant_id) == ("owner", "spike-tenant")
-        assert request.after_event_id is None
+        after = 0
+        if request.after_event_id is not None:
+            run_id, index = request.after_event_id.split(":")
+            assert run_id == reference.run_id and 0 < int(index) <= len(frames)
+            after = int(index)
+        closed = False
+
+        def close():
+            nonlocal closed
+            closed = True
 
         async def body():
-            for frame in frames:
-                yield frame
-        return StreamingResponse(body())
+            try:
+                for frame in frames[after:]:
+                    assert not closed
+                    yield frame
+            finally:
+                close()
+        return StreamingResponse(body(), background=BackgroundTask(close))
 
     async def inline_io(_task, function, *, lane, owner, **kwargs):
         assert lane == "control-io" and owner == "management"
@@ -78,6 +93,24 @@ async def persist_output(monkeypatch, info, output):
 
     wire = await public_wire()
     assert await public_wire() == wire, "Public journal replay changed observer projection"
+    roots = [(index, event) for index, event in enumerate(output, 1) if event.get("type") == "tool"
+             and event.get("runtime_mode") == "native_agent" and not event.get("invocation_id")]
+    if roots and info.run_result.end_reason != "awaiting_input" and info.attempt_outcome == "completed":
+        index, call = roots[0]
+        expected = next(event for event in output if event.get("type") == "tool_result"
+                        and event.get("local_call_id") == call["local_call_id"])
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: SimpleNamespace(resume=resume))
+        resumed = await runtime_client.forward_conversation_resume(
+            cursor.model_copy(update={"after_event_id": f"{reference.run_id}:{index}"}), "owner", "spike-tenant")
+        chunks = [chunk async for chunk in resumed.body_iterator]
+        public = [json.loads(line[6:]) for chunk in chunks for line in chunk.decode().splitlines()
+                  if line.startswith("data: ")]
+        assert not any(event.get("type") == "tool" and event.get("local_call_id") == call["local_call_id"]
+                       for event in public), "Acknowledged tool call was replayed to the client"
+        assert any(event.get("type") == "execution_logs" and event.get("local_call_id") == call["local_call_id"]
+                   and event["content"] == expected["result"] for event in public)
+        assert sum(event.get("type") == "final_answer" and not event.get("invocation_id")
+                   for event in public) == 1
     history = get_conversation_history(conversation, "owner")
     assistant = next(message for message in history["message_records"] if message["role"] == "assistant")
     envelopes = []
