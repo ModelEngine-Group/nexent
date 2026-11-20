@@ -21,19 +21,28 @@ def _resolve_or_create_default_tenant(session) -> str:
     Returns the tenant_id (UUID string) to bind the SU to.
     """
     from contracts.constants.constants import (
+        ASSET_OWNER_TENANT_ID,
         DEFAULT_GROUP_ID,
+        DEFAULT_TENANT_ID,
         TENANT_ID,
         TENANT_NAME,
     )
     from management.db.models import TenantConfig, TenantGroupInfo
     from sqlalchemy import select
 
+    # Exclude placeholder rows seeded by the deployment scripts ("" / "tenant_id"),
+    # and the virtual asset-owner tenant, so a fresh install does not bind the SU
+    # to a fake tenant and skip real provisioning. Mirrors _count_real_tenants.
     existing = (
         session.execute(
             select(TenantConfig.tenant_id)
             .where(
                 TenantConfig.config_key == TENANT_ID,
                 TenantConfig.delete_flag == "N",
+                TenantConfig.tenant_id.isnot(None),
+                TenantConfig.tenant_id.notin_(
+                    ("", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID)
+                ),
             )
             .limit(1)
         )

@@ -81,6 +81,58 @@ def test_bootstrap_reuses_existing_tenant_without_provisioning(store):
     assert "TenantGroupInfo" not in added
 
 
+def test_default_tenant_resolution_refuses_placeholder_tenant(monkeypatch):
+    """A fresh install seeds TENANT_ID='tenant_id'; the SU must not join that fake tenant."""
+    from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, select
+    from sqlalchemy.orm import Session, registry
+
+    import management.db.models as models
+    from contracts.constants.constants import DEFAULT_GROUP_ID, DEFAULT_TENANT_ID, TENANT_ID, TENANT_NAME
+
+    metadata = MetaData()
+    tenant_config = Table(
+        "tenant_config_t", metadata,
+        Column("tenant_config_id", Integer, primary_key=True, autoincrement=True),
+        Column("tenant_id", String), Column("config_key", String), Column("config_value", String),
+        Column("created_by", String), Column("updated_by", String), Column("delete_flag", String),
+    )
+    tenant_group = Table(
+        "tenant_group_info_t", metadata,
+        Column("group_id", Integer, primary_key=True, autoincrement=True),
+        Column("tenant_id", String), Column("group_name", String), Column("group_description", String),
+        Column("created_by", String), Column("updated_by", String), Column("delete_flag", String),
+    )
+    mapper = registry()
+    config_model = type("TenantConfig", (), {})
+    group_model = type("TenantGroupInfo", (), {})
+    mapper.map_imperatively(config_model, tenant_config)
+    mapper.map_imperatively(group_model, tenant_group)
+    monkeypatch.setattr(models, "TenantConfig", config_model)
+    monkeypatch.setattr(models, "TenantGroupInfo", group_model)
+
+    engine = create_engine("sqlite://")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(tenant_config.insert(), {
+            "tenant_id": DEFAULT_TENANT_ID, "config_key": TENANT_ID,
+            "config_value": DEFAULT_TENANT_ID, "delete_flag": "N",
+        })
+
+    with Session(engine) as session:
+        resolved = cli._resolve_or_create_default_tenant(session)
+
+        assert resolved != DEFAULT_TENANT_ID
+        keys = set(
+            session.execute(
+                select(tenant_config.c.config_key).where(tenant_config.c.tenant_id == resolved)
+            ).scalars().all()
+        )
+        assert keys == {TENANT_ID, TENANT_NAME, DEFAULT_GROUP_ID}
+        assert session.execute(
+            select(tenant_group.c.group_id).where(tenant_group.c.tenant_id == resolved)
+        ).scalars().all()
+
+
 def test_bootstrap_configuration_failure_prevents_account_writes(store):
     store.configuration.side_effect = RuntimeError("configuration unavailable")
 
