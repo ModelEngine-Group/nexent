@@ -44,7 +44,7 @@ case:
       source kinds.
     expected: Only full source-proven arrays are projected; critical outside facts remain. The compact wire references
       original data and omits output caps. Typed proof and raw originals survive checkpoint transfer, middle-page
-      numeric values match exactly, foreign owners reject, and normal continuation makes no auxiliary summary request.
+      numeric values and literal error control characters match exactly, foreign owners reject, and normal continuation makes no auxiliary summary request.
   expected_results:
   - Real wire requests omit max_tokens, max_completion_tokens and max_output_tokens.
   - Normal preparation is pure and accepted usage anchors subsequent estimates; normal maintenance occurs only after

@@ -2,23 +2,24 @@
 """Restore backend-bound completed actions, retaining uncovered evidence verbatim."""
 
 import json
-from xml.etree import ElementTree
+import re
+from html import unescape
 
 from .execution_history import result_text
 from .models import ContextItem, ContextItemInput
 
 
 def decode_execution_fields(payload):
-    """Decode the exact canonical original, including empty and error channels."""
+    """Decode canonical escaped channels without imposing XML character restrictions."""
     try:
-        root = ElementTree.fromstring("<fields>" + payload["content"] + "</fields>")
-        fields = {}
-        for node in root:
-            if node.tag not in {"STDOUT", "OUTPUT", "RETURN_VALUE", "ERROR"} or len(node) or node.tag in fields:
+        text, fields, position = payload["content"], {}, 0
+        for match in re.finditer(r"<(STDOUT|OUTPUT|RETURN_VALUE|ERROR)>(.*?)</\1>(?:\n|$)", text, re.DOTALL):
+            if match.start() != position or match[1] in fields:
                 return None
-            fields[node.tag] = node.text or ""
-        return fields if fields and result_text(fields) == payload["content"] else None
-    except (KeyError, TypeError, ValueError, ElementTree.ParseError):
+            fields[match[1]] = unescape(match[2])
+            position = match.end()
+        return fields if fields and position == len(text) and result_text(fields) == text else None
+    except (KeyError, TypeError, ValueError):
         return None
 
 
@@ -120,7 +121,7 @@ def _payload(record):
         if fields is None:
             return None
         return payload, fields
-    except (KeyError, TypeError, ValueError, AttributeError, ElementTree.ParseError):
+    except (KeyError, TypeError, ValueError, AttributeError):
         return None
 
 

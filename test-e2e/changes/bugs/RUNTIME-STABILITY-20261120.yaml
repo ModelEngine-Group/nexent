@@ -77,4 +77,8 @@ change:
     actual useful reduction and existing C/deadline/three-summary budget govern. Formal owned HTTP Case covers all
     three kinds with typed checkpoint continuation; real AC-08 remains separately required. v12 deadline audit removes
     recovery-only connection-timeout multipliers: inherit actual parent/task deadlines, retain transport timeout,
-    cancellation and three subrequests. Existing deadline/reentry UT and owned HTTP Case are reused; no new Feature.'
+    cancellation and three subrequests. Existing deadline/reentry UT and owned HTTP Case are reused; no new Feature.
+    v12 turn05 failed before proof validation because XML decoding rejected ANSI in a real canonical execution_result.
+    Decode the existing escaped channel format losslessly, retain exact canonical roundtrip and batch authorization,
+    preserve raw controls and CR in recall, and reject malformed markup without skipping sources. Source-order proof
+    revalidation is retained and separately regressed; actual sealed data passes both orders after decoding.'
