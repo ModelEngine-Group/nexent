@@ -81,6 +81,8 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     ("POST", "/api/agent/automations/runs/42/cancel", "management"),
     ("GET", "/api/conversation/42/automation", "management"),
     ("POST", "/api/file/storage", "management"), ("GET", "/api/file/storage", "management"),
+    ("GET", "/api/file/knowledge/content", "management"),
+    ("POST", "/api/file/knowledge/content", "management"),
     ("POST", "/nb/v1/chat/run", "northbound"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])

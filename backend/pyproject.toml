@@ -44,6 +44,7 @@ dependencies = [
 management-cleanse = [
     # Required by the existing Management queue-control callers until their migration.
     "celery>=5.3.6",
+    "cryptography>=43",
     "huggingface_hub>=0.30.0,<1.0",
     "nexent[data_process,performance]",
 ]

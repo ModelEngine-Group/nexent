@@ -2,22 +2,48 @@
 """Public hybrid search with Runtime-owned query embedding."""
 
 import asyncio
+import json
 from threading import Event
 from time import monotonic, perf_counter
 from types import SimpleNamespace
 from uuid import uuid4
 
+from contracts.agentos_knowledge import KnowledgeContentRequest
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
 from management.clients.model import embed_query
 from management.services.knowledge_base.common import KnowledgeBaseNeedsModelConfigError
 from management.services.knowledge_base.file_reader import KnowledgeFileReader
+from management.services.knowledge_base.image_ticket import issue_image_url
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import DeadlineExceeded
+from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from nexent.storage.models import OperationContext
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
+
+
+def project_retrieved_image(hit, actor, *, northbound=False):
+    if hit.image_ref is None:
+        if hit.public_document is None:
+            raise ScopeDenied()
+        return dict(hit.public_document)
+    request = KnowledgeContentRequest(
+        knowledge_id=hit.knowledge_id, file_id=hit.file_id, file_version=hit.file_version,
+        image_ref=hit.image_ref,
+    )
+    url = issue_image_url(request, actor, northbound=northbound)
+    position = {key: hit.location[key] for key in ("page_number", "sheet_name", "coordinates") if key in hit.location}
+    metadata = {"process_source": "UniversalImageExtractor", "image_url": url}
+    if "chunk_index" in hit.location:
+        metadata["chunk_index"] = hit.location["chunk_index"]
+    return {
+        "id": hit.chunk_id,
+        "filename": hit.filename,
+        "process_source": "UniversalImageExtractor",
+        "metadata": metadata,
+        "content": json.dumps({"source_file": hit.filename, "position": position, "image_url": url}, ensure_ascii=False),
+    }
 
 
 async def _resolve_model(client, index, model_id, actor):

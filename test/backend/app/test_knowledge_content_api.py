@@ -3,9 +3,17 @@
 
 import httpx
 import pytest
+from contracts.agentos_knowledge import KnowledgeSearchHit
 from fastapi import FastAPI
 from management.api.file import knowledge_content as module
+from management.services.knowledge_base.hybrid import project_retrieved_image
+from management.services.knowledge_base.image_ticket import (
+    IMAGE_TICKET_PREFIX,
+    open_image_ticket,
+)
 from nexent.storage.errors import ScopeDenied
+
+from infrastructure.agentos_identity import ServicePrincipal
 
 
 @pytest.mark.asyncio
@@ -76,3 +84,94 @@ async def test_request_cannot_supply_tenant_or_unpinned_object_key(mocker):
     assert response.status_code == 422
     identity.assert_not_called()
     fetch.assert_not_called()
+
+
+@pytest.fixture
+def image_hit(monkeypatch):
+    from contracts.constants import environment
+
+    monkeypatch.setattr(environment, "JWT_SECRET", "owned-test-image-secret")
+    return KnowledgeSearchHit(
+        knowledge_id=3, file_id="a" * 32, file_version=7, chunk_id="owned", filename="source.pptx",
+        content="internal body", score=1, score_kind="dense",
+        location={"page_number": 2, "coordinates": {"x1": 15}, "internal": "private"},
+        image_ref={"space": "files", "key": "images/pinned.png", "version": "private-revision", "sha256": "c" * 64},
+    )
+
+
+@pytest.mark.parametrize("fault", [None, "user", "tenant", "tampered", "expired", "revoked"])
+@pytest.mark.asyncio
+async def test_image_url_has_bound_identity_and_live_content_check(image_hit, mocker, fault):
+    import json
+
+    app = FastAPI()
+    app.include_router(module.router)
+    clock = mocker.patch("cryptography.fernet.time.time", return_value=20_000)
+    actor = ServicePrincipal("user", "tenant")
+    document = project_retrieved_image(image_hit, actor)
+    content = json.loads(document["content"])
+    address = content["image_url"]
+    assert content["position"] == {"page_number": 2, "coordinates": {"x1": 15}}
+    assert document["metadata"]["image_url"] == address
+    assert all(value not in str(document) for value in ("images/pinned.png", "private-revision", "private"))
+    if fault == "tampered":
+        start = address.index(IMAGE_TICKET_PREFIX) + len(IMAGE_TICKET_PREFIX) + 20
+        address = address[:start] + ("A" if address[start] != "A" else "B") + address[start + 1:]
+    if fault == "expired":
+        clock.return_value += 601
+    mocker.patch.object(module, "get_current_user_id", return_value=(
+        "other" if fault == "user" else "user", "other" if fault == "tenant" else "tenant"))
+    fetch = mocker.patch.object(module, "fetch_knowledge_content", return_value=(b"image", "source.pptx"))
+    if fault == "revoked":
+        fetch.side_effect = ScopeDenied()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://management") as client:
+        response = await client.get(address.removeprefix("/api"))
+    if fault:
+        assert response.status_code == 403 and set(response.json()) == {"code"}
+    else:
+        assert response.status_code == 200 and response.content == b"image"
+        assert response.headers["content-disposition"] == "inline"
+        assert response.headers["cache-control"] == "no-store"
+    if fault in {None, "revoked"}:
+        request, = fetch.await_args.args
+        assert request.image_ref == image_hit.image_ref and request.file_version == 7
+    else:
+        fetch.assert_not_called()
+
+
+def test_northbound_url_requires_the_northbound_audience(image_hit):
+    from urllib.parse import parse_qs, urlsplit
+
+    actor = ServicePrincipal("user", "tenant")
+    result = project_retrieved_image(image_hit, actor, northbound=True)
+    url = urlsplit(result["metadata"]["image_url"])
+    token, = parse_qs(url.query)["presigned_url"]
+    assert url.path.endswith("/nb/v1/file/fetch")
+    assert open_image_ticket(token, actor, northbound=True).image_ref == image_hit.image_ref
+    with pytest.raises(ScopeDenied):
+        open_image_ticket(token, actor)
+
+
+@pytest.mark.asyncio
+async def test_northbound_fetch_uses_current_api_key_identity_for_image_ticket(image_hit, mocker):
+    from types import SimpleNamespace
+    from urllib.parse import urlsplit
+
+    from management.api import northbound
+
+    app = FastAPI()
+    app.include_router(northbound.router)
+    actor = ServicePrincipal("user", "tenant")
+    document = project_retrieved_image(image_hit, actor, northbound=True)
+    url = urlsplit(document["metadata"]["image_url"])
+    identity = mocker.patch.object(northbound, "_get_northbound_context",
+                                   return_value=SimpleNamespace(user_id=actor.user_id, tenant_id=actor.tenant_id))
+    fetch = mocker.patch.object(module, "fetch_knowledge_content", return_value=(b"owned image", "file.pptx"))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://management") as client:
+        response = await client.get("/nb/v1/file/fetch?" + url.query, headers={"Authorization": "Bearer fixture-api-key"})
+        assert response.status_code == 200 and response.content == b"owned image"
+        identity.return_value = SimpleNamespace(user_id="other", tenant_id=actor.tenant_id)
+        denied = await client.get("/nb/v1/file/fetch?" + url.query, headers={"Authorization": "Bearer other-api-key"})
+    assert denied.status_code == 403
+    fetch.assert_awaited_once()
+    assert fetch.await_args.kwargs == {"user_id": actor.user_id, "tenant_id": actor.tenant_id}

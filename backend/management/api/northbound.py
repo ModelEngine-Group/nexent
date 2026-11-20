@@ -661,13 +661,18 @@ async def fetch_file_from_presigned_url(
     from contracts.constants import environment
     from contracts.object_tickets import TICKET_PREFIX
     from management.api.file.http import legacy_storage_object_name
+    from management.api.file.knowledge_content import read_image_ticket
     from management.api.file.ticket import (
         download_authorized_object_response,
         download_ticket_response,
     )
+    from management.services.knowledge_base.image_ticket import IMAGE_TICKET_PREFIX
 
     if not presigned_url:
         raise HTTPException(HTTPStatus.BAD_REQUEST, "presigned_url is required")
+    if presigned_url.startswith(IMAGE_TICKET_PREFIX):
+        ctx = await _get_northbound_context(request)
+        return await read_image_ticket(presigned_url, ctx.user_id, ctx.tenant_id, northbound=True)
     if presigned_url.startswith(TICKET_PREFIX):
         return await download_ticket_response(presigned_url, request)
 

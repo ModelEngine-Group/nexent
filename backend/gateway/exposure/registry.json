@@ -1884,6 +1884,28 @@
     },
     {
       "method": "GET",
+      "path": "/api/file/knowledge/content",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/knowledge_content.py",
+      "route_id": "route-7147bc392c5ca688",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file/knowledge/content",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/knowledge_content.py",
+      "route_id": "route-b32ab582efb8cf36",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/file/download/{object_name:path}",
       "transport": "http",
       "target": "management",
@@ -6385,5 +6407,5 @@
       ]
     }
   ],
-  "revision": "2026-11-20.1"
+  "revision": "2026-11-20.2"
 }
