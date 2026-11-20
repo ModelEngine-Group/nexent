@@ -55,6 +55,7 @@ from management.services.repository.agent.common import (
     _validate_card_fields,
     _validate_create_listing_permission,
 )
+from nexent.core.concurrency import run_blocking
 
 
 def _validate_repository_status_transition(
@@ -410,8 +411,10 @@ async def create_agent_repository_listing_impl(
     if icon_url is not None:
         image_id = _repository_image_id(icon_url, agent_id, version_no)
         try:
-            read_icon_image(
-                _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+            await run_blocking(
+                "repository-icon-check", read_icon_image,
+                _repository_icon_object_name(tenant_id, agent_id, version_no, image_id),
+                lane="control-io", owner="management.repository",
             )
         except FileNotFoundError as exc:
             raise ValueError("Repository icon upload not found") from exc

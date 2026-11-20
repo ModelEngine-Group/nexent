@@ -4,7 +4,7 @@ import io
 import os
 import uuid
 from datetime import datetime
-from typing import Any, BinaryIO, Dict, List, Optional, Tuple
+from typing import Any, BinaryIO, Dict, List, Optional
 
 from contracts import file_types
 from contracts.constants.constants import S3_URL_PREFIX
@@ -19,11 +19,6 @@ from infrastructure.trace.knowledge import (
     set_span_attributes,
     trace_knowledge_operation,
 )
-
-
-def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:
-    """Upload bytes to an exact object key without generating attachment metadata."""
-    return minio_client.upload_fileobj(io.BytesIO(content), object_name)
 
 
 def build_s3_url(object_name: str, bucket: Optional[str] = None) -> str:

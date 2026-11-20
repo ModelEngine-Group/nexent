@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request, Header, HTTPException, Path as PathParam, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import DeadlineExceeded
 from contracts.errors.exceptions import ManagementReadBusyError
 from pydantic import BaseModel
@@ -67,7 +68,9 @@ async def create_conversation_share_endpoint(
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = create_share_snapshot_service(
+        result = await run_blocking(
+            "conversation-share-create", create_share_snapshot_service,
+            lane="control-io", owner="management.conversation",
             conversation_id=conversation_id,
             user_id=user_id,
             tenant_id=tenant_id,

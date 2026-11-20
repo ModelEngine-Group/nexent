@@ -184,6 +184,11 @@ class ManagedTaskSpec:
         self.owner = owner
 
 
+async def _run_blocking(_name, target, *args, lane, owner, **kwargs):
+    return target(*args, **kwargs)
+
+
+concurrency_mod.run_blocking = _run_blocking
 concurrency_mod.ManagedTaskSpec = ManagedTaskSpec
 sys.modules["nexent.core.concurrency"] = concurrency_mod
 sys.modules["nexent.multi_modal"] = types.ModuleType("nexent.multi_modal")

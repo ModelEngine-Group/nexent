@@ -201,7 +201,8 @@ async def upload_agent_icon_impl(
 
     owner_tenant_id = agent.get("tenant_id") or tenant_id
     object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
-    content_type = upload_icon_image(content, object_name)
+    content_type = await run_blocking("agent-icon-write", upload_icon_image, content, object_name,
+                                      lane="control-io", owner="management.agent")
 
     icon_url = f"/api/agent/{agent_id}/icon?v={uuid4().hex}"
     update_agent_icon(
@@ -222,7 +223,8 @@ async def get_agent_icon_impl(
         raise FileNotFoundError("Agent icon not found")
 
     owner_tenant_id = agent.get("tenant_id") or tenant_id
-    return read_icon_image(_agent_icon_object_name(agent_id, owner_tenant_id))
+    return await run_blocking("agent-icon-read", read_icon_image, _agent_icon_object_name(agent_id, owner_tenant_id),
+                              lane="control-io", owner="management.agent")
 
 
 async def check_agent_name_conflict_batch_impl(

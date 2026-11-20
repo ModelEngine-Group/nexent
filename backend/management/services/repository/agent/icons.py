@@ -3,9 +3,10 @@
 import uuid
 from typing import Dict
 
-from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.catalog import get_agent_repository_by_agent_id
+from management.db.agent.repository import search_agent_info_by_agent_id
 from management.services.agent.icon import read_icon_image, upload_icon_image
+from nexent.core.concurrency import run_blocking
 
 
 async def upload_agent_repository_icon_impl(
@@ -18,8 +19,10 @@ async def upload_agent_repository_icon_impl(
         raise ValueError("Agent version not found")
     _validate_create_listing_permission(user_id=user_id, agent_info=agent_info)
     image_id = str(uuid.uuid4())
-    content_type = upload_icon_image(
-        content, _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+    content_type = await run_blocking(
+        "repository-icon-write", upload_icon_image, content,
+        _repository_icon_object_name(tenant_id, agent_id, version_no, image_id),
+        lane="control-io", owner="management.repository",
     )
     return {
         "icon_url": _repository_icon_url(agent_id, version_no, image_id),

@@ -171,6 +171,8 @@ sys.modules["management.services.agent.service"] = _agent_service_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
+sys.modules["infrastructure.file_reads"] = MagicMock()
+sys.modules["infrastructure.icon_objects"] = MagicMock()
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import UnauthorizedError
@@ -746,8 +748,8 @@ async def test_repository_icon_upload_keeps_separate_object_and_agent_record():
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one"}
     ), patch_import_object_context(
         ars, "_validate_create_listing_permission"
-    ), patch_import_object_context(
-        ars.uuid, "uuid4", return_value=image_id
+    ), patch(
+        "management.services.repository.agent.icons.uuid", types.SimpleNamespace(uuid4=lambda: image_id)
     ), patch_import_object_context(
         ars, "upload_icon_image", return_value="image/png"
     ) as upload:

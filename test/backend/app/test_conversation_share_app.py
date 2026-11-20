@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import asyncio
 from http import HTTPStatus
 from unittest.mock import ANY, AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from management.api.conversation import conversation_share as conversation_share_app
@@ -40,14 +42,19 @@ def test_create_conversation_share_endpoint_success(mocker):
         "management.api.conversation.conversation_share.get_current_user_id",
         return_value=("user_1", "tenant_1"),
     )
-    mock_create = mocker.patch(
-        "management.api.conversation.conversation_share.create_share_snapshot_service",
-        return_value={
+    def create_snapshot(**_kwargs):
+        with pytest.raises(RuntimeError):
+            asyncio.get_running_loop()
+        return {
             "share_id": "share_token",
             "conversation_id": 7,
             "title": "Test Conversation",
             "asset_count": 2,
-        },
+        }
+
+    mock_create = mocker.patch(
+        "management.api.conversation.conversation_share.create_share_snapshot_service",
+        side_effect=create_snapshot,
     )
 
     response = client.post(

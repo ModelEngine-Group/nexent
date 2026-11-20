@@ -34,6 +34,7 @@ from management.db.file.attachment import (
     upload_file,
 )
 from management.services.file.upload import convert_office_to_pdf
+from nexent.core.concurrency import run_blocking
 
 from infrastructure.file_reads import read_attachment_size
 
@@ -437,7 +438,10 @@ class DataProcessService:
                     )
 
                 # Step 4: Validate the uploaded PDF (header check + minimum size)
-                remote_size = read_attachment_size(pdf_object_name)
+                remote_size = await run_blocking(
+                    "legacy-office-pdf-stat", read_attachment_size, pdf_object_name,
+                    lane="control-io", owner="data_process.office",
+                )
                 if remote_size <= 0:
                     raise OfficeConversionException(
                         "PDF validation failed: cannot read remote file size")

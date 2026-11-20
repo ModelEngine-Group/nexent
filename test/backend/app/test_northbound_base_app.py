@@ -235,6 +235,7 @@ class _NorthboundThreadManager:
 
 
 concurrency_module = types.ModuleType("nexent.core.concurrency")
+concurrency_module.run_blocking = AsyncMock()
 concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
 concurrency_module.ManagerState = _ManagerState
 concurrency_module.set_default_thread_manager = MagicMock()

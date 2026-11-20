@@ -70,7 +70,7 @@ from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model.management import list_models_for_tenant
 from management.services.model.resolver import get_model_descriptor
 from management.thread_management import config_thread_manager
-from nexent.core.concurrency import ManagedTaskSpec
+from nexent.core.concurrency import ManagedTaskSpec, run_blocking
 from nexent.multi_modal.utils import parse_s3_url
 
 from infrastructure.file_reads import read_attachment_size
@@ -529,11 +529,13 @@ async def start_streaming_chat(
 
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
-        normalized_attachments = _normalize_northbound_attachments(
-            attachments=attachments,
-            user_id=ctx.user_id,
-            tenant_id=ctx.tenant_id,
-        )
+        normalized_attachments = None
+        if attachments is not None:
+            normalized_attachments = await run_blocking(
+                "northbound-attachments", _normalize_northbound_attachments,
+                attachments=attachments, user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                lane="control-io", owner="management.northbound",
+            )
         # Idempotency: only prevent concurrent duplicate starts
         metadata_key = "inherit" if metadata is None else runtime_metadata_hash(metadata)
         composed_key = idempotency_key or _build_idempotency_key(

@@ -5,18 +5,6 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import (
-    APIRouter,
-    Body,
-    File,
-    Header,
-    HTTPException,
-    Query,
-    Request,
-    UploadFile,
-)
-from starlette.responses import JSONResponse, Response
-
 from contracts.agent import AgentRepositoryListingCreateRequest
 from contracts.errors.exceptions import (
     AgentToolImportError,
@@ -27,8 +15,21 @@ from contracts.knowledge import KnowledgeBaseResolution
 from contracts.roles import has_any_role
 from contracts.skill import SkillResolution
 from contracts.tag import TagAssignmentFilter
-from management.services.permission.identity.session import get_current_user_context, get_current_user_id
+from fastapi import (
+    APIRouter,
+    Body,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.session import (
+    get_current_user_context,
+    get_current_user_id,
+)
 from management.services.repository.agent.listing import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
@@ -44,8 +45,8 @@ from management.services.repository.agent.listing import (
     upload_agent_repository_icon_impl,
 )
 from management.services.repository.agent.sync import sync_official_agents
-from management.services.permission.identity.session import get_current_user_context, get_current_user_id
-from contracts.errors.exceptions import AgentToolImportError
+from nexent.core.concurrency import run_blocking
+from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
@@ -86,7 +87,10 @@ async def get_agent_repository_icon_api(
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        content, content_type = get_agent_repository_icon_impl(agent_id, version_no, image_id, tenant_id)
+        content, content_type = await run_blocking(
+            "repository-icon-read", get_agent_repository_icon_impl, agent_id, version_no, image_id, tenant_id,
+            lane="control-io", owner="management.repository",
+        )
         return Response(content=content, media_type=content_type)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
