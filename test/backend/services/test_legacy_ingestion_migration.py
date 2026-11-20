@@ -7,12 +7,20 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from contracts.agentos import ModelMetadata
 from contracts.agentos_knowledge import KnowledgeBaseState
+from contracts.knowledge_ingestion import (
+    INGESTION_DATASET,
+    LEGACY_FILE_ID_OCCUPANCY,
+    KnowledgeIngestionIntent,
+    canonical_legacy_file_id,
+)
 from contracts.knowledge_maintenance import SourceFinding, SourceInspectionPage
 from management.services.knowledge_base.legacy_migration import LegacyMigrationService
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
+from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
 from nexent.storage.models import FieldPatch, OperationContext
+from pydantic import ValidationError
 
+from infrastructure.rdb.knowledge_ingestion import bind_legacy_file_id_occupancy
 from test.backend.infrastructure.test_knowledge_ingestion_records import (
     records as records,  # noqa: PLC0414
 )
@@ -115,3 +123,85 @@ async def test_receipt_inspection_is_read_only_without_model_or_source_requests(
     observed=await m.service.inspect(plan,s.actor,context=context())
     assert observed['version']==before['version'] and s.row()==before
     assert s.client.get_model.await_count==calls and m.source.page.call_count==source_calls
+
+
+@pytest.fixture
+def historical(migration, records):
+    s = migration.s
+    port, engine, table = records
+    old_id = 'archive-file-001'
+    target_id = canonical_legacy_file_id(s.actor.tenant_id, 1, old_id)
+    baseline = migration.source.page.side_effect()
+    with engine.begin() as conn:
+        conn.execute(table.update().where(table.c.file_id == s.value.file_id).values(file_id=old_id))
+    row = port.get(INGESTION_DATASET, old_id, context=context())
+    migration.source.page.side_effect = None
+    migration.source.page.return_value = baseline.model_copy(update={'files': [baseline.files[0].model_copy(
+        update={'file_id': old_id, 'issues': ['FILE_ID_NONCANONICAL']},
+    )]})
+
+    def occupied(actor, file_id, *, context):
+        store = bind_legacy_file_id_occupancy(actor.user_id, file_id, engine)
+        try:
+            return store.get(LEGACY_FILE_ID_OCCUPANCY, file_id, context=context)['count'] > 0
+        finally:
+            store.close()
+
+    migration.service.file_id_occupied = Mock(side_effect=occupied)
+    return SimpleNamespace(m=migration, old_id=old_id, target_id=target_id, row=row, port=port, engine=engine, table=table)
+
+
+async def test_historical_id_plan_keeps_the_ledger_and_produces_a_strict_runtime_reference(historical):
+    h = historical
+    s = h.m.s
+    arguments = {'legacy_quiesced': True, 'map_legacy_file_id': True}
+    plan = await h.m.service.plan(1, h.old_id, s.actor, context=context(), **arguments)
+
+    assert plan.legacy_snapshot.previous_file_id == h.old_id
+    assert plan.legacy_snapshot.lifecycle_revision == h.row['version']
+    assert plan.cleanse_request().file_id == h.target_id
+    assert h.m.service.file_id_occupied.call_count == 2
+    with h.engine.connect() as conn:
+        saved = conn.execute(h.table.select()).mappings().one()
+        assert saved['file_id'] == h.old_id and saved['ingestion_request'] is None and saved['version'] == h.row['version']
+    assert await h.m.service.plan(1, h.old_id, s.actor, context=context(), **arguments) == plan
+    different_tenant = canonical_legacy_file_id('different-tenant', 1, h.old_id)
+    assert different_tenant != h.target_id
+    forged = {**plan.model_dump(mode='json'), 'file_id': different_tenant}
+    with pytest.raises(ValidationError):
+        KnowledgeIngestionIntent.model_validate(forged)
+    with pytest.raises(Conflict):
+        await h.m.service.execute(plan, s.actor, context=context(), coordinator=s.coordinator)
+    s.cleanse.submit.assert_not_called()
+
+
+async def test_target_present_in_deleted_foreign_row_is_unavailable(historical):
+    h = historical
+    with h.engine.begin() as conn:
+        conn.execute(h.table.insert().values(
+            file_id=h.target_id, tenant_id='another-tenant', delete_flag='Y', knowledge_id=2,
+            index_name='another-kb', original_filename='other.txt', status='DELETED',
+            source_generation=0, processing_attempt=0, version=0,
+        ))
+    with pytest.raises(Conflict):
+        await h.m.service.plan(1, h.old_id, h.m.s.actor, legacy_quiesced=True,
+            map_legacy_file_id=True, context=context())
+    h.m.s.client.inspect_knowledge_base.assert_not_awaited()
+
+
+async def test_mapping_checks_current_permission_and_never_accepts_implicit_or_late_collision(historical):
+    h = historical
+    s = h.m.s
+    with pytest.raises(InvalidInput):
+        await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True, context=context())
+    h.m.service.file_id_occupied.side_effect = [False, True]
+    with pytest.raises(Conflict):
+        await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True,
+            map_legacy_file_id=True, context=context())
+    assert h.m.service.file_id_occupied.call_count == 2
+    s.update('cleanse_memberships', delete_flag='Y')
+    h.m.service.file_id_occupied.reset_mock()
+    with pytest.raises(ScopeDenied):
+        await h.m.service.plan(1, h.old_id, s.actor, legacy_quiesced=True,
+            map_legacy_file_id=True, context=context())
+    h.m.service.file_id_occupied.assert_not_called()

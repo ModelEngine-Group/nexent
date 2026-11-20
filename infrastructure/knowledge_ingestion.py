@@ -3,12 +3,16 @@
 
 from contextlib import contextmanager
 
-from contracts.knowledge_ingestion import INGESTION_DATASET
+from contracts.knowledge_ingestion import INGESTION_DATASET, LEGACY_FILE_ID_OCCUPANCY
+from nexent.storage.errors import Unavailable
 from nexent.storage.models import StorageScope
 
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
 from infrastructure.rdb.composition import close_owned, record_engine
-from infrastructure.rdb.knowledge_ingestion import bind_ingestion_records
+from infrastructure.rdb.knowledge_ingestion import (
+    bind_ingestion_records,
+    bind_legacy_file_id_occupancy,
+)
 from infrastructure.rdb.knowledge_ingestion_dispatch import bind_ingestion_dispatch
 
 
@@ -22,6 +26,18 @@ def ingestion_dispatch_ports(*, context):
         close_owned(
             context, ([records.close] if records is not None else []) + [engine.dispose]
         )
+
+
+def legacy_file_id_occupied(actor, file_id, *, context):
+    engine, records = record_engine(context), None
+    try:
+        records = bind_legacy_file_id_occupancy(actor.user_id, file_id, engine)
+        row = records.get(LEGACY_FILE_ID_OCCUPANCY, file_id, context=context)
+        if row is None:
+            raise Unavailable(operation_id=context.operation_id)
+        return row["count"] != 0
+    finally:
+        close_owned(context, ([records.close] if records is not None else []) + [engine.dispose])
 
 
 @contextmanager

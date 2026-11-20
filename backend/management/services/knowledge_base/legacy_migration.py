@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 
 from contracts.agentos_knowledge import (
     KnowledgeBaseInspect,
-    KnowledgeFileReference,
     KnowledgeSearchAuthorization,
 )
 from contracts.constants import environment
@@ -16,6 +15,9 @@ from contracts.knowledge_ingestion import (
     LegacyIngestionSnapshot,
     LegacySourceBinding,
     LegacySourceState,
+    canonical_legacy_file_id,
+    is_canonical_file_id,
+    is_historical_file_id,
 )
 from management.services.file.cleanse_authorization import KnowledgeCleanseAuthorization
 from management.services.knowledge_base.file_authorization import (
@@ -37,7 +39,10 @@ from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, Scop
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
-from infrastructure.knowledge_ingestion import knowledge_ingestion_ports
+from infrastructure.knowledge_ingestion import (
+    knowledge_ingestion_ports,
+    legacy_file_id_occupied,
+)
 from infrastructure.legacy_tasks import legacy_task_records
 
 SOURCE_BINDING_ISSUES = frozenset({'SOURCE_SPACE_UNPINNED', 'SOURCE_KEY_UNPINNED', 'SOURCE_REVISION_UNPINNED',
@@ -53,19 +58,19 @@ async def _deadline(context):
 
 class LegacyMigrationService:
     def __init__(self, *, ports=knowledge_ingestion_ports, client=None, sources=None, parser_version=None,
-                 cancellation_scope=None, tasks=legacy_task_records):
+                 cancellation_scope=None, tasks=legacy_task_records, file_id_occupied=legacy_file_id_occupied):
         self.ports = ports
         self.client = client or AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
         self.sources = sources or KnowledgeSourceInspector(cancellation_scope=cancellation_scope)
         self.parser_version = parser_version or environment.KNOWLEDGE_CLEANSE_PARSER_VERSION
         self.tasks, self.cancellation_scope = tasks, cancellation_scope
+        self.file_id_occupied = file_id_occupied
 
     @staticmethod
     async def _blocking(method, *args):
         return await run_blocking('legacy-knowledge-migration', method, *args, lane='control-io', owner='management.knowledge.maintenance')
 
     def _selected(self, knowledge_id, file_id, actor, context):
-        KnowledgeFileReference(knowledge_id=knowledge_id, file_id=file_id, file_version=0)
         context.remaining()
         with self.ports(actor.tenant_id, actor.user_id, context=context) as (records, resources):
             if (records.scope.system or records.scope.service_role != 'management'
@@ -91,13 +96,15 @@ class LegacyMigrationService:
         return verify_task_archive(path, row, resource, actor, task_records=self.tasks, context=context,
             cancellation_scope=self.cancellation_scope, expected_hash=expected_hash)
 
-    def _source_evidence(self, row, resource_revision, actor, context, binding=False, archived_tasks=False):
+    def _source_evidence(self, row, resource_revision, actor, context, binding=False, archived_tasks=False,
+                         map_legacy_file_id=False):
         page = self.sources.page(row['knowledge_id'], actor, file_id=row['file_id'], page_size=1, context=context)
         if (page.knowledge_revision != resource_revision or page.next_cursor is not None or len(page.files) != 1):
             raise Conflict()
         finding = page.files[0]
         allowed = {'LEGACY_TASK_UNVERIFIED'} if archived_tasks else set()
         if binding: allowed.update(SOURCE_BINDING_ISSUES)
+        if map_legacy_file_id: allowed.add("FILE_ID_NONCANONICAL")
         if (finding.file_id != row['file_id'] or finding.lifecycle_revision != row['version']
             or finding.source_generation != row['source_generation'] or set(finding.issues) - allowed or finding.candidate_source is None):
             raise Conflict()
@@ -129,29 +136,44 @@ class LegacyMigrationService:
             or model.embedding_dimensions is None): raise Conflict()
         return model
 
-    async def plan(self, knowledge_id, file_id, actor, *, legacy_quiesced, context, task_archive=None, bind_observed_source=False):
-        if legacy_quiesced is not True: raise InvalidInput()
-        if type(bind_observed_source) is not bool: raise InvalidInput()
+    def _require_unoccupied(self, actor, file_id, context):
+        if self.file_id_occupied(actor, file_id, context=context):
+            raise Conflict()
+
+    async def plan(self, knowledge_id, file_id, actor, *, legacy_quiesced, context, task_archive=None,
+                   bind_observed_source=False, map_legacy_file_id=False):
+        if (
+            legacy_quiesced is not True or type(bind_observed_source) is not bool
+            or type(map_legacy_file_id) is not bool or type(knowledge_id) is not int or knowledge_id <= 0
+            or not is_historical_file_id(file_id) or map_legacy_file_id == is_canonical_file_id(file_id)
+        ):
+            raise InvalidInput()
+        target_id = canonical_legacy_file_id(actor.tenant_id, knowledge_id, file_id) if map_legacy_file_id else file_id
         async with _deadline(context):
             row, resource = await self._blocking(self._selected, knowledge_id, file_id, actor, context)
             self._eligible(row, archived_tasks=task_archive is not None)
+            if map_legacy_file_id:
+                await self._blocking(self._require_unoccupied, actor, target_id, context)
             archive_hash = await self._blocking(self._task_evidence, row, resource, actor, task_archive, context)
             metadata = await self._model(resource.embedding_model_id, actor)
             finding = await self._blocking(self._source_evidence, row, resource.revision, actor, context,
-                bind_observed_source, archive_hash is not None)
+                bind_observed_source, archive_hash is not None, map_legacy_file_id)
             binding = LegacySourceBinding(previous=LegacySourceState.capture(row), storage_object_id=finding.candidate_storage_object_id,
                 file_size=finding.observed_size,
                 previous_object_name=row['object_name'] if 'SOURCE_ALIAS_PROVEN' in finding.issues else None,
             ) if bind_observed_source else None
-            plan = KnowledgeIngestionIntent(knowledge_id=knowledge_id, file_id=file_id, file_version=row['source_generation'],
+            plan = KnowledgeIngestionIntent(knowledge_id=knowledge_id, file_id=target_id, file_version=row['source_generation'],
                 user_id=actor.user_id, attempt=row['processing_attempt']+1, filename=row['original_filename'], parser_version=self.parser_version,
                 source=finding.candidate_source,
                 embedding_model={'model_id': metadata.model_id, 'revision': metadata.revision},
                 legacy_snapshot=LegacyIngestionSnapshot.capture(row, resource_revision=resource.revision,
-                    legacy_quiesced=True, task_archive_sha256=archive_hash, source_binding=binding))
+                    legacy_quiesced=True, task_archive_sha256=archive_hash, source_binding=binding,
+                    previous_file_id=file_id if map_legacy_file_id else None))
             await self._empty_runtime(plan, actor)
             final, final_resource = await self._blocking(self._selected, knowledge_id, file_id, actor, context)
             if final != row or final_resource != resource or await self._model(resource.embedding_model_id, actor) != metadata: raise Conflict()
+            if map_legacy_file_id:
+                await self._blocking(self._require_unoccupied, actor, target_id, context)
             return plan
 
     def _change(self, plan, actor, context, action):
@@ -177,6 +199,9 @@ class LegacyMigrationService:
         KnowledgeIngestionIntent.model_validate_json(plan.model_dump_json())
         if plan.user_id != actor.user_id or plan.legacy_snapshot.tenant_id != actor.tenant_id: raise ScopeDenied()
         if bool(plan.legacy_snapshot.task_references) != bool(plan.legacy_snapshot.task_archive_sha256): raise InvalidInput()
+        if plan.legacy_snapshot.previous_file_id is not None:
+            # A plan does not reserve or rename the lifecycle primary key.
+            raise Conflict()
         if check_parser and plan.parser_version != self.parser_version: raise Conflict()
 
     async def inspect(self, plan, actor, *, context):

@@ -135,3 +135,16 @@ def test_cli_requires_operator_quiescence_and_bounded_input(cli,extra):
     args=['plan','--tenant-id','tenant-a','--user-id','user-a','--knowledge-id','1','--file-id',s.value.file_id,'--output',str(s.args.output)]
     with pytest.raises(SystemExit) as error:module.main(args+extra)
     assert error.value.code==2 and not s.args.output.exists()
+
+
+def test_historical_file_id_option_applies_only_to_planning(cli, monkeypatch):
+    run = AsyncMock(return_value={'state': 'planned'})
+    monkeypatch.setattr(module, 'run', run)
+    tail = ['--tenant-id', 'tenant-a', '--user-id', 'user-a', '--knowledge-id', '1',
+            '--file-id', 'old-file', '--output', str(cli.args.output), '--legacy-quiesced']
+    with pytest.raises(SystemExit):
+        module.main(['plan', *tail])
+    assert module.main(['plan', *tail, '--map-legacy-file-id']) == 0
+    assert run.call_args.args[0].map_legacy_file_id is True
+    with pytest.raises(SystemExit):
+        module.main(['admit', *tail, '--map-legacy-file-id', '--plan', str(cli.args.output)])

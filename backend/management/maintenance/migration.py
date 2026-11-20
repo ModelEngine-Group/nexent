@@ -11,7 +11,11 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from contracts.knowledge_ingestion import KnowledgeIngestionIntent
+from contracts.knowledge_ingestion import (
+    KnowledgeIngestionIntent,
+    is_canonical_file_id,
+    is_historical_file_id,
+)
 from management.services.knowledge_base.legacy_migration import LegacyMigrationService
 from nexent.core.concurrency import (
     LanePolicy,
@@ -64,6 +68,7 @@ async def run(args, *, service=None):
                 archive = {'task_archive': args.task_archive} if getattr(args, 'task_archive', None) is not None else {}
                 if args.action == 'plan':
                     if getattr(args, 'bind_observed_source', False): archive['bind_observed_source'] = True
+                    if getattr(args, 'map_legacy_file_id', False): archive['map_legacy_file_id'] = True
                     plan = await service.plan(args.knowledge_id,args.file_id,actor,legacy_quiesced=args.legacy_quiesced,context=context,**archive)
                     _emit(stream, {'kind':'migration_plan','plan_hash':plan_hash(plan),'intent':plan.model_dump(mode='json')})
                     state, row = 'planned', None
@@ -99,16 +104,19 @@ def main(argv=None):
     parser.add_argument('--output',required=True,type=Path);parser.add_argument('--plan',type=Path)
     parser.add_argument('--task-archive',type=Path,help='Complete private archive-tasks report for original PG task references')
     parser.add_argument('--bind-observed-source',action='store_true',help='Explicitly pin a proven historical source or same-bucket S3 alias in the plan')
+    parser.add_argument('--map-legacy-file-id', action='store_true',
+                        help='Plan a standard ID for a historical file without modifying the ledger')
     parser.add_argument('--legacy-quiesced',action='store_true',help='Operator confirms old admission and workers are stopped and drained')
     parser.add_argument('--timeout',type=int,default=300)
     args = parser.parse_args(argv)
     if (args.action != 'inspect' and not args.legacy_quiesced or not 1 <= args.timeout <= 3600 or args.knowledge_id <= 0
         or any(not value.strip() or len(value)>100 for value in (args.user_id,args.tenant_id))
-        or len(args.file_id)!=32 or any(c not in '0123456789abcdef' for c in args.file_id)
+        or not is_historical_file_id(args.file_id) or args.map_legacy_file_id == is_canonical_file_id(args.file_id)
+        or args.map_legacy_file_id and args.action != 'plan'
         or args.action!='plan' and args.plan is None or args.action=='plan' and args.plan is not None
         or args.task_archive is not None and args.action in {'inspect','restore'}
         or args.bind_observed_source and args.action != 'plan'):
-        parser.error('Select a canonical file, actual actor/tenant, deadline 1..3600 and confirmed legacy quiescence; non-plan actions require --plan')
+        parser.error('Select a file, actor, tenant and deadline. Mapping a historical ID requires plan --map-legacy-file-id.')
     try:
         print(json.dumps(asyncio.run(run(args))));return 0
     except (TimeoutError,DeadlineExceeded) as error:

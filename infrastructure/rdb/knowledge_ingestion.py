@@ -1,7 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Restricted lifecycle records for Management's persistent ingestion coordinator."""
 
-from contracts.knowledge_ingestion import INGESTION_DATASET
+import sqlalchemy as sa
+from contracts.knowledge_ingestion import (
+    INGESTION_DATASET,
+    LEGACY_FILE_ID_OCCUPANCY,
+    is_canonical_file_id,
+)
+from nexent.storage.errors import InvalidInput
+from nexent.storage.models import StorageScope
 
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
 from infrastructure.rdb.record_audit import RecordAudit
@@ -13,6 +20,25 @@ from infrastructure.storage.catalog import (
 )
 
 files = KnowledgeFileLifecycle.__table__
+
+
+def bind_legacy_file_id_occupancy(actor_id, file_id, engine):
+    if not is_canonical_file_id(file_id):
+        raise InvalidInput()
+    projection = sa.select(
+        sa.literal(file_id).label("file_id"),
+        sa.func.count().label("count"),
+    ).where(files.c.file_id == file_id).subquery(LEGACY_FILE_ID_OCCUPANCY)
+    projection.primary_key.add(projection.c.file_id)
+    definition = DatasetDefinition(
+        LEGACY_FILE_ID_OCCUPANCY, "file_id",
+        (FieldDefinition("file_id", "string"), FieldDefinition("count", "integer")),
+        frozenset({"management"}), allow_system=True,
+    )
+    return SQLRecordStore(
+        StorageScope("management", None, actor_id, {LEGACY_FILE_ID_OCCUPANCY}, system=True),
+        DatasetCatalog((definition,)), {LEGACY_FILE_ID_OCCUPANCY: projection}, engine, revision_fields={},
+    )
 
 
 def ingestion_catalog():

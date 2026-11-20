@@ -1,8 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management-owned immutable ingestion intent; no credentials or provider setup."""
 
+import json
+import re
 from datetime import datetime
 from typing import Annotated, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from contracts.agentos_knowledge import (
     Contract,
@@ -15,9 +18,23 @@ from contracts.knowledge_cleanse import KnowledgeCleanseRequest
 from pydantic import Field, model_serializer, model_validator
 
 INGESTION_DATASET = "knowledge_ingestion_files"
+LEGACY_FILE_ID_OCCUPANCY = "legacy_file_id_occupancy"
 LOCAL_SOURCE_DATASET = "management_local_sources"
 FILE_READ_DATASET = "management_file_lifecycle"
 FILE_KNOWLEDGE_READ_DATASET = "management_file_knowledge"
+
+
+def is_canonical_file_id(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None
+
+
+def is_historical_file_id(value):
+    return isinstance(value, str) and 1 <= len(value) <= 64 and bool(value.strip()) and value.isprintable()
+
+
+def canonical_legacy_file_id(tenant_id, knowledge_id, file_id):
+    identity = json.dumps([tenant_id, knowledge_id, file_id], ensure_ascii=True, separators=(",", ":"))
+    return uuid5(NAMESPACE_URL, "nexent:knowledge:legacy-file:v1:" + identity).hex
 
 
 class LegacyFileState(Contract):
@@ -96,6 +113,7 @@ class LegacyIngestionSnapshot(Contract):
     task_references: dict[Literal['process_task_id', 'forward_task_id', 'parent_task_id'],
                           Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')]] = Field(default_factory=dict, max_length=3)
     source_binding: LegacySourceBinding | None = None
+    previous_file_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_serializer(mode='wrap')
     def serialize_snapshot(self, handler):
@@ -103,15 +121,17 @@ class LegacyIngestionSnapshot(Contract):
         if self.task_archive_sha256 is None: value.pop('task_archive_sha256', None)
         if not self.task_references: value.pop('task_references', None)
         if self.source_binding is None: value.pop('source_binding', None)
+        if self.previous_file_id is None: value.pop('previous_file_id', None)
         return value
 
     @classmethod
-    def capture(cls, row, *, resource_revision, legacy_quiesced, task_archive_sha256=None, source_binding=None):
+    def capture(cls, row, *, resource_revision, legacy_quiesced, task_archive_sha256=None, source_binding=None,
+                previous_file_id=None):
         updated = row.get('update_time')
         return cls(tenant_id=row['tenant_id'], resource_revision=resource_revision, lifecycle_revision=row['version'],
                    legacy_quiesced=legacy_quiesced, previous=LegacyFileState.capture(row), original_updated_by=row.get('updated_by'),
                    original_update_time=updated.isoformat() if isinstance(updated, datetime) else updated,
-                   task_archive_sha256=task_archive_sha256, source_binding=source_binding,
+                   task_archive_sha256=task_archive_sha256, source_binding=source_binding, previous_file_id=previous_file_id,
                    task_references={name: row[name] for name in ('process_task_id', 'forward_task_id', 'parent_task_id') if row.get(name) is not None})
 
 
@@ -138,6 +158,12 @@ class KnowledgeIngestionIntent(KnowledgeFileReference):
     def bounded_snapshot(self):
         if self.source.space != "files":
             raise ValueError("Expected a pinned knowledge file source")
+        original = self.legacy_snapshot.previous_file_id if self.legacy_snapshot is not None else None
+        if original is not None and (
+            not is_historical_file_id(original) or is_canonical_file_id(original)
+            or self.file_id != canonical_legacy_file_id(self.legacy_snapshot.tenant_id, self.knowledge_id, original)
+        ):
+            raise ValueError("Expected the deterministic standard ID for the historical file")
         if len(self.model_dump_json().encode("utf-8")) > 16384:
             raise ValueError("Knowledge ingestion intent exceeds 16 KiB")
         return self
