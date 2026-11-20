@@ -652,6 +652,47 @@ assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_COM
 assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_PROD_COMPOSE_FILE")" 'FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}' "docker production web should refresh the persisted upload size during startup"
 assert_contains "$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")" 'create_dir_with_permission "$ROOT_DIR/minio/data" 775' "docker deploy should initialize the exact MinIO bind-mount directory"
 DOCKER_PREPARE_DATA_BLOCK="$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
+(
+  eval "$(awk '/^prepare_core_service_deployment\(\)/,/^}/' "$SCRIPT_DIR/../docker/deploy.sh")"
+  docker_compose_command=mock_compose
+  ROOT_ENV_FILE="$DEPLOYMENT_ROOT_ENV"
+  COMPOSE_DIR="$TMP_DIR"
+  COMPOSE_FILE_SUFFIX=".yml"
+  DEPLOYMENT_IMAGE_SOURCE=registry
+  NEXENT_IMAGE=example.com/legacy/backend:v1
+  NEXENT_MANAGEMENT_IMAGE=example.com/roles/management:v2
+  NEXENT_RUNTIME_IMAGE=example.com/roles/runtime:v3
+  inspected=()
+  pulled=()
+  mock_compose() {
+    case " $* " in
+      *" config --quiet "*|*" run --rm --no-deps "*) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  docker() {
+    case "$1" in
+      image) inspected+=("$3"); return 1 ;;
+      pull) pulled+=("$2"); return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  prepare_core_service_deployment nexent-config nexent-runtime nexent-config nexent-mcp
+  assert_eq "$NEXENT_MANAGEMENT_IMAGE $NEXENT_RUNTIME_IMAGE $NEXENT_IMAGE" "${inspected[*]}" "preflight must inspect each Compose role image exactly once"
+  assert_eq "${inspected[*]}" "${pulled[*]}" "preflight must pull each missing role image before recreation"
+
+  inspected=()
+  pulled=()
+  DEPLOYMENT_IMAGE_SOURCE=local-latest
+  unset NEXENT_MANAGEMENT_IMAGE NEXENT_RUNTIME_IMAGE
+  if prepare_core_service_deployment nexent-runtime 2>"$TMP_DIR/runtime-image-error"; then
+    echo "FAIL: preflight accepted a missing local Runtime image" >&2
+    exit 1
+  fi
+  assert_eq "nexent/nexent-runtime:latest" "${inspected[*]}" "local preflight must inspect the Compose default Runtime image"
+  assert_eq "" "${pulled[*]}" "local preflight must stop without pulling the missing Runtime image"
+)
+
 assert_contains "$DOCKER_PREPARE_DATA_BLOCK" 'prepare_project_config_dir || return 1' "docker deploy should initialize the project configuration bind-mount directory"
 assert_contains "$DOCKER_PREPARE_DATA_BLOCK" 'migrate_legacy_project_config || return 1' "docker deploy should stop before recreation when project configuration migration fails"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/deploy.sh")" 'docker cp' "docker deploy should migrate legacy web project configuration before recreation"
