@@ -290,7 +290,7 @@ export function AgentSpace({ active }: { active: boolean }) {
                   })}
                 </span>
               </div>
-              <span className="ml-auto flex w-[clamp(8rem,45%,12rem)] max-w-full shrink-0 items-center gap-1">
+              <span className="ml-auto flex w-[clamp(8rem,45%,12rem)] max-w-full shrink-0 items-center justify-end gap-1">
                 <span className="shrink-0 whitespace-nowrap">
                   {t("resourceCenter.publishedVersion")}
                 </span>
@@ -388,7 +388,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         <div
           className={
             presentation
-              ? "relative min-w-0 max-w-[800px] flex-[1_1_320px]"
+              ? "relative repository-search-field"
               : "relative min-w-0 flex-1"
           }
         >

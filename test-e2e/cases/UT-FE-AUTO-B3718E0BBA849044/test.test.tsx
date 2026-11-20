@@ -26,9 +26,9 @@ import { tagManagementApi } from "@/services/tagManagementService";
 
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
-import MineMcpServiceCard from "@/app/resource-space/components/mcp/components/MineMcpServiceCard";
-import McpServiceDetailModal from "@/app/resource-space/components/mcp/components/McpServiceDetailModal";
-import PublishConfirmModal from "@/app/resource-space/components/mcp/components/PublishConfirmModal";
+import MineMcpServiceCard from "@/app/resource-space/mcp/components/MineMcpServiceCard";
+import McpServiceDetailModal from "@/app/resource-space/mcp/components/McpServiceDetailModal";
+import PublishConfirmModal from "@/app/resource-space/mcp/components/PublishConfirmModal";
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),

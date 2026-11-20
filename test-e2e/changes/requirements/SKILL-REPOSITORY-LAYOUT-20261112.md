@@ -3,7 +3,7 @@
 ## Scope and acceptance
 
 Reference: the user-provided resource repository / all skills screenshot.
-Entry point: `frontend/app/[locale]/resource-space/components/skill/components/RepositoryView.tsx`.
+Entry point: `frontend/app/[locale]/resource-space/skill/components/RepositoryView.tsx`.
 The sibling document repository and `../docs/前端ui.md` are unavailable in this checkout;
 the screenshot and existing component references define this presentation-only adjustment.
 

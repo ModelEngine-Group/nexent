@@ -30,7 +30,6 @@ import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { deleteLocalRepositorySkill } from "@/services/skillRepositoryService";
 import { fetchMyEditableSkills } from "@/services/skillRepositoryService";
 import type {
-  MineOwnershipFilter,
   MyEditableSkillItem,
   MySkillRepositoryInfoItem,
 } from "@/types/skillRepository";
@@ -69,12 +68,6 @@ export function MySkill({ active }: { active: boolean }) {
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
   const [minePage, setMinePage] = useRepositoryQueryState("page", 1);
-  const [mineOwnership, setMineOwnership] =
-    useRepositoryQueryState<MineOwnershipFilter>("ownership", "all", [
-      "all",
-      "created",
-      "others",
-    ]);
   const [mineSearch, setMineSearch] = useRepositoryQueryState("search", "");
   const [mineTagPredicates, setMineTagPredicates] =
     useRepositoryTagPredicates();
@@ -160,7 +153,6 @@ export function MySkill({ active }: { active: boolean }) {
   }, [locale, router]);
   const mineParams = useMemo(
     () => ({
-      ownership: mineOwnership,
       page: minePage,
       page_size: pageSize,
       ...(debouncedMineSearch.trim()
@@ -170,7 +162,6 @@ export function MySkill({ active }: { active: boolean }) {
         ? { tag_predicates: mineTagPredicates }
         : {}),
       ...(!presentation &&
-      mineOwnership === "all" &&
       !debouncedMineSearch.trim() &&
       mineTagPredicates.length === 0
         ? { new_skill_padding: true }
@@ -178,7 +169,6 @@ export function MySkill({ active }: { active: boolean }) {
     }),
     [
       debouncedMineSearch,
-      mineOwnership,
       minePage,
       mineTagPredicates,
       pageSize,
@@ -201,7 +191,6 @@ export function MySkill({ active }: { active: boolean }) {
   const updateStatusMutation = useUpdateSkillRepositoryStatus();
   const mineItems = mineData?.items ?? [];
   const mineTotal = mineData?.pagination?.total ?? 0;
-  const mineCounts = mineData?.counts ?? { all: 0, created: 0, others: 0 };
   const deepLinkFallbackSkill = useMemo(() => {
     if (!reviewDeepLink) return null;
     const items = deepLinkMineData?.items ?? [];
@@ -258,12 +247,6 @@ export function MySkill({ active }: { active: boolean }) {
       {active ? (
         <MineSkillsView
           skills={mineItems}
-          counts={mineCounts}
-          ownership={mineOwnership}
-          onOwnershipChange={(ownership) => {
-            setMineOwnership(ownership);
-            setMinePage(1);
-          }}
           searchQuery={mineSearch}
           onSearchChange={(value) => {
             setMineSearch(value);

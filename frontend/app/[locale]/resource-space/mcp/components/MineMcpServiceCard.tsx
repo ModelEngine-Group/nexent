@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import ResourceReviewLink from "@/app/resource-space/components/ResourceReviewLink";
+import { ResourceReviewLink } from "@/app/resource-space/components/ResourceReviewCenter";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { CheckCircleFilled } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { Button, Dropdown, type MenuProps } from "antd";
-import { Clock, MoreHorizontal, Puzzle, RotateCw } from "lucide-react";
+import { Clock, MoreHorizontal, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpDeploymentType } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -17,6 +17,7 @@ import {
 import { getMineCardReviewBadge } from "@/lib/mcpToolsMine";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import ResourceCard from "@/components/resource/ResourceCard";
+import RepositoryMcpIcon from "./shared/RepositoryMcpIcon";
 import TransportIcon from "./shared/TransportIcon";
 
 export type MineMcpCardItem =
@@ -111,12 +112,6 @@ export default function MineMcpServiceCard({
   );
   const updatedDate = formatRegistryDate(service.updatedAt || "");
   const installCount = onlineService?.installCount ?? 0;
-  const iconTone =
-    deploymentType === McpDeploymentType.REMOTE_LINK
-      ? "bg-[#EEE0F7] text-[#743E9C]"
-      : deploymentType === McpDeploymentType.API
-        ? "bg-[#E0F2D2] text-[#316614]"
-        : "bg-[#D0D8FD]/50 text-[#1F55B5]";
   const toolCount = resolveToolCount(item);
 
   // Owned = user-created MCP can be published/updated; community-installed
@@ -270,11 +265,7 @@ export default function MineMcpServiceCard({
       footerLayout="inline"
       icon={
         repositoryCard ? (
-          <span
-            className={`flex size-12 items-center justify-center rounded ${iconTone}`}
-          >
-            <Puzzle size={24} aria-hidden />
-          </span>
+          <RepositoryMcpIcon deploymentType={deploymentType} />
         ) : (
           <TransportIcon
             transportType={service.transportType}

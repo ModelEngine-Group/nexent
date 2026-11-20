@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Button } from "antd";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SkillRepositoryCard } from "@/app/resource-space/components/skill/components/SkillRepositoryCard";
+import { SkillRepositoryCard } from "@/app/resource-space/skill/components/SkillRepositoryCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { SkillRepositoryListingStatus } from "@/types/skillRepository";
 

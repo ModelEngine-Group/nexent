@@ -3,7 +3,7 @@
 import { render, screen } from "@testing-library/react";
 import { App } from "antd";
 import { expect, test, vi } from "vitest";
-import { MineSkillCard } from "@/app/resource-space/components/skill/components/MineSkillsView";
+import { MineSkillCard } from "@/app/resource-space/skill/components/MineSkillsView";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
 
@@ -14,12 +14,12 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("@/app/resource-space/components/ResourceReviewLink", () => ({
-  default: ({ review }: { review?: { status: string } | null }) =>
+vi.mock("@/app/resource-space/components/ResourceReviewCenter", () => ({
+  ResourceReviewLink: ({ review }: { review?: { status: string } | null }) =>
     review ? <a href="#review">{review.status}</a> : null,
 }));
 vi.mock(
-  "@/app/resource-space/components/skill/components/MineApplyListingModal",
+  "@/app/resource-space/skill/components/MineApplyListingModal",
   () => ({ MineApplyListingModal: () => null })
 );
 
@@ -58,10 +58,10 @@ test.each(["cards"] as const)(
   }
 );
 vi.mock(
-  "@/app/resource-space/components/skill/components/SkillReviewStatusModal",
+  "@/app/resource-space/skill/components/SkillReviewStatusModal",
   () => ({ SkillReviewStatusModal: () => null })
 );
-vi.mock("@/app/resource-space/components/skill/components/CreateNewSkillCard", () => ({
+vi.mock("@/app/resource-space/skill/components/CreateNewSkillCard", () => ({
   CreateNewSkillCard: () => null,
 }));
 vi.mock("@/components/resource/ResourceCardGrid", () => ({

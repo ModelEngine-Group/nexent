@@ -55,28 +55,3 @@ export function AsyncContent({
     <div className={cn("relative", isFetching && "opacity-70")}>{children}</div>
   );
 }
-
-export function FilterButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
-        active
-          ? "bg-primary text-white"
-          : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-      )}
-    >
-      {children}
-    </button>
-  );
-}

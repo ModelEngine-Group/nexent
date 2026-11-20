@@ -11,6 +11,12 @@
   margin-bottom: 16px;
 }
 
+.resource-space .repository-search-field {
+  flex: none;
+  width: min(100%, 800px);
+  min-width: 0;
+}
+
 .resource-space .ant-table-wrapper:not(.resource-scroll-table) {
   overflow-x: auto;
 }
@@ -86,6 +92,13 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.resource-space .repository-card-body,
+.resource-space[data-resource-type="skill"]
+  .resource-repository-content:has(.resource-card-grid) {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .resource-repository-content div:has(.resource-scroll-table) {
@@ -169,7 +182,15 @@
     scrollbar-color: auto !important;
   }
 
-  :is(.repository-card-body, .repository-detail-body)::-webkit-scrollbar {
+  .resource-space .repository-card-body,
+  .resource-space[data-resource-type="skill"]
+    .resource-repository-content:has(.resource-card-grid) {
+    scrollbar-width: auto;
+  }
+
+  :is(.repository-card-body, .repository-detail-body)::-webkit-scrollbar,
+  .resource-space[data-resource-type="skill"]
+    .resource-repository-content:has(.resource-card-grid)::-webkit-scrollbar {
     width: 4px;
   }
 

@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
 import type { ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { MyMcp } from "@/app/resource-space/components/mcp/my-mcp";
+import { MyMcp } from "@/app/resource-space/mcp/my-mcp";
 import {
   FILTER_ALL,
   McpHealthStatus,

@@ -46,7 +46,7 @@ import {
 } from "@/const/mcpTools";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
-import ResourceReviewLink from "@/app/resource-space/components/ResourceReviewLink";
+import { ResourceReviewLink } from "@/app/resource-space/components/ResourceReviewCenter";
 import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import MineMcpServiceCard, {
@@ -55,7 +55,6 @@ import MineMcpServiceCard, {
 } from "./components/MineMcpServiceCard";
 import MineApplyListingModal from "./components/MineApplyListingModal";
 import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
-import { getDeploymentTypeLabelKey } from "@/lib/mcpTools";
 
 export function MyMcp({
   localList,
@@ -88,12 +87,6 @@ export function MyMcp({
   const cardLayout = presentation?.layout === "cards";
   const [batchMode, setBatchMode] = useState(false);
   const [search, setSearch] = useRepositoryQueryState("search", "");
-  const [deploymentType, setDeploymentType] =
-    useRepositoryQueryState<DeploymentFilter>("deployment", FILTER_ALL, [
-      FILTER_ALL,
-      ...Object.values(McpDeploymentType),
-    ]);
-  const tag = FILTER_ALL;
   const { data: mineTagLibraries } = useTagLibraries();
   const mineDefaultLibrary =
     mineTagLibraries?.find((lib) => lib.bucket_key === "default_resource") ??
@@ -208,15 +201,6 @@ export function MyMcp({
     t,
   ]);
 
-  const categoryStats = useMemo(
-    () =>
-      getDeploymentCategoryStats(
-        items.map((item) => item.service),
-        t
-      ),
-    [items, t]
-  );
-
   const searchTagPredicates = useMemo(
     () => getTagSearchPredicates(mineTagDefinitions, search, t),
     [mineTagDefinitions, search, t]
@@ -300,26 +284,19 @@ export function MyMcp({
         matchedSearchTagIds?.has(String(item.service.mcpId));
       if (!matchesNameOrTag(service, search) && !matchesStructuredTag)
         return false;
-      if (tag !== FILTER_ALL && !(service.tags || []).includes(tag))
-        return false;
-      if (
-        deploymentType !== FILTER_ALL &&
-        resolveDeploymentType(service) !== deploymentType
-      )
-        return false;
       if (matchedTagIds !== null) {
         if (item.kind !== "local") return false;
         if (!matchedTagIds.has(String(item.service.mcpId))) return false;
       }
       return true;
     });
-  }, [items, search, tag, deploymentType, matchedTagIds, matchedSearchTagIds]);
+  }, [items, search, matchedTagIds, matchedSearchTagIds]);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- Filter changes restart pagination. */
     if (!presentation) setPage(1);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [search, tag, deploymentType, tagPredicates]);
+  }, [search, tagPredicates]);
 
   const itemsPerPage = presentation ? pageSize : pageSize - 1;
   const totalPages = Math.max(
@@ -633,8 +610,6 @@ export function MyMcp({
     <div className="mb-4 shrink-0">
       <McpToolsSearchFilterBar
         search={search}
-        deploymentType={deploymentType}
-        categoryStats={categoryStats}
         actions={
           presentation ? (
             <>
@@ -669,7 +644,6 @@ export function MyMcp({
           />
         }
         onSearchChange={setSearch}
-        onDeploymentTypeChange={setDeploymentType}
       />
     </div>
   );
@@ -770,7 +744,6 @@ export function MyMcp({
             getItemKey={getMineItemKey}
             selectionKey={JSON.stringify([
               search,
-              deploymentType,
               tagPredicates,
             ])}
             canBatchDelete={(item) =>
@@ -889,45 +862,6 @@ export function MyMcp({
 }
 
 export type DeploymentFilter = McpDeploymentType | typeof FILTER_ALL;
-
-type DeploymentCountable = {
-  transportType: CommunityMcpCard["transportType"];
-  deploymentType?: McpDeploymentType;
-  configJson?: Record<string, unknown>;
-  serverUrl?: string;
-};
-
-const deploymentCategories = [
-  McpDeploymentType.REMOTE_LINK,
-  McpDeploymentType.CONTAINER,
-  McpDeploymentType.API,
-  McpDeploymentType.LOCAL_IMAGE,
-];
-
-export function getDeploymentCategoryStats(
-  items: DeploymentCountable[],
-  t: (key: string) => string
-): Array<{ value: DeploymentFilter; label: string; count: number }> {
-  const hasLocalImage = items.some(
-    (item) => resolveDeploymentType(item) === McpDeploymentType.LOCAL_IMAGE
-  );
-  return [
-    {
-      value: FILTER_ALL,
-      label: t("mcpTools.deploymentType.all"),
-      count: items.length,
-    },
-    ...deploymentCategories
-      .filter((dt) => dt !== McpDeploymentType.LOCAL_IMAGE || hasLocalImage)
-      .map((deploymentType) => ({
-        value: deploymentType,
-        label: t(getDeploymentTypeLabelKey(deploymentType)),
-        count: items.filter(
-          (item) => resolveDeploymentType(item) === deploymentType
-        ).length,
-      })),
-  ];
-}
 
 export function getDeduplicatedMineItems(
   localServices: McpServiceItem[],

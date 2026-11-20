@@ -10,7 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ReactNode } from "react";
-import { McpSpace } from "@/app/resource-space/components/mcp/agent-space";
+import { McpSpace } from "@/app/resource-space/mcp/mcp-space";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import { fetchCommunityMcpCards } from "@/services/mcpToolsService";
 import type { CommunityMcpCard } from "@/types/mcpTools";
@@ -35,7 +35,7 @@ vi.mock("@/services/mcpToolsService", () => ({
 vi.mock("@/hooks/mcpTools/useMcpCommunityQuickAdd", () => ({
   useMcpCommunityQuickAdd: () => ({ visible: false, open: vi.fn() }),
 }));
-vi.mock("@/app/resource-space/components/mcp/my-mcp", () => ({
+vi.mock("@/app/resource-space/mcp/my-mcp", () => ({
   PlaceholderBox: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -44,12 +44,12 @@ vi.mock("@/components/tag/RepositoryTagFilter", () => ({
   default: () => null,
 }));
 vi.mock(
-  "@/app/resource-space/components/mcp/components/McpToolsSearchFilterBar",
+  "@/app/resource-space/mcp/components/McpToolsSearchFilterBar",
   () => ({
     default: () => null,
   })
 );
-vi.mock("@/app/resource-space/components/mcp/components/RepositoryMcpCard", () => ({
+vi.mock("@/app/resource-space/mcp/components/RepositoryMcpCard", () => ({
   default: ({ service }: { service: CommunityMcpCard }) => (
     <p>{service.name}</p>
   ),

@@ -4,9 +4,8 @@ import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import RepositoryCardActions from "@/app/resource-space/components/RepositoryCardActions";
 import ResourcePublishedAt from "@/app/resource-space/components/ResourcePublishedAt";
 import { Button, Dropdown, type MenuProps } from "antd";
-import { Download, MoreHorizontal, Puzzle, Trash2 } from "lucide-react";
+import { Download, MoreHorizontal, Trash2 } from "lucide-react";
 import { AgentCardTags } from "@/components/resource/AgentCardTags";
-import { McpDeploymentType } from "@/const/mcpTools";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +15,7 @@ import {
   resolveDeploymentType,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
+import RepositoryMcpIcon from "./shared/RepositoryMcpIcon";
 import TransportIcon from "./shared/TransportIcon";
 
 interface RepositoryMcpCardProps {
@@ -65,12 +65,6 @@ export default function RepositoryMcpCard({
   const installLabel = t(
     installed ? "mcpTools.repository.installed" : "mcpTools.repository.install"
   );
-  const iconTone =
-    deploymentType === McpDeploymentType.REMOTE_LINK
-      ? "bg-[#EEE0F7] text-[#743E9C]"
-      : deploymentType === McpDeploymentType.API
-        ? "bg-[#E0F2D2] text-[#346522]"
-        : "bg-[rgba(208,216,253,0.5)] text-[#1F55B5]";
 
   return (
     <ResourceCard
@@ -94,11 +88,7 @@ export default function RepositoryMcpCard({
       footerLayout="inline"
       icon={
         repositoryCard ? (
-          <span
-            className={`flex size-12 items-center justify-center rounded ${iconTone}`}
-          >
-            <Puzzle size={24} aria-hidden />
-          </span>
+          <RepositoryMcpIcon deploymentType={deploymentType} />
         ) : (
           <TransportIcon
             transportType={service.transportType}

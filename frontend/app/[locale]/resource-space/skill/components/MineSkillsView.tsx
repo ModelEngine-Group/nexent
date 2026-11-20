@@ -2,14 +2,14 @@
 
 "use client";
 
-import ResourceReviewLink from "@/app/resource-space/components/ResourceReviewLink";
+import { ResourceReviewLink } from "@/app/resource-space/components/ResourceReviewCenter";
 import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import RepositoryDisplayControls from "@/app/resource-space/components/RepositoryDisplayControls";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { App, Button, Dropdown, Input, Popover, Select } from "antd";
+import { App, Button, Dropdown, Input, Popover } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -31,7 +31,7 @@ import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { MineApplyListingModal } from "./MineApplyListingModal";
 import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
-import { AsyncContent, FilterButton } from "./SkillRepositoryControls";
+import { AsyncContent } from "./SkillRepositoryControls";
 import {
   formatRepositoryDate,
   getSkillRepositoryStatusLabel,
@@ -41,7 +41,6 @@ import type {
   MyEditableSkillItem,
   MyEditableSkillListItem,
   MySkillRepositoryInfoItem,
-  MineOwnershipFilter,
   NewSkillPaddingItem,
   SkillRepositoryListingCreatePayload,
   SkillRepositoryListingStatus,
@@ -51,12 +50,6 @@ import type {
   TagDefinition,
   TagResourcePredicate,
 } from "@/types/tagManagement";
-
-const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
-  "all",
-  "created",
-  "others",
-];
 
 export function isNewSkillPaddingItem(
   item: MyEditableSkillListItem
@@ -82,9 +75,6 @@ function findRepositoryInfoById(
 
 export function MineSkillsView({
   skills,
-  counts,
-  ownership,
-  onOwnershipChange,
   searchQuery,
   onSearchChange,
   tagDefinitions,
@@ -113,9 +103,6 @@ export function MineSkillsView({
   onReviewDeepLinkConsumed,
 }: {
   skills: MyEditableSkillListItem[];
-  counts: { all: number; created: number; others: number };
-  ownership: MineOwnershipFilter;
-  onOwnershipChange: (ownership: MineOwnershipFilter) => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   tagDefinitions: TagDefinition[];
@@ -159,11 +146,6 @@ export function MineSkillsView({
   const applyModalSkill = applyQueue[0] ?? null;
   const [applySubmitting, setApplySubmitting] = useState(false);
   const consumedDeepLinkRef = useRef<number | null>(null);
-  const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
-    all: "repository.mine.filter.all",
-    created: "repository.mine.filter.created",
-    others: "repository.mine.filter.others",
-  };
 
   const openReviewModal = (
     skill: MyEditableSkillItem,
@@ -373,21 +355,6 @@ export function MineSkillsView({
               </Button>
             </Popover>
           )}
-          {presentation && (
-            <Select<MineOwnershipFilter>
-              className="h-8 w-[296px] max-w-full"
-              aria-label={t(ownershipLabelKey.all)}
-              value={ownership}
-              onChange={onOwnershipChange}
-              options={MINE_OWNERSHIP_FILTERS.map((value) => ({
-                value,
-                label:
-                  value === "all"
-                    ? t("skillRepository.mine.allCreators")
-                    : t(ownershipLabelKey[value]),
-              }))}
-            />
-          )}
         </div>
         {presentation ? (
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -435,25 +402,6 @@ export function MineSkillsView({
         )}
       </div>
 
-      {!presentation && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex flex-wrap gap-1.5">
-            {MINE_OWNERSHIP_FILTERS.map((filter) => (
-              <FilterButton
-                key={filter}
-                active={ownership === filter}
-                onClick={() => onOwnershipChange(filter)}
-              >
-                {t(ownershipLabelKey[filter])}
-                <span className="ml-1 text-xs opacity-80">
-                  {counts[filter]}
-                </span>
-              </FilterButton>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="min-h-0">
         <AsyncContent
           isLoading={isLoading}
@@ -482,7 +430,6 @@ export function MineSkillsView({
               }
               selectionKey={JSON.stringify([
                 searchQuery,
-                ownership,
                 tagPredicates,
                 batchMode,
               ])}

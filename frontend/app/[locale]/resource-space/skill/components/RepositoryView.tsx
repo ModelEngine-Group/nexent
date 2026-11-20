@@ -119,7 +119,7 @@ export function RepositoryView({
         <div
           className={
             presentation
-              ? "relative min-w-0 max-w-[800px] flex-[1_1_320px]"
+              ? "relative repository-search-field"
               : "relative min-w-0 flex-1"
           }
         >

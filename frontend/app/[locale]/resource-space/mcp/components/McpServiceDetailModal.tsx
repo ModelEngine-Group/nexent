@@ -295,7 +295,7 @@ export default function McpServiceDetailModal({
             </div>
           }
         >
-          <div className="w-full min-w-0 space-y-4 bg-white">
+          <div className="flex w-full min-w-0 flex-col gap-4 bg-white">
             {canSelectGroups && (
               <Steps
                 className="relative shrink-0 !justify-between before:absolute before:inset-x-10 before:top-3 before:h-px before:bg-[#0067D1]"
@@ -321,7 +321,7 @@ export default function McpServiceDetailModal({
               colon={false}
               className="space-y-4 text-sm text-[#191919]"
             >
-              <div hidden={showGroupStep} className="space-y-4">
+              <div className={showGroupStep ? "hidden" : "flex flex-col gap-4"}>
                 <div
                   role="list"
                   aria-label={t("mcpTools.detail.addMethod")}

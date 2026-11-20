@@ -35,6 +35,7 @@ import RepositoryMcpCard from "./components/RepositoryMcpCard";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
+import RepositoryMcpIcon from "./components/shared/RepositoryMcpIcon";
 import TransportIcon from "./components/shared/TransportIcon";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import { type DeploymentFilter, PlaceholderBox } from "./my-mcp";
@@ -292,21 +293,23 @@ export function useMcpSpaceController(
           service={selectedRepository}
           installed={isRepositoryInstalled(selectedRepository)}
           icon={
-            <TransportIcon
-              transportType={selectedRepository.transportType}
-              deploymentType={resolveDeploymentType(selectedRepository)}
-              label={t(
-                getDeploymentTypeLabelKey(
-                  resolveDeploymentType(selectedRepository)
-                )
-              )}
-              seed={selectedRepository.name}
-              className={
-                presentation
-                  ? "!size-14 !rounded"
-                  : "!size-12 shrink-0 rounded-xl"
-              }
-            />
+            presentation ? (
+              <RepositoryMcpIcon
+                deploymentType={resolveDeploymentType(selectedRepository)}
+              />
+            ) : (
+              <TransportIcon
+                transportType={selectedRepository.transportType}
+                deploymentType={resolveDeploymentType(selectedRepository)}
+                label={t(
+                  getDeploymentTypeLabelKey(
+                    resolveDeploymentType(selectedRepository)
+                  )
+                )}
+                seed={selectedRepository.name}
+                className="!size-12 shrink-0 rounded-xl"
+              />
+            )
           }
           onClose={() => setSelectedRepository(null)}
           onInstall={quickAdd.open}

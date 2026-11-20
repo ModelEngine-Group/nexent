@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { RepositoryView } from "@/app/resource-space/components/skill/components/RepositoryView";
+import { RepositoryView } from "@/app/resource-space/skill/components/RepositoryView";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 
@@ -23,11 +23,11 @@ vi.mock("@/components/resource/ResourceCardGrid", () => ({
     renderItem: (item: SkillRepositoryListingItem) => ReactNode;
   }) => <>{items.map(renderItem)}</>,
 }));
-vi.mock("@/app/resource-space/components/skill/components/SkillRepositoryCard", () => ({
+vi.mock("@/app/resource-space/skill/components/SkillRepositoryCard", () => ({
   SkillRepositoryCard: ({ action }: { action: ReactNode }) => <>{action}</>,
 }));
 vi.mock(
-  "@/app/resource-space/components/skill/components/SkillRepositoryControls",
+  "@/app/resource-space/skill/components/SkillRepositoryControls",
   () => ({
     AsyncContent: ({ children }: { children: ReactNode }) => <>{children}</>,
   })

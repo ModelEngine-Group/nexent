@@ -6,15 +6,6 @@ import { Input, Select } from "antd";
 import { Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FILTER_ALL, McpDeploymentType } from "@/const/mcpTools";
-
-type DeploymentFilter = McpDeploymentType | typeof FILTER_ALL;
-
-interface McpCategoryStat {
-  value: DeploymentFilter;
-  label: string;
-  count: number;
-}
 
 interface FilterTab {
   value: string;
@@ -24,18 +15,14 @@ interface FilterTab {
 
 interface McpToolsSearchFilterBarProps {
   search: string;
-  deploymentType?: DeploymentFilter;
   searchPlaceholder?: string;
   status?: string;
   statusOptions?: Array<{ value: string; label: string }>;
-  categoryStats?: McpCategoryStat[];
   actions?: ReactNode;
   searchActions?: ReactNode;
   filterActions?: ReactNode;
   onSearchChange: (value: string) => void;
-  onDeploymentTypeChange?: (value: DeploymentFilter) => void;
   onStatusChange?: (value: string) => void;
-  /** Generic filter tabs replace categoryStats when provided */
   filterTabs?: FilterTab[];
   activeFilterTab?: string;
   onFilterTabChange?: (value: string) => void;
@@ -43,16 +30,13 @@ interface McpToolsSearchFilterBarProps {
 
 export default function McpToolsSearchFilterBar({
   search,
-  deploymentType,
   searchPlaceholder,
   status,
   statusOptions,
-  categoryStats,
   actions,
   searchActions,
   filterActions,
   onSearchChange,
-  onDeploymentTypeChange,
   onStatusChange,
   filterTabs,
   activeFilterTab,
@@ -93,13 +77,7 @@ export default function McpToolsSearchFilterBar({
           onFilterTabChange?.(item.value)
         )
       )
-    : !measuredMine && categoryStats?.length && onDeploymentTypeChange
-      ? categoryStats.map((item) =>
-          renderTab(item, deploymentType === item.value, () =>
-            onDeploymentTypeChange(item.value)
-          )
-        )
-      : null;
+    : null;
 
   const tabsContent =
     filterTabsContent || filterActions ? (
@@ -127,7 +105,7 @@ export default function McpToolsSearchFilterBar({
             measuredMine
               ? "flex min-w-[192px] flex-1 items-center gap-2"
               : measuredRepository
-                ? "flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-2"
+                ? "contents"
                 : "flex min-w-[240px] flex-1 items-center gap-3"
           }
         >
@@ -149,7 +127,7 @@ export default function McpToolsSearchFilterBar({
             }
             className={
               measuredRepository
-                ? "h-8 min-w-0 max-w-[800px] flex-[1_1_320px] gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
+                ? "repository-search-field h-8 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
                 : measuredMine
                   ? "h-8 !min-w-[80px] max-w-[800px] flex-[1_1_320px] rounded-lg border-slate-200 bg-slate-50/60"
                   : "h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
@@ -167,15 +145,6 @@ export default function McpToolsSearchFilterBar({
             >
               {searchActions}
             </div>
-          ) : null}
-          {measuredMine && categoryStats?.length && onDeploymentTypeChange ? (
-            <Select
-              aria-label={t("mcpTools.deploymentType.label")}
-              value={deploymentType}
-              onChange={onDeploymentTypeChange}
-              options={categoryStats}
-              className="h-8 min-w-12 max-w-48 flex-[1_1_192px]"
-            />
           ) : null}
           {statusOptions && onStatusChange ? (
             <Select

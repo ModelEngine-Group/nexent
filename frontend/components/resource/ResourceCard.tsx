@@ -84,7 +84,8 @@ export default function ResourceCard({
   const footerInHeader = compact && !measuredMineMcp;
   const measuredSkill = presentation?.resourceType === "skill";
   const uniformRepositorySize =
-    measuredAgent || measuredMcp || (measuredSkill && repositoryView);
+    measuredAgent || measuredMcp || measuredMineMcp || measuredSkill;
+  const constrainMineTags = uniformRepositorySize && !repositoryView;
   const actionsInFooter =
     measuredSkill && repositoryView && footerLayout === "inline";
   const titleId = `resource-card-title-${useId()}`;
@@ -244,7 +245,9 @@ export default function ResourceCard({
                 </div>
               ) : null}
             </div>
-            <div className="flex flex-1 flex-col">
+            <div
+              className={cn("flex flex-1 flex-col", constrainMineTags && "min-h-0")}
+            >
               {statusRow ? (
                 <div className={cn("min-w-0", !measuredAgent && "mt-1")}>
                   {statusRow}
@@ -291,7 +294,9 @@ export default function ResourceCard({
                   className={cn(
                     "flex flex-wrap gap-2 text-xs [&>*]:max-w-full [&>*]:[overflow-wrap:anywhere]",
                     "pb-2",
-                    compact ? "mt-2.5" : description ? "mt-3" : "mt-4"
+                    compact ? "mt-2.5" : description ? "mt-3" : "mt-4",
+                    constrainMineTags &&
+                      "pointer-events-auto min-h-0 overflow-y-auto"
                   )}
                 >
                   {tags}

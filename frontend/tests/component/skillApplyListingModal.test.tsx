@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
 import { expect, test, vi } from "vitest";
-import { MineApplyListingModal } from "@/app/resource-space/components/skill/components/MineApplyListingModal";
+import { MineApplyListingModal } from "@/app/resource-space/skill/components/MineApplyListingModal";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
 
 vi.mock("react-i18next", () => ({
