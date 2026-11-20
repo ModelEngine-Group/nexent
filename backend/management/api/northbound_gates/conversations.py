@@ -70,7 +70,7 @@ async def nb_delete_conversation(
     """Delete one conversation owned by the calling partner (AC-02/05)."""
     target = {"conversation_id": conversation_id}
     try:
-        delete_conversation_service(conversation_id, ctx.user_id)
+        await delete_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id)
     except Exception as exc:
         audit(audit_outcome(exc), target)
         return _error_response(exc, request)
@@ -90,7 +90,7 @@ async def nb_delete_conversations_batch(
     """Batch-delete conversations; per-item failures surface in failed_ids."""
     target = {"conversation_ids": list(getattr(request, "conversation_ids", []) or [])}
     try:
-        result = delete_conversations_batch_service(request.conversation_ids, ctx.user_id)
+        result = await delete_conversations_batch_service(request.conversation_ids, ctx.user_id, ctx.tenant_id)
     except Exception as exc:
         audit(audit_outcome(exc), target)
         return _error_response(exc, raw_request)

@@ -31,11 +31,14 @@ def gate_client(monkeypatch):
     auto_gates.agent_automation_facade.list_tasks.return_value = {"items": [], "total": 0}
     auto_gates.agent_automation_facade.get_task.return_value = {"id": 1, "status": "paused"}
 
-    conv_gates.delete_conversation_service = lambda cid, uid, tenant_id=None: None
-    conv_gates.delete_conversations_batch_service = lambda ids, uid: {
-        "deleted_count": len(ids),
-        "failed_ids": [],
-    }
+    async def fake_delete(cid, uid, tenant_id=None):
+        return True
+
+    async def fake_batch_delete(ids, uid, tenant_id=None):
+        return {"deleted_count": len(ids), "failed_ids": []}
+
+    conv_gates.delete_conversation_service = fake_delete
+    conv_gates.delete_conversations_batch_service = fake_batch_delete
 
     async def fake_url_impl(object_name, expires=86400):
         return {"object_name": object_name, "url": f"presigned://{object_name}"}
@@ -152,7 +155,7 @@ def test_denied_delete_still_records_audit(gate_client):
     import management.api.northbound_gates.conversations as conv_gates
     from contracts.errors.exceptions import ForbiddenError
 
-    def deny(cid, uid, tenant_id=None):
+    async def deny(cid, uid, tenant_id=None):
         raise ForbiddenError("not yours")
 
     conv_gates.delete_conversation_service = deny
@@ -164,3 +167,25 @@ def test_denied_delete_still_records_audit(gate_client):
     # The audit dependency already ran: the denied attempt is on record.
     assert audit_calls[0][1]["result"] == "denied"
     assert audit_calls[0][1]["details"]["target"] == {"conversation_id": 999}
+
+
+def test_missing_conversation_delete_maps_to_404_not_500(gate_client):
+    """Regression: the gate must await the async service call.
+
+    The gate previously called the async delete service without await, so the
+    ownership miss raised inside a never-awaited coroutine and every
+    conversation delete collapsed into an INTERNAL_ERROR 500 instead of the
+    registered 404 translation. The async mock reproduces the real shape.
+    """
+    client, _ = gate_client
+    import management.api.northbound_gates.conversations as conv_gates
+    from contracts.errors.exceptions import ConversationNotFoundError
+
+    async def missing(cid, uid, tenant_id=None):
+        raise ConversationNotFoundError(f"Conversation {cid} does not exist")
+
+    conv_gates.delete_conversation_service = missing
+    response = client.delete("/nb/v1/conversations/99999")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["code"] == "NOT_FOUND"
