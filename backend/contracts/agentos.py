@@ -584,12 +584,27 @@ class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
 
 
+class PreparedHistoryExecutionRecord(RunSpecModel):
+    record_type: str
+    content: str | None
+    tool_call_id: str | None = None
+    invocation_id: str | None = None
+
+
 class PreparedHistoryTurn(RunSpecModel):
     user_message: str
     assistant_final_answer: str
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    execution_records: list[PreparedHistoryExecutionRecord] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def omit_empty_execution_records(self, serialize):
+        payload = serialize(self)
+        if not self.execution_records:
+            payload.pop("execution_records", None)
+        return payload
 
 
 class PreparedConversationHistory(RunSpecModel):
