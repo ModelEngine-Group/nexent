@@ -152,6 +152,27 @@ def test_raw_error_credentials_are_scrubbed_and_partial_result_survives(capture)
     assert attempt.attributes["nexent.output_complete"] is False
 
 
+@pytest.mark.parametrize(("category", "message"), [
+    ("model_timeout", "The model request timed out. Please try again later."),
+    ("MODEL_EMPTY_RESPONSE", "The model returned no answer content or tool calls."),
+    ("unknown_diagnostic", None),
+])
+def test_legacy_attempt_records_safe_reason_without_provider_exception(capture, category, message):
+    manager, local, _ = capture
+    with manager.tracer.start_as_current_span("logical") as logical:
+        session = ModelAttemptSession(manager, "model", logical, "request", 1)
+        session.begin({"messages": []})
+        session.legacy_failure(RuntimeError("private provider exception"), category=category, will_retry=True)
+
+    attempt = local.get_finished_spans()[0]
+    assert attempt.attributes["nexent.business_status"] == "failed"
+    assert json.loads(attempt.attributes["nexent.error"]) == {
+        "category": category, "http_status": None, "safe_message": message,
+        "retryable": False, "will_retry": True,
+    }
+    assert "private provider exception" not in str(attempt.attributes)
+
+
 def test_capture_budget_preserves_business_success_and_reports_missing_body(capture):
     manager, local, _ = capture
     manager._config.local_span_processor = SimpleNamespace(run_queue_max_bytes=100)

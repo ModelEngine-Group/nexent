@@ -173,11 +173,53 @@ def test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads(runtime
         root = next(n for n in result['nodes'] if n['parent_id'] is None)
         assert root['display_trace_id'] == '123' and root['model_call_count'] == 2
         indexed = {n['id']: n for n in result['nodes']}
+        reason = 'The model service is temporarily unavailable. Please try again later.'
+        assert json.loads(first['nexent.error'])['safe_message'] == reason
+        assert indexed[first['nexent.record_id']]['failure_reason'] == reason
+        assert 'failure_reason' not in indexed[second['nexent.record_id']]
         for physical, expected in zip(models, ('failed-partial', '<final_answer>completed-answer</final_answer>')):
             body = json.loads(indexed[attrs(physical)['nexent.record_id']]['output']['text'])
             assert body['choices'][0]['delta']['content'] == expected
             assert not {'content_parts', 'provider_metadata', 'complete', 'message_id'} & body.keys()
         assert client.get('/trajectory/conversations/123', headers={'Authorization': 'user'}).status_code == 403
+
+
+def test_capture_tool_failure_reason_survives_cold_read(runtime, monkeypatch):
+    from nexent.core.agents.cores.smolagents import agent as module
+
+    calls = []
+    reason = 'The controlled tool rejected the request.'
+
+    class CaptureFailureTool(Tool):
+        name = 'capture_failure'
+        description = 'A controlled tool failure'
+        inputs: ClassVar[dict] = {}
+        output_type = 'string'
+
+        def forward(self) -> str:
+            calls.append(True)
+            raise ValueError(reason)
+
+    monkeypatch.setattr(module, 'CaptureFailureTool', CaptureFailureTool, raising=False)
+    config = AgentConfig(name='root', description='Controlled Agent', model_name='model', max_steps=2,
+                         tools=[ToolConfig(class_name='CaptureFailureTool', name='capture_failure',
+                                           source='local', params={})])
+
+    def reply(request, number, emit):
+        emit('<code>\ncapture_failure()\n</code>' if number == 1 else '<final_answer>recovered</final_answer>')
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        info, _ = runtime.run(base, config=config)
+        assert info.attempt_outcome == 'completed'
+        assert len(requests) == 2 and calls == [True]
+    tool_span = next(s for s in runtime.spans() if attrs(s).get('tool.name') == 'capture_failure')
+    assert attrs(tool_span)['error.message'] == reason
+    with runtime.client() as client:
+        view = snapshot(runtime, client)
+        node = next(n for n in view['nodes'] if n['name'] == 'capture_failure')
+        assert node['source']['span_id'] == tool_span['spanId']
+        assert node['status'] == 'failed' and node['failure_reason'] == reason
 
 
 def test_capture_parallel_tools_nested_output_and_full_local_body(runtime, monkeypatch):

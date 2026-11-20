@@ -14,9 +14,18 @@ from uuid import uuid4
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from nexent.core.model_errors import ModelErrorCode, model_error_summary
+
 from .duration import duration_attributes
 from .local_content import local_capture_enabled, safe_local_content
 from .provider_response import ProviderResponse
+
+
+_LEGACY_ATTEMPT_MESSAGES = {
+    'MODEL_EMPTY_RESPONSE': 'The model returned no answer content or tool calls.',
+    'MODEL_CONTEXT_EXCEEDED': 'The model service context limit was exceeded.',
+    'MODEL_SAMPLING_FALLBACK': 'The model service rejected the sampling parameters.',
+}
 
 
 def _isolated(method):
@@ -320,8 +329,12 @@ class ModelAttemptSession:
                 if key.lower() in {'authorization', 'x-api-key', 'api-key', 'cookie'}:
                     secrets.extend([value, value.removeprefix('Bearer ')])
             self.raw_response(RawHttpResponse(response.status_code, {}, response.content, tuple(secrets)))
+        try:
+            message = model_error_summary(ModelErrorCode(category))
+        except ValueError:
+            message = _LEGACY_ATTEMPT_MESSAGES.get(category)
         self.fail({'category': category, 'http_status': status if type(status) is int else None,
-                   'retryable': retryable, 'will_retry': will_retry})
+                   'safe_message': message, 'retryable': retryable, 'will_retry': will_retry})
 
     @_isolated
     def complete(self, message):

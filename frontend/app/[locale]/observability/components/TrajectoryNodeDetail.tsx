@@ -1,12 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useEffect, useRef, useState } from "react";
-import { Tag } from "antd";
+import { Alert, Tag } from "antd";
 import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BodyCache, formatMetric } from "@/lib/trajectory";
 import type { TrajectoryNode } from "@/types/trajectory";
 import { TrajectoryBody } from "./TrajectoryBody";
+import { isMarkdownOutputKind } from "./trajectoryOutputMarkdown";
 import { AgentVersion } from "./AgentVersion";
 import {
   CopyTraceId,
@@ -153,6 +154,21 @@ export function TrajectoryNodeDetail({
             </div>
           )}
       </section>
+      {(node.kind === "tool" || node.kind === "model") &&
+        (node.status === "failed" || node.status === "error") && (
+          <div className="mx-[18px] mt-3">
+            <Alert
+              type="error"
+              showIcon
+              title={t("trajectory.failureReason")}
+              description={
+                <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {node.failure_reason || t("trajectory.failureReasonMissing")}
+                </div>
+              }
+            />
+          </div>
+        )}
       <section className="trajectory-execution-info">
         <button
           className="trajectory-section-title"
@@ -212,6 +228,11 @@ export function TrajectoryNodeDetail({
             key={`${node.id}:${slot}`}
             reference={node[slot]}
             slot={slot}
+            outputKind={
+              slot === "output" && isMarkdownOutputKind(node.kind)
+                ? node.kind
+                : undefined
+            }
             conversationId={conversationId}
             nodeId={node.id}
             cache={cache}

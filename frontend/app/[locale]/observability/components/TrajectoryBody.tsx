@@ -11,14 +11,24 @@ import {
   WrapText,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { trajectoryService } from "@/services/trajectoryService";
 import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
 import type { ContentReference } from "@/types/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
+import {
+  outputMarkdown,
+  type MarkdownOutputKind,
+} from "./trajectoryOutputMarkdown";
+
+type BodyMode = "text" | "json" | "markdown";
+const MARKDOWN_PLUGINS = [remarkGfm];
 
 interface TrajectoryBodyProps {
   reference: ContentReference;
   slot: string;
+  outputKind?: MarkdownOutputKind;
   conversationId: string;
   nodeId: string;
   cache: BodyCache;
@@ -33,6 +43,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
         props.conversationId,
         props.nodeId,
         props.slot,
+        props.outputKind,
         props.reference.content_id,
         props.reference.availability,
         props.reference.complete,
@@ -45,6 +56,7 @@ export function TrajectoryBody(props: TrajectoryBodyProps) {
 function TrajectoryBodyContent({
   reference,
   slot,
+  outputKind,
   conversationId,
   nodeId,
   cache,
@@ -55,7 +67,9 @@ function TrajectoryBodyContent({
   const { message } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [mode, setMode] = useState("json");
+  const [preferredMode, setMode] = useState<BodyMode>(
+    outputKind ? "markdown" : "json"
+  );
   const [wordWrap, setWordWrap] = useState(false);
   const [chunk, setChunk] = useState<{
     offset: number;
@@ -82,21 +96,36 @@ function TrajectoryBodyContent({
   const text = chunk?.text ?? reference.text ?? reference.preview ?? "";
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
+  const markdown = useMemo(() => {
+    if (!outputKind || !complete || reference.availability !== "available")
+      return "";
+    return outputMarkdown(text, outputKind, {
+      field: t("trajectory.markdownField"),
+      value: t("trajectory.markdownValue"),
+      index: t("trajectory.markdownIndex"),
+      logs: t("trajectory.markdownLogs"),
+    });
+  }, [complete, outputKind, reference.availability, t, text]);
+  const mode =
+    preferredMode === "markdown" && !markdown ? "json" : preferredMode;
   const formatted = useMemo(() => {
+    if (mode === "markdown") return markdown;
     if (mode !== "json") return text;
     try {
       return JSON.stringify(JSON.parse(text), null, 2);
     } catch {
       return JSON.stringify({ content: text }, null, 2);
     }
-  }, [text, mode]);
+  }, [text, mode, markdown]);
   const lineNumbers = useMemo(
     () =>
-      Array.from(
-        { length: Math.min(formatted.split("\n").length, 10000) },
-        (_, index) => index + 1
-      ).join("\n"),
-    [formatted]
+      mode === "markdown"
+        ? ""
+        : Array.from(
+            { length: Math.min(formatted.split("\n").length, 10000) },
+            (_, index) => index + 1
+          ).join("\n"),
+    [formatted, mode]
   );
   const load = useCallback(
     async (offset: number) => {
@@ -192,13 +221,16 @@ function TrajectoryBodyContent({
           {t(`trajectory.${slot}`)}
         </button>
         <div className="flex flex-wrap items-center gap-1">
-          <Segmented
+          <Segmented<BodyMode>
             size="small"
             value={mode}
             onChange={setMode}
             options={[
               { label: t("trajectory.text"), value: "text" },
               { label: "JSON", value: "json" },
+              ...(markdown
+                ? [{ label: "Markdown", value: "markdown" as const }]
+                : []),
             ]}
           />
         </div>
@@ -216,7 +248,9 @@ function TrajectoryBodyContent({
               {!awaitingFirstChunk && (
                 <div className="trajectory-code-card">
                   <div className="trajectory-code-toolbar">
-                    <span>{mode === "json" ? "JSON" : "TEXT"}</span>
+                    <span>
+                      {mode === "markdown" ? "Markdown" : mode.toUpperCase()}
+                    </span>
                     <span
                       className="trajectory-code-meta"
                       title={t(
@@ -236,24 +270,26 @@ function TrajectoryBodyContent({
                         count: reference.char_count ?? Array.from(text).length,
                       })}
                       <span className="trajectory-code-actions">
-                        <Button
-                          type={wordWrap ? "primary" : "text"}
-                          size="small"
-                          icon={<WrapText size={14} />}
-                          aria-label={t(
-                            wordWrap
-                              ? "trajectory.unwrapLines"
-                              : "trajectory.wrapLines"
-                          )}
-                          title={t(
-                            wordWrap
-                              ? "trajectory.unwrapLines"
-                              : "trajectory.wrapLines"
-                          )}
-                          aria-pressed={wordWrap}
-                          disabled={reference.availability !== "available"}
-                          onClick={() => setWordWrap((value) => !value)}
-                        />
+                        {mode !== "markdown" && (
+                          <Button
+                            type={wordWrap ? "primary" : "text"}
+                            size="small"
+                            icon={<WrapText size={14} />}
+                            aria-label={t(
+                              wordWrap
+                                ? "trajectory.unwrapLines"
+                                : "trajectory.wrapLines"
+                            )}
+                            title={t(
+                              wordWrap
+                                ? "trajectory.unwrapLines"
+                                : "trajectory.wrapLines"
+                            )}
+                            aria-pressed={wordWrap}
+                            disabled={reference.availability !== "available"}
+                            onClick={() => setWordWrap((value) => !value)}
+                          />
+                        )}
                         <button
                           className="trajectory-icon-button"
                           aria-label={t("trajectory.copy")}
@@ -288,26 +324,44 @@ function TrajectoryBodyContent({
                       </span>
                     </span>
                   </div>
-                  <div className="trajectory-code-scroll">
-                    <pre
+                  {mode === "markdown" ? (
+                    <div
+                      className={`markdown-body trajectory-markdown-body ${expanded ? "trajectory-body-full" : "trajectory-body-preview"}`}
+                      role="region"
+                      aria-label={t("trajectory.output")}
                       tabIndex={0}
-                      onScroll={(event) => loadAtBottom(event.currentTarget)}
-                      onWheel={(event) => {
-                        if (event.deltaY > 0) loadAtBottom(event.currentTarget);
-                      }}
-                      className={[
-                        expanded
-                          ? "trajectory-body-full"
-                          : "trajectory-body-preview",
-                        wordWrap ? "is-wrapped" : "",
-                      ].join(" ")}
                     >
-                      <span className="trajectory-line-numbers" aria-hidden>
-                        {lineNumbers}
-                      </span>
-                      <code>{formatted || t("trajectory.emptyBody")}</code>
-                    </pre>
-                  </div>
+                      <ReactMarkdown
+                        remarkPlugins={MARKDOWN_PLUGINS}
+                        skipHtml
+                        disallowedElements={["img"]}
+                      >
+                        {markdown}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <div className="trajectory-code-scroll">
+                      <pre
+                        tabIndex={0}
+                        onScroll={(event) => loadAtBottom(event.currentTarget)}
+                        onWheel={(event) => {
+                          if (event.deltaY > 0)
+                            loadAtBottom(event.currentTarget);
+                        }}
+                        className={[
+                          expanded
+                            ? "trajectory-body-full"
+                            : "trajectory-body-preview",
+                          wordWrap ? "is-wrapped" : "",
+                        ].join(" ")}
+                      >
+                        <span className="trajectory-line-numbers" aria-hidden>
+                          {lineNumbers}
+                        </span>
+                        <code>{formatted || t("trajectory.emptyBody")}</code>
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
               {showLoading && (

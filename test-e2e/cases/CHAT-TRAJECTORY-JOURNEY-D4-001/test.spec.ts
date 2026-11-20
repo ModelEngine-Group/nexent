@@ -266,6 +266,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await expect(body.locator("code")).toContainText("aaaa");
     const inputSection = page.locator(".trajectory-body").first();
     const outputSection = page.locator(".trajectory-body").nth(1);
+    await outputSection.getByText("JSON", { exact: true }).click();
     const originalBody = await body.locator("code").textContent();
     await inputSection
       .getByRole("button", { name: "自动换行", exact: true })
