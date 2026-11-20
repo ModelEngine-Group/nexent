@@ -640,7 +640,11 @@ export function MyMcp({
             value={tagPredicates}
             onChange={setTagPredicates}
             appearance={presentation ? "select" : "button"}
-            buttonClassName={presentation ? "w-full min-w-0" : undefined}
+            buttonClassName={
+              presentation
+                ? "!h-8 !w-full min-w-0 !rounded !border-[#C9C9C9] !px-[11px]"
+                : undefined
+            }
           />
         }
         onSearchChange={setSearch}

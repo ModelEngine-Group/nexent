@@ -44,12 +44,7 @@ export default function McpToolsSearchFilterBar({
 }: McpToolsSearchFilterBarProps) {
   const { t } = useTranslation("common");
   const presentation = useRepositoryPresentation();
-  const measuredMine =
-    presentation?.resourceType === "mcp" &&
-    presentation.query?.get("view") === "mine";
-  const measuredRepository =
-    presentation?.resourceType === "mcp" &&
-    presentation.query?.get("view") !== "mine";
+  const repositoryToolbar = presentation?.resourceType === "mcp";
 
   const renderTab = (
     item: { value: string; label: string; count: number },
@@ -93,20 +88,16 @@ export default function McpToolsSearchFilterBar({
     <div>
       <div
         className={
-          measuredMine
+          repositoryToolbar
             ? "flex shrink-0 flex-wrap items-center gap-2"
-            : measuredRepository
-              ? "flex shrink-0 flex-wrap items-center gap-2"
-              : "flex flex-row items-center gap-3 overflow-x-auto"
+            : "flex flex-row items-center gap-3 overflow-x-auto"
         }
       >
         <div
           className={
-            measuredMine
-              ? "flex min-w-[192px] flex-1 items-center gap-2"
-              : measuredRepository
-                ? "contents"
-                : "flex min-w-[240px] flex-1 items-center gap-3"
+            repositoryToolbar
+              ? "contents"
+              : "flex min-w-[240px] flex-1 items-center gap-3"
           }
         >
           <Input
@@ -119,28 +110,22 @@ export default function McpToolsSearchFilterBar({
             prefix={
               <Search
                 className={
-                  measuredRepository
+                  repositoryToolbar
                     ? "size-4 text-[#777777]"
                     : "h-4 w-4 text-slate-400"
                 }
               />
             }
             className={
-              measuredRepository
+              repositoryToolbar
                 ? "repository-search-field h-8 gap-1 rounded border-[#C9C9C9] bg-white px-3 py-[5px] text-sm leading-[22px] [&_input::placeholder]:text-[#AEAEAE]"
-                : measuredMine
-                  ? "h-8 !min-w-[80px] max-w-[800px] flex-[1_1_320px] rounded-lg border-slate-200 bg-slate-50/60"
-                  : "h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
+                : "h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
             }
           />
           {searchActions ? (
             <div
               className={
-                measuredMine
-                  ? "min-w-12 max-w-[240px] flex-[1_1_240px]"
-                  : measuredRepository
-                    ? "max-w-full shrink-0"
-                    : "shrink-0"
+                repositoryToolbar ? "w-[240px] max-w-full shrink-0" : "shrink-0"
               }
             >
               {searchActions}
@@ -156,8 +141,8 @@ export default function McpToolsSearchFilterBar({
             />
           ) : null}
         </div>
-        {measuredMine ? (
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+        {repositoryToolbar ? (
+          <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
             {actions}
             <RepositoryDisplayControls showSort={false} />
           </div>
