@@ -21,12 +21,14 @@ from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
 from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
 from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
 from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
-from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
+from nexent.core.agents.cores.jiuwen.tool_tracing import record_tool_result, tool_execution_trace
+from nexent.core.agents.resources.monitoring import _is_retriever_tool, _wrap_tool_with_monitoring
 from nexent.core.agents.resources.provider import AgentResources
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.tools.prompt_registry import PromptToolPolicySnapshot, filter_effective_prompt_tools
 from nexent.core.utils.observer import ProcessType
+from nexent.monitor import get_monitoring_manager
 
 
 logger = logging.getLogger(__name__)
@@ -204,7 +206,16 @@ class JiuwenAdapter(AgentCoreAdapter):
         source = self._resource_source(name)
         token = self._active_resource.set((call_id, provider_id, name, source))
         try:
-            with self.run_info.observer.tool_call_context(call_id):
+            with self.run_info.observer.tool_call_context(call_id), tool_execution_trace(
+                get_monitoring_manager, name, self.run_info.agent_config.name, {
+                "nexent.runtime.turn_id": self.events.turn_id,
+                "nexent.model.request_id": self.events.model_request_id,
+                "nexent.runtime.step_number": self.events.step_number,
+                "nexent.tool.local_call_id": call_id,
+                "nexent.tool.provider_call_id": provider_id,
+                "nexent.tool.parent_call_id": parent[0] if parent else None,
+                "nexent.tool.source": source,
+            }, tool_input=arguments, tool=self.business_tools.get(name), observer=self.run_info.observer):
                 try:
                     yield
                 except BaseException as error:
@@ -290,6 +301,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         )
         if active is not None:
             rendered = result if isinstance(result, str) else json.dumps(value, ensure_ascii=False, default=str)
+            record_tool_result(is_error, value)
             diagnostic = (
                 self._resource_failure(RuntimeError("Resource returned failure"), active[3], active[2])
                 if is_error else None
@@ -342,7 +354,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         for config in self.tool_configs:
             if config.source == "mcp" or config.class_name == "ParallelExecutorTool":
                 continue
-            tool = _wrap_tool_with_monitoring(self.resources.create_tool(config), info.agent_config.name)
+            # The shared execution boundary owns one span for this actual call.
+            tool = self.resources.create_tool(config)
+            if _is_retriever_tool(tool):
+                # Retain the distinct retrieval phase, not a second TOOL span.
+                tool = _wrap_tool_with_monitoring(tool, info.agent_config.name, observer=info.observer)
             name = config.name or tool.name
             self.business_tools[name] = tool
             if name in self.visible_tool_names:

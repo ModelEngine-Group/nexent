@@ -25,6 +25,7 @@ class JiuwenEventAdapter:
         self._call_history = {}
         self.sequence = 0
         self.step_number = 0
+        self.model_request_id = None
         self._lock = threading.RLock()
         self.capacity_provider = capacity_provider
         self.artifact_output = False
@@ -48,6 +49,7 @@ class JiuwenEventAdapter:
         if self.final_answer is not None:
             raise RuntimeError("Model step after Runner terminal")
         self.step_number += 1
+        self.model_request_id = getattr(request, "request_id", None)
         self.output(ProcessType.STEP_COUNT, str(self.step_number), step_number=self.step_number)
         self.blocks.append({"id": uuid.uuid4().hex, "text": "", "reasoning": "", "started": time.monotonic(),
                             "filters": {"text": PublicTextFilter(), "reasoning": PublicTextFilter()},
