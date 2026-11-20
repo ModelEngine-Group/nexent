@@ -2042,7 +2042,7 @@
   "aidpKnowledge.ontologyEntityDeleteContent": "The entity will be removed from the ontology.",
   "aidpKnowledge.ontologyEntityDeleteContentWithName": "Delete entity “{{name}}”? The knowledge base chunk links are not removed immediately; they are cleared when metadata is updated later.",
   "aidpKnowledge.ontologyEntityDeleteFailed": "Failed to delete the entity",
-  "aidpKnowledge.ontologyEntityDeleteGap": "AIDP has not clarified what happens to existing parent/synonym relations, chunk labels and bound knowledge bases after deleting an entity; the page does not promise automatic cleanup.",
+  "aidpKnowledge.ontologyEntityDeleteGap": "Deleting an entity is synchronous: parent/child and synonym relations are removed with it, while knowledge-base bindings are unaffected. Ontology tags on chunks are not removed immediately; they are cleaned up when metadata is updated or a tag sync task runs.",
   "aidpKnowledge.ontologyEntityDeleteTitle": "Delete the entity {{name}}?",
   "aidpKnowledge.ontologyEntityDeleteTitleFixed": "Delete entity",
   "aidpKnowledge.ontologyEntityDeleted": "Entity deleted",
