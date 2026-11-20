@@ -345,7 +345,7 @@ class ContextManager:
         attempts_exhausted = history_triggered and len(self._step_local_log) >= 3
         if exceeds_limit:
             logger.warning(
-                "Context exceeds Effective Input Limit after compaction: %s > %s",
+                "Context exceeds Effective Input Limit after assembly: %s > %s",
                 final_tokens, effective_limit,
             )
 

@@ -1,7 +1,22 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Request-local usage calibration; summary calls never update this baseline."""
 
+import logging
 from dataclasses import dataclass
+
+
+def record_capacity_rejection(*, local_tokens, estimated_tokens, limit, baseline, model_key):
+    """Record numeric provenance without logging any input or model credentials."""
+    calibrated = (baseline.model_key == model_key and baseline.actual_input_tokens is not None
+                  and baseline.request_estimate is not None)
+    source = baseline.source if calibrated or baseline.source != "provider_calibrated" else "estimated"
+    logging.getLogger("agent_context.runtime").warning(
+        "event=context_input_rejected local_input=%s calibrated_input=%s combined_window=%s "
+        "usage_source=%s provider_input=%s previous_request_estimate=%s",
+        local_tokens, estimated_tokens, limit, source,
+        baseline.actual_input_tokens if calibrated else None,
+        baseline.request_estimate if calibrated else None,
+    )
 
 
 @dataclass

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from nexent.core.agents.context import ContextItem, ContextManager, ContextManagerConfig
 from nexent.core.agents.context.models import CurrentActionContextItem
 from nexent.core.agents.context.maintenance import complete_context
-from nexent.core.agents.context.usage import ContextUsageBaseline
+from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
 from nexent.core.agents.contracts.context import ContextItemInput
 from nexent.core.agents.contracts.output import ContextCapacityObservation
 from nexent.core.agents.cores.jiuwen.messages import _mapping, resource_view
@@ -163,9 +163,13 @@ class JiuwenContextBridge:
         if self.scope.cancelled:
             raise RunTerminated()
         self._current_items, self._tools = current, definitions
-        estimated = self.usage_baseline.estimate(self._estimate(context.messages, definitions), self._model_key())
+        local_estimate = self._estimate(context.messages, definitions)
+        model_key = self._model_key()
+        estimated = self.usage_baseline.estimate(local_estimate, model_key)
         limit = self.context_manager.effective_input_limit_tokens or self.context_manager.config.context_window_tokens
         if limit and estimated >= limit:
+            record_capacity_rejection(local_tokens=local_estimate, estimated_tokens=estimated, limit=limit,
+                                      baseline=self.usage_baseline, model_key=model_key)
             raise ValueError("Jiuwen input exceeds the combined context window")
         self.usage_baseline.capture(self._estimate(context.messages, definitions), self._model_key())
         self.last_evidence = context.evidence
@@ -192,21 +196,23 @@ class JiuwenContextBridge:
         self._completed_tool_ids.clear()
         content = "".join(part.get("text", "") for part in message.content_parts)
         payload = {"role": "assistant", "content": content}
-        if message.tool_calls:
-            payload["tool_calls"] = [{"id": call.provider_call_id, "type": "function", "function": {
-                "name": call.name, "arguments": call.raw_arguments}} for call in message.tool_calls]
+        if self._pending_calls:
+            payload["tool_calls"] = [{"id": call.id, "type": "function", "function": {
+                "name": call.name, "arguments": call.arguments}} for call in self._pending_calls]
         self._current_items.append(NativeActionItem(id="jiuwen-accepted-response", type="current_action",
             content={"messages": [payload]}, metadata={"layout_order": 1000000}))
         if not self._pending_calls:
             self._schedule_maintenance()
 
-    def completed_tool(self, name, result, local_id):
+    def completed_tool(self, name, result, local_id, *, provider_call_id=None):
         """Nested business calls cannot close an unrelated native tool transaction."""
         if self.scope.cancelled or local_id in self._completed_tool_ids:
             return
-        call = next((call for call in self._pending_calls if call.name == name), None)
-        if call is None:
+        matches = [call for call in self._pending_calls if call.name == name
+                   and (provider_call_id is None or call.id == provider_call_id)]
+        if len(matches) != 1:
             return
+        call = matches[0]
         self._completed_tool_ids.add(local_id)
         self._pending_calls.remove(call)
         self._current_items.append(NativeActionItem(id="jiuwen-accepted-tool:" + local_id,

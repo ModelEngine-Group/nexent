@@ -195,7 +195,7 @@ def execute_pending_maintenance(bridge, *, calls=()):
 def test_maintenance_waits_for_matching_tool_results_and_ignores_nested_calls():
     bridge, info = make_bridge("adaptive_compact", [turn()])
     bridge._assemble([{"role":"user", "content":info.query}], [])
-    call = SimpleNamespace(name="native_tool", id="provider-call")
+    call = SimpleNamespace(name="native_tool", id="provider-call", arguments="{}")
     execute_pending_maintenance(bridge, calls=[call])
     assert bridge._maintenance_execution is None
     bridge.completed_tool("nested_business_tool", "nested", "nested-local")
@@ -208,7 +208,7 @@ def test_maintenance_waits_for_matching_tool_results_and_ignores_nested_calls():
 def test_closed_tool_step_starts_maintenance_once_and_keeps_original_source():
     bridge, info = make_bridge("passthrough", [turn()])
     bridge._assemble([{"role":"user", "content":info.query}], [])
-    execute_pending_maintenance(bridge, calls=[SimpleNamespace(name="native_tool", id="provider-call")])
+    execute_pending_maintenance(bridge, calls=[SimpleNamespace(name="native_tool", id="provider-call", arguments="{}")])
     bridge.completed_tool("native_tool", "actual result", "local")
     bridge._maintenance_execution.future.result()
     assert bridge.usage_baseline.actual_input_tokens == 3000
@@ -217,3 +217,65 @@ def test_closed_tool_step_starts_maintenance_once_and_keeps_original_source():
     assert bridge.manager.submit.call_count == 1
     assert "actual result" in str(bridge._current_items)
     assert len(bridge.run_context.items) == 1
+
+
+def test_text_execution_maintenance_preserves_converted_native_call_pair():
+    """FIX-JW-01: post-response accounting uses the call actually dispatched."""
+    bridge, info = make_bridge()
+    bridge._assemble([{"role": "user", "content": info.query}], [])
+    call = SimpleNamespace(id="text-execution", name="nexent_execute_block", arguments='{"code":"print(7)"}')
+    bridge.accepted_response(SimpleNamespace(
+        usage=SimpleNamespace(origin="provider", input_tokens=100),
+        content_parts=[{"type": "text", "text": "<code>print(7)</code>"}], tool_calls=[]),
+        SimpleNamespace(tool_calls=[call]))
+    payload = bridge._current_items[-1].content["messages"][0]
+    assert payload["tool_calls"] == [{"id": call.id, "type": "function", "function": {
+        "name": call.name, "arguments": call.arguments}}]
+    assert bridge._maintenance_execution is None
+
+
+def test_same_name_reverse_completion_matches_provider_call_id():
+    """FIX-JW-02: a later same-name call may finish before the first."""
+    bridge, info = make_bridge()
+    bridge._assemble([{"role": "user", "content": info.query}], [])
+    calls = [SimpleNamespace(id="call-a", name="lookup", arguments='{"key":"A"}'),
+             SimpleNamespace(id="call-b", name="lookup", arguments='{"key":"B"}')]
+    execute_pending_maintenance(bridge, calls=calls)
+    bridge.completed_tool("lookup", "result-B", "local-b", provider_call_id="call-b")
+    payload = bridge._current_items[-1].content["messages"][0]
+    assert payload["tool_call_id"] == "call-b"
+    assert payload["content"] == "result-B"
+    assert [call.id for call in bridge._pending_calls] == ["call-a"]
+    assert bridge._maintenance_execution is None
+    bridge.completed_tool("lookup", "result-A", "local-a", provider_call_id="call-a")
+    bridge._maintenance_execution.future.result()
+    assert bridge.manager.submit.call_count == 1
+
+
+@pytest.mark.parametrize("provider_id", [None, "foreign-call"])
+def test_ambiguous_or_foreign_completion_cannot_consume_pending_call(provider_id):
+    """FIX-JW-02: absent correlation never guesses which result completed."""
+    bridge, info = make_bridge()
+    bridge._assemble([{"role": "user", "content": info.query}], [])
+    calls = [SimpleNamespace(id="call-a", name="lookup", arguments="{}"),
+             SimpleNamespace(id="call-b", name="lookup", arguments="{}")]
+    execute_pending_maintenance(bridge, calls=calls)
+    bridge.completed_tool("lookup", "unattributed result", "unknown-local", provider_call_id=provider_id)
+    assert bridge._pending_calls == calls
+    assert bridge._completed_tool_ids == set()
+    assert bridge._maintenance_execution is None
+
+
+def test_capacity_rejection_reports_safe_local_estimate_and_no_provider_usage(caplog):
+    bridge, info = make_bridge()
+    bridge.context_manager.config.effective_input_limit_tokens = 1000
+    info.query = "PRIVATE_PROMPT " + "x" * 3000
+    with pytest.raises(ValueError, match="combined context window"):
+        bridge._assemble([{"role": "user", "content": info.query}], [])
+    records = [record.getMessage() for record in caplog.records
+               if "event=context_input_rejected" in record.getMessage()]
+    assert len(records) == 1
+    assert "combined_window=1000" in records[0]
+    assert "usage_source=estimated" in records[0]
+    assert "provider_input=None" in records[0]
+    assert "PRIVATE_PROMPT" not in caplog.text

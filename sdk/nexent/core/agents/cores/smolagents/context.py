@@ -22,7 +22,7 @@ from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
 from nexent.core.agents.context.run_context import ManagedRunContext
-from nexent.core.agents.context.usage import ContextUsageBaseline
+from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
 from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.contracts.context import ContextEvidence, ContextMessage, ContextToolView, FinalContext
 from nexent.core.agents.cores.smolagents.context_contracts import (
@@ -224,9 +224,12 @@ class ManagedContextRuntime:
 
     def check_input_capacity(self, messages, tools, model):
         local = self._estimate(messages, tools)
-        estimate = self.usage_baseline.estimate(local, self._model_key(model))
+        model_key = self._model_key(model)
+        estimate = self.usage_baseline.estimate(local, model_key)
         limit = self.effective_input_limit_tokens or self.context_window_tokens
         if limit and estimate >= limit:
+            record_capacity_rejection(local_tokens=local, estimated_tokens=estimate, limit=limit,
+                                      baseline=self.usage_baseline, model_key=model_key)
             raise ValueError("Context input exceeds the combined context window; reduce the new input")
         return estimate
 

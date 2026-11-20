@@ -99,6 +99,26 @@ def test_ac012_oversized_new_input_is_rejected_without_compaction(monkeypatch):
     compact.assert_not_called()
 
 
+@pytest.mark.parametrize("provider_usage,matching_model", [(None, True), (0, True), (100, True), (100, False)])
+def test_ac012_capacity_rejection_records_safe_estimate_provenance(caplog, provider_usage, matching_model):
+    managed = runtime(window=1000)
+    model = SimpleNamespace(model_id="controlled")
+    if provider_usage is not None:
+        managed.usage_baseline.capture(200, managed._model_key(model) if matching_model else "old-model")
+        managed.usage_baseline.accept(provider_usage)
+    memory = SimpleNamespace(steps=[TaskStep(task="PRIVATE_PROMPT " + "x" * 1400)])
+    with pytest.raises(ValueError, match="combined context window"):
+        managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    records = [record.getMessage() for record in caplog.records
+               if "event=context_input_rejected" in record.getMessage()]
+    assert len(records) == 1
+    assert "combined_window=1000" in records[0]
+    actual_usage = provider_usage if matching_model else None
+    assert f"provider_input={actual_usage}" in records[0]
+    assert "usage_source=" + ("provider_calibrated" if actual_usage is not None else "estimated") in records[0]
+    assert "PRIVATE_PROMPT" not in caplog.text
+
+
 def test_ac011_cancelled_response_cannot_start_maintenance(monkeypatch):
     from threading import Event
     managed = runtime()

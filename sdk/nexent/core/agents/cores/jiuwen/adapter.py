@@ -215,7 +215,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                         is_error=diagnostic is not None, error=diagnostic,
                     )
                     if self.context_bridge is not None:
-                        self.context_bridge.completed_tool(name, "Resource failed", call_id)
+                        self.context_bridge.completed_tool(
+                            name, "Resource failed", call_id, provider_call_id=provider_id)
                     raise
         finally:
             self._active_resource.reset(token)
@@ -294,7 +295,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             )
             self.events.tool_result(*active[:2], rendered, is_error, error=diagnostic)
             if self.context_bridge is not None:
-                self.context_bridge.completed_tool(active[2], rendered, active[0])
+                self.context_bridge.completed_tool(
+                    active[2], rendered, active[0], provider_call_id=active[1])
         # Keep legacy side channels for artifacts and existing consumers.
         log_text = str(result)
         if getattr(self.run_info.agent_config, "response_mode", "chat") == "python_workflow":
