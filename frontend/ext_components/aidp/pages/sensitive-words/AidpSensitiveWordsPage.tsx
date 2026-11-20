@@ -5,59 +5,31 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  App,
-  Button,
-  ConfigProvider,
-  Input,
-  Modal,
-  Popover,
-  Switch,
-  Table,
-  Tag,
-  Tooltip,
-} from "antd";
-import type { ColumnsType } from "antd/es/table";
-import {
-  EditOutlined,
-  PlusOutlined,
-  QuestionCircleOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-} from "@ant-design/icons";
+import { App, Button, ConfigProvider, Popover, Tag, Tooltip } from "antd";
+import { EditOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 
 import log from "@/lib/logger";
-import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import type {
   AidpSensitiveWordItem,
   AidpSensitiveWordMode,
 } from "@/ext_components/aidp/shared/types/sensitiveWord";
-import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { useAidpKnowledgeDetail } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpKnowledgeDetail";
 import AidpSensitiveWordDrawer from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordDrawer";
+import AidpSensitiveWordsTable from "@/ext_components/aidp/pages/sensitive-words/components/AidpSensitiveWordsTable";
+import AidpSensitiveWordsToolbar from "@/ext_components/aidp/pages/sensitive-words/components/AidpSensitiveWordsToolbar";
+import AidpGuardrailSettingsModal from "@/ext_components/aidp/pages/sensitive-words/components/AidpGuardrailSettingsModal";
 import {
   useAidpSensitiveWordList,
   useDeleteAidpSensitiveWords,
 } from "@/ext_components/aidp/pages/sensitive-words/hooks/useAidpSensitiveWords";
-import {
-  SENSITIVE_WORD_COLUMN_WIDTHS,
-  sumSensitiveWordColumnWidths,
-  withResizableSensitiveWordColumns,
-} from "@/ext_components/aidp/pages/sensitive-words/utils/aidpSensitiveWordColumns";
 import styles from "./AidpSensitiveWords.module.css";
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 300;
-
-const MODE_COLORS: Record<AidpSensitiveWordMode, string> = {
-  BLACK: "red",
-  WHITE: "green",
-};
 
 /**
  * Sensitive words of one AIDP knowledge base.
@@ -85,9 +57,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
   });
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    ...SENSITIVE_WORD_COLUMN_WIDTHS,
-  });
   const [drawer, setDrawer] = useState<{
     open: boolean;
     editing: AidpSensitiveWordItem | null;
@@ -108,7 +77,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
   const deleteMutation = useDeleteAidpSensitiveWords(knowledgeBaseId);
   const rows = useMemo(() => listQuery.data?.value ?? [], [listQuery.data]);
   const total = listQuery.data?.total_count ?? rows.length;
-  const hasMore = params.page * params.pageSize < total;
   // Only rows that are still on this page and not built-in can be deleted.
   const selectedRows = useMemo(
     () =>
@@ -326,149 +294,6 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
     });
   };
 
-  const columns: ColumnsType<AidpSensitiveWordItem> = [
-    {
-      title: t("aidpSensitiveWords.columnIndex"),
-      key: "index",
-      width: SENSITIVE_WORD_COLUMN_WIDTHS.index,
-      render: (_value, _record, index) =>
-        (params.page - 1) * params.pageSize + index + 1,
-    },
-    {
-      title: t("aidpSensitiveWords.columnWord"),
-      dataIndex: "word",
-      key: "word",
-      ellipsis: { showTitle: false },
-      render: (_value, record) => (
-        <div className={styles.wordCell}>
-          <Tooltip title={record.word}>
-            <span className={styles.wordText}>{record.word}</span>
-          </Tooltip>
-          {record.source === "BUILT_IN" && (
-            <Tag color="default" className="mr-0">
-              {t("aidpSensitiveWords.builtIn")}
-            </Tag>
-          )}
-        </div>
-      ),
-    },
-    {
-      title: t("aidpSensitiveWords.columnMode"),
-      dataIndex: "mode",
-      key: "mode",
-      width: SENSITIVE_WORD_COLUMN_WIDTHS.mode,
-      filters: [
-        { text: t("aidpSensitiveWords.modeBlack"), value: "BLACK" },
-        { text: t("aidpSensitiveWords.modeWhite"), value: "WHITE" },
-      ],
-      filterMultiple: false,
-      filteredValue: mode ? [mode] : null,
-      render: (value: AidpSensitiveWordMode) => (
-        <Tag color={MODE_COLORS[value] ?? "default"} className="mr-0">
-          {value === "WHITE"
-            ? t("aidpSensitiveWords.modeWhite")
-            : t("aidpSensitiveWords.modeBlack")}
-        </Tag>
-      ),
-    },
-    {
-      title: t("aidpSensitiveWords.columnDescription"),
-      dataIndex: "description",
-      key: "description",
-      ellipsis: { showTitle: false },
-      render: (value: string) => (
-        <Tooltip title={value}>
-          <span>{value}</span>
-        </Tooltip>
-      ),
-    },
-    {
-      title: t("aidpSensitiveWords.columnActions"),
-      key: "actions",
-      width: SENSITIVE_WORD_COLUMN_WIDTHS.actions,
-      render: (_value, record) =>
-        canManage && record.source !== "BUILT_IN" ? (
-          <div className={styles.actions}>
-            <Button
-              type="link"
-              size="small"
-              className="px-1"
-              onClick={() => openEdit(record)}
-            >
-              {t("aidpSensitiveWords.edit")}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              className="px-1"
-              onClick={() => confirmDelete(record)}
-            >
-              {t("common.delete")}
-            </Button>
-          </div>
-        ) : null,
-    },
-  ];
-  const resizableColumns = withResizableSensitiveWordColumns(
-    columns,
-    columnWidths,
-    setColumnWidths
-  );
-  const tableWidth = sumSensitiveWordColumnWidths(resizableColumns);
-
-  const renderBody = () => {
-    if (listQuery.isError && rows.length === 0) {
-      return (
-        <div className={styles.emptyState}>
-          <span>{loadErrorMessage || t("aidpSensitiveWords.loadFailed")}</span>
-          <Button size="small" onClick={() => void refetch()}>
-            {t("aidpKnowledge.retry")}
-          </Button>
-        </div>
-      );
-    }
-    return (
-      <Table<AidpSensitiveWordItem>
-        rowKey="id"
-        size="middle"
-        loading={listQuery.isFetching}
-        columns={resizableColumns}
-        dataSource={rows}
-        rowSelection={
-          canManage
-            ? {
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys),
-                getCheckboxProps: (record) => ({
-                  disabled: record.source === "BUILT_IN",
-                }),
-              }
-            : undefined
-        }
-        pagination={false}
-        tableLayout="fixed"
-        components={{ header: { cell: AidpResizableTitle } }}
-        scroll={{ x: tableWidth }}
-        onChange={(_pagination, filters) => {
-          const selected = filters.mode?.[0];
-          setMode(
-            selected === "BLACK" || selected === "WHITE" ? selected : undefined
-          );
-          setParams((current) => ({ ...current, page: 1 }));
-        }}
-        locale={{
-          emptyText: (
-            <div className={styles.emptyState}>
-              {keyword.trim() || mode
-                ? t("aidpSensitiveWords.searchEmpty")
-                : t("aidpSensitiveWords.empty")}
-            </div>
-          ),
-        }}
-      />
-    );
-  };
-
   const helpContent = (
     <div className={styles.helpContent}>
       {t("aidpSensitiveWords.dictionaryIntro")}
@@ -526,95 +351,54 @@ const AidpSensitiveWordsPage: React.FC<AidpSensitiveWordsPageProps> = ({
           </div>
         </div>
 
-        <div className={styles.toolbar}>
-          <Input
-            allowClear
-            className={styles.searchInput}
-            placeholder={t("aidpSensitiveWords.searchPlaceholder")}
-            prefix={<SearchOutlined />}
-            value={keywordInput}
-            onChange={(event) => setKeywordInput(event.target.value)}
-            onPressEnter={applySearch}
-          />
-          <div className={styles.toolbarActions}>
-            <Tooltip title={t("aidpKnowledge.refresh")}>
-              <Button
-                aria-label={t("aidpKnowledge.refresh")}
-                icon={<ReloadOutlined spin={listQuery.isFetching} />}
-                onClick={() => void refetch()}
-              />
-            </Tooltip>
-            {canManage && (
-              <>
-                <Button
-                  disabled={selectedIds.length === 0}
-                  onClick={handleBatchDelete}
-                >
-                  {t("common.delete")}
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={openCreate}
-                >
-                  {t("aidpSensitiveWords.add")}
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
+        <AidpSensitiveWordsToolbar
+          keywordInput={keywordInput}
+          loading={listQuery.isFetching}
+          canManage={canManage}
+          selectedCount={selectedIds.length}
+          onKeywordChange={setKeywordInput}
+          onSearch={applySearch}
+          onRefresh={() => void refetch()}
+          onBatchDelete={handleBatchDelete}
+          onCreate={openCreate}
+        />
 
-        <div className={styles.tableArea}>{renderBody()}</div>
+        <AidpSensitiveWordsTable
+          rows={rows}
+          total={total}
+          page={params.page}
+          pageSize={params.pageSize}
+          loading={listQuery.isFetching}
+          errorMessage={loadErrorMessage}
+          keyword={keyword}
+          mode={mode}
+          canManage={canManage}
+          selectedKeys={selectedKeys}
+          onSelectionChange={setSelectedKeys}
+          onModeChange={(nextMode) => {
+            setMode(nextMode);
+            setParams((current) => ({ ...current, page: 1 }));
+          }}
+          onPageChange={(page) =>
+            setParams((current) => ({ ...current, page }))
+          }
+          onPageSizeChange={(pageSize) => setParams({ page: 1, pageSize })}
+          onEdit={openEdit}
+          onDelete={confirmDelete}
+          onRetry={() => void refetch()}
+        />
 
-        <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
-          <AidpPagination
-            currentPage={params.page}
-            pageSize={params.pageSize}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            total={total}
-            totalReliable
-            hasMore={hasMore}
-            onPageChange={(page) =>
-              setParams((current) => ({ ...current, page }))
-            }
-            onPageSizeChange={(pageSize) => setParams({ page: 1, pageSize })}
-          />
-        </div>
-
-        <Modal
+        <AidpGuardrailSettingsModal
           open={guardrailOpen}
-          title={t("aidpSensitiveWords.guardrailEdit")}
-          onOk={() => void handleSaveGuardrail()}
+          enabled={guardrailEnabled}
+          loading={detailQuery.isFetching}
+          saving={savingGuardrail}
+          onToggle={setGuardrailEnabled}
+          onSave={handleSaveGuardrail}
           onCancel={() => {
             if (!savingGuardrail) setGuardrailOpen(false);
           }}
-          okText={t("common.save")}
-          cancelText={t("common.cancel")}
-          confirmLoading={savingGuardrail}
-          okButtonProps={{ disabled: detailQuery.isFetching }}
-          centered
-          width={520}
-          closable={!savingGuardrail}
-          maskClosable={!savingGuardrail}
-          keyboard={!savingGuardrail}
-        >
-          <div className={styles.guardrailModal}>
-            <div className={styles.guardrailModalControl}>
-              <span className={styles.guardrailModalLabel}>
-                {t("aidpKnowledge.sensitiveIntercept")}
-              </span>
-              <Switch
-                checked={guardrailEnabled}
-                loading={detailQuery.isFetching}
-                onChange={setGuardrailEnabled}
-                aria-label={t("aidpKnowledge.sensitiveIntercept")}
-              />
-            </div>
-            <p className={styles.guardrailModalHint}>
-              {t("aidpSensitiveWords.guardrailSwitchHint")}
-            </p>
-          </div>
-        </Modal>
+        />
 
         <AidpSensitiveWordDrawer
           knowledgeBaseId={knowledgeBaseId}

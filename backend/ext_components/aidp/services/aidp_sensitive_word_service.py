@@ -20,6 +20,13 @@ from nexent.utils.http_client_manager import http_client_manager
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpSensitiveWordError
+from ext_components.aidp.services.aidp_client import (
+    _AIDP_READ_TIMEOUT_SECONDS,
+    _extract_upstream_code,
+    _extract_upstream_error,
+    _get_sensitive_words_path,
+    _validate_params,
+)
 
 
 logger = logging.getLogger("aidp_sensitive_word_service")
@@ -27,29 +34,8 @@ logger = logging.getLogger("aidp_sensitive_word_service")
 # AIDP's fixed namespace for all knowledge-base requests.
 AIDP_SENSITIVE_WORD_TENANT = "aidp"
 AIDP_SENSITIVE_WORD_MAX_PAGE_SIZE = 100
-AIDP_SENSITIVE_WORD_TIMEOUT_SECONDS = 30.0
 
 _WORD_MODES = {"BLACK", "WHITE"}
-
-
-def _validate_params(server_url: str, api_key: str) -> str:
-    """Validate the AIDP connection settings and return the normalized URL."""
-    if not server_url or not isinstance(server_url, str):
-        raise AppException(
-            ErrorCode.AIDP_CONFIG_INVALID,
-            "AIDP server_url is required and must be a non-empty string",
-        )
-    if not server_url.startswith(("http://", "https://")):
-        raise AppException(
-            ErrorCode.AIDP_CONFIG_INVALID,
-            "AIDP server_url must start with http:// or https://",
-        )
-    if not api_key or not isinstance(api_key, str):
-        raise AppException(
-            ErrorCode.AIDP_CONFIG_INVALID,
-            "AIDP api_key is required and must be a non-empty string",
-        )
-    return server_url.rstrip("/")
 
 
 def _validate_kds_id(kds_id: str) -> str:
@@ -63,9 +49,9 @@ def _validate_kds_id(kds_id: str) -> str:
 
 
 def _collection_path(kds_id: str) -> str:
-    return (
-        f"/KnowledgeBase/Tenants/{AIDP_SENSITIVE_WORD_TENANT}"
-        f"/KnowledgeBases/{quote(_validate_kds_id(kds_id), safe='')}/SensitiveWords"
+    return _get_sensitive_words_path(
+        _validate_kds_id(kds_id),
+        tenant_id=AIDP_SENSITIVE_WORD_TENANT,
     )
 
 
@@ -102,41 +88,11 @@ def _build_list_path(
     return f"{_collection_path(kds_id)}{query}"
 
 
-def _normalize_reason(value: Any) -> str | None:
-    """Flatten an upstream error value into one readable reason."""
-    if isinstance(value, str):
-        normalized = " ".join(value.split())
-        return normalized or None
-    if isinstance(value, dict):
-        for key in ("reason_zh", "reason_en", "details", "message", "msg", "detail", "error"):
-            reason = _normalize_reason(value.get(key))
-            if reason:
-                return reason
-    if isinstance(value, list):
-        reasons = [reason for item in value if (reason := _normalize_reason(item))]
-        if reasons:
-            return "; ".join(reasons)
-    return None
-
-
 def _decode_body(response: httpx.Response) -> Any:
     try:
         return response.json()
     except (TypeError, ValueError):
         return None
-
-
-def _extract_business_error(response: httpx.Response) -> tuple[str | None, str | None]:
-    """Return ``(code, message)`` from an AIDP business error body."""
-    payload = _decode_body(response)
-    code: str | None = None
-    if isinstance(payload, dict):
-        for container in (payload.get("error"), payload.get("data"), payload):
-            if isinstance(container, dict) and container.get("code") is not None:
-                code = str(container["code"])
-                break
-    message = _normalize_reason(payload)
-    return code, message
 
 
 def _request(
@@ -160,7 +116,7 @@ def _request(
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=AIDP_SENSITIVE_WORD_TIMEOUT_SECONDS,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
         response = client.request(method, url, headers=headers, json=json_body)
@@ -172,7 +128,8 @@ def _request(
         )
 
     if response.status_code >= 400:
-        upstream_code, upstream_message = _extract_business_error(response)
+        upstream_message = _extract_upstream_error(response)
+        upstream_code = _extract_upstream_code(response)
         reason = upstream_message or response.text[:500] or "no response body"
         logger.warning(
             "AIDP sensitive word %s %s failed: http_status=%s business_code=%s reason=%s",
@@ -185,7 +142,7 @@ def _request(
         raise AidpSensitiveWordError(
             upstream_message
             or f"AIDP sensitive word request failed with HTTP {response.status_code}",
-            upstream_code=upstream_code,
+            upstream_code=str(upstream_code) if upstream_code is not None else None,
             upstream_status=response.status_code,
         )
     return response

@@ -91,7 +91,7 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
-from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
+from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common, aidp_sensitive_word_routes
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
@@ -3095,7 +3095,7 @@ class TestSensitiveWordRoutes:
             "total_count": 1,
         }
         with self._permission("READ_ONLY") as mock_permission, \
-             patch.object(aidp_mgmt_app, "list_sensitive_words_impl",
+             patch.object(aidp_sensitive_word_routes, "list_sensitive_words_impl",
                           return_value=result) as mock_list:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
@@ -3125,7 +3125,7 @@ class TestSensitiveWordRoutes:
             side_effect=aidp_mgmt_app.HTTPException(
                 status_code=HTTPStatus.FORBIDDEN, detail="denied"
             ),
-        ), patch.object(aidp_mgmt_app, "list_sensitive_words_impl") as mock_list:
+        ), patch.object(aidp_sensitive_word_routes, "list_sensitive_words_impl") as mock_list:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
                 headers=_bearer(),
@@ -3144,7 +3144,7 @@ class TestSensitiveWordRoutes:
             side_effect=aidp_mgmt_app.HTTPException(
                 status_code=HTTPStatus.FORBIDDEN, detail="denied"
             ),
-        ), patch.object(aidp_mgmt_app, "create_sensitive_word_impl") as mock_create:
+        ), patch.object(aidp_sensitive_word_routes, "create_sensitive_word_impl") as mock_create:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
                 headers=_bearer(),
@@ -3158,7 +3158,7 @@ class TestSensitiveWordRoutes:
         from ext_components.aidp.apps import aidp_mgmt_app
 
         with self._permission() as mock_permission, \
-             patch.object(aidp_mgmt_app, "create_sensitive_word_impl",
+             patch.object(aidp_sensitive_word_routes, "create_sensitive_word_impl",
                           return_value={"id": "sw-1"}) as mock_create:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words",
@@ -3187,7 +3187,7 @@ class TestSensitiveWordRoutes:
         from ext_components.aidp.apps import aidp_mgmt_app
 
         with self._permission() as mock_permission, \
-             patch.object(aidp_mgmt_app, "update_sensitive_word_impl",
+             patch.object(aidp_sensitive_word_routes, "update_sensitive_word_impl",
                           return_value={}) as mock_update:
             response = client.patch(
                 "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words/sw-1",
@@ -3228,7 +3228,7 @@ class TestSensitiveWordRoutes:
         from contracts.errors.codes import ErrorCode
 
         with self._permission(), \
-             patch.object(aidp_mgmt_app, "create_sensitive_word_impl",
+             patch.object(aidp_sensitive_word_routes, "create_sensitive_word_impl",
                           side_effect=AidpSensitiveWordError(
                               message,
                               upstream_code=upstream_code,
@@ -3253,7 +3253,7 @@ class TestSensitiveWordRoutes:
         from ext_components.aidp.apps import aidp_mgmt_app
 
         with self._permission() as mock_permission, \
-             patch.object(aidp_mgmt_app, "delete_sensitive_word_impl",
+             patch.object(aidp_sensitive_word_routes, "delete_sensitive_word_impl",
                           return_value=True) as mock_delete:
             response = client.delete(
                 "/aidp-mgmt/knowledge-bases/kb-1/sensitive-words/sw-1",

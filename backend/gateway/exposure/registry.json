@@ -6464,7 +6464,7 @@
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words",
       "transport": "http",
       "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
       "route_id": "route-49d8ab0946e4d4e0",
       "credential_kinds": [
         "session"
@@ -6475,7 +6475,7 @@
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words",
       "transport": "http",
       "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
       "route_id": "route-0da325fb5ba45d00",
       "credential_kinds": [
         "session"
@@ -6486,7 +6486,7 @@
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words/{word_id}",
       "transport": "http",
       "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
       "route_id": "route-a518754486327edf",
       "credential_kinds": [
         "session"
@@ -6497,7 +6497,7 @@
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words/{word_id}",
       "transport": "http",
       "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
       "route_id": "route-e420020a21c016c7",
       "credential_kinds": [
         "session"
@@ -6508,7 +6508,7 @@
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/sensitive-words/{word_id}",
       "transport": "http",
       "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "source": "backend/ext_components/aidp/apps/aidp_sensitive_word_routes.py",
       "route_id": "route-65e5bb104c76a44d",
       "credential_kinds": [
         "session"
