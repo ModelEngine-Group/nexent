@@ -58,6 +58,10 @@ def _render_summary(item: ContextItem) -> list[dict[str, Any]]:
         text = summary
     else:
         text = _summary_dict_to_markdown(summary, labels)
+    refs = item.metadata.get("execution_source_refs") or ()
+    if refs:
+        text += "\n\nOriginal execution results (read with read_execution_output):\n" + "\n".join(
+            "<OUTPUT_REF>" + escape(reference) + "</OUTPUT_REF>" for reference in refs)
     return [_text_message("user", f"{labels['summary_prefix']}\n{text}")]
 
 

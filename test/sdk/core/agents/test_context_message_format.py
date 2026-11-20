@@ -89,8 +89,9 @@ def test_multiple_model_steps_are_not_merged_and_duplicate_delivery_is_idempoten
     assert len([m for m in messages if m["role"] == "tool"]) == 2
 
 
+@pytest.mark.parametrize("message_format", ["codeagent", "openai_chat_completions"])
 @pytest.mark.parametrize("change", ["missing", "conflict", "cancelled_without_result", "wrong_id"])
-def test_incomplete_or_conflicting_group_is_read_only(change):
+def test_incomplete_or_conflicting_group_is_read_only(change, message_format):
     values = records()
     if change in {"missing", "cancelled_without_result"}:
         values.pop()
@@ -100,7 +101,7 @@ def test_incomplete_or_conflicting_group_is_read_only(change):
         values.append(duplicate)
     else:
         values[-1]["execution_event"]["call_id"] = "foreign-call"
-    messages = render(values)
+    messages = ContextManager(message_format=message_format).build_context_messages([history(values)])
     assert not any(m.get("tool_calls") or m["role"] == "tool" for m in messages)
     assert "read_only" in str(messages)
 

@@ -119,3 +119,89 @@ def test_usage_calibrates_post_response_maintenance(old_input, old_reserve, entr
         server.server_close()
         thread.join(timeout=3)
         assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "invalid_summary", "main_failure"])
+def test_rejected_capacity_recovers_transactionally_over_http(outcome):
+    requests, committed = [], []
+    summary = "# Compact Result of History\n\n" + "\n\n".join(
+        "## " + heading + "\n\n" + "The old fact remains available."
+        for heading in ["Task Overview", "Completed Work", "Key Decisions", "Unresolved Issues",
+                        "Pending Items", "Next Steps", "Context To Preserve"])
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(request)
+            is_summary = "NEW_CURRENT_TASK" not in str(request["messages"])
+            text = (summary if outcome != "invalid_summary" else "unstructured rejected summary") if is_summary else "MAIN_OK"
+            if not is_summary and outcome == "main_failure":
+                body = json.dumps({"error": {"message": "controlled authentication failure", "type": "authentication_error"}}).encode()
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+            else:
+                chunk = {"id": "owned-recovery", "model": "qwen3.5-plus", "choices": [{"index": 0,
+                    "delta": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
+                usage = {"id": "owned-recovery", "choices": [], "usage": {
+                    "prompt_tokens": 900, "completion_tokens": 100, "total_tokens": 1000}}
+                body = ("data: " + json.dumps(chunk) + "\n\ndata: " + json.dumps(usage)
+                        + "\n\ndata: [DONE]\n\n").encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        data = resolved_profile_for_test(f"http://127.0.0.1:{server.server_port}/v1").model_dump(mode="json")
+        data["capabilities"]["context"] = {"combined_window": 20000, "input_limit": 1000, "output_limit": 5000}
+        model = LegacyChatModel.from_profile(ResolvedModelProfile.model_validate(data), "owned-key")
+        original_service = model.service
+        runtime = ManagedContextRuntime(ContextManager(ContextManagerConfig(
+            context_window_tokens=20000, effective_input_limit_tokens=20000, chars_per_token=1,
+            compaction_trigger_threshold_tokens=16000, compaction_target_tokens=12000,
+            history_summary_sink=committed.append,
+            policy_layers={"platform": {"processing_mode": "adaptive_compact"}})), items=[
+                ContextItemInput(id="old", type="conversation_turn", content={"user_message": "h" * 24000,
+                    "assistant_final_answer": "old fact", "user_message_id": 1, "assistant_message_id": 2})])
+        memory = SimpleNamespace(steps=[TaskStep(task="NEW_CURRENT_TASK")])
+        runtime.prepare_run(memory=memory, fallback_system_prompt="MANDATORY_SYSTEM")
+        if outcome == "invalid_summary":
+            with pytest.raises(ValueError, match="combined context window"):
+                runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+            first_calls = len(requests)
+            with pytest.raises(ValueError):
+                runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+            assert len(requests) == first_calls and not committed
+            assert runtime.context_manager._history_candidate is None
+            assert runtime.context_manager._pending_capacity_candidate is None
+        else:
+            prepared = runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+            assert prepared.evidence.maintenance_phase == "local_capacity_recovery"
+            assert prepared.evidence.provider_input_tokens is None
+            assert runtime._estimate(prepared.messages, prepared.tools) < 20000
+            assert len(committed) == 1 and committed[0].covered_through_message_id == 2
+            if outcome == "main_failure":
+                from nexent.core.model_errors import ModelInvocationTerminalError
+                with pytest.raises(ModelInvocationTerminalError):
+                    model.generate(prepared.messages)
+            else:
+                assert model.generate(prepared.messages).content == "MAIN_OK"
+            assert runtime.context_manager._history_candidate is committed[0]
+            assert runtime.usage_baseline.actual_input_tokens is None
+            assert "NEW_CURRENT_TASK" in str(requests[-1]["messages"])
+            assert "MANDATORY_SYSTEM" in str(requests[-1]["messages"])
+        assert 1 <= runtime._capacity_budget.summary_calls <= 3
+        assert model.service is original_service
+        assert all(not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(body) for body in requests)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+        assert not thread.is_alive()

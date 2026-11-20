@@ -5,6 +5,10 @@ import logging
 from dataclasses import dataclass
 
 
+class ContextInputCapacityExceeded(ValueError):
+    """Internal typed capacity failure with the established public message."""
+
+
 def record_capacity_rejection(*, local_tokens, estimated_tokens, limit, baseline, model_key):
     """Record numeric provenance without logging any input or model credentials."""
     calibrated = (baseline.model_key == model_key and baseline.actual_input_tokens is not None

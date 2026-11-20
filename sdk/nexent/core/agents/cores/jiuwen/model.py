@@ -308,6 +308,10 @@ class JiuwenServiceModel(Model):
         return current
 
     async def invoke(self, messages, *, tools=None, **kwargs):
+        owner = getattr(self.prepare_messages, "__self__", None)
+        begin_context_request = getattr(owner, "begin_request", None)
+        if begin_context_request is not None:
+            begin_context_request()
         step_corrections = 0
         while True:
             try:
@@ -320,6 +324,10 @@ class JiuwenServiceModel(Model):
                 messages = corrected
 
     async def stream(self, messages, *, tools=None, **kwargs):
+        owner = getattr(self.prepare_messages, "__self__", None)
+        begin_context_request = getattr(owner, "begin_request", None)
+        if begin_context_request is not None:
+            begin_context_request()
         step_corrections = 0
         while True:
             try:

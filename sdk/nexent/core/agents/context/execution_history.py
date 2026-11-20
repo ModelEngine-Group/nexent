@@ -64,19 +64,28 @@ class ExecutionHistory:
         return key
 
     def restore(self, owner: str, message_id: int, unit_index: int, fields: dict[str, str]) -> None:
-        """Register only history already authorized and bound by the backend loader."""
-        if type(message_id) is not int or message_id <= 0 or type(unit_index) is not int or unit_index < 0:
-            raise ValueError("Invalid persisted execution reference")
-        reference = f"message:{message_id}/unit-index:{unit_index}"
+        """Register one backend-authorized historical result."""
+        self.restore_many(owner, [(message_id, unit_index, fields)])
+
+    def restore_many(self, owner: str, sources) -> None:
+        """Validate the full private source batch before publishing any reference."""
+        pending = {}
+        for message_id, unit_index, fields in sources:
+            if type(message_id) is not int or message_id <= 0 or type(unit_index) is not int or unit_index < 0:
+                raise ValueError("Invalid persisted execution reference")
+            reference = f"message:{message_id}/unit-index:{unit_index}"
+            if reference in pending and pending[reference] != fields:
+                raise PermissionError("Conflicting persisted execution reference")
+            pending[reference] = dict(fields)
         with self._lock:
-            existing = self._restored.get((owner, reference))
-            if existing is not None:
-                if existing.fields != fields:
+            for reference, fields in pending.items():
+                existing = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
+                if existing is not None and existing.fields != fields:
                     raise PermissionError("Conflicting persisted execution reference")
-                return
-            record = ExecutionRecord(owner, dict(fields), reference=reference)
-            record.ready.set()
-            self._restored[owner, reference] = record
+            for reference, fields in pending.items():
+                record = ExecutionRecord(owner, fields, reference=reference)
+                record.ready.set()
+                self._restored[owner, reference] = record
 
     def get(self, key: str) -> ExecutionRecord | None:
         with self._lock:

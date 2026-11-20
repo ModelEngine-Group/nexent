@@ -216,3 +216,38 @@ def test_fix01_closed_action_preserves_raw_storage_and_authorized_roundtrip(hist
     assert 'write(body=computed)' in text and 'actual result' in text and 'EXPANDED' not in text
     assert 'message:2/unit-index:3' in text
     assert module.get_historical_context(1, 3, 'other-owner', 'tenant') is None
+
+
+def test_b010_checkpoint_private_sources_follow_authorized_boundary_not_message_id(history_db):
+    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+    from nexent.core.agents.context.models import ContextItem, ContextItemInput
+
+    module, message, unit = history_db
+    message(90, "user", "old task", index=0)
+    message(100, "assistant", "earliest answer", index=1)
+    message(101, "assistant", "saved partial answer", "stopped", index=1)
+    message(40, "user", "covered task", index=2)
+    message(42, "assistant", "covered answer", index=3)
+    message(10, "user", "uncovered task", index=4)
+    message(11, "assistant", "uncovered answer", index=5)
+    message(12, "user", "current task", index=6)
+    body = json.dumps({"content": "<STDOUT>private original 中段</STDOUT>"})
+    unit(1, 100, "execution_result", body)
+    unit(2, 42, "execution_result", body)
+    unit(7, 101, "execution_result", body)
+    unit(3, 42, "execution_result", body, status="streaming")
+    unit(4, 42, "execution_result", body, deleted="Y")
+    unit(5, 11, "execution_result", body)
+    unit(6, 42, "history_summary", json.dumps({
+        "summary": {"task_overview": "accepted checkpoint"}, "covered_through_message_id": 42}))
+    result = module.get_historical_context(1, 12, "owner", "tenant")
+    summary = result["history_summary"]
+    assert [(s["message_id"], s["unit_index"]) for s in summary["execution_sources"]] == [(100, 1), (101, 7), (42, 2)]
+    assert [turn["assistant_message_id"] for turn in result["conversation_turns"]] == [11]
+    store = ExecutionHistory()
+    item = ContextItem.from_input(ContextItemInput(id="history", type="history_summary", content=summary))
+    register_authorized_sources([item], store, "next-run")
+    assert "中段" in store.read("next-run", "message:100/unit-index:1")
+    assert module.get_historical_context(1, 12, "owner", "foreign-tenant") is None
+    assert module.get_historical_context(1, 12, "foreign-user", "tenant") is None
