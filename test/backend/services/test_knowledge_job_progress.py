@@ -2,7 +2,7 @@
 """Confirmed ingestion progress is owner-fenced, monotonic and exposed through AgentOS."""
 
 import pytest
-from contracts.agentos_knowledge import KnowledgeFileDelete, KnowledgeJobState
+from contracts.agentos_knowledge import KnowledgeFileDelete, KnowledgeJobInspection, KnowledgeJobState
 from nexent.storage.errors import Conflict, InvalidInput, NotFound
 from nexent.storage.models import StorageScope
 from pydantic import ValidationError
@@ -63,6 +63,23 @@ def test_deleted_attempt_cannot_publish_more_progress(setup):  # noqa: F811
     )
     current = service.inspect(lookup(state), context=context)
     assert current.status == "cancelled" and current.processed_chunks == 1
+
+
+def test_publication_inspection_confirms_only_the_current_visible_upload(setup):
+    service, state, handle, request, context = running(setup)
+    inspection = KnowledgeJobInspection(**lookup(state).model_dump(), confirm_publication=True)
+    assert service.inspect(inspection, context=context).publication_confirmed is False
+    assert service.complete(handle, chunk_count=1, context=context)
+    checked = service.inspect(inspection, context=context)
+    assert checked.publication_confirmed is True and checked.writer_ended is True
+    assert "publication_confirmed" not in service.inspect(lookup(state), context=context).model_dump()
+    deletion = service.submit(KnowledgeFileDelete(
+        knowledge_id=request.knowledge_id, file_id=request.file_id, file_version=request.file_version,
+        idempotency_key="delete-published",
+    ), context=context)
+    assert service.inspect(inspection, context=context).publication_confirmed is False
+    with pytest.raises(InvalidInput):
+        service.inspect(KnowledgeJobInspection(**lookup(deletion).model_dump(), confirm_publication=True), context=context)
 
 
 @pytest.mark.parametrize(

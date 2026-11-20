@@ -10,6 +10,7 @@ from contracts.agentos_knowledge import (
     KnowledgeChunks,
     KnowledgeChunksResult,
     KnowledgeFileDelete,
+    KnowledgeJobInspection,
     KnowledgeJobLookup,
     KnowledgeJobState,
     KnowledgeOperation,
@@ -65,11 +66,16 @@ async def send(app, operation, payload, *, tamper=False):
         )
 
 
-async def test_inspection_passes_only_signed_identity(setup):
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_inspection_passes_only_signed_identity(setup, confirm):
     app, service, lookup = setup
-    response = await send(app, KnowledgeOperation.INSPECT, lookup)
+    inspection = KnowledgeJobInspection(**lookup.model_dump(), confirm_publication=confirm)
+    if confirm:
+        service.inspect.return_value = service.inspect.return_value.model_copy(update={"publication_confirmed": False})
+    response = await send(app, KnowledgeOperation.INSPECT, inspection if confirm else lookup)
     assert response.status_code == 200 and response.json()["job_id"] == lookup.job_id
-    service.inspect.assert_awaited_once_with(lookup, ServicePrincipal("user", "tenant"))
+    assert ("publication_confirmed" in response.json()) is confirm
+    service.inspect.assert_awaited_once_with(inspection, ServicePrincipal("user", "tenant"))
 
 
 async def test_tampered_body_cannot_reach_service(setup):

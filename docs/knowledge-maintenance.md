@@ -210,6 +210,22 @@ revalidating the model/parser configuration. `intent_matches_plan` distinguishes
 an absent receipt, an exact match and an unreadable stored intent. A receipt is
 not an instruction to replay an unknown write.
 
+Before switching a rebuilt file to Runtime retrieval, check its publication:
+
+```sh
+python -m management.maintenance.migration verify-publication \
+  --tenant-id TENANT --user-id ACTUAL_OPERATOR --knowledge-id 123 \
+  --file-id CANONICAL_32_HEX_ID \
+  --plan /maintenance/file-plan.jsonl --output /maintenance/file-publication.jsonl
+```
+
+This read-only command checks the current Management lifecycle and asks Runtime
+over signed AgentOS to confirm the exact upload job and its visible generation.
+It compares the confirmed chunk counts and verifies that the writer finished.
+Use the canonical ID after activating a legacy ID mapping. A successful receipt
+contains `publication_verified: true`. Retrieval, physical vector counts and
+legacy task disposition still require their separate checks.
+
 `restore` accepts the same `--plan` arguments and restores the archived state only
 while the row remains `INGEST_ACCEPTED` before child execution reservation. It
 retains the actual operator's update audit and rejects later phases. The isolated
@@ -219,7 +235,8 @@ rehearsal. Legacy indexes, Redis keys and source objects are not deleted here.
 
 Reports are exclusive JSONL files with operation IDs. Incomplete plan reports
 cannot be loaded; all commands share a total deadline and cancel owned resources.
-`migration_complete` refers only to an observed completed file in the new pipeline;
+`migration_complete` refers to the Management lifecycle reaching completion.
+Use `publication_verified` for the corresponding Runtime publication evidence.
 `retirement_complete` remains false. Historical task archival, missing/unversioned
 sources, noncanonical IDs and full deployment/rollback acceptance remain pending.
 

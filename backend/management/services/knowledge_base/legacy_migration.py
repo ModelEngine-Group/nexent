@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from contracts.agentos_knowledge import (
     KnowledgeBaseInspect,
+    KnowledgeJobInspection,
     KnowledgeSearchAuthorization,
 )
 from contracts.constants import environment
@@ -286,6 +287,40 @@ class LegacyMigrationService:
                 return row
         async with _deadline(context):
             return await self._blocking(observe)
+
+    async def verify_publication(self, plan, actor, *, context):
+        mapping = isinstance(plan, KnowledgeIngestionIntent) and plan.legacy_snapshot is not None and (
+            plan.legacy_snapshot.previous_file_id is not None
+        )
+        self._plan(plan, actor, check_parser=False, mapping=mapping)
+        async with _deadline(context):
+            row, resource = await self._blocking(self._selected, plan.knowledge_id, plan.file_id, actor, context)
+            try:
+                saved = KnowledgeIngestionIntent.model_validate(row["ingestion_request"])
+                lookup = KnowledgeJobInspection(**plan._reference(), job_id=row["forward_task_id"],
+                                                confirm_publication=True)
+            except ValidationError:
+                raise Conflict(operation_id=context.operation_id) from None
+            if (saved != plan or row["status"] != "COMPLETED" or row["stage"] != "COMPLETE"
+                or row["runtime_status"] != "completed" or row["deletion_request"] is not None
+                or row["source_generation"] != plan.file_version
+                or [row[f"source_{name}"] for name in ("space", "key", "revision", "sha256")] !=
+                   [plan.source.space, plan.source.key, plan.source.version, plan.source.sha256]
+                or resource.revision != plan.legacy_snapshot.resource_revision
+                or resource.embedding_model_id != plan.embedding_model.model_id
+                or type(row["total_chunks"]) is not int or row["total_chunks"] < 0
+                or row["processed_chunks"] != row["total_chunks"]):
+                raise Conflict(operation_id=context.operation_id)
+            state = await self.client.inspect_knowledge_file(lookup, actor.user_id, actor.tenant_id)
+            if (state.publication_confirmed is not True or state.status != "completed"
+                or state.writer_ended is not True or state.reconcile_required is not False
+                or state.total_chunks != row["total_chunks"] or state.processed_chunks != row["processed_chunks"]
+                or any(getattr(state, name) != getattr(lookup, name)
+                       for name in ("knowledge_id", "file_id", "file_version", "job_id"))):
+                raise Conflict(operation_id=context.operation_id)
+            if await self._blocking(self._selected, plan.knowledge_id, plan.file_id, actor, context) != (row, resource):
+                raise Conflict(operation_id=context.operation_id)
+            return row
 
     async def admit(self, plan, actor, *, context, task_archive=None):
         self._plan(plan, actor)

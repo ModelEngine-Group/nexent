@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from contracts.agentos_knowledge import (
     KnowledgeFileDelete,
     KnowledgeFileUpload,
+    KnowledgeJobInspection,
     KnowledgeJobLookup,
     KnowledgeJobState,
     knowledge_job_id,
@@ -288,7 +289,21 @@ class KnowledgeJobs:
 
     def inspect(self, lookup, *, context):
         self.authorize(lookup, context=context)
-        return job_state(self._job(self.records, lookup, context))
+        row = self._job(self.records, lookup, context)
+        state = job_state(row)
+        if isinstance(lookup, KnowledgeJobInspection) and lookup.confirm_publication:
+            if row["operation"] != "upload":
+                raise InvalidInput()
+            manifest = _file_record(self.records, lookup, context)
+            state.publication_confirmed = bool(
+                state.status == "completed" and state.writer_ended is True and state.reconcile_required is False
+                and row["attempt_id"] and manifest
+                and manifest["visible_job_id"] == lookup.job_id
+                and manifest["visible_version"] == lookup.file_version
+                and manifest["visible_generation"] == row["attempt_id"]
+                and lookup.file_version > manifest["tombstone_version"]
+            )
+        return state
 
     @staticmethod
     def _current(manifest, job):

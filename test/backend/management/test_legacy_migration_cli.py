@@ -113,6 +113,25 @@ async def test_inspection_reports_a_matching_receipt_without_calling_write_actio
     s.service.admit.assert_not_awaited();s.service.execute.assert_not_awaited();s.service.restore.assert_not_awaited()
 
 
+async def test_publication_receipt_calls_runtime_verification_only(cli):
+    s = cli
+    await module.run(s.args, service=s.service)
+    s.args.plan = s.args.output
+    s.args.output = s.args.plan.with_name("verified.jsonl")
+    s.args.action = "verify-publication"
+    s.service.verify_publication = AsyncMock(return_value={
+        "status": "COMPLETED", "stage": "COMPLETE", "version": 5,
+        "ingestion_request": s.value.model_dump(mode="json"),
+    })
+
+    receipt = await module.run(s.args, service=s.service)
+
+    assert receipt["publication_verified"] and receipt["migration_complete"]
+    assert not receipt["retirement_complete"]
+    s.service.verify_publication.assert_awaited_once()
+    s.service.admit.assert_not_awaited()
+
+
 def test_read_only_inspection_does_not_require_new_quiescence_confirmation(cli,monkeypatch):
     action=AsyncMock(return_value={'state':'observed'})
     monkeypatch.setattr(module,'run',action)

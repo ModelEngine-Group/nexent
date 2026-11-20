@@ -198,6 +198,10 @@ class KnowledgeJobLookup(KnowledgeFileReference):
     job_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
+class KnowledgeJobInspection(KnowledgeJobLookup):
+    confirm_publication: bool = False
+
+
 class KnowledgeJobState(KnowledgeJobLookup):
     status: Literal[
         "queued",
@@ -214,6 +218,14 @@ class KnowledgeJobState(KnowledgeJobLookup):
     reconcile_required: bool | None = Field(default=None, strict=True)
     processed_chunks: int | None = Field(default=None, ge=0, le=2**31 - 1, strict=True)
     total_chunks: int | None = Field(default=None, ge=0, le=2**31 - 1, strict=True)
+    publication_confirmed: bool | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_job_state(self, handler):
+        result = handler(self)
+        if self.publication_confirmed is None:
+            result.pop("publication_confirmed", None)
+        return result
 
     @model_validator(mode="after")
     def valid_progress(self):

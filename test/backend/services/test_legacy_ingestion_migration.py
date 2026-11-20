@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from contracts.agentos import ModelMetadata
-from contracts.agentos_knowledge import KnowledgeBaseState
+from contracts.agentos_knowledge import KnowledgeBaseState, KnowledgeJobState
 from contracts.knowledge_ingestion import (
     INGESTION_DATASET,
     LEGACY_FILE_ID_OCCUPANCY,
@@ -128,6 +128,35 @@ async def test_receipt_inspection_is_read_only_without_model_or_source_requests(
     observed=await m.service.inspect(plan,s.actor,context=context())
     assert observed['version']==before['version'] and s.row()==before
     assert s.client.get_model.await_count==calls and m.source.page.call_count==source_calls
+
+
+@pytest.mark.parametrize("evidence", ["current", "no-publication", "different-count", "different-job"])
+async def test_publication_verification_needs_the_current_runtime_generation(migration, evidence):
+    m = migration
+    s = m.s
+    plan = await m.service.plan(1, s.value.file_id, s.actor, legacy_quiesced=True, context=context())
+    await m.service.admit(plan, s.actor, context=context())
+    await run_blocking("fixture", s.port.patch, INGESTION_DATASET, plan.file_id, FieldPatch(set_values={
+        "status": "COMPLETED", "stage": "COMPLETE", "runtime_status": "completed",
+        "forward_task_id": "e" * 32, "processed_chunks": 2, "total_chunks": 2,
+    }), context=context(), lane="control-io")
+    before = s.row()
+    s.client.inspect_knowledge_file.return_value = KnowledgeJobState(
+        **plan._reference(), job_id=("f" if evidence == "different-job" else "e") * 32,
+        status="completed", writer_ended=True, reconcile_required=False,
+        processed_chunks=2, total_chunks=3 if evidence == "different-count" else 2,
+        publication_confirmed=evidence != "no-publication",
+    )
+    if evidence == "current":
+        verified = await m.service.verify_publication(plan, s.actor, context=context())
+        assert verified["version"] == before["version"] and verified["ingestion_request"] == before["ingestion_request"]
+    else:
+        with pytest.raises(Conflict):
+            await m.service.verify_publication(plan, s.actor, context=context())
+    lookup, user, tenant = s.client.inspect_knowledge_file.await_args.args
+    assert lookup.confirm_publication and lookup.job_id == "e" * 32
+    assert (user, tenant) == (s.actor.user_id, s.actor.tenant_id)
+    assert s.row() == before
 
 
 @pytest.fixture
