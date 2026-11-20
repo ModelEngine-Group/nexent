@@ -24,6 +24,8 @@ import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErro
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import { joinFolderPath } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpFolderUtils";
+import type { AidpFolderFileItem } from "@/ext_components/aidp/shared/types/management";
 import type {
   AidpBatchMetadataResult,
   AidpChunk,
@@ -36,6 +38,39 @@ import chunkStyles from "./AidpOntologyMetadataChunks.module.css";
 interface AidpOntologyMetadataChunksProps {
   domainId: string;
 }
+
+/** Folder depth cap so one picker open cannot fan out without bound. */
+const FILE_SCAN_FOLDER_LIMIT = 50;
+
+/**
+ * Collect the KB's files for the annotation picker.
+ *
+ * The KB file list is folder-scoped after the folder refactor, so walk the tree
+ * breadth-first (bounded) and flatten file rows.
+ */
+const collectKbFiles = async (kdsId: string): Promise<AidpFolderFileItem[]> => {
+  const queue: string[] = ["/"];
+  const visited = new Set<string>();
+  const files: AidpFolderFileItem[] = [];
+  while (queue.length > 0 && visited.size < FILE_SCAN_FOLDER_LIMIT) {
+    const path = queue.shift() as string;
+    if (visited.has(path)) continue;
+    visited.add(path);
+    const tree = await aidpKnowledgeService.getFolderTree(
+      kdsId,
+      path,
+      1,
+      200,
+      "",
+      true
+    );
+    files.push(...tree.files.value);
+    tree.folders.forEach((folder) => {
+      queue.push(joinFolderPath(path, folder.folder_name));
+    });
+  }
+  return files;
+};
 
 const renderMetadataTags = (metadata: Record<string, unknown>) => {
   const entries = Object.entries(metadata ?? {});
@@ -116,8 +151,7 @@ const AidpOntologyMetadataChunks: React.FC<AidpOntologyMetadataChunksProps> = ({
 
   const filesQuery = useQuery({
     queryKey: [...scope.key, "ontology-chunk-files", kdsId],
-    queryFn: () =>
-      aidpKnowledgeService.listIngestedFiles(kdsId as string, 1, 100),
+    queryFn: () => collectKbFiles(kdsId as string),
     enabled: scope.enabled && !!kdsId,
     staleTime: 30_000,
     retry: false,
@@ -125,11 +159,13 @@ const AidpOntologyMetadataChunks: React.FC<AidpOntologyMetadataChunksProps> = ({
 
   const fileOptions = useMemo(
     () =>
-      (filesQuery.data?.value ?? []).map((file) => ({
-        value: file.file_uuid,
-        label: file.file_name || file.file_uuid,
-      })),
-    [filesQuery.data?.value]
+      (filesQuery.data ?? [])
+        .filter((file) => Boolean(file.file_uuid))
+        .map((file) => ({
+          value: file.file_uuid as string,
+          label: file.file_name || (file.file_uuid as string),
+        })),
+    [filesQuery.data]
   );
 
   const fieldsQuery = useQuery({

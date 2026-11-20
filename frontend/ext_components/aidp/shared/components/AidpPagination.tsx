@@ -23,6 +23,8 @@ interface AidpPaginationProps {
   showTotal?: boolean;
   /** When provided, render UCD-style "total / selected" instead of a plain total. */
   selectedCount?: number;
+  /** Optional short hint displayed after the selected count. */
+  selectionHint?: string;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
 }
@@ -37,6 +39,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
   hasMore,
   showTotal = true,
   selectedCount,
+  selectionHint,
   onPageChange,
   onPageSizeChange,
 }) => {
@@ -66,6 +69,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
                   selected: selectedCount,
                 })
               : t("aidpKnowledge.showTotal", { count: total })}
+            {selectionHint ? ` · ${selectionHint}` : ""}
           </span>
         )}
         <div className={styles.paginationControls}>

@@ -157,6 +157,16 @@ def test_uploaded_file_is_visible_after_successful_response_by_default(mock_aidp
 
     assert response.status_code == 200
     assert response.json()["summary"] == {"total": 1, "success": 1, "failed": 0}
+
+    duplicate = client.post(
+        upload_path,
+        headers=headers,
+        files={"files": ("新上传文件.txt", "另一份内容".encode(), "text/plain")},
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["summary"] == {"total": 1, "success": 0, "failed": 1}
+    assert duplicate.json()["failed_list"][0]["code"] == 1089
+
     listed = client.get(list_path, headers=headers)
     assert listed.status_code == 200
     assert [item["file_name"] for item in listed.json()["value"]] == ["新上传文件.txt"]
@@ -484,3 +494,211 @@ def test_chinese_demo_failure_reasons_are_json_without_top_level_code(
         assert "error_code" not in doc
         parsed = json.loads(doc["extraction_failure_reason"])
         assert parsed["error_code"] and parsed["msg"]
+
+
+def _folder_client(mock_aidp_server):
+    mock_aidp_server._KNOWLEDGE_BASES["kb-1"] = {
+        "kds_id": "kb-1",
+        "kds_name": "目录测试库",
+    }
+    mock_aidp_server._FOLDERS_BY_KB["kb-1"] = [
+        {"folder_path": "/制度", "create_time": 1},
+        {"folder_path": "/制度/法规", "create_time": 1},
+        {"folder_path": "/空目录", "create_time": 1},
+    ]
+    mock_aidp_server._DOCUMENTS_BY_KB["kb-1"] = [
+        {
+            "file_uuid": "f-1",
+            "file_ino_no": 1,
+            "file_name": "条例.txt",
+            "file_type": "txt",
+            "file_size": 10,
+            "status": 1,
+            "update_time": 1700000000,
+            "folder_path": "/制度",
+        },
+        {
+            "file_uuid": "f-2",
+            "file_ino_no": 2,
+            "file_name": "根文件.pdf",
+            "file_type": "pdf",
+            "file_size": 20,
+            "status": 1,
+            "update_time": 1700000100,
+            "folder_path": "/",
+        },
+    ]
+    return TestClient(mock_aidp_server.app)
+
+
+def test_folder_tree_returns_direct_folders_and_paginated_files(mock_aidp_server):
+    client = _folder_client(mock_aidp_server)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    folders = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/Folders"
+
+    root = client.get(
+        f"{folders}/0",
+        params={"folder_path": "/", "include_files": True, "page": 1, "page_size": 10},
+        headers=headers,
+    )
+    assert root.status_code == 200
+    root_body = root.json()
+    assert root_body["folder_id"] == 0
+    assert root_body["folder_path"] == "/"
+    assert [(folder["folder_name"], folder["has_child_folders"]) for folder in root_body["folders"]] == [
+        ("制度", True),
+        ("空目录", False),
+    ]
+    assert [item["file_uuid"] for item in root_body["files"]["value"]] == ["f-2"]
+    assert root_body["files"]["total"] == 1
+
+    nested_path = "/制度"
+    nested = client.get(
+        f"{folders}/{mock_aidp_server._folder_id_for_path(nested_path)}",
+        params={
+            "folder_path": nested_path,
+            "include_files": True,
+            "page": 1,
+            "page_size": 1,
+            "keyword": "条例",
+        },
+        headers=headers,
+    ).json()
+    assert [folder["folder_name"] for folder in nested["folders"]] == ["法规"]
+    assert [item["file_uuid"] for item in nested["files"]["value"]] == ["f-1"]
+    assert nested["files"]["total"] == 1
+    assert nested["files"]["page_size"] == 1
+
+
+def test_folder_crud_and_empty_folder_delete_rule(mock_aidp_server):
+    client = _folder_client(mock_aidp_server)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    folders = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/Folders"
+
+    conflict = client.post(
+        f"{folders}/0",
+        headers=headers,
+        json={"parent_folder_path": "/", "folder_name": "制度"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == 1089
+
+    created = client.post(
+        f"{folders}/0",
+        headers=headers,
+        json={"parent_folder_path": "/", "folder_name": "新目录"},
+    )
+    assert created.status_code == 200
+    created_body = created.json()
+    assert created_body["folder_path"] == "/新目录"
+    assert created_body["folder_id"] == mock_aidp_server._folder_id_for_path("/新目录")
+
+    new_folder_id = mock_aidp_server._folder_id_for_path("/新目录")
+    renamed = client.patch(
+        f"{folders}/{new_folder_id}",
+        headers=headers,
+        json={
+            "parent_folder_path": "/",
+            "old_folder_name": "新目录",
+            "new_folder_name": "历史",
+        },
+    )
+    assert renamed.status_code == 200
+    assert renamed.json() == {"folder_path": "/历史"}
+
+    non_empty = client.delete(
+        f"{folders}/{mock_aidp_server._folder_id_for_path('/制度')}",
+        headers=headers,
+        params={"folder_path": "/制度"},
+    )
+    assert non_empty.status_code == 400
+
+    empty = client.delete(
+        f"{folders}/{mock_aidp_server._folder_id_for_path('/空目录')}",
+        headers=headers,
+        params={"folder_path": "/空目录"},
+    )
+    assert empty.status_code == 204
+    tree = client.get(
+        f"{folders}/0",
+        params={"folder_path": "/", "include_files": True},
+        headers=headers,
+    ).json()
+    assert [folder["folder_name"] for folder in tree["folders"]] == ["制度", "历史"]
+
+    history_id = mock_aidp_server._folder_id_for_path("/历史")
+    target_id = mock_aidp_server._folder_id_for_path("/制度")
+    moved = client.post(
+        f"{folders}/{history_id}/Move",
+        headers=headers,
+        json={
+            "src_parent_folder_path": "/",
+            "folder_name": "历史",
+            "target_parent_folder_path": "/制度",
+            "target_parent_folder_id": target_id,
+            "merge_on_conflict": False,
+        },
+    )
+    assert moved.status_code == 200
+    assert moved.json()["folder_path"] == "/制度/历史"
+
+
+def test_directory_upload_preserves_relative_path_and_file_move_rename(mock_aidp_server):
+    client = _folder_client(mock_aidp_server)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    files_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles"
+    folders_path = files_path.replace("/KnowledgeFiles", "/Folders")
+
+    uploaded = client.post(
+        f"{files_path}/Upload",
+        headers=headers,
+        data={
+            "target_folder_path": "/制度",
+            "target_folder_id": mock_aidp_server._folder_id_for_path("/制度"),
+            "relative_paths": ["合同/2026"],
+        },
+        files=[("files", ("新条例.txt", b"content", "text/plain"))],
+    )
+    assert uploaded.status_code == 200
+    receipt = uploaded.json()["success_list"][0]
+    file_uuid = receipt["file_uuid"]
+    assert receipt["relative_path"] == "合同/2026"
+    assert receipt["file_path"] == "/制度/合同/2026/新条例.txt"
+    assert receipt["folder_id"] == mock_aidp_server._folder_id_for_path("/制度/合同/2026")
+    document = next(
+        doc
+        for doc in mock_aidp_server._DOCUMENTS_BY_KB["kb-1"]
+        if doc["file_uuid"] == file_uuid
+    )
+    assert document["folder_path"] == "/制度/合同/2026"
+
+    target_path = "/制度/合同/2026"
+    target_tree = client.get(
+        f"{folders_path}/{mock_aidp_server._folder_id_for_path(target_path)}",
+        params={"folder_path": target_path, "include_files": True},
+        headers=headers,
+    ).json()
+    assert [item["file_name"] for item in target_tree["files"]["value"]] == ["新条例.txt"]
+    assert target_tree["folders"] == []
+
+    target_id = mock_aidp_server._folder_id_for_path("/制度/法规")
+    moved = client.post(
+        f"{files_path}/Move",
+        headers=headers,
+        json={
+            "file_uuids": [file_uuid],
+            "target_folder_path": "/制度/法规",
+            "target_folder_id": target_id,
+        },
+    )
+    assert moved.status_code == 200
+    assert moved.json()["summary"] == {"total": 1, "success": 1, "failed": 0}
+    assert document["folder_path"] == "/制度/法规"
+
+    renamed = client.patch(
+        files_path,
+        headers=headers,
+        json={"file_uuid": file_uuid, "new_file_name": "改名后.txt"},
+    )
+    assert renamed.status_code == 204
+    assert document["file_name"] == "改名后.txt"

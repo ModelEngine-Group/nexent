@@ -6384,6 +6384,83 @@
     },
     {
       "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders/tree",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-80176a45743fb231",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-8ffd3295002e1fd4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-34e5d3aa4e48f613",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-88000ae8b7ffa058",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/folders/move",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-de6cd224592dacbb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/files/move",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-624201bc9d0ffc29",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/files",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_folder_routes.py",
+      "route_id": "route-441040e3e9779f5e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/aidp-mgmt/ontology/demo-mode",
       "transport": "http",
       "target": "management",
@@ -6812,5 +6889,5 @@
       ]
     }
   ],
-  "revision": "2026-11-20.1"
+  "revision": "2026-11-20.2"
 }

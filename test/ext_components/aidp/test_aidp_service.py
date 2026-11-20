@@ -949,6 +949,27 @@ class TestNormalizeAidpDoc:
         assert raw == snapshot
 
 
+class TestNormalizeFolderTreeFile:
+    """Folder/Files must not invent a creation time from update_time."""
+
+    def test_keeps_first_upload_time(self):
+        from ext_components.aidp.services import aidp_folder_service
+
+        result = aidp_folder_service._normalize_folder_tree_file(
+            {"first_upload_time": 1700000000, "update_time": 1700003600}
+        )
+        assert "2023-11-14" in result["created_at"]
+
+    def test_blank_created_at_when_only_update_time_exists(self):
+        from ext_components.aidp.services import aidp_folder_service
+
+        result = aidp_folder_service._normalize_folder_tree_file(
+            {"update_time": 1700003600}
+        )
+        assert result["created_at"] is None
+        assert result["updated_at"] is not None
+
+
 # ---------------------------------------------------------------------------
 # Small gap coverage for existing function tests
 # ---------------------------------------------------------------------------
@@ -1353,17 +1374,23 @@ class TestIsKbApplicable:
 class TestResolveTenantId:
     """Tests for _resolve_tenant_id helper."""
 
-    def test_explicit_string_tenant(self, aidp_service_module):
-        result = aidp_service_module._resolve_tenant_id("my-tenant")
+    def test_explicit_string_tenant(self):
+        from ext_components.aidp.services import aidp_client
+
+        result = aidp_client._resolve_tenant_id("my-tenant")
         assert result == "my-tenant"
 
-    def test_none_uses_configured(self, aidp_service_module):
-        result = aidp_service_module._resolve_tenant_id(None)
+    def test_none_uses_configured(self):
+        from ext_components.aidp.services import aidp_client
+
+        result = aidp_client._resolve_tenant_id(None)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_whitespace_falls_back(self, aidp_service_module):
-        result = aidp_service_module._resolve_tenant_id("   ")
+    def test_whitespace_falls_back(self):
+        from ext_components.aidp.services import aidp_client
+
+        result = aidp_client._resolve_tenant_id("   ")
         assert result == "aidp"
 
     def test_non_string_uses_configured(self, aidp_service_module):
@@ -1961,6 +1988,30 @@ class TestUploadAidpDocsImpl:
         )
         assert result == upload_response
 
+    def test_target_folder_uses_new_aidp_fields(self, aidp_service_module, mock_file, monkeypatch):
+        mock_resp = _make_success_response({"summary": {}, "success_list": [], "failed_list": []})
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+        monkeypatch.setattr(
+            aidp_service_module,
+            "_resolve_aidp_folder_id",
+            lambda *args, **kwargs: 42,
+        )
+
+        aidp_service_module.upload_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            files=[mock_file],
+            target_folder="/docs",
+            relative_paths=["sub"],
+        )
+
+        data = aidp_service_module.http_client_manager.get_sync_client.return_value.post.call_args.kwargs["data"]
+        assert data["target_folder_path"] == "/docs"
+        assert data["target_folder_id"] == 42
+        assert data["relative_paths"] == ["sub"]
+        assert "target_folder" not in data
+
     def test_file_with_no_content_type_uses_octet_stream(self, aidp_service_module, mock_file_no_ct):
         mock_resp = _make_success_response({"uploaded": 1})
         _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
@@ -2049,6 +2100,36 @@ class TestUploadAidpDocsImpl:
         assert exc_info.value.details == {
             "upstream_status": 500,
             "upstream_reason": "文件解析服务不可用",
+        }
+
+    def test_name_conflict_code_is_preserved_for_frontend_mapping(
+        self, aidp_service_module
+    ):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/folders/0")
+        response = httpx.Response(
+            409,
+            request=request,
+            json={
+                "detail": {
+                    "code": 1089,
+                    "message": "folder name already exists",
+                }
+            },
+        )
+        error = httpx.HTTPStatusError(
+            "http 409",
+            request=request,
+            response=response,
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._raise_aidp_http_error(error, "create-folder:kb-1")
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        assert exc_info.value.details == {
+            "upstream_status": 409,
+            "upstream_reason": "folder name already exists",
+            "upstream_code": 1089,
         }
 
     def test_structured_file_error_returns_localized_failed_list(self, aidp_service_module, mock_file):

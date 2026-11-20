@@ -33,8 +33,6 @@ async function menu(action: string) {
   );
   fireEvent.click(await screen.findByText(t(action)));
 }
-const confirm = () =>
-  fireEvent.click(screen.getByRole("button", { name: /确\s*定/ }));
 const confirmDeleteKb = () =>
   fireEvent.click(
     screen.getByRole("button", {
@@ -206,46 +204,48 @@ describe("AIDP-FE-LIST-01", () => {
     ).toBeInTheDocument();
   });
 
-  it.each(["confirm", "close"])(
-    "import %s pauses polling and refreshes exactly on close",
-    async (closeMode) => {
-      vi.useFakeTimers();
-      mount(<AidpKnowledgeConfiguration />);
-      await advance(5);
-      const first = matching(base).length;
-      await advance(30000);
-      expect(matching(base)).toHaveLength(first + 1);
-      fireEvent.click(
-        screen.getByRole("button", { name: t("aidpKnowledge.moreOperations") }),
-      );
-      await advance(5);
-      fireEvent.click(screen.getByText(t("aidpKnowledge.importFile")));
-      await advance(5);
-      const opened = matching(base).length;
-      await advance(30000);
-      expect(matching(base)).toHaveLength(opened);
-      fireEvent.change(document.querySelector("input[type=file]")!, {
-        target: { files: [new File(["x"], "added.txt")] },
-      });
-      await advance(25);
-      expect(UploadTransport.sent).toHaveLength(1);
-      await act(async () =>
-        UploadTransport.sent[0].complete({
-          summary: { total: 1, success: 1, failed: 0 },
-          success_list: [{ file_name: "added.txt" }],
-          failed_list: [],
-        }),
-      );
-      await advance(5);
-      expect(matching(base)).toHaveLength(opened);
-      if (closeMode === "confirm") confirm();
-      else fireEvent.click(screen.getByRole("button", { name: "Close" }));
-      await advance(5);
-      expect(matching(base)).toHaveLength(opened + 1);
-      await advance(30000);
-      expect(matching(base)).toHaveLength(opened + 2);
-    },
-  );
+  it("import pauses polling, uploads only after confirmation and refreshes after upload completion", async () => {
+    vi.useFakeTimers();
+    mount(<AidpKnowledgeConfiguration />);
+    await advance(5);
+    const first = matching(base).length;
+    await advance(30000);
+    expect(matching(base)).toHaveLength(first + 1);
+    fireEvent.click(
+      screen.getByRole("button", { name: t("aidpKnowledge.moreOperations") }),
+    );
+    await advance(5);
+    fireEvent.click(screen.getByText(t("aidpKnowledge.importFile")));
+    await advance(5);
+    const opened = matching(base).length;
+    await advance(30000);
+    expect(matching(base)).toHaveLength(opened);
+    fireEvent.change(document.querySelector("input[type=file]")!, {
+      target: { files: [new File(["x"], "added.txt")] },
+    });
+    await advance(25);
+    // Selecting a file only stages it; the Upload API is called by "Import".
+    expect(UploadTransport.sent).toHaveLength(0);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: t("aidpKnowledge.importAction"),
+      }),
+    );
+    await advance(25);
+    expect(UploadTransport.sent).toHaveLength(1);
+    await act(async () =>
+      UploadTransport.sent[0].complete({
+        summary: { total: 1, success: 1, failed: 0 },
+        success_list: [{ file_name: "added.txt" }],
+        failed_list: [],
+      }),
+    );
+    await advance(5);
+    // The drawer closes immediately on import; upload completion refreshes the list once.
+    expect(matching(base)).toHaveLength(opened + 1);
+    await advance(30000);
+    expect(matching(base)).toHaveLength(opened + 2);
+  });
 
   it("cancelled deletion does nothing and confirmed deletion refreshes the list", async () => {
     let deleted = false;

@@ -1,0 +1,21 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.folderRail {
+  scrollbar-width: thin;
+  scrollbar-color: #c9c9c9 #f5f5f5;
+}
+
+.folderRail::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.folderRail::-webkit-scrollbar-thumb {
+  background: #c9c9c9;
+  border-radius: 4px;
+}
+
+.folderRail::-webkit-scrollbar-track {
+  background: #f5f5f5;
+  border-radius: 4px;
+}

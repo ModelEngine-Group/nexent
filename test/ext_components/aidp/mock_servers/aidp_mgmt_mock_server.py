@@ -12,8 +12,15 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}     (detail)
   - PATCH  /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}     (update)
   - DELETE /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}     (delete)
-  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Upload  (upload docs)
+  - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Folders/{folder_id}     (one level; include_files=true for files)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Folders/{parent_id}     (create folder)
+  - PATCH  /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Folders/{folder_id}     (rename folder)
+  - DELETE /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Folders/{folder_id}     (delete empty folder)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Folders/{folder_id}/Move (move folder)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Upload  (upload docs; target_folder_path + target_folder_id + directory relative_paths)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (list docs)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Move    (move files)
+  - PATCH  /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (rename file)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Channels               (ingestion channels)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/History (all-status file history)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
@@ -56,6 +63,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import zlib
 import os
 import re
 import time
@@ -65,10 +73,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
 
-from fastapi import Body, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 logger = logging.getLogger("aidp_mgmt_mock")
 logging.basicConfig(
@@ -144,6 +152,10 @@ _STATE_DIR = _STATE_FILE.parent
 # =============================================================================
 _KNOWLEDGE_BASES: Dict[str, Dict[str, Any]] = {}
 _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
+# Explicit folders per knowledge base. Documents also carry ``folder_path``;
+# a folder exists here even when it is empty, matching AIDP's real Folders API.
+# Entries look like ``{"folder_path": "/政策制度", "create_time": 173...}``.
+_FOLDERS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
 # Uploaded file payloads keyed by ``file_uuid``.
 #
 # Real AIDP hands the original file back on download and preview, which is what
@@ -718,6 +730,7 @@ def _save_state() -> None:
     payload = {
         "knowledge_bases": _KNOWLEDGE_BASES,
         "documents_by_kb": _DOCUMENTS_BY_KB,
+        "folders_by_kb": _FOLDERS_BY_KB,
         "ontology": {
             "domains": _ONTOLOGY_DOMAINS,
             "entities": _ONTOLOGY_ENTITIES,
@@ -751,10 +764,13 @@ def _load_state() -> None:
                 payload = json.load(f)
             kb_data = payload.get("knowledge_bases", {})
             doc_data = payload.get("documents_by_kb", {})
+            folder_data = payload.get("folders_by_kb", {})
             if not isinstance(kb_data, dict) or not isinstance(doc_data, dict):
                 raise ValueError("state file payload is not {dict, dict}")
             _KNOWLEDGE_BASES.update(kb_data)
             _DOCUMENTS_BY_KB.update(doc_data)
+            if isinstance(folder_data, dict):
+                _FOLDERS_BY_KB.update(folder_data)
             for kb in _KNOWLEDGE_BASES.values():
                 if isinstance(kb, dict):
                     kb.pop("sensitive_intercept_enalbe", None)
@@ -1108,9 +1124,54 @@ def _ensure_chinese_demo_data() -> None:
     _save_state()
 
 
+# Demo folder layout for the Chinese review knowledge base. Documents keep the
+# folder they are assigned to across restarts; folders without documents
+# (``/归档``) prove that empty folders are preserved and can be removed.
+_DEMO_FOLDERS = (
+    "/政策制度",
+    "/政策制度/公共服务",
+    "/归档",
+)
+_DEMO_DOCUMENT_FOLDERS = {
+    "00000000-0000-4000-8000-000000000001": "/政策制度",
+    "00000000-0000-4000-8000-000000000002": "/政策制度",
+    "00000000-0000-4000-8000-000000000007": "/政策制度/公共服务",
+    "00000000-0000-4000-8000-000000000008": "/政策制度/公共服务",
+    "00000000-0000-4000-8000-000000000009": "/",
+    "00000000-0000-4000-8000-000000000010": "/",
+    "00000000-0000-4000-8000-000000000011": "/",
+    "00000000-0000-4000-8000-000000000012": "/",
+}
+
+
+def _ensure_folder_structure() -> None:
+    """Seed the demo folder tree and give every existing document a folder.
+
+    Only fills missing values so folders/documents created through the UI (or a
+    previous local run) are never overwritten. Other knowledge bases start with
+    no folders, which is also a valid AIDP state.
+    """
+    kds_id = "aidp-kb-faq"
+    if kds_id not in _KNOWLEDGE_BASES:
+        return
+    folders = _FOLDERS_BY_KB.setdefault(kds_id, [])
+    if not folders:
+        now = int(time.time())
+        folders.extend(
+            {"folder_path": path, "create_time": now}
+            for path in _DEMO_FOLDERS
+        )
+    for document in _DOCUMENTS_BY_KB.get(kds_id, []):
+        if not isinstance(document, dict) or document.get("folder_path"):
+            continue
+        file_uuid = str(document.get("file_uuid") or "")
+        document["folder_path"] = _DEMO_DOCUMENT_FOLDERS.get(file_uuid, "/")
+
+
 _ensure_detail_demo_tasks()
 _ensure_chinese_demo_data()
 _ensure_document_uuids()
+_ensure_folder_structure()
 _save_state()
 
 
@@ -1136,6 +1197,164 @@ def _active_documents(kds_id: str) -> List[Dict[str, Any]]:
             and doc["_deleted_at"] <= now
         )
     ]
+
+
+def _normalize_mock_folder_path(path: Optional[str]) -> str:
+    """Normalize one mock folder path to the AIDP relative form."""
+    normalized = (path or "/").strip().replace("\\", "/")
+    if not normalized:
+        return "/"
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    normalized = "/" + "/".join(
+        part for part in normalized.split("/") if part and part != "."
+    )
+    if not normalized:
+        return "/"
+    if ".." in normalized.split("/"):
+        raise HTTPException(status_code=422, detail="folder_path must not contain '..'")
+    return normalized
+
+
+def _folder_parent(path: str) -> str:
+    parent, _, _name = path.rpartition("/")
+    return parent or "/"
+
+
+def _folder_name(path: str) -> str:
+    return path.rpartition("/")[2]
+
+
+def _join_folder_path(parent: str, name: str) -> str:
+    return f"/{name}" if parent == "/" else f"{parent}/{name}"
+
+
+def _folder_id_for_path(path: str) -> int:
+    """Stable mock folder id: root is 0, other paths get a deterministic hash."""
+    if path == "/":
+        return 0
+    return (zlib.crc32(path.encode("utf-8")) % 900_000_000) + 1
+
+
+def _folder_path_for_id(kds_id: str, folder_id: int) -> str | None:
+    if folder_id == 0:
+        return "/"
+    return next(
+        (
+            path
+            for path in _all_folder_paths(kds_id)
+            if _folder_id_for_path(path) == folder_id
+        ),
+        None,
+    )
+
+
+def _folder_has_child_folders(kds_id: str, path: str) -> bool:
+    return any(
+        _folder_parent(candidate) == path and candidate != path
+        for candidate in _all_folder_paths(kds_id)
+    )
+
+
+def _uuid_hex(value: Any) -> str:
+    text = str(value or "")
+    compact = text.replace("-", "")
+    if len(compact) == 32 and all(ch in "0123456789abcdefABCDEF" for ch in compact):
+        return compact.lower()
+    return text
+
+
+def _folder_tree_status(document: Dict[str, Any]) -> int:
+    """Map the mock's task status to the new tree contract 1–6."""
+    deleted_at = document.get("_deleted_at")
+    if isinstance(deleted_at, (int, float)) and deleted_at > time.time():
+        return 5
+    if document.get("file_status") == 2:
+        return 6
+    status = _doc_effective_status(document)
+    if status == 4:
+        return 2
+    if status == 5:
+        return 4
+    return status if isinstance(status, int) else 1
+
+
+def _folder_records(kds_id: str) -> List[Dict[str, Any]]:
+    return _FOLDERS_BY_KB.setdefault(kds_id, [])
+
+
+def _all_folder_paths(kds_id: str) -> set[str]:
+    """Return every folder path, including ancestors implied by nested files."""
+    paths: set[str] = set()
+    values = [record.get("folder_path") for record in _folder_records(kds_id)]
+    values.extend(
+        document.get("folder_path") or "/"
+        for document in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if isinstance(document, dict)
+    )
+    for value in values:
+        if not isinstance(value, str) or not value.startswith("/"):
+            continue
+        current = value.rstrip("/") or "/"
+        while current != "/":
+            paths.add(current)
+            current = _folder_parent(current)
+    return paths
+
+
+def _folder_exists(kds_id: str, path: str) -> bool:
+    if path == "/":
+        return True
+    return path in _all_folder_paths(kds_id)
+
+
+def _folder_is_empty(kds_id: str, path: str) -> bool:
+    prefix = f"{path}/"
+    if any(
+        isinstance(document, dict)
+        and str(document.get("folder_path") or "/").startswith(prefix)
+        for document in _DOCUMENTS_BY_KB.get(kds_id, [])
+    ):
+        return False
+    return not any(
+        folder_path.startswith(prefix)
+        for folder_path in _all_folder_paths(kds_id)
+    )
+
+
+def _ensure_folder_records(kds_id: str, path: str) -> None:
+    """Materialize a folder and its ancestors so empty folders survive moves."""
+    current = _normalize_mock_folder_path(path)
+    records = _folder_records(kds_id)
+    known = {record.get("folder_path") for record in records}
+    now = int(time.time())
+    ancestors: List[str] = []
+    while current != "/":
+        ancestors.append(current)
+        current = _folder_parent(current)
+    for folder_path in reversed(ancestors):
+        if folder_path not in known:
+            records.append({"folder_path": folder_path, "create_time": now})
+            known.add(folder_path)
+
+
+def _rewrite_folder_prefix(kds_id: str, old_path: str, new_path: str) -> None:
+    """Move a folder subtree by rewriting folder and document path prefixes."""
+    old_prefix = f"{old_path}/"
+    for record in _folder_records(kds_id):
+        current = record.get("folder_path")
+        if current == old_path:
+            record["folder_path"] = new_path
+        elif isinstance(current, str) and current.startswith(old_prefix):
+            record["folder_path"] = f"{new_path}/{current[len(old_prefix):]}"
+    for document in _DOCUMENTS_BY_KB.get(kds_id, []):
+        if not isinstance(document, dict):
+            continue
+        current = document.get("folder_path") or "/"
+        if current == old_path:
+            document["folder_path"] = new_path
+        elif isinstance(current, str) and current.startswith(old_prefix):
+            document["folder_path"] = f"{new_path}/{current[len(old_prefix):]}"
 
 
 _DERIVED_KB_FIELDS = frozenset(
@@ -2036,10 +2255,381 @@ def delete_knowledge_base(
 
     del _KNOWLEDGE_BASES[kds_id]
     _DOCUMENTS_BY_KB.pop(kds_id, None)
+    _FOLDERS_BY_KB.pop(kds_id, None)
 
     logger.info("DELETE  kds_id=%s", kds_id)
     _save_state()
     return JSONResponse(content={"success": True})
+
+
+# =============================================================================
+# Folder Management
+# =============================================================================
+
+
+class CreateFolderBody(BaseModel):
+    parent_folder_path: str
+    folder_name: str
+
+
+class RenameFolderBody(BaseModel):
+    parent_folder_path: str
+    old_folder_name: str
+    new_folder_name: str
+
+
+class MoveFolderBody(BaseModel):
+    src_parent_folder_path: str
+    folder_name: str
+    target_parent_folder_path: str
+    target_parent_folder_id: int
+    merge_on_conflict: bool = False
+
+
+class MoveFilesBody(BaseModel):
+    file_uuids: List[str]
+    target_folder_path: str
+    target_folder_id: int
+
+
+class RenameFileBody(BaseModel):
+    file_uuid: str
+    new_file_name: str
+
+
+def _require_kb(kds_id: str) -> None:
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+
+def _name_conflict(path: str) -> HTTPException:
+    """AIDP 1089: a folder or file already uses this name in the location."""
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": 1089,
+            "message": f"name already exists: {path}",
+        },
+    )
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{folder_id}}")
+def get_folder_tree(
+    kds_id: str,
+    folder_id: int,
+    folder_path: str = Query(default="/"),
+    include_files: bool = Query(default=False),
+    keyword: Optional[str] = Query(default=None, max_length=200),
+    file_type: Optional[str] = Query(default=None, max_length=32),
+    file_status: Optional[str] = Query(default=None, max_length=32),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Return direct subfolders and, when requested, current-folder files."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    normalized_path = _normalize_mock_folder_path(folder_path)
+    if not _folder_exists(kds_id, normalized_path):
+        raise HTTPException(status_code=404, detail=f"Folder {normalized_path} not found")
+    if _folder_id_for_path(normalized_path) != folder_id:
+        raise HTTPException(status_code=404, detail=f"Folder id {folder_id} not found")
+
+    all_paths = _all_folder_paths(kds_id)
+    direct_folders = sorted(
+        (
+            path
+            for path in all_paths
+            if _folder_parent(path) == normalized_path and path != normalized_path
+        ),
+        key=str.casefold,
+    )
+    folders = [
+        {
+            "folder_name": _folder_name(path),
+            "folder_id": _folder_id_for_path(path),
+            "has_child_folders": _folder_has_child_folders(kds_id, path),
+        }
+        for path in direct_folders
+    ]
+
+    documents: List[Dict[str, Any]] = []
+    if include_files:
+        documents = [
+            document
+            for document in _active_documents(kds_id)
+            if (document.get("folder_path") or "/") == normalized_path
+        ]
+        normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
+        if normalized_keyword:
+            documents = [
+                document
+                for document in documents
+                if normalized_keyword in str(document.get("file_name") or "").casefold()
+            ]
+        if file_type and file_type.strip():
+            wanted_type = file_type.strip().casefold().lstrip(".")
+            documents = [
+                document
+                for document in documents
+                if str(document.get("file_type") or "").casefold().lstrip(".") == wanted_type
+            ]
+        if file_status and file_status.strip():
+            wanted_status = file_status.strip()
+            documents = [
+                document
+                for document in documents
+                if str(_folder_tree_status(document)) == wanted_status
+            ]
+        documents.sort(key=lambda document: str(document.get("file_name") or "").casefold())
+
+    total = len(documents)
+    start_index = (page - 1) * page_size
+    items = [
+        {
+            "file_uuid": _uuid_hex(document.get("file_uuid")),
+            "file_name": document.get("file_name"),
+            "file_type": document.get("file_type"),
+            "file_size": document.get("file_size"),
+            "status": _folder_tree_status(document),
+            "first_upload_time": document.get("first_upload_time")
+            or document.get("create_time"),
+            "update_time": document.get("update_time") or document.get("first_upload_time"),
+        }
+        for document in documents[start_index : start_index + page_size]
+    ]
+    return JSONResponse(
+        content={
+            "folder_id": folder_id,
+            "folder_path": normalized_path,
+            "folders": folders,
+            "files": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "value": items,
+            },
+        }
+    )
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{parent_folder_id}}")
+def create_folder(
+    kds_id: str,
+    parent_folder_id: int,
+    body: CreateFolderBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Create one folder below an existing parent folder (name must be unique)."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    parent = _normalize_mock_folder_path(body.parent_folder_path)
+    name = body.folder_name.strip()
+    if not name or "/" in name or "\\" in name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="folder_name must not contain /")
+    if not _folder_exists(kds_id, parent):
+        raise HTTPException(status_code=404, detail=f"Folder {parent} not found")
+    if _folder_id_for_path(parent) != parent_folder_id:
+        raise HTTPException(status_code=404, detail=f"Folder id {parent_folder_id} not found")
+    new_path = _join_folder_path(parent, name)
+    if _folder_exists(kds_id, new_path):
+        raise _name_conflict(new_path)
+    _ensure_folder_records(kds_id, new_path)
+    _save_state()
+    logger.info("CREATE FOLDER  kds_id=%s path=%s", kds_id, new_path)
+    return JSONResponse(
+        content={
+            "folder_path": new_path,
+            "folder_id": _folder_id_for_path(new_path),
+        }
+    )
+
+
+@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{folder_id}}")
+def rename_folder(
+    kds_id: str,
+    folder_id: int,
+    body: RenameFolderBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Rename one folder addressed by its own FolderId."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    parent = _normalize_mock_folder_path(body.parent_folder_path)
+    old_name = body.old_folder_name.strip()
+    new_name = body.new_folder_name.strip()
+    if not new_name or "/" in new_name or "\\" in new_name:
+        raise HTTPException(status_code=400, detail="invalid new_folder_name")
+    source = _join_folder_path(parent, old_name)
+    if not _folder_exists(kds_id, source) or source == "/":
+        raise HTTPException(status_code=404, detail=f"Folder {source} not found")
+    if _folder_id_for_path(source) != folder_id:
+        raise HTTPException(status_code=404, detail=f"Folder id {folder_id} not found")
+    destination = _join_folder_path(parent, new_name)
+    if destination != source and destination in _all_folder_paths(kds_id):
+        raise _name_conflict(destination)
+    _rewrite_folder_prefix(kds_id, source, destination)
+    _save_state()
+    return JSONResponse(content={"folder_path": destination})
+
+
+@app.delete(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{folder_id}}")
+def delete_folder(
+    kds_id: str,
+    folder_id: int,
+    folder_path: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> Response:
+    """Delete an empty folder addressed by its own FolderId."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    target = (
+        _normalize_mock_folder_path(folder_path)
+        if folder_path is not None
+        else _folder_path_for_id(kds_id, folder_id)
+    )
+    if target is None or target == "/":
+        raise HTTPException(status_code=404, detail=f"Folder id {folder_id} not found")
+    if _folder_id_for_path(target) != folder_id:
+        raise HTTPException(status_code=404, detail=f"Folder id {folder_id} not found")
+    if not _folder_exists(kds_id, target):
+        raise HTTPException(status_code=404, detail=f"Folder {target} not found")
+    if not _folder_is_empty(kds_id, target):
+        raise HTTPException(
+            status_code=400,
+            detail="folder is not empty (code 1090)",
+        )
+    _FOLDERS_BY_KB[kds_id] = [
+        record
+        for record in _folder_records(kds_id)
+        if record.get("folder_path") != target
+    ]
+    _save_state()
+    logger.info("DELETE FOLDER  kds_id=%s path=%s", kds_id, target)
+    return Response(status_code=204)
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Folders/{{folder_id}}/Move")
+def move_folder(
+    kds_id: str,
+    folder_id: int,
+    body: MoveFolderBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Move one folder (with its subtree) using the new target_* fields."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    parent = _normalize_mock_folder_path(body.src_parent_folder_path)
+    name = body.folder_name.strip()
+    target = _normalize_mock_folder_path(body.target_parent_folder_path)
+    source = _join_folder_path(parent, name)
+    if source == "/" or not _folder_exists(kds_id, source):
+        raise HTTPException(status_code=404, detail=f"Folder {source} not found")
+    if _folder_id_for_path(source) != folder_id:
+        raise HTTPException(status_code=404, detail=f"Folder id {folder_id} not found")
+    if not _folder_exists(kds_id, target):
+        raise HTTPException(status_code=404, detail=f"Folder {target} not found")
+    if _folder_id_for_path(target) != body.target_parent_folder_id:
+        raise HTTPException(status_code=404, detail="target folder id not found")
+    if target == source or target.startswith(f"{source}/"):
+        raise HTTPException(
+            status_code=400,
+            detail="cannot move a folder into itself (code 1091)",
+        )
+    destination = _join_folder_path(target, name)
+    if destination in _all_folder_paths(kds_id) and not body.merge_on_conflict:
+        raise _name_conflict(destination)
+    _rewrite_folder_prefix(kds_id, source, destination)
+    _save_state()
+    return JSONResponse(
+        content={"folder_path": destination, "conflict_paths": []}
+    )
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Move")
+def move_files(
+    kds_id: str,
+    body: MoveFilesBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Move knowledge files to a folder with per-file outcomes."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    target = _normalize_mock_folder_path(body.target_folder_path)
+    if not _folder_exists(kds_id, target):
+        raise HTTPException(status_code=404, detail=f"Folder {target} not found")
+    if _folder_id_for_path(target) != body.target_folder_id:
+        raise HTTPException(status_code=404, detail="target folder id not found")
+    documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    success_list: List[Dict[str, str]] = []
+    failed_list: List[Dict[str, str]] = []
+    for file_uuid in body.file_uuids:
+        document = next(
+            (
+                item
+                for item in documents
+                if _uuid_hex(item.get("file_uuid")) == _uuid_hex(file_uuid)
+            ),
+            None,
+        )
+        if document is None:
+            failed_list.append(
+                {
+                    "file_uuid": str(file_uuid),
+                    "reason_zh": "文件不存在",
+                    "reason_en": "File not found",
+                }
+            )
+            continue
+        document["folder_path"] = target
+        success_list.append(
+            {
+                "file_uuid": _uuid_hex(file_uuid),
+                "file_path": _join_folder_path(
+                    target, str(document.get("file_name") or "")
+                ),
+            }
+        )
+    _save_state()
+    return JSONResponse(
+        content={
+            "summary": {
+                "total": len(body.file_uuids),
+                "success": len(success_list),
+                "failed": len(failed_list),
+            },
+            "success_list": success_list,
+            "failed_list": failed_list,
+        }
+    )
+
+
+@app.patch(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles")
+def rename_file(
+    kds_id: str,
+    body: RenameFileBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Rename one knowledge file and return its new logical path."""
+    _check_auth(authorization)
+    _require_kb(kds_id)
+    document = _find_document(kds_id, body.file_uuid)
+    if document is None:
+        raise HTTPException(status_code=404, detail="file not found")
+    new_name = body.new_file_name.strip()
+    if not new_name or "/" in new_name or "\\" in new_name:
+        raise HTTPException(status_code=422, detail="invalid new_file_name")
+    folder_path = document.get("folder_path") or "/"
+    if any(
+        other is not document
+        and (other.get("folder_path") or "/") == folder_path
+        and other.get("file_name") == new_name
+        for other in _DOCUMENTS_BY_KB.get(kds_id, [])
+    ):
+        raise _name_conflict(_join_folder_path(folder_path, new_name))
+    document["file_name"] = new_name
+    _save_state()
+    return Response(status_code=204)
 
 
 # =============================================================================
@@ -2051,20 +2641,32 @@ def delete_knowledge_base(
 async def upload_documents(
     kds_id: str,
     files: List[UploadFile] = File(...),
+    target_folder_path: Optional[str] = Form(default=None),
+    target_folder_id: Optional[int] = Form(default=None),
+    relative_paths: Optional[List[str]] = Form(default=None),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """Upload documents to a knowledge base. AIDP uses form-data file upload."""
+    """Upload documents using the new target_folder_path + relative directory fields."""
     _check_auth(authorization)
 
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
+    normalized_target = _normalize_mock_folder_path(target_folder_path or "/")
+    if not _folder_exists(kds_id, normalized_target):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Folder {normalized_target} not found",
+        )
+    if target_folder_id is not None and _folder_id_for_path(normalized_target) != target_folder_id:
+        raise HTTPException(status_code=404, detail="target folder id not found")
+
     if _UPLOAD_SECONDS > 0:
         await asyncio.sleep(_UPLOAD_SECONDS)
 
     success_docs: List[Dict[str, Any]] = []
-    failed: List[Dict[str, str]] = []
-    for f in files:
+    failed: List[Dict[str, Any]] = []
+    for index, f in enumerate(files):
         try:
             content = await f.read()
             file_ino_no = max(
@@ -2075,14 +2677,42 @@ async def upload_documents(
                 ),
                 default=0,
             ) + 1
+            relative_dir = (
+                (relative_paths[index] or "").replace("\\", "/").strip("/")
+                if relative_paths and index < len(relative_paths)
+                else ""
+            )
+            if any(segment in {".", ".."} for segment in relative_dir.split("/")):
+                raise ValueError("relative_paths must not contain '.' or '..'")
+            folder_path = (
+                _join_folder_path(normalized_target, relative_dir)
+                if relative_dir
+                else normalized_target
+            )
+            _ensure_folder_records(kds_id, folder_path)
+            file_name = f.filename or "unknown"
+            if any(
+                (document.get("folder_path") or "/") == folder_path
+                and document.get("file_name") == file_name
+                for document in _DOCUMENTS_BY_KB.get(kds_id, [])
+            ):
+                failed.append({
+                    "file_name": file_name,
+                    "reason_zh": "文件已存在，请重命名或删除已有文件",
+                    "reason_en": "File already exists. Please rename or delete the existing file.",
+                    "code": 1089,
+                    "relative_path": relative_dir,
+                })
+                continue
             doc = {
-                "file_uuid": str(uuid.uuid4()),
+                "file_uuid": uuid.uuid4().hex,
                 "file_ino_no": file_ino_no,
-                "file_name": f.filename or "unknown",
+                "file_name": file_name,
                 "file_size": len(content),
                 "file_type": (f.filename.rsplit(".", 1)[-1] if f.filename and "." in f.filename else "bin"),
                 "create_time": int(time.time()),
                 "update_time": int(time.time()),
+                "folder_path": folder_path,
                 # Uploaded files enter the ingestion pipeline immediately: the
                 # legacy list endpoint hides them until the timer elapses, while
                 # the history endpoint reports them as PROCESSING.
@@ -2110,11 +2740,21 @@ async def upload_documents(
         },
         "success_list": [
             {
+                "file_uuid": doc["file_uuid"],
                 "file_name": doc["file_name"],
                 "file_type": doc["file_type"],
                 "file_size": doc["file_size"],
                 "file_ino_no": doc["file_ino_no"],
-                "file_uuid": doc["file_uuid"],
+                "storage_name": f"{doc['file_uuid']}_{doc['file_name']}",
+                "file_path": _join_folder_path(
+                    doc["folder_path"], doc["file_name"]
+                ),
+                "folder_id": _folder_id_for_path(doc["folder_path"]),
+                "relative_path": (
+                    ""
+                    if doc["folder_path"] == normalized_target
+                    else doc["folder_path"][len(normalized_target):].strip("/")
+                ),
                 "first_upload_time": doc["create_time"],
             }
             for doc in success_docs
