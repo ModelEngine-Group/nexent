@@ -6,6 +6,7 @@ import hashlib
 import json
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import httpx
@@ -104,6 +105,8 @@ def main():
                 messages = rows(session, ConversationMessage, conversation_id=cid)
                 units = rows(session, ConversationMessageUnit, conversation_id=cid)
                 forms, responses, terminals = [], [], []
+                native_thinking = Counter()
+                latest_message = messages[-1]["message_id"]
                 for unit in units:
                     value = unit["unit_content"]
                     try:
@@ -124,9 +127,20 @@ def main():
                         terminals.append({"message_id": unit["message_id"], **{k: parsed[k] for k in (
                             "status", "end_reason", "agent_core", "final_content", "final_block_ids", "error",
                         )}})
+                    elif (unit["message_id"] == latest_message
+                          and unit["unit_type"] in {"model_output_thinking", "model_output_deep_thinking"}
+                          and isinstance(parsed, dict) and parsed.get("agent_core") == "jiuwen"):
+                        assert parsed["type"] == unit["unit_type"] and isinstance(parsed["content"], str)
+                        key = tuple(parsed.get(k) for k in (
+                            "type", "turn_id", "step_id", "block_id", "invocation_id", "attempt_id",
+                        ))
+                        native_thinking[key] += 1
                 print(json.dumps({"message_count": len(messages), "message_statuses": [m["status"] for m in messages],
                                   "messages_hash": digest(messages), "units_hash": digest(units),
-                                  "forms": forms, "responses": responses, "terminals": terminals}, ensure_ascii=False))
+                                  "forms": forms, "responses": responses, "terminals": terminals,
+                                  "raw_model_output_units": sum(u["unit_type"] == "model_output" for u in units),
+                                  "native_thinking_units": sum(native_thinking.values()),
+                                  "max_native_units_per_block": max(native_thinking.values(), default=0)}, ensure_ascii=False))
         elif mode == "cleanup":
             with get_db_session() as session:
                 source_unchanged = digest(rows(session, AgentInfo, agent_id=state["source"])) == state["source_hash"]

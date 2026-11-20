@@ -396,6 +396,19 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     ).not.toBe("");
     continued = audit(cid);
     expect(continued.message_count).toBe(4);
+    expect(continued.raw_model_output_units).toBe(0);
+    if (expectedCore === "jiuwen") {
+      const fragments = secondWire.filter(
+        (event) =>
+          event.block_id &&
+          ["model_output_thinking", "model_output_deep_thinking"].includes(
+            event.type,
+          ),
+      );
+      expect(continued.native_thinking_units).toBeGreaterThan(0);
+      expect(continued.max_native_units_per_block).toBe(1);
+      expect(fragments.length).toBeGreaterThan(continued.native_thinking_units);
+    }
     expect(continued.responses).toHaveLength(1);
     expect(continued.responses[0].source_message_id).toBe(
       first.forms[0].source_message_id,
@@ -410,6 +423,9 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
       submitted_once: true,
       answer_persisted: true,
       successful_continuation: true,
+      raw_model_output_units: continued.raw_model_output_units,
+      native_thinking_units: continued.native_thinking_units,
+      max_native_units_per_block: continued.max_native_units_per_block,
     });
     save();
   });

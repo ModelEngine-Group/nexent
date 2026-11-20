@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import json
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -52,6 +53,48 @@ def test_assistant_projection_replay_returns_original_ids_without_writes(project
     assert project() == {1: 101}
     session.add.assert_not_called()
     assert session.execute.call_count == 1
+
+
+def test_native_thinking_groups_at_write_without_changing_receipt_input(projection_db, mocker):
+    session, parent, _, receipts = projection_db
+    digest = mocker.patch.object(projection_receipt, "projection_payload_digest",
+                                 wraps=projection_receipt.projection_payload_digest)
+
+    def native(index, content, *, step="one", block="body", invocation=None, attempt="attempt", kind="model_output"):
+        envelope = {"type": kind, "schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+                    "turn_id": "turn", "sequence": index, "step_id": step, "block_id": block,
+                    "invocation_id": invocation, "attempt_id": attempt, "content": content}
+        return {"unit_index": index, "type": kind, "unit_type": kind, "unit_content": json.dumps(envelope),
+                "invocation_id": invocation}
+
+    raw = [native(1, "一"), native(2, "deep", kind="model_output_deep_thinking"),
+           native(3, ". Child", invocation="child"), native(4, "二"),
+           native(5, "deep end", kind="model_output_deep_thinking"), native(6, "do not join", step="two"),
+           native(7, "other attempt", attempt="different"),
+           {"unit_index": 8, "unit_type": "human_interaction", "unit_content": "form"}]
+
+    assert project(message_units=raw) == {1: 101}
+    rows = session.execute.call_args_list[1].args[1]
+    assert [(row["unit_index"], row["unit_type"]) for row in rows] == [
+        (1, "model_output_thinking"), (2, "model_output_deep_thinking"), (3, "model_output_thinking"),
+        (6, "model_output_thinking"), (7, "model_output_thinking"), (8, "human_interaction"),
+    ]
+    payloads = [json.loads(row["unit_content"]) for row in rows[:-1]]
+    assert [payload["content"] for payload in payloads] == ["一二", "deepdeep end", ". Child", "do not join", "other attempt"]
+    assert payloads[0] == (json.loads(raw[0]["unit_content"]) | {"type": "model_output_thinking", "content": "一二"})
+    assert rows[-1]["unit_content"] == "form"
+    assert digest.call_args.args[0]["message_units"] == raw
+    assert raw[0]["unit_type"] == "model_output" and raw[3]["unit_type"] == "model_output"
+
+    receipt = session.add.call_args.args[0]
+    receipts.return_value = [receipt]
+    for unit_ids in ({"1": 101}, {"1": 101, "4": 104}):
+        receipt.unit_ids = unit_ids
+        session.reset_mock()
+        session.execute.side_effect = [MagicMock(scalar_one_or_none=MagicMock(return_value=parent))]
+        assert project(message_units=raw) == {int(index): unit_id for index, unit_id in unit_ids.items()}
+        session.add.assert_not_called()
+        assert session.execute.call_count == 1
 
 
 @pytest.mark.parametrize("change", [{"message_content": "changed"}, {"projection_run_id": "b" * 32}, {"message_id": 18}])
