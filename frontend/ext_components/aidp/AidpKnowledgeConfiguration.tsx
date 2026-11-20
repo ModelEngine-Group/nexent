@@ -23,6 +23,8 @@ import {
 } from "@/ext_components/aidp/pages/knowledge-list/hooks/useAidpKnowledgeList";
 
 import AidpKnowledgeList from "./pages/knowledge-list/AidpKnowledgeList";
+import AidpKnowledgeGuide from "./pages/knowledge-list/AidpKnowledgeGuide";
+import typography from "./shared/styles/aidpKnowledgeTypography.module.css";
 import {
   AIDP_KB_DEFAULT_COLUMNS,
   AIDP_KB_DEFAULT_PAGE_SIZE,
@@ -213,7 +215,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   }, [locale, router]);
 
   return (
-    <div className="flex h-full w-full min-w-0 flex-col">
+    <div className={`${typography.page} flex h-full w-full min-w-0 flex-col`}>
+      <AidpKnowledgeGuide />
       <div className="mt-4 min-h-0 flex-1 overflow-hidden">
         <AidpKnowledgeList
           kbs={kbs}

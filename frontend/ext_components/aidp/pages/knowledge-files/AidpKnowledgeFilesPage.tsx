@@ -60,6 +60,7 @@ import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpR
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
 import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeInformationTab";
+import AidpSensitiveWordsPage from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordsPage";
 import {
   AIDP_DETAIL_PAGE_SIZE,
   FILE_COLUMN_MIN_WIDTHS,
@@ -78,7 +79,7 @@ interface AidpKnowledgeFilesPageProps {
   pollingPaused?: boolean;
 }
 
-type DetailTab = "files" | "tasks" | "information";
+type DetailTab = "files" | "tasks" | "information" | "sensitive-words";
 
 // AIDP caps a single batch document removal request at 10 files.
 const AIDP_BATCH_DELETE_MAX = 10;
@@ -671,6 +672,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             key: "information",
             label: t("aidpKnowledge.detailTabInformation"),
           },
+          {
+            key: "sensitive-words",
+            label: t("aidpKnowledge.detailTabSensitiveWords"),
+          },
         ]}
       />
 
@@ -782,8 +787,19 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           canConfigureGroupPermissions={canConfigureGroupPermissions}
           detailFetching={detailQuery.isFetching}
           onEditPermissions={() => setEditingKbMode("permissions")}
+          onEditMetadata={() => setEditingKbMode("metadata")}
           onRefreshDetail={() => detailQuery.refetch()}
         />
+      )}
+
+      {activeTab === "sensitive-words" && (
+        <section className="flex min-h-0 flex-1 flex-col bg-white">
+          <AidpSensitiveWordsPage
+            key={detail.kds_id}
+            knowledgeBaseId={detail.kds_id}
+            canManage={canEdit}
+          />
+        </section>
       )}
 
       <AidpUpdateKbModal

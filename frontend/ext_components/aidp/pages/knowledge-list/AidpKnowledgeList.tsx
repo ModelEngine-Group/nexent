@@ -51,7 +51,6 @@ import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-lis
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
-import AidpKnowledgeGuide from "@/ext_components/aidp/pages/knowledge-list/AidpKnowledgeGuide";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
@@ -569,7 +568,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       <div
         className={`${typography.page} ${styles.overview} flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto`}
       >
-        <AidpKnowledgeGuide />
         <section
           ref={tableContainer}
           className="flex min-h-[320px] flex-1 flex-col overflow-hidden bg-white"

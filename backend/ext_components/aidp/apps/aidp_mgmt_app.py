@@ -20,25 +20,26 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, NoReturn, Optional
 from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
+import gateway.authentication.auth as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, UnauthorizedError
-from management.db.identity.user_tenant import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
+    AidpSensitiveWordError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
@@ -56,6 +57,13 @@ from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
     PRIVATE,
     READ_ONLY,
+)
+from ext_components.aidp.services.aidp_sensitive_word_service import (
+    create_sensitive_word_impl,
+    delete_sensitive_word_impl,
+    get_sensitive_word_impl,
+    list_sensitive_words_impl,
+    update_sensitive_word_impl,
 )
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
@@ -78,7 +86,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-import gateway.authentication.auth as auth_utils_module
+from management.db.identity.user_tenant import get_user_role_by_tenant
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
@@ -176,6 +184,13 @@ class CreateKbRequest(BaseModel):
     topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
     similarity: float = Field(0.0, ge=0, le=1, description="Similarity score threshold")
     caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
+    sensitive_intercept_enable: int = Field(
+        0,
+        ge=0,
+        le=1,
+        strict=True,
+        description="Sensitive word interception toggle for future files, int 0 or 1",
+    )
     chunk_mode: int = Field(
         0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
     )
@@ -237,6 +252,12 @@ class UpdateKbRequest(BaseModel):
     caption_enable: Optional[int] = Field(
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
     )
+    sensitive_intercept_enable: Optional[int] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Sensitive word interception toggle, int 0 or 1",
+    )
     vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
     is_exist_graph: Optional[bool] = Field(
         None,
@@ -296,6 +317,44 @@ class DownloadAidpDocumentRequest(BaseModel):
     file_uuid: UUID = Field(..., description="AIDP file UUID")
 
 
+class CreateSensitiveWordRequest(BaseModel):
+    """Body for creating one custom sensitive word."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    word: str = Field(..., min_length=1, max_length=64, description="Word or phrase to match")
+    mode: Literal["BLACK", "WHITE"] = Field(..., description="BLACK blocks, WHITE allows")
+    description: str = Field(
+        ..., min_length=1, max_length=512, description="Why the word is in the dictionary"
+    )
+
+    @field_validator("word", "description", mode="before")
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class UpdateSensitiveWordRequest(BaseModel):
+    """Partial update for one custom sensitive word."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    word: Optional[str] = Field(None, min_length=1, max_length=64)
+    mode: Optional[Literal["BLACK", "WHITE"]] = None
+    description: Optional[str] = Field(None, min_length=1, max_length=512)
+
+    @field_validator("word", "description", mode="before")
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def require_at_least_one_field(self):
+        if self.word is None and self.mode is None and self.description is None:
+            raise ValueError("At least one sensitive word field must be provided")
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
@@ -343,6 +402,21 @@ def _infer_is_multimodal(detail: dict) -> bool:
     return caption in (1, "1", True)
 
 
+def _normalize_int_toggle(value: Any, default: int = 0) -> int:
+    """Normalize an AIDP 0/1 toggle without hiding an explicit enabled value."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return 1 if value else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "是"}:
+            return 1
+        if normalized in {"0", "false", "no", "否", ""}:
+            return 0
+    return default
+
+
 def _normalize_kb_config_fields(detail: dict) -> dict:
     """Extract configuration fields the frontend expects from the AIDP detail response.
 
@@ -379,6 +453,12 @@ def _normalize_kb_config_fields(detail: dict) -> dict:
     # Derive is_multimodal from caption_enable when not already present.
     if "is_multimodal" not in detail or detail["is_multimodal"] is None:
         detail["is_multimodal"] = _infer_is_multimodal(detail)
+
+    # Historical KBs predate the sensitive-word toggle; treat a missing value
+    # as disabled while keeping an explicit upstream 1 intact.
+    detail["sensitive_intercept_enable"] = _normalize_int_toggle(
+        detail.get("sensitive_intercept_enable"), 0
+    )
 
     # Normalize the graph configuration for the frontend. AIDP serializes the
     # three graph toggles as "是"/"否" and the hop count as a string, while the
@@ -436,6 +516,24 @@ def _is_user_role(user_id: str, tenant_id: str) -> bool:
     """
     role = get_user_role_by_tenant(user_id, tenant_id)
     return (role or "USER").upper() == "USER"
+
+
+def _raise_sensitive_word_upstream_error(exc: AidpSensitiveWordError) -> NoReturn:
+    """Propagate AIDP's message while keeping business codes as diagnostics.
+
+    Business codes describe the upstream result; they are not Nexent HTTP
+    semantics. The response therefore carries the upstream message and details
+    under the generic AIDP service error instead of remapping codes to
+    409/404/403.
+    """
+    raise AppException(
+        ErrorCode.AIDP_SERVICE_ERROR,
+        str(exc),
+        details={
+            "upstream_status": exc.upstream_status,
+            "upstream_code": exc.upstream_code,
+        },
+    ) from exc
 
 
 def _current_accessible_rows(
@@ -659,6 +757,12 @@ async def list_knowledge_bases(
             "is_multimodal": _infer_is_multimodal(detail or row),
             "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
             "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
+            "sensitive_intercept_enable": _normalize_int_toggle(
+                detail.get("sensitive_intercept_enable")
+                if detail.get("sensitive_intercept_enable") is not None
+                else row.get("sensitive_intercept_enable"),
+                0,
+            ),
             "created_at": _timestamp_to_iso(row.get("create_time")),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
@@ -1440,3 +1544,158 @@ async def list_models(
         lane="control-io", owner="config",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+# ---------------------------------------------------------------------------
+# Sensitive words (per knowledge base)
+#
+# AIDP scopes the dictionary to one knowledge base, so every route checks that
+# KB's READ/EDIT permission. Upstream business codes stay diagnostics: the
+# response carries AIDP's message instead of remapping codes to HTTP statuses.
+# ---------------------------------------------------------------------------
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/sensitive-words")
+async def list_sensitive_words(
+    request: Request,
+    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
+    keyword: Annotated[
+        str | None,
+        Query(max_length=200, description="Optional word filter forwarded to AIDP"),
+    ] = None,
+    mode: Annotated[
+        Literal["BLACK", "WHITE"] | None,
+        Query(description="Optional dictionary mode filter"),
+    ] = None,
+) -> JSONResponse:
+    """Return one page of the knowledge base's sensitive word dictionary."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    try:
+        result = await run_blocking(
+            "aidp-sensitive-words",
+            list_sensitive_words_impl,
+            server_url,
+            api_key,
+            kds_id,
+            page,
+            page_size,
+            keyword,
+            mode,
+            lane="control-io",
+            owner="config",
+        )
+    except AidpSensitiveWordError as exc:
+        _raise_sensitive_word_upstream_error(exc)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/sensitive-words")
+async def create_sensitive_word(
+    request: Request,
+    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    body: CreateSensitiveWordRequest,
+) -> JSONResponse:
+    """Create one custom word in the knowledge base dictionary."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    try:
+        result = await run_blocking(
+            "aidp-create-sensitive-word",
+            create_sensitive_word_impl,
+            server_url,
+            api_key,
+            kds_id,
+            body.word,
+            body.mode,
+            body.description,
+            lane="control-io",
+            owner="config",
+        )
+    except AidpSensitiveWordError as exc:
+        _raise_sensitive_word_upstream_error(exc)
+    return JSONResponse(status_code=HTTPStatus.CREATED, content=result)
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/sensitive-words/{word_id}")
+async def get_sensitive_word(
+    request: Request,
+    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    word_id: Annotated[str, Path(min_length=1, description="AIDP sensitive word ID")],
+) -> JSONResponse:
+    """Read the latest value of one word before editing it."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    try:
+        result = await run_blocking(
+            "aidp-sensitive-word-detail",
+            get_sensitive_word_impl,
+            server_url,
+            api_key,
+            kds_id,
+            word_id,
+            lane="control-io",
+            owner="config",
+        )
+    except AidpSensitiveWordError as exc:
+        _raise_sensitive_word_upstream_error(exc)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.patch("/knowledge-bases/{kds_id}/sensitive-words/{word_id}")
+async def update_sensitive_word(
+    request: Request,
+    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    word_id: Annotated[str, Path(min_length=1, description="AIDP sensitive word ID")],
+    body: UpdateSensitiveWordRequest,
+) -> JSONResponse:
+    """Update the supplied fields of one custom word."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    try:
+        result = await run_blocking(
+            "aidp-update-sensitive-word",
+            update_sensitive_word_impl,
+            server_url,
+            api_key,
+            kds_id,
+            word_id,
+            body.model_dump(exclude_none=True),
+            lane="control-io",
+            owner="config",
+        )
+    except AidpSensitiveWordError as exc:
+        _raise_sensitive_word_upstream_error(exc)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.delete("/knowledge-bases/{kds_id}/sensitive-words/{word_id}")
+async def delete_sensitive_word(
+    request: Request,
+    kds_id: Annotated[str, Path(min_length=1, description="Knowledge base ID")],
+    word_id: Annotated[str, Path(min_length=1, description="AIDP sensitive word ID")],
+) -> Response:
+    """Delete one custom word; AIDP confirms with an empty 204 response."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    server_url, api_key = _credentials()
+    try:
+        await run_blocking(
+            "aidp-delete-sensitive-word",
+            delete_sensitive_word_impl,
+            server_url,
+            api_key,
+            kds_id,
+            word_id,
+            lane="control-io",
+            owner="config",
+        )
+    except AidpSensitiveWordError as exc:
+        _raise_sensitive_word_upstream_error(exc)
+    return Response(status_code=HTTPStatus.NO_CONTENT)

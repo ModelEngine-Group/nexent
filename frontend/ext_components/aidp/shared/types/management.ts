@@ -24,6 +24,8 @@ export interface AidpKbDetail {
   llm_model_name?: string | null;
   is_exist_graph?: boolean | null;
   graph_config?: string | Record<string, unknown> | null;
+  /** Sensitive word interception for files ingested after it is enabled. */
+  sensitive_intercept_enable?: number | null;
   created_by?: string | null;
   creator_name?: string | null;
   creator_cas_username?: string | null;
@@ -191,6 +193,8 @@ export interface AidpCreateKbPayload {
   caption_enable?: number;
   /** Chunking mode: 0 = smart splitting, 1 = legal clauses. */
   chunk_mode?: number;
+  /** Sensitive word interception for files ingested after it is enabled. */
+  sensitive_intercept_enable?: number;
   /** Whether knowledge graph extraction is enabled for this knowledge base. */
   is_exist_graph?: boolean;
   /**
@@ -239,6 +243,8 @@ export interface AidpUpdateKbPayload {
   caption_enable?: number;
   /** VLM model identifier; required when caption_enable is 1. */
   vlm_model?: string;
+  /** Sensitive word interception toggle; 1 enabled, 0 disabled. */
+  sensitive_intercept_enable?: number;
   /** Disable the knowledge graph; permanent, cannot be re-enabled. */
   is_exist_graph?: boolean;
   /** Partial structured graph configuration update; merged into the stored AIDP config. */

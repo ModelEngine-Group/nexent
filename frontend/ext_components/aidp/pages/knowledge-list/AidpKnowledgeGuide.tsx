@@ -12,24 +12,24 @@ import styles from "./AidpKnowledgeGuide.module.css";
  * Collapsible guide shown above the AIDP knowledge base overview.
  *
  * The three steps describe the documented usage flow (create, upload, connect
- * an agent); they are explanatory only and do not add shortcuts. The guide
- * starts expanded and can be collapsed back to a single reopen entry without
- * touching the list state around it.
+ * an agent); they are explanatory only and do not add shortcuts. The header
+ * sits above the page tabs and the body starts collapsed so the tabs stay
+ * aligned with the prototype; the guide can be reopened from the header.
  */
 const AidpKnowledgeGuide: React.FC = () => {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       try {
         if (
           window.sessionStorage.getItem("aidpKnowledge.guideExpanded") ===
-          "false"
+          "true"
         )
-          setExpanded(false);
+          setExpanded(true);
       } catch {
-        // Keep the guide expanded when browser storage is unavailable.
+        // Keep the guide collapsed when browser storage is unavailable.
       }
     });
     return () => window.cancelAnimationFrame(frame);

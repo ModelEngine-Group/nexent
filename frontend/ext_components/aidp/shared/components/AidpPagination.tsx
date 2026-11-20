@@ -19,6 +19,10 @@ interface AidpPaginationProps {
   /** True when the backend reports a confirmed global total. */
   totalReliable: boolean;
   hasMore: boolean;
+  /** Render the built-in "共 N 条" total; callers with their own summary pass false. */
+  showTotal?: boolean;
+  /** Keep the jump control visible even when the result fits on one page. */
+  alwaysShowJump?: boolean;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
 }
@@ -31,6 +35,8 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
   total,
   totalReliable,
   hasMore,
+  showTotal = true,
+  alwaysShowJump = false,
   onPageChange,
   onPageSizeChange,
 }) => {
@@ -52,7 +58,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
       locale={i18n.language.startsWith("zh") ? zhCN : enUS}
     >
       <div className={styles.pagination}>
-        {totalReliable && (
+        {totalReliable && showTotal && (
           <span className={styles.paginationTotal}>
             {t("aidpKnowledge.showTotal", { count: total })}
           </span>
@@ -81,7 +87,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
             showSizeChanger={false}
             simple={!totalReliable}
           />
-          {totalReliable && pageCount > 1 && (
+          {totalReliable && (pageCount > 1 || alwaysShowJump) && (
             <form
               className={styles.pageJump}
               onSubmit={(event) => {
