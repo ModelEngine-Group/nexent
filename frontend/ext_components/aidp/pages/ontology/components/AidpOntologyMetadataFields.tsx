@@ -82,7 +82,7 @@ const DEFAULT_PAGE_SIZE = 10;
 
 const TYPE_LABEL_KEYS: Record<AidpMetadataFieldType, string> = {
   string: "aidpKnowledge.ontologyMetadataTypeText",
-  time: "aidpKnowledge.ontologyMetadataTypeDate",
+  date: "aidpKnowledge.ontologyMetadataTypeDate",
   number: "aidpKnowledge.ontologyMetadataTypeNumber",
 };
 
@@ -835,7 +835,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               className={styles.typeSegmented}
               options={[
                 { value: "string", label: typeLabel("string") },
-                { value: "time", label: typeLabel("time") },
+                { value: "date", label: typeLabel("date") },
                 { value: "number", label: typeLabel("number") },
               ]}
             />
@@ -910,7 +910,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               options={[
                 { value: "string", label: typeLabel("string") },
                 { value: "number", label: typeLabel("number") },
-                { value: "time", label: typeLabel("time") },
+                { value: "date", label: typeLabel("date") },
               ]}
             />
           </Form.Item>

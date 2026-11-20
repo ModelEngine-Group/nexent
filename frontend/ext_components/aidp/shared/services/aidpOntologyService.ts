@@ -25,6 +25,8 @@ import type {
   AidpOntologyRule,
   AidpOntologyRuleListResponse,
   AidpOntologyRulePayload,
+  AidpOntologyTask,
+  AidpOntologyTaskListResponse,
 } from "../types/ontology";
 
 type QueryValue = string | number | boolean | undefined | null;
@@ -198,12 +200,40 @@ class AidpOntologyService {
 
   deleteBinding(
     domainId: string,
-    bindingId: string,
-    kdsId?: string
-  ): Promise<{ success: boolean }> {
-    return jsonRequest<{ success: boolean }>(
-      API_ENDPOINTS.aidpMgmt.ontology.unbind(domainId, bindingId, kdsId),
-      { method: "DELETE" }
+    kdsId: string
+  ): Promise<{
+    success: boolean;
+    accepted?: boolean;
+    task_id?: string | null;
+    task_type?: string | null;
+  }> {
+    return jsonRequest<{
+      success: boolean;
+      accepted?: boolean;
+      task_id?: string | null;
+      task_type?: string | null;
+    }>(API_ENDPOINTS.aidpMgmt.ontology.unbind(domainId, kdsId), {
+      method: "DELETE",
+    });
+  }
+
+  listTasks(
+    page = 1,
+    pageSize = 20,
+    taskType?: string
+  ): Promise<AidpOntologyTaskListResponse> {
+    return jsonRequest<AidpOntologyTaskListResponse>(
+      buildUrl(API_ENDPOINTS.aidpMgmt.ontology.tasks, {
+        page,
+        page_size: pageSize,
+        task_type: taskType || undefined,
+      })
+    );
+  }
+
+  getTask(taskId: string): Promise<AidpOntologyTask> {
+    return jsonRequest<AidpOntologyTask>(
+      API_ENDPOINTS.aidpMgmt.ontology.task(taskId)
     );
   }
 

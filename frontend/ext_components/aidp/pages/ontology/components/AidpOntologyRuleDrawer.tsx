@@ -51,7 +51,7 @@ interface AidpOntologyRuleDrawerProps {
   onSaved: () => void;
 }
 
-type FieldType = "string" | "number" | "time";
+type FieldType = "string" | "number" | "date";
 type ConditionValue = string | number | Dayjs | null | undefined;
 
 interface ConditionFormValue {
@@ -134,7 +134,7 @@ const OPERATORS_BY_TYPE: Record<FieldType, string[]> = {
     "empty",
     "not_empty",
   ],
-  time: [
+  date: [
     "is",
     "is_not",
     "before",
@@ -215,7 +215,7 @@ const ConditionValueInput: React.FC<{ name: number; fieldType: FieldType }> = ({
       />
     );
   }
-  if (fieldType === "time") {
+  if (fieldType === "date") {
     return (
       <DatePicker
         showTime
@@ -302,7 +302,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
       metadataFields
         .filter(
           (field) =>
-            field.field_type === "number" || field.field_type === "time"
+            field.field_type === "number" || field.field_type === "date"
         )
         .map((field) => ({
           value: `metadata_json.${field.field_name}`,
@@ -723,7 +723,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                         name="range_start"
                         className={styles.rangeItem}
                       >
-                        {scaleFieldType === "time" ? (
+                        {scaleFieldType === "date" ? (
                           <DatePicker
                             className={styles.fullWidth}
                             placeholder={t(
@@ -740,7 +740,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                         )}
                       </Form.Item>
                       <Form.Item name="range_end" className={styles.rangeItem}>
-                        {scaleFieldType === "time" ? (
+                        {scaleFieldType === "date" ? (
                           <DatePicker
                             className={styles.fullWidth}
                             placeholder={t(

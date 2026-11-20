@@ -82,6 +82,17 @@ const relationName = (value: unknown): string => {
   return "";
 };
 
+/** AIDP relations and first-class entities are addressed by numeric id. */
+const relationId = (value: unknown): string => {
+  if (typeof value === "string" || typeof value === "number")
+    return String(value);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return String(record.entity_id ?? record.id ?? "");
+  }
+  return "";
+};
+
 const propertyValueToText = (
   value: string | string[] | number | Dayjs | null | undefined
 ): string => {
@@ -173,20 +184,36 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
             item.api_name !== entity?.api_name || item.kind !== entity?.kind
         )
         .map((item) => ({
-          value: relationName(item),
+          value: relationId(item.entity_id),
           label: item.display_name || item.api_name,
         }))
         .filter((item) => item.value),
     [allEntitiesQuery.data?.value, entity?.api_name, entity?.kind]
   );
 
+  const synonymOptions = useMemo(
+    () =>
+      (allEntitiesQuery.data?.value ?? [])
+        .filter((item) => item.kind !== "type")
+        .map((item) => ({
+          value: item.display_name || item.api_name,
+          label: item.display_name || item.api_name,
+        }))
+        .filter((item) => item.value),
+    [allEntitiesQuery.data?.value]
+  );
+
   const initialProperties = useMemo<PropertyFormValue[]>(
     () =>
-      (entity?.properties ?? []).map((property) => ({
-        name: property.display_name || property.api_name,
-        value_type: "text",
-        value: property.value ?? "",
-      })),
+      (entity?.properties ?? [])
+        // Synonyms live in their own control; keep them out of the extension
+        // property rows so they are not edited twice.
+        .filter((property) => property.api_name !== "synonym")
+        .map((property) => ({
+          name: property.display_name || property.api_name,
+          value_type: "text",
+          value: property.value ?? "",
+        })),
     [entity?.properties]
   );
 
@@ -203,8 +230,22 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       .map((property) => ({
         api_name: property.name.trim(),
         display_name: property.name.trim(),
-        value: propertyValueToText(property.value) || undefined,
+        value: propertyValueToText(property.value) || "",
       }));
+    // Synonyms are a `synonym` property in the confirmed AIDP contract, not a
+    // relation; keep the select but fold it into the property list on save.
+    const synonyms = (values.demo_synonyms ?? [])
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+    if (synonyms.length) {
+      properties.push({
+        api_name: "synonym",
+        display_name: "synonym",
+        value: synonyms.join("、"),
+      });
+    }
+    const parentIds = (values.demo_parents ?? []).filter(Boolean);
+    const childIds = (values.demo_children ?? []).filter(Boolean);
 
     setSaving(true);
     setErrorMessage(null);
@@ -215,6 +256,8 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           description: values.description?.trim() ?? "",
           properties,
           primary_properties: properties.map((item) => item.api_name),
+          parent_entities: parentIds,
+          child_entities: childIds,
         });
         message.success(t("aidpKnowledge.ontologyEntityUpdated"));
       } else {
@@ -228,6 +271,8 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           description: values.description?.trim() ?? "",
           properties,
           primary_properties: properties.map((item) => item.api_name),
+          parent_entities: parentIds,
+          child_entities: childIds,
         });
         message.success(t("aidpKnowledge.ontologyEntityCreated"));
       }
@@ -282,13 +327,13 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
           description: entity?.description ?? "",
           properties: initialProperties,
           demo_parents: (entity?.parent_entities ?? [])
-            .map(relationName)
+            .map(relationId)
             .filter(Boolean),
           demo_synonyms: (entity?.synonym_entities ?? [])
             .map(relationName)
             .filter(Boolean),
           demo_children: (entity?.child_entities ?? [])
-            .map(relationName)
+            .map(relationId)
             .filter(Boolean),
         }}
       >
@@ -377,7 +422,7 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
               mode="multiple"
               allowClear
               maxCount={RELATION_LIMIT.synonym}
-              options={relationOptions}
+              options={synonymOptions}
               placeholder={t("aidpKnowledge.ontologyEntityRelationPlaceholder")}
               optionFilterProp="label"
             />

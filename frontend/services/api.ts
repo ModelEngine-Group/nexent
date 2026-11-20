@@ -488,12 +488,18 @@ export const API_ENDPOINTS = {
       bindings: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings`,
       allBindings: `${API_BASE_URL}/aidp-mgmt/ontology/bindings`,
-      unbind: (domainId: string, bindingId: string, kdsId?: string) => {
-        const base = `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(bindingId)}`;
-        return kdsId ? `${base}?kds_id=${encodeURIComponent(kdsId)}` : base;
-      },
+      // AIDP has no BindingId: a row is addressed by (domain_id, kds_id).
+      unbind: (domainId: string, kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(kdsId)}`,
       bindingByKb: (kdsId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/binding`,
+      relations: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/relations`,
+      relation: (domainId: string, relationId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/relations/${encodeURIComponent(relationId)}`,
+      tasks: `${API_BASE_URL}/aidp-mgmt/ontology/tasks`,
+      task: (taskId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/tasks/${encodeURIComponent(taskId)}`,
       metadataFields: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields`,
       metadataField: (domainId: string, fieldRef: string | number) =>

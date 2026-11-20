@@ -768,6 +768,9 @@ export function AidpRetrievalParamsForm({
         <p className={styles.inlineNote}>
           {t("aidpRetrieval.ontologyScopeHint")}
         </p>
+        <p className={styles.inlineNote}>
+          {t("aidpRetrieval.ontologyBackendDependency")}
+        </p>
         <div className={styles.fields}>
           <SwitchControl
             label={t("aidpRetrieval.fields.ontology_enhance_enable")}

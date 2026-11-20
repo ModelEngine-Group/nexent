@@ -12,7 +12,7 @@
       "full_text_candidates": 10,
       "graph_reranking_enable": false,
       "multi_modal": false,
-      "hybrid_top_k": 0,
+      "hybrid_top_k": 7,
       "graph_top_k": 0
     }
   },
@@ -47,14 +47,14 @@
     "name": "zero caps and jargon",
     "config": {
       "top_k": 1,
-      "hybrid_top_k": 0,
+      "hybrid_top_k": 1,
       "graph_top_k": 0,
       "reranking_mode": "jargon_coverage"
     },
     "expected": {
       "vector_candidates": 10,
       "full_text_candidates": 10,
-      "hybrid_top_k": 0,
+      "hybrid_top_k": 1,
       "graph_top_k": 0,
       "reranking_mode": "jargon_coverage"
     }

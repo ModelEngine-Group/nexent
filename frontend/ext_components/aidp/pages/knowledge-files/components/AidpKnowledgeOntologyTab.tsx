@@ -163,7 +163,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
         try {
           await aidpOntologyService.deleteBinding(
             binding.od_id,
-            binding.binding_id as string,
             binding.kds_id
           );
           message.success(t("aidpKnowledge.ontologyUnbindSuccess"));
@@ -201,7 +200,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
             ? "aidpKnowledge.ontologyMetadataTypeText"
             : value === "number"
               ? "aidpKnowledge.ontologyMetadataTypeNumber"
-              : value === "time"
+              : value === "date"
                 ? "aidpKnowledge.ontologyMetadataTypeDate"
                 : value
         ),

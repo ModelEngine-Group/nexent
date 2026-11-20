@@ -2880,7 +2880,7 @@ def list_ontology_domains(
         if start + page_size < total
         else None
     )
-    return {"value": page_items, "total": total, "next_link": next_link}
+    return {"value": page_items, "total_count": total, "next_link": next_link}
 
 
 @app.put(_ONTOLOGY_PREFIX)
@@ -2908,7 +2908,13 @@ def create_ontology_domain(
     _ONTOLOGY_RELATIONS.setdefault(domain_id, [])
     _ONTOLOGY_METADATA.setdefault(domain_id, [])
     _save_state()
-    return record
+    return JSONResponse(
+        status_code=201,
+        content={
+            "domain_id": int(domain_id),
+            "message": "create ontology domain success",
+        },
+    )
 
 
 # Bindings are registered before /OntologyDomain/{domain_id} so the static
@@ -3078,13 +3084,132 @@ def delete_ontology_binding(
     return JSONResponse(status_code=204, content=None)
 
 
+# Confirmed real-contract routes: bind/unbind live on the KB side and take no
+# body; the domain-side list answers value/next_link/total_count without any
+# BindingId. The legacy routes above stay for older demo seeds.
+@app.post(f"/KnowledgeBase/KnowledgeBases/{{kds_id}}/OntologyDomain/{{domain_id}}/Bind")
+def bind_kb_to_ontology(
+    kds_id: str,
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    if domain_id not in _ONTOLOGY_DOMAINS:
+        raise HTTPException(status_code=404, detail="Ontology domain not found")
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    for binding in _ONTOLOGY_BINDINGS:
+        if binding["kds_id"] != kds_id:
+            continue
+        if binding["od_id"] == int(domain_id):
+            return {
+                "domain_id": int(domain_id),
+                "kb_id": kds_id,
+                "id": binding.get("id"),
+                "failed_kbs": [],
+                "partial_failure": False,
+            }
+        raise HTTPException(
+            status_code=409,
+            detail="ONTOLOGY_KDS_BIND_CONFLICT(1055): knowledge base is already bound or unbinding",
+        )
+    binding = {
+        "id": max([int(item.get("id") or 0) for item in _ONTOLOGY_BINDINGS] or [0]) + 1,
+        "od_id": int(domain_id),
+        "kds_id": kds_id,
+        "kb_name": (_KNOWLEDGE_BASES.get(kds_id) or {}).get("kds_name"),
+        "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _ONTOLOGY_BINDINGS.append(binding)
+    _save_state()
+    return {
+        "domain_id": int(domain_id),
+        "kb_id": kds_id,
+        "id": binding["id"],
+        "failed_kbs": [],
+        "partial_failure": False,
+    }
+
+
+@app.post(f"/KnowledgeBase/KnowledgeBases/{{kds_id}}/OntologyDomain/{{domain_id}}/Unbind")
+def unbind_kb_from_ontology(
+    kds_id: str,
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    before = len(_ONTOLOGY_BINDINGS)
+    _ONTOLOGY_BINDINGS[:] = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if not (
+            binding["od_id"] == int(domain_id) and binding["kds_id"] == kds_id
+        )
+    ]
+    if len(_ONTOLOGY_BINDINGS) == before:
+        raise HTTPException(status_code=404, detail="Binding not found")
+    _save_state()
+    return {
+        "tag_clear_task": {
+            "task_id": 456,
+            "task_type": "ontology_tag_clear",
+        }
+    }
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Bindings")
+def list_domain_bindings_real(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if binding["od_id"] == int(domain_id)
+    ]
+    total = len(rows)
+    start = (page - 1) * page_size
+    items = [
+        {
+            "binding_type": "ontology",
+            "domain_id": row["od_id"],
+            "kb_id": row["kds_id"],
+        }
+        for row in rows[start:start + page_size]
+    ]
+    next_link = (
+        f"{_ONTOLOGY_PREFIX}/{domain_id}/Bindings?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {"value": items, "total_count": total, "next_link": next_link}
+
+
 @app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}")
 def get_ontology_domain(
     domain_id: str,
     authorization: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     _check_auth(authorization)
-    return _ontology_domain_or_404(domain_id)
+    domain = _ontology_domain_or_404(domain_id)
+    # Confirmed contract wraps the row in a named `domain` object whose id key
+    # is `id` (the list uses domain_id/od_id).
+    return {
+        "domain": {
+            "id": int(domain_id),
+            "name": domain.get("name"),
+            "description": domain.get("description") or "",
+            "create_time": domain.get("create_time"),
+            "update_time": domain.get("update_time"),
+            "entity_version": 1,
+            "metadata_version": 1,
+            "rule_version": 1,
+        }
+    }
 
 
 @app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}")
@@ -3159,8 +3284,10 @@ def list_ontology_entities(
         else None
     )
     return {
-        "value": [_public_entity(item) for item in page_items],
-        "total_count": total,
+        "items": [_public_entity(item) for item in page_items],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
         "next_link": next_link,
     }
 
@@ -3192,15 +3319,28 @@ def create_ontology_entity(
         "type_id": body.get("type_id"),
         "properties": body.get("properties") or [],
         "primary_properties": body.get("primary_properties") or [],
-        "parent_entities": [],
-        "synonym_entities": [],
+        "parent_entities": body.get("parent_entities") or [],
+        "synonym_entities": body.get("synonym_entities") or [],
         "child_entities": [],
         "chunk_count": 0,
         "extended_properties": [],
     }
     entities.append(record)
     _save_state()
-    return _public_entity(record)
+    # Confirmed create answers a small receipt keyed by entity_id (or type_id).
+    if kind == "type":
+        return {
+            "type_id": int(entity_id),
+            "api_name": api_name,
+            "display_name": record["display_name"],
+            "description": record["description"],
+        }
+    return {
+        "entity_id": int(entity_id),
+        "api_name": api_name,
+        "display_name": record["display_name"],
+        "description": record["description"],
+    }
 
 
 @app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Entities/{{entity_id}}")
@@ -3213,7 +3353,11 @@ def get_ontology_entity(
     _ontology_domain_or_404(domain_id)
     for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
         if str(item.get("entity_id")) == str(entity_id):
-            return _public_entity(item)
+            # Confirmed contract: named `entity` wrapper, no id inside, and a
+            # permanently empty neighbor list.
+            entity = _public_entity(item)
+            entity.pop("entity_id", None)
+            return {"entity": entity, "neighbor": []}
     raise HTTPException(status_code=404, detail="Entity not found")
 
 
@@ -3239,7 +3383,12 @@ def update_ontology_entity(
             if key in body:
                 item[key] = body.get(key)
         _save_state()
-        return _public_entity(item)
+        return {
+            "id": int(entity_id),
+            "name": item.get("api_name"),
+            "description": item.get("description") or "",
+            "graph_updated": False,
+        }
     raise HTTPException(status_code=404, detail="Entity not found")
 
 
@@ -3247,13 +3396,17 @@ def update_ontology_entity(
 def delete_ontology_entity(
     domain_id: str,
     entity_id: str,
+    kind: Optional[str] = Query(default=None),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
     _check_auth(authorization)
     _ontology_domain_or_404(domain_id)
     entities = _ONTOLOGY_ENTITIES.get(str(domain_id), [])
     remaining = [
-        item for item in entities if str(item.get("entity_id")) != str(entity_id)
+        item
+        for item in entities
+        if str(item.get("entity_id")) != str(entity_id)
+        or (kind and item.get("kind") != kind)
     ]
     if len(remaining) == len(entities):
         raise HTTPException(status_code=404, detail="Entity not found")
@@ -3335,7 +3488,7 @@ def create_ontology_rule(
     if any(item.get("name") == name for item in rules):
         raise HTTPException(status_code=409, detail="Rule name already exists")
     rule_id = max([int(item.get("rule_id") or 0) for item in rules] or [0]) + 1
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = int(time.time())
     record = {
         "rule_id": rule_id,
         "name": name,
@@ -3343,8 +3496,9 @@ def create_ontology_rule(
         "enabled": bool(body.get("enabled", True)),
         "condition": condition,
         "action": action,
-        "created_at": now,
-        "updated_at": now,
+        # Confirmed rule contract uses created_time/updated_time in unix seconds.
+        "created_time": now,
+        "updated_time": now,
     }
     rules.append(record)
     _save_state()
@@ -3383,7 +3537,7 @@ def update_ontology_rule(
     for key in ("name", "description", "enabled", "condition", "action"):
         if key in body:
             current[key] = body.get(key)
-    current["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current["updated_time"] = int(time.time())
     _save_state()
     return _public_rule(current)
 
@@ -3449,8 +3603,8 @@ def create_ontology_metadata(
             status_code=400,
             detail="fieldName must not exceed 63 characters or 64 UTF-8 bytes",
         )
-    if field_type not in ("string", "number", "time"):
-        raise HTTPException(status_code=400, detail="fieldType must be string, number or time")
+    if field_type not in ("string", "number", "date"):
+        raise HTTPException(status_code=422, detail="fieldType must be string, number or date")
     fields = _ONTOLOGY_METADATA.setdefault(domain_id, [])
     if len(fields) >= 20:
         raise HTTPException(status_code=400, detail="At most 20 metadata fields are allowed")
@@ -3476,7 +3630,16 @@ def create_ontology_metadata(
     }
     fields.append(record)
     _save_state()
-    return record
+    # Confirmed create answers a sync receipt; task_id=-1 means no async task.
+    return {
+        "column_index": record["columnIndex"],
+        "failed_kbs": [],
+        "field_name": record["fieldName"],
+        "field_type": record["fieldType"],
+        "metadata_id": record["id"],
+        "partial_failure": False,
+        "task_id": -1,
+    }
 
 
 def _mock_metadata_field(domain_id: str, metadata_id: str) -> Optional[Dict[str, Any]]:
@@ -3486,7 +3649,7 @@ def _mock_metadata_field(domain_id: str, metadata_id: str) -> Optional[Dict[str,
     return None
 
 
-@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata/BatchUnbindAsync")
+@app.post(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata/BatchUnbindAsync")
 def batch_unbind_ontology_metadata(
     domain_id: str,
     body: Dict[str, Any] = Body(...),
@@ -3562,17 +3725,17 @@ def delete_ontology_metadata_by_id(
     current = _mock_metadata_field(str(domain_id), metadata_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Metadata field not found")
-    current["status"] = "删除中"
-    current["demoTask"] = {"state": "running", "label": "演示：等待 AIDP 回执"}
+    fields = _ONTOLOGY_METADATA.get(str(domain_id), [])
+    _ONTOLOGY_METADATA[str(domain_id)] = [
+        item for item in fields if item is not current
+    ]
     _save_state()
-    return JSONResponse(
-        status_code=200,
-        content={
-            "task_id": "mock-delete-001",
-            "status": "RUNNING",
-            "progress": 0,
-        },
-    )
+    # Confirmed delete is synchronous and reports dropped KBs.
+    return {
+        "deleted": True,
+        "dropped_kbs": [],
+        "failed_kbs": [],
+    }
 
 
 @app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata")
@@ -3731,15 +3894,239 @@ def batch_chunk_metadata(
         chunk.setdefault("metadata", {}).update(metadata)
         success_list.append({"chunk_id": chunk.get("chunk_id")})
     _save_state()
+    # Confirmed contract answers counters, not per-chunk lists.
     return {
-        "summary": {
-            "total": len(chunk_ids),
-            "success": len(success_list),
-            "failed": len(failed_list),
-        },
-        "success_list": success_list,
-        "failed_list": failed_list,
+        "kds_id": kds_id,
+        "od_id": str(od_id),
+        "partial_failure": bool(failed_list),
+        "total_chunks": len(chunk_ids),
+        "updated_chunks": len(success_list),
     }
+
+
+# =============================================================================
+# Relations, tasks and KB-side chunk aliases (confirmed real contracts)
+# =============================================================================
+
+_KB_SIDE_PREFIX = "/KnowledgeBase/KnowledgeBases"
+_TASK_STORE: List[Dict[str, Any]] = [
+    {
+        "id": "1",
+        "task_type": "metadata_index_create",
+        "status": "completed",
+        "progress": 100,
+        "description": "",
+        "error_message": "",
+        "start_time": 1794901958,
+        "end_time": 1794901958,
+    },
+    {
+        "id": "2",
+        "task_type": "ontology_tag_clear",
+        "status": "failed",
+        "progress": 50,
+        "description": "",
+        "error_message": "mock tag clear failure",
+        "start_time": 1794902000,
+        "end_time": 1794902300,
+    },
+]
+
+
+def _entity_by_api_name(domain_id: str, api_name: str) -> Optional[Dict[str, Any]]:
+    for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
+        if item.get("api_name") == api_name:
+            return item
+    return None
+
+
+def _relation_endpoint(domain_id: str, kind: str, entity_id: Any) -> Dict[str, Any]:
+    for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
+        if str(item.get("entity_id")) == str(entity_id):
+            return {
+                "entity_id": item.get("entity_id"),
+                "api_name": item.get("api_name"),
+                "display_name": item.get("display_name"),
+                "kind": item.get("kind"),
+            }
+    raise HTTPException(status_code=404, detail="Relation endpoint not found")
+
+
+def _relation_rows(domain_id: str, relation_type: Optional[str]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for item in _ONTOLOGY_RELATIONS.get(str(domain_id), []):
+        api_name = str(item.get("api_name") or "")
+        if relation_type and api_name != relation_type:
+            continue
+        if "subject_entity" in item:
+            rows.append(item)
+            continue
+        source = _entity_by_api_name(domain_id, str(item.get("source_api_name")))
+        target = _entity_by_api_name(domain_id, str(item.get("object_api_name")))
+        rows.append(
+            {
+                "relation_id": item.get("relation_id"),
+                "api_name": api_name,
+                "display_name": item.get("display_name") or "",
+                "subject_entity": {
+                    "entity_id": (source or {}).get("entity_id"),
+                    "api_name": (source or {}).get("api_name"),
+                    "display_name": (source or {}).get("display_name"),
+                    "kind": (source or {}).get("kind"),
+                },
+                "object_entity": {
+                    "entity_id": (target or {}).get("entity_id"),
+                    "api_name": (target or {}).get("api_name"),
+                    "display_name": (target or {}).get("display_name"),
+                    "kind": (target or {}).get("kind"),
+                },
+                "create_time": item.get("create_time"),
+            }
+        )
+    return rows
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Relations")
+def list_ontology_relations(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    size: int = Query(100, ge=1, le=500),
+    relation_type: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = _relation_rows(domain_id, relation_type)
+    total = len(rows)
+    start = (page - 1) * size
+    return {
+        "items": rows[start:start + size],
+        "page": page,
+        "page_size": size,
+        "total": total,
+        "next_link": None,
+    }
+
+
+@app.put(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Relations")
+def create_ontology_relation(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    api_name = str(body.get("api_name") or "")
+    if api_name not in ("is", "is-a"):
+        raise HTTPException(status_code=400, detail="api_name must be is or is-a")
+    subject = _relation_endpoint(domain_id, body.get("source_kind"), body.get("source_id"))
+    obj = _relation_endpoint(domain_id, body.get("object_kind"), body.get("object_id"))
+    rows = _ONTOLOGY_RELATIONS.setdefault(str(domain_id), [])
+    relation_id = max([int(item.get("relation_id") or 0) for item in rows] or [0]) + 1
+    rows.append(
+        {
+            "relation_id": relation_id,
+            "api_name": api_name,
+            "display_name": body.get("display_name") or "",
+            "subject_entity": subject,
+            "object_entity": obj,
+            "create_time": int(time.time()),
+        }
+    )
+    _save_state()
+    return {"message": "create relation success", "relation_id": relation_id}
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Relations/{{relation_id}}")
+def delete_ontology_relation(
+    domain_id: str,
+    relation_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = _ONTOLOGY_RELATIONS.get(str(domain_id), [])
+    remaining = [
+        item for item in rows if str(item.get("relation_id")) != str(relation_id)
+    ]
+    if len(remaining) == len(rows):
+        raise HTTPException(status_code=404, detail="Relation not found")
+    _ONTOLOGY_RELATIONS[str(domain_id)] = remaining
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get(f"/KnowledgeBase/Tenants/{TENANT}/Tasks")
+def list_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    task_type: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    rows = [
+        item for item in _TASK_STORE if not task_type or item["task_type"] == task_type
+    ]
+    total = len(rows)
+    start = (page - 1) * page_size
+    return {
+        "page": page,
+        "page_size": page_size,
+        "task_count": total,
+        "total": total,
+        "task_list": rows[start:start + page_size],
+    }
+
+
+@app.get(f"/KnowledgeBase/Tenants/{TENANT}/Tasks/{{task_id}}")
+def get_task(
+    task_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    for item in _TASK_STORE:
+        if str(item["id"]) == str(task_id):
+            return item
+    raise HTTPException(status_code=404, detail="Task not found")
+
+
+@app.get(f"{_KB_SIDE_PREFIX}/{{kds_id}}/Chunks")
+def list_chunks_kb_side(
+    kds_id: str,
+    file_uuid: Optional[str] = Query(default=None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    return list_chunks(
+        kds_id=kds_id,
+        file_uuid=file_uuid or "",
+        page=page,
+        page_size=page_size,
+        authorization=authorization,
+    )
+
+
+@app.get(f"{_KB_SIDE_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def get_chunk_kb_side(
+    kds_id: str,
+    chunk_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    return get_chunk(
+        kds_id=kds_id, chunk_id=chunk_id, authorization=authorization
+    )
+
+
+@app.patch(f"{_KB_SIDE_PREFIX}/{{kds_id}}/Chunks/BatchMetadataJson")
+def batch_chunk_metadata_kb_side(
+    kds_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    return batch_chunk_metadata(
+        kds_id=kds_id, body=body, authorization=authorization
+    )
 
 
 def _export_entity(item: Dict[str, Any], include_properties: bool) -> Dict[str, Any]:
@@ -3831,23 +4218,45 @@ def import_ontology(
     _check_auth(authorization)
     domain_id = str(domain_id)
     _ontology_domain_or_404(domain_id)
-    raw_domain_id = body.get("DOMAIN_ID")
-    if not isinstance(raw_domain_id, int) or isinstance(raw_domain_id, bool):
-        raise HTTPException(status_code=400, detail="DOMAIN_ID must be an integer")
-    if raw_domain_id != int(domain_id):
-        raise HTTPException(status_code=400, detail="DOMAIN_ID does not match the path domain")
-    incoming_entities = body.get("ENTITIES") or []
-    incoming_relations = body.get("RELATIONS") or []
-    total = len(incoming_entities) + len(incoming_relations)
+    # Confirmed payload: {"<target domain name>": {types, entities, relations}}.
+    # The legacy flat DOMAIN_ID/ENTITIES/RELATIONS shape stays accepted.
+    incoming_types: List[Any] = []
+    incoming_entities: List[Any] = []
+    incoming_relations: List[Any] = []
+    if "DOMAIN_ID" in body:
+        raw_domain_id = body.get("DOMAIN_ID")
+        if not isinstance(raw_domain_id, int) or isinstance(raw_domain_id, bool):
+            raise HTTPException(status_code=400, detail="DOMAIN_ID must be an integer")
+        if raw_domain_id != int(domain_id):
+            raise HTTPException(status_code=400, detail="DOMAIN_ID does not match the path domain")
+        incoming_entities = body.get("ENTITIES") or []
+        incoming_relations = body.get("RELATIONS") or []
+    else:
+        group = next(
+            (
+                value
+                for value in body.values()
+                if isinstance(value, dict) and ({"types", "entities", "relations"} & set(value))
+            ),
+            None,
+        )
+        if group is None:
+            raise HTTPException(status_code=400, detail="import payload is invalid")
+        incoming_types = group.get("types") or []
+        incoming_entities = group.get("entities") or []
+        incoming_relations = group.get("relations") or []
+    incoming = [
+        ("type", item) for item in incoming_types
+    ] + [("entity", item) for item in incoming_entities]
+    total = len(incoming) + len(incoming_relations)
     if total > _ONTOLOGY_ASYNC_THRESHOLD:
         return {
-            "code": 200,
-            "message": "OK",
-            "data": {
-                "task_id": f"ontology-import-{uuid.uuid4().hex[:12]}",
-                "status": "pending",
-                "progress": 0,
-            },
+            "execution_mode": "async",
+            "task_id": 12345,
+            "task_type": "ontology_batch_import",
+            "status": "pending",
+            "progress": 0,
+            "result": None,
         }
 
     entities = _ONTOLOGY_ENTITIES.setdefault(domain_id, [])
@@ -3857,13 +4266,13 @@ def import_ontology(
     failed_count = 0
     errors: List[Dict[str, Any]] = []
 
-    for index, item in enumerate(incoming_entities):
+    for index, (kind, item) in enumerate(incoming):
         if not isinstance(item, dict):
             failed_count += 1
             errors.append(
                 {
                     "index": index,
-                    "type": "entity",
+                    "type": kind,
                     "api_name": None,
                     "error_code": 4001,
                     "message_zh": "条目不是对象",
@@ -3872,17 +4281,16 @@ def import_ontology(
             )
             continue
         api_name = str(item.get("api_name") or "").strip()
-        kind = str(item.get("kind") or "").lower()
-        if not api_name or kind not in ("type", "entity"):
+        if not api_name:
             failed_count += 1
             errors.append(
                 {
                     "index": index,
-                    "type": "entity",
-                    "api_name": api_name or None,
+                    "type": kind,
+                    "api_name": None,
                     "error_code": 4001,
-                    "message_zh": "api_name 或 kind 不合法",
-                    "message_en": "api_name or kind is invalid",
+                    "message_zh": "api_name 不合法",
+                    "message_en": "api_name is invalid",
                 }
             )
             continue
@@ -3981,9 +4389,11 @@ def import_ontology(
 
     _save_state()
     return {
-        "code": 200,
-        "message": "OK",
-        "data": {
+        "execution_mode": "sync",
+        "task_id": None,
+        "status": "completed",
+        "progress": 100,
+        "result": {
             "imported_count": imported_count,
             "skipped_count": skipped_count,
             "failed_count": failed_count,

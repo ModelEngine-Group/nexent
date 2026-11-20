@@ -6,8 +6,12 @@ import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Popover, Table, type TableColumnsType } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
+import { useQuery } from "@tanstack/react-query";
 
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
+import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import type { AidpOntologyTask } from "@/ext_components/aidp/shared/types/ontology";
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
@@ -29,6 +33,46 @@ interface DemoTaskRow {
   errorCode?: string;
   errorReason?: string;
 }
+
+const formatTaskTime = (value: number | string | null | undefined): string => {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "number") {
+    const date = new Date(value * 1000);
+    if (Number.isNaN(date.getTime())) return "—";
+    const pad = (input: number) => String(input).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+      date.getDate()
+    )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  return String(value);
+};
+
+const TASK_STATUS_MAP: Record<string, TaskStatus> = {
+  pending: "queued",
+  queued: "queued",
+  running: "running",
+  processing: "running",
+  completed: "success",
+  success: "success",
+  succeeded: "success",
+  failed: "failed",
+  error: "failed",
+  terminated: "terminated",
+  canceled: "terminated",
+  cancelled: "terminated",
+};
+
+/** Map one confirmed AIDP task row into the table row shape. */
+const toTaskRow = (task: AidpOntologyTask): DemoTaskRow => ({
+  id: task.task_id ?? "—",
+  name: task.task_type ?? "—",
+  description: task.description || "",
+  status: TASK_STATUS_MAP[String(task.status ?? "").toLowerCase()] ?? "queued",
+  progress: task.progress,
+  startTime: formatTaskTime(task.start_time),
+  endTime: task.end_time ? formatTaskTime(task.end_time) : null,
+  errorReason: task.error_message || undefined,
+});
 
 /**
  * Demo-only task fixtures.
@@ -104,10 +148,23 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
 const AidpOntologyTasksTab: React.FC = () => {
   const { t } = useTranslation();
   const demo = useAidpOntologyDemoMode();
+  const scope = useAidpQueryScope();
   const [search, setSearch] = useState("");
   const [activeTask, setActiveTask] = useState<DemoTaskRow | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
-  const rows = useMemo(() => (demo ? DEMO_TASKS : []), [demo]);
+  const tasksQuery = useQuery({
+    queryKey: [...scope.key, "ontology-tasks", page],
+    queryFn: () => aidpOntologyService.listTasks(page, pageSize),
+    enabled: scope.enabled && !demo,
+    retry: false,
+  });
+
+  const rows = useMemo(() => {
+    if (demo) return DEMO_TASKS;
+    return (tasksQuery.data?.value ?? []).map(toTaskRow);
+  }, [demo, tasksQuery.data?.value]);
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return rows;
@@ -221,17 +278,19 @@ const AidpOntologyTasksTab: React.FC = () => {
             title={t("aidpKnowledge.ontologyTaskFailureTitle")}
             content={
               <div className={styles.failureDetail}>
-                <div>
-                  <span className={styles.failureLabel}>
-                    {t("aidpKnowledge.ontologyTaskErrorCode")}
-                  </span>
-                  <span>{record.errorCode}</span>
-                </div>
+                {record.errorCode && (
+                  <div>
+                    <span className={styles.failureLabel}>
+                      {t("aidpKnowledge.ontologyTaskErrorCode")}
+                    </span>
+                    <span>{record.errorCode}</span>
+                  </div>
+                )}
                 <div>
                   <span className={styles.failureLabel}>
                     {t("aidpKnowledge.ontologyTaskErrorReason")}
                   </span>
-                  <span>{record.errorReason}</span>
+                  <span>{record.errorReason || "—"}</span>
                 </div>
               </div>
             }
@@ -262,7 +321,8 @@ const AidpOntologyTasksTab: React.FC = () => {
         <div className={styles.legend}>
           <span>{t("aidpKnowledge.ontologyTaskWeekSummary")}</span>
           <span className={styles.legendItem}>
-            {t("aidpKnowledge.ontologyTaskTotal")} {rows.length}
+            {t("aidpKnowledge.ontologyTaskTotal")}{" "}
+            {demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)}
           </span>
           {(["running", "failed", "success", "queued"] as TaskStatus[]).map(
             (status) => (
@@ -301,6 +361,7 @@ const AidpOntologyTasksTab: React.FC = () => {
           className={tableStyles.table}
           columns={columns}
           dataSource={filteredRows}
+          loading={!demo && tasksQuery.isLoading}
           pagination={false}
           tableLayout="fixed"
           scroll={{ x: 1100 }}
@@ -313,14 +374,16 @@ const AidpOntologyTasksTab: React.FC = () => {
       </div>
       {rows.length > 0 && (
         <AidpPagination
-          currentPage={1}
-          pageSize={10}
+          currentPage={demo ? 1 : page}
+          pageSize={demo ? 10 : pageSize}
           pageSizeOptions={[10]}
-          total={rows.length}
+          total={
+            demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)
+          }
           totalReliable
-          hasMore={false}
+          hasMore={demo ? false : Boolean(tasksQuery.data?.has_more)}
           selectedCount={0}
-          onPageChange={() => undefined}
+          onPageChange={(nextPage) => setPage(nextPage)}
         />
       )}
 

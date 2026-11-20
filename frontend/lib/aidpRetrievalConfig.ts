@@ -17,7 +17,7 @@ export const aidpDefaults: Record<string, unknown> = {
   multi_modal: true,
   vector_candidates: 10,
   full_text_candidates: 10,
-  hybrid_top_k: 0,
+  hybrid_top_k: 10,
   graph_top_k: 0,
   vector_score_threshold: 0,
   full_text_score_threshold: 0,

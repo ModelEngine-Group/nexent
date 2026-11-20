@@ -159,6 +159,14 @@ def _project_entity(
                 )
             )
             return None
+        # Confirmed import contract requires data_type on every property; the
+        # export contract may omit it, so default to string and keep "" as the
+        # only legal blank value.
+        prop.setdefault("data_type", "string")
+        if "value" not in prop or prop.get("value") is None:
+            prop["value"] = ""
+    # The import payload groups objects by array, not by kind.
+    projected.pop("kind", None)
     return projected
 
 
@@ -262,10 +270,13 @@ def _project_relation(
     return projected
 
 
-def build_import_request(document: Any, domain_id: int) -> tuple[dict[str, Any], dict[str, int]]:
-    """Convert an exported ontology document into the flat batch import body.
+def build_import_request(document: Any, domain_name: str) -> tuple[dict[str, Any], dict[str, int]]:
+    """Convert an exported ontology document into the confirmed import body.
 
-    Returns ``(request_body, counts)``. Raises
+    The deployed service wants ``{"<target domain name>": {types, entities,
+    relations}}`` with lowercase arrays, ``source_api_name``/``object_api_name``
+    relation references and ``data_type`` on every property. Returns
+    ``(request_body, counts)``. Raises
     :class:`OntologyImportValidationError` with field-level errors when the
     document cannot be located or a relation endpoint cannot be resolved, so
     the browser can report problems before any upstream request is made.
@@ -275,6 +286,7 @@ def build_import_request(document: Any, domain_id: int) -> tuple[dict[str, Any],
     if errors:
         raise OntologyImportValidationError(errors)
 
+    types: list[dict[str, Any]] = []
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
     entity_kinds: dict[str, set[str]] = {}
@@ -283,9 +295,9 @@ def build_import_request(document: Any, domain_id: int) -> tuple[dict[str, Any],
     entity_count = 0
 
     for group in groups:
-        for kind, source_key in (
-            (ONTOLOGY_KIND_TYPE, "types"),
-            (ONTOLOGY_KIND_ENTITY, "entities"),
+        for kind, source_key, target_list in (
+            (ONTOLOGY_KIND_TYPE, "types", types),
+            (ONTOLOGY_KIND_ENTITY, "entities", entities),
         ):
             raw_items = group.get(source_key) or []
             if not isinstance(raw_items, list):
@@ -311,7 +323,7 @@ def build_import_request(document: Any, domain_id: int) -> tuple[dict[str, Any],
                     continue
                 seen_entities.add(key)
                 entity_kinds.setdefault(projected["api_name"], set()).add(kind)
-                entities.append(projected)
+                target_list.append(projected)
                 if kind == ONTOLOGY_KIND_TYPE:
                     type_count += 1
                 else:
@@ -333,9 +345,12 @@ def build_import_request(document: Any, domain_id: int) -> tuple[dict[str, Any],
         raise OntologyImportValidationError(errors)
 
     request_body = {
-        "DOMAIN_ID": int(domain_id),
-        "ENTITIES": entities,
-        "RELATIONS": relations,
+        domain_name: {
+            "display_name": domain_name,
+            "types": types,
+            "entities": entities,
+            "relations": relations,
+        },
     }
     counts = {
         "type_count": type_count,
@@ -384,13 +399,26 @@ def _extract_error_message(item: dict[str, Any]) -> str:
     return "导入失败"
 
 
+def _import_result_data(payload: Any) -> dict[str, Any]:
+    """Return the counters object of a sync import response.
+
+    Confirmed contract nests them under ``result``:
+    ``{execution_mode, status, progress, result: {...counters...}}``.
+    """
+    data = unwrap_payload(payload)
+    if not data:
+        return {}
+    nested = data.get("result")
+    return nested if isinstance(nested, dict) else data
+
+
 def normalize_import_errors(payload: Any) -> list[dict[str, Any]]:
     """Flatten ``first_error``/``errors[]`` into display-friendly entries.
 
     Numeric AIDP error codes stay in the logs; the UI only receives the
     readable message and the object locator.
     """
-    data = unwrap_payload(payload)
+    data = _import_result_data(payload)
     raw_errors: list[Any] = []
     first_error = data.get("first_error")
     if isinstance(first_error, dict):
@@ -420,7 +448,7 @@ def normalize_import_errors(payload: Any) -> list[dict[str, Any]]:
 
 def normalize_import_result(payload: Any) -> dict[str, Any]:
     """Normalize a synchronous import response into per-item counters."""
-    data = unwrap_payload(payload)
+    data = _import_result_data(payload)
     return {
         "accepted": False,
         "imported_count": int(data.get("imported_count") or 0),

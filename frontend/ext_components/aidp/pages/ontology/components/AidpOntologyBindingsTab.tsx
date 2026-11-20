@@ -113,9 +113,8 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
     page * pageSize
   );
   const selectedBindings = displayBindings.filter((binding) =>
-    selectedKeys.includes(binding.binding_id ?? binding.kds_id)
+    selectedKeys.includes(binding.kds_id)
   );
-  const missingBindingIds = bindings.filter((binding) => !binding.binding_id);
   const errorMessage = query.error
     ? getAidpErrorMessage(
         query.error,
@@ -134,11 +133,7 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
   const removeBindings = async (rows: AidpOntologyBinding[]) => {
     const outcomes = await Promise.allSettled(
       rows.map((binding) =>
-        aidpOntologyService.deleteBinding(
-          domainId,
-          binding.binding_id as string,
-          binding.kds_id
-        )
+        aidpOntologyService.deleteBinding(domainId, binding.kds_id)
       )
     );
     const failed = outcomes.filter(
@@ -156,23 +151,18 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
   };
 
   const openCancelConfirm = (rows: AidpOntologyBinding[]) => {
-    const removable = rows.filter((binding) => !!binding.binding_id);
-    if (removable.length === 0) {
-      message.warning(t("aidpKnowledge.ontologyBindingMissingIdAction"));
-      return;
-    }
     modal.confirm({
       title: t("aidpKnowledge.ontologyBindingCancelTitle"),
       content: (
         <div className={bindingStyles.confirmBody}>
           <p>
             {t("aidpKnowledge.ontologyBindingCancelCount", {
-              count: removable.length,
+              count: rows.length,
             })}
           </p>
           <div className={bindingStyles.confirmNames}>
-            {removable.map((binding) => (
-              <span key={binding.binding_id}>
+            {rows.map((binding) => (
+              <span key={binding.kds_id}>
                 {binding.kds_name || binding.kds_id}
               </span>
             ))}
@@ -188,7 +178,7 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       centered: true,
-      onOk: () => removeBindings(removable),
+      onOk: () => removeBindings(rows),
     });
   };
 
@@ -233,7 +223,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
           <Button
             type="link"
             size="small"
-            disabled={!record.binding_id}
             onClick={() => openCancelConfirm([record])}
           >
             {t("aidpKnowledge.ontologyBindCancelShort")}
@@ -277,7 +266,7 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
     }
     return (
       <Table<AidpOntologyBinding>
-        rowKey={(record) => record.binding_id ?? record.kds_id}
+        rowKey={(record) => record.kds_id}
         size="middle"
         className={styles.table}
         columns={columns}
@@ -331,13 +320,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
       <AidpOntologyGapNote>
         {t("aidpKnowledge.ontologyBindingStatusGap")}
       </AidpOntologyGapNote>
-      {missingBindingIds.length > 0 && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyBindingMissingIdGap", {
-            count: missingBindingIds.length,
-          })}
-        </AidpOntologyGapNote>
-      )}
       {query.isError && bindings.length > 0 && (
         <div className={styles.inlineError} role="alert">
           {errorMessage}

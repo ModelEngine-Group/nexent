@@ -11,7 +11,7 @@ DEFAULTS = {
     "search_method": ALL_CHANNELS, "top_k": 10, "score_threshold": 0.0,
     "reranking_enable": True, "reranking_mode": "performance", "rewrite_enable": False,
     "query_expansion_enable": False, "related_search_enable": False, "multi_modal": True,
-    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0,
+    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 10,
     "graph_top_k": 0, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
     "graph_score_threshold": 0.0, "graph_reranking_enable": True,
     "ontology_enhance_enable": False, "rule_enable": False,
@@ -44,7 +44,14 @@ def merge_config(*layers):
 
 def resolve_config(config):
     """Fill defaults and normalize the method without validation side effects."""
-    result = {**DEFAULTS, **merge_config(config)}
+    merged = merge_config(config)
+    # Real AIDP rejects hybrid_top_k=0, so a missing or legacy zero value
+    # resolves to 10 (bounded by top_k). Explicit positive caps are kept.
+    if not merged.get("hybrid_top_k"):
+        merged["hybrid_top_k"] = min(
+            DEFAULTS["hybrid_top_k"], merged.get("top_k", DEFAULTS["top_k"])
+        )
+    result = {**DEFAULTS, **merged}
     result["search_method"] = normalize_method(result["search_method"])
     if not result["reranking_enable"]:
         result["graph_reranking_enable"] = False

@@ -216,11 +216,17 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
                           label: t("aidpKnowledge.ontologyImportJson"),
                           onClick: () => setImportOpen(true),
                         },
-                        {
-                          key: "export",
-                          label: t("aidpKnowledge.ontologyExportJson"),
-                          onClick: () => setExportOpen(true),
-                        },
+                        // AIDP's export endpoint answers 500/code1001 in the
+                        // confirmed environment; keep it demo-only until fixed.
+                        ...(demo
+                          ? [
+                              {
+                                key: "export",
+                                label: t("aidpKnowledge.ontologyExportJson"),
+                                onClick: () => setExportOpen(true),
+                              },
+                            ]
+                          : []),
                       ],
                     }}
                   >

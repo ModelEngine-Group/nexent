@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from http import HTTPStatus
 from typing import Annotated, Any, Literal
 
@@ -97,6 +98,10 @@ def _validate_domain_name(value: str) -> str:
     name = _clean_required(value, "本体库名称不能为空")
     if _utf8_size(name) > _DOMAIN_NAME_MAX_BYTES:
         raise _bad_request(f"本体库名称不能超过 {_DOMAIN_NAME_MAX_BYTES} 字节")
+    # AIDP rejects hyphens with an opaque 500/code1001; fail fast with a
+    # readable 400 before the request leaves Nexent.
+    if "-" in name:
+        raise _bad_request("本体库名称不能包含连字符 -")
     return name
 
 
@@ -176,7 +181,8 @@ class EntityPropertyRequest(BaseModel):
 
     api_name: str = Field(..., min_length=1)
     display_name: str | None = None
-    value: str | None = None
+    data_type: str = Field("string", description="AIDP property data_type (str/string/float/datetime/list[str])")
+    value: str | None = Field("", description="Property value; empty string is the only legal blank")
 
 
 class OntologyEntityCreateRequest(BaseModel):
@@ -189,6 +195,9 @@ class OntologyEntityCreateRequest(BaseModel):
     properties: list[EntityPropertyRequest] = Field(default_factory=list)
     primary_properties: list[str] = Field(default_factory=list)
     type_id: str | None = None
+    parent_entities: list[str] = Field(default_factory=list)
+    synonym_entities: list[str] = Field(default_factory=list)
+    child_entities: list[str] = Field(default_factory=list)
 
     @field_validator("api_name")
     @classmethod
@@ -196,6 +205,9 @@ class OntologyEntityCreateRequest(BaseModel):
         api_name = _clean_required(value, "API 名称不能为空")
         if len(api_name) > _ENTITY_NAME_MAX_CHARS:
             raise ValueError(f"API 名称不能超过 {_ENTITY_NAME_MAX_CHARS} 个字符")
+        # Confirmed AIDP rule: letter first, then letters/digits/underscores.
+        if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", api_name):
+            raise ValueError("API 名称必须以字母开头，且只能包含字母、数字、下划线")
         return api_name
 
     @field_validator("description")
@@ -222,11 +234,11 @@ class OntologyEntityCreateRequest(BaseModel):
 
 
 class OntologyEntityUpdateRequest(BaseModel):
-    """Only fields the AIDP PATCH contract accepts for an existing entity.
+    """Fields accepted for an existing entity.
 
-    ``parent_entities``, ``synonym_entities`` and ``type_id`` are deliberately
-    absent: the upstream contract marks them non-editable, so accepting them
-    here would report a save that AIDP never applied.
+    ``parent_entities``/``child_entities`` are not part of AIDP's entity PATCH;
+    they are translated into Relations create/delete calls by the handler.
+    ``synonym_entities`` is likewise applied through the ``synonym`` property.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -235,6 +247,9 @@ class OntologyEntityUpdateRequest(BaseModel):
     description: str | None = None
     properties: list[EntityPropertyRequest] | None = None
     primary_properties: list[str] | None = None
+    parent_entities: list[str] | None = None
+    child_entities: list[str] | None = None
+    synonym_entities: list[str] | None = None
 
     @field_validator("description")
     @classmethod
@@ -274,7 +289,7 @@ class OntologyMetadataFieldRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field_name: str = Field(..., description="Field name, at most 63 characters and 64 UTF-8 bytes")
-    field_type: Literal["string", "number", "time"]
+    field_type: Literal["string", "number", "date"]
 
     @field_validator("field_name")
     @classmethod
@@ -298,6 +313,26 @@ class OntologyRulePayload(BaseModel):
         if not stripped:
             raise ValueError("规则名称不能为空")
         return stripped
+
+
+class OntologyRelationRequest(BaseModel):
+    """Confirmed relation contract: only `is` and `is-a` exist."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_name: Literal["is", "is-a"]
+    display_name: str = Field(..., min_length=1, max_length=64)
+    source_kind: Literal["type", "entity"]
+    source_id: str = Field(..., min_length=1, max_length=20)
+    object_kind: Literal["type", "entity"]
+    object_id: str = Field(..., min_length=1, max_length=20)
+
+    @field_validator("source_id", "object_id")
+    @classmethod
+    def validate_numeric_id(cls, value: str) -> str:
+        if not value.isdigit():
+            raise ValueError("关系端点 ID 必须是数字")
+        return value
 
 
 class OntologyMetadataUnbindRequest(BaseModel):
@@ -550,39 +585,40 @@ async def list_ontology_domains(
     )
     domains = envelope["value"]
     if domains:
-        counts: dict[str, int] = {}
-        counts_available = True
-        try:
-            all_bindings = await run_blocking(
-                "aidp-ontology-bindings-all",
-                ontology_service.list_ontology_bindings_impl,
-                server_url,
-                api_key,
-                lane="control-io",
-                owner="config",
-            )
-            for binding in all_bindings:
-                counts[binding["od_id"]] = counts.get(binding["od_id"], 0) + 1
-        except AppException as error:
-            logger.warning("AIDP binding counts unavailable for domain list: %s", error)
-            counts_available = False
-        envelope["value"] = [
-            _domain_summary(
-                item,
-                (
-                    counts.get(
-                        str(
-                            item.get("od_id")
-                            or item.get("domain_id")
-                            or item.get("id")
-                        ),
-                        0,
+        # AIDP has no all-bindings endpoint; resolve the trusted count per
+        # visible domain. Failures degrade that one row to "—" instead of
+        # blocking the page.
+        server_url, api_key = _credentials()
+        semaphore = asyncio.Semaphore(5)
+
+        async def load_count(item: dict[str, Any]) -> int | None:
+            raw_id = item.get("od_id") or item.get("domain_id") or item.get("id")
+            if raw_id is None:
+                return None
+            async with semaphore:
+                try:
+                    rows = await run_blocking(
+                        "aidp-ontology-binding-count-row",
+                        ontology_service.list_ontology_bindings_impl,
+                        server_url,
+                        api_key,
+                        domain_id=str(raw_id),
+                        lane="control-io",
+                        owner="config",
                     )
-                    if counts_available
-                    else None
-                ),
-            )
-            for item in domains
+                    return len(rows)
+                except AppException as error:
+                    logger.warning(
+                        "AIDP binding count unavailable for domain %s: %s",
+                        raw_id,
+                        error,
+                    )
+                    return None
+
+        counts = await asyncio.gather(*(load_count(item) for item in domains))
+        envelope["value"] = [
+            _domain_summary(item, count)
+            for item, count in zip(domains, counts)
         ]
     else:
         envelope["value"] = []
@@ -616,17 +652,63 @@ async def get_ontology_domain(
 ) -> JSONResponse:
     await _auth(request)
     server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-ontology-domain-get",
-        ontology_service.get_ontology_domain_impl,
-        server_url,
-        api_key,
-        domain_id,
-        lane="control-io",
-        owner="config",
+
+    async def load_entity_count() -> int | None:
+        try:
+            envelope = await run_blocking(
+                "aidp-ontology-domain-entity-count",
+                ontology_service.list_ontology_entities_impl,
+                server_url,
+                api_key,
+                domain_id,
+                page=1,
+                page_size=1,
+                lane="control-io",
+                owner="config",
+            )
+            return _optional_count(envelope.get("total_count"))
+        except AppException as error:
+            logger.warning("AIDP entity count unavailable for %s: %s", domain_id, error)
+            return None
+
+    async def load_metadata_count() -> int | None:
+        try:
+            envelope = await run_blocking(
+                "aidp-ontology-domain-metadata-count",
+                ontology_service.list_ontology_metadata_fields_impl,
+                server_url,
+                api_key,
+                domain_id,
+                page=1,
+                page_size=1,
+                lane="control-io",
+                owner="config",
+            )
+            return _optional_count(envelope.get("total_count"))
+        except AppException as error:
+            logger.warning("AIDP metadata count unavailable for %s: %s", domain_id, error)
+            return None
+
+    result, count, entity_count, metadata_count = await asyncio.gather(
+        run_blocking(
+            "aidp-ontology-domain-get",
+            ontology_service.get_ontology_domain_impl,
+            server_url,
+            api_key,
+            domain_id,
+            lane="control-io",
+            owner="config",
+        ),
+        _binding_count(domain_id),
+        load_entity_count(),
+        load_metadata_count(),
     )
-    count = await _binding_count(domain_id)
-    return JSONResponse(status_code=HTTPStatus.OK, content=_domain_summary(result, count))
+    summary = _domain_summary(result, count)
+    # The single-domain GET has no counts; fill them best-effort from list
+    # totals so the detail header can show real numbers instead of "—".
+    summary["metadata_count"] = metadata_count
+    summary["entity_count"] = entity_count
+    return JSONResponse(status_code=HTTPStatus.OK, content=summary)
 
 
 @aidp_ontology_router.patch("/domains/{domain_id}")
@@ -678,14 +760,24 @@ async def delete_ontology_domain(
 # ---------------------------------------------------------------------------
 
 
-def _entity_summary(item: dict[str, Any], binding_count: int | None) -> dict[str, Any]:
-    entity_id = item.get("entity_id") or item.get("id")
+def _entity_summary(
+    item: dict[str, Any],
+    binding_count: int | None,
+    *,
+    entity_id: str | None = None,
+    kind: str | None = None,
+) -> dict[str, Any]:
+    resolved_id = item.get("entity_id") or item.get("id") or item.get("type_id")
+    raw_kind = item.get("kind") or kind
     return {
-        "entity_id": str(entity_id) if entity_id is not None else None,
-        "api_name": item.get("api_name"),
+        "entity_id": str(resolved_id if resolved_id is not None else entity_id)
+        if (resolved_id is not None or entity_id is not None)
+        else None,
+        # PATCH answers `name` for the updated api_name; create answers api_name.
+        "api_name": item.get("api_name") or item.get("name"),
         "display_name": item.get("display_name"),
         "description": item.get("description") or "",
-        "kind": (item.get("kind") or "").lower() or None,
+        "kind": (raw_kind or "").lower() or None,
         "type_id": item.get("type_id"),
         "properties": item.get("properties") or [],
         "primary_properties": item.get("primary_properties") or [],
@@ -702,6 +794,204 @@ def _entity_summary(item: dict[str, Any], binding_count: int | None) -> dict[str
         "update_time": item.get("update_time") or item.get("updateTime"),
         "bound_kb_count": binding_count,
     }
+
+
+def _relation_maps(
+    relations: list[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    """Map is-a relations into parent/children endpoints keyed by entity id.
+
+    Confirmed semantics: subject_entity is the child, object_entity the parent.
+    """
+    parents: dict[str, list[dict[str, Any]]] = {}
+    children: dict[str, list[dict[str, Any]]] = {}
+    for relation in relations:
+        if str(relation.get("api_name") or "").lower() not in ("is-a", "is_a"):
+            continue
+        subject = relation.get("subject_entity") or {}
+        obj = relation.get("object_entity") or {}
+        child_id = subject.get("entity_id")
+        parent_id = obj.get("entity_id")
+        if child_id:
+            parents.setdefault(str(child_id), []).append(obj)
+        if parent_id:
+            children.setdefault(str(parent_id), []).append(subject)
+    return parents, children
+
+
+def _synonym_values(item: dict[str, Any]) -> list[str]:
+    """Extract synonym values from the entity's `synonym` property list."""
+    values: list[str] = []
+    for prop in item.get("properties") or []:
+        if not isinstance(prop, dict):
+            continue
+        if prop.get("api_name") != "synonym":
+            continue
+        raw = prop.get("value")
+        if isinstance(raw, str) and raw.strip():
+            values.extend(
+                part.strip()
+                for part in raw.replace("，", "、").split("、")
+                if part.strip()
+            )
+    return values
+
+
+async def _enrich_entity_rows(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    rows: list[dict[str, Any]],
+    kind: str | None,
+) -> list[dict[str, Any]]:
+    """Attach parents/children (Relations) and synonyms (detail property).
+
+    The entity list does not carry relations; the detail does not carry ids.
+    This merges both confirmed contracts into what the table renders.
+    """
+    if not rows:
+        return rows
+    try:
+        relations = await run_blocking(
+            "aidp-ontology-entity-relations",
+            ontology_service.list_ontology_relations_impl,
+            server_url,
+            api_key,
+            domain_id,
+            page=1,
+            size=200,
+            lane="control-io",
+            owner="config",
+        )
+    except AppException as error:
+        logger.warning("AIDP relations unavailable for domain %s: %s", domain_id, error)
+        relations = {"value": []}
+    parents, children = _relation_maps(relations.get("value") or [])
+    semaphore = asyncio.Semaphore(5)
+
+    async def load_synonyms(row: dict[str, Any]) -> list[str]:
+        entity_id = row.get("entity_id") or row.get("id")
+        if entity_id is None:
+            return []
+        async with semaphore:
+            try:
+                detail = await run_blocking(
+                    "aidp-ontology-entity-detail-synonyms",
+                    ontology_service.get_ontology_entity_impl,
+                    server_url,
+                    api_key,
+                    domain_id,
+                    str(entity_id),
+                    lane="control-io",
+                    owner="config",
+                )
+            except AppException:
+                return []
+        return _synonym_values(detail)
+
+    synonyms = await asyncio.gather(*(load_synonyms(row) for row in rows))
+    enriched: list[dict[str, Any]] = []
+    for row, synonym_values in zip(rows, synonyms):
+        entity_id = row.get("entity_id") or row.get("id")
+        row = dict(row)
+        row["parent_entities"] = parents.get(str(entity_id), [])
+        row["child_entities"] = children.get(str(entity_id), [])
+        row["synonym_entities"] = [
+            {"api_name": value, "display_name": value} for value in synonym_values
+        ]
+        enriched.append(row)
+    return enriched
+
+
+async def _reconcile_entity_relations(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    entity_id: str,
+    kind: str,
+    *,
+    parent_ids: list[str] | None,
+    child_ids: list[str] | None,
+) -> None:
+    """Make this entity's is-a relations match the requested endpoint ids.
+
+    AIDP's entity PATCH does not accept parent/child fields, so an edit that
+    changes them has to diff Relations and create/delete rows explicitly.
+    """
+    if parent_ids is None and child_ids is None:
+        return
+    envelope = await run_blocking(
+        "aidp-ontology-entity-relations-sync",
+        ontology_service.list_ontology_relations_impl,
+        server_url,
+        api_key,
+        domain_id,
+        page=1,
+        size=500,
+        lane="control-io",
+        owner="config",
+    )
+    relations = envelope.get("value") or []
+    current_parents: dict[str, dict[str, Any]] = {}
+    current_children: dict[str, dict[str, Any]] = {}
+    for relation in relations:
+        if str(relation.get("api_name") or "").lower() not in ("is-a", "is_a"):
+            continue
+        subject = relation.get("subject_entity") or {}
+        obj = relation.get("object_entity") or {}
+        if str(subject.get("entity_id")) == str(entity_id):
+            current_parents[str(obj.get("entity_id"))] = relation
+        if str(obj.get("entity_id")) == str(entity_id):
+            current_children[str(subject.get("entity_id"))] = relation
+
+    async def create_link(subject_id: str, subject_kind: str, object_id: str, object_kind: str) -> None:
+        await run_blocking(
+            "aidp-ontology-relation-create",
+            ontology_service.create_ontology_relation_impl,
+            server_url,
+            api_key,
+            domain_id,
+            {
+                "api_name": "is-a",
+                "display_name": f"{subject_id}_{object_id}",
+                "source_kind": subject_kind,
+                "source_id": int(subject_id),
+                "object_kind": object_kind,
+                "object_id": int(object_id),
+            },
+            lane="control-io",
+            owner="config",
+        )
+
+    async def remove_link(relation: dict[str, Any]) -> None:
+        relation_id = relation.get("relation_id")
+        if relation_id is None:
+            return
+        await run_blocking(
+            "aidp-ontology-relation-delete",
+            ontology_service.delete_ontology_relation_impl,
+            server_url,
+            api_key,
+            domain_id,
+            str(relation_id),
+            lane="control-io",
+            owner="config",
+        )
+
+    if parent_ids is not None:
+        desired = {str(item) for item in parent_ids if str(item)}
+        for stale_id, relation in current_parents.items():
+            if stale_id not in desired:
+                await remove_link(relation)
+        for parent_id in desired - set(current_parents):
+            await create_link(str(entity_id), kind, parent_id, "entity")
+    if child_ids is not None:
+        desired = {str(item) for item in child_ids if str(item)}
+        for stale_id, relation in current_children.items():
+            if stale_id not in desired:
+                await remove_link(relation)
+        for child_id in desired - set(current_children):
+            await create_link(child_id, "entity", str(entity_id), kind)
 
 
 @aidp_ontology_router.get("/domains/{domain_id}/entities")
@@ -733,9 +1023,10 @@ async def list_ontology_entities(
         ),
         _binding_count(domain_id),
     )
-    envelope["value"] = [
-        _entity_summary(item, count) for item in envelope["value"]
-    ]
+    rows = await _enrich_entity_rows(
+        server_url, api_key, domain_id, envelope["value"], kind or "entity"
+    )
+    envelope["value"] = [_entity_summary(item, count) for item in rows]
     envelope["bound_kb_count"] = count
     return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
 
@@ -755,7 +1046,14 @@ async def create_ontology_entity(
         "api_name": body.api_name,
         "display_name": (body.display_name or "").strip() or body.api_name,
         "description": body.description or "",
-        "properties": [item.model_dump(exclude_none=True) for item in body.properties],
+        "properties": [
+            {
+                "api_name": item.api_name,
+                "data_type": item.data_type or "string",
+                "value": item.value if item.value is not None else "",
+            }
+            for item in body.properties
+        ],
         "primary_properties": body.primary_properties,
     }
 
@@ -779,7 +1077,11 @@ async def create_ontology_entity(
         type_names = {str(item.get("api_name")) for item in types["value"]}
         if body.type_id not in type_ids and body.type_id not in type_names:
             raise _bad_request("所属 Type 不存在于当前本体库")
-        payload["type_id"] = body.type_id
+        payload["type_id"] = int(body.type_id)
+    if body.kind == "entity" and body.parent_entities:
+        payload["parent_entities"] = [int(item) for item in body.parent_entities]
+    if body.kind == "entity" and body.synonym_entities:
+        payload["synonym_entities"] = [int(item) for item in body.synonym_entities]
 
     result = await run_blocking(
         "aidp-ontology-entity-create",
@@ -791,9 +1093,27 @@ async def create_ontology_entity(
         lane="control-io",
         owner="config",
     )
+    entity_id = result.get("entity_id") or result.get("id") or result.get("type_id")
+    # The create contract has no child list; children are inherited links that
+    # must be written as Relations after the entity exists.
+    if body.kind == "entity" and body.child_entities and entity_id is not None:
+        await _reconcile_entity_relations(
+            server_url,
+            api_key,
+            domain_id,
+            str(entity_id),
+            "entity",
+            parent_ids=None,
+            child_ids=body.child_entities,
+        )
     return JSONResponse(
         status_code=HTTPStatus.OK,
-        content=_entity_summary(result, await _binding_count(domain_id)),
+        content=_entity_summary(
+            result,
+            await _binding_count(domain_id),
+            entity_id=str(entity_id) if entity_id is not None else None,
+            kind=body.kind,
+        ),
     )
 
 
@@ -805,19 +1125,27 @@ async def get_ontology_entity(
 ) -> JSONResponse:
     await _auth(request)
     server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-ontology-entity-get",
-        ontology_service.get_ontology_entity_impl,
-        server_url,
-        api_key,
-        domain_id,
-        entity_id,
-        lane="control-io",
-        owner="config",
+    result, count = await asyncio.gather(
+        run_blocking(
+            "aidp-ontology-entity-get",
+            ontology_service.get_ontology_entity_impl,
+            server_url,
+            api_key,
+            domain_id,
+            entity_id,
+            lane="control-io",
+            owner="config",
+        ),
+        _binding_count(domain_id),
+    )
+    row = dict(result)
+    row["entity_id"] = entity_id
+    enriched = await _enrich_entity_rows(
+        server_url, api_key, domain_id, [row], "entity"
     )
     return JSONResponse(
         status_code=HTTPStatus.OK,
-        content=_entity_summary(result, await _binding_count(domain_id)),
+        content=_entity_summary(enriched[0], count, entity_id=entity_id),
     )
 
 
@@ -831,6 +1159,35 @@ async def update_ontology_entity(
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
     payload = body.model_dump(exclude_none=True)
+    parent_ids = payload.pop("parent_entities", None)
+    child_ids = payload.pop("child_entities", None)
+    synonyms = payload.pop("synonym_entities", None)
+    if "properties" in payload:
+        payload["properties"] = [
+            {
+                "api_name": item.get("api_name"),
+                "data_type": item.get("data_type") or "string",
+                "value": item.get("value") if item.get("value") is not None else "",
+            }
+            for item in payload["properties"]
+        ]
+    if synonyms is not None:
+        # AIDP has no synonym write field; synonyms live in a `synonym`
+        # property and are replaced together with the other properties.
+        properties = [
+            item
+            for item in payload.get("properties") or []
+            if item.get("api_name") != "synonym"
+        ]
+        if synonyms:
+            properties.append(
+                {
+                    "api_name": "synonym",
+                    "data_type": "string",
+                    "value": "、".join(str(item) for item in synonyms),
+                }
+            )
+        payload["properties"] = properties
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-ontology-entity-update",
@@ -843,9 +1200,22 @@ async def update_ontology_entity(
         lane="control-io",
         owner="config",
     )
+    await _reconcile_entity_relations(
+        server_url,
+        api_key,
+        domain_id,
+        entity_id,
+        "entity",
+        parent_ids=parent_ids,
+        child_ids=child_ids,
+    )
     return JSONResponse(
         status_code=HTTPStatus.OK,
-        content=_entity_summary(result, await _binding_count(domain_id)),
+        content=_entity_summary(
+            result,
+            await _binding_count(domain_id),
+            entity_id=entity_id,
+        ),
     )
 
 
@@ -854,6 +1224,7 @@ async def delete_ontology_entity(
     request: Request,
     domain_id: Annotated[str, _domain_id_path()],
     entity_id: Annotated[str, Path(..., min_length=1, max_length=64)],
+    kind: Annotated[Literal["type", "entity"] | None, Query()] = None,
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
@@ -865,6 +1236,7 @@ async def delete_ontology_entity(
         api_key,
         domain_id,
         entity_id,
+        kind=kind,
         lane="control-io",
         owner="config",
     )
@@ -1006,29 +1378,40 @@ async def create_domain_binding(
     )
 
 
-@aidp_ontology_router.delete("/domains/{domain_id}/bindings/{binding_id}")
+@aidp_ontology_router.delete("/domains/{domain_id}/bindings/{kds_id}")
 async def delete_domain_binding(
     request: Request,
     domain_id: Annotated[str, _domain_id_path()],
-    binding_id: Annotated[str, Path(..., min_length=1, max_length=128)],
-    kds_id: Annotated[str | None, Query(max_length=128)] = None,
+    kds_id: Annotated[str, Path(..., min_length=1, max_length=128)],
 ) -> JSONResponse:
+    """Unbind one knowledge base from this ontology domain.
+
+    AIDP has no BindingId to address a row; the pair (domain_id, kds_id) is the
+    confirmed identifier and the unbind route is KB-side.
+    """
     user_id, tenant_id = await _auth(request)
-    if kds_id:
-        perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-    else:
-        _require_ontology_manager(user_id, tenant_id)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
     server_url, api_key = _credentials()
-    success = await run_blocking(
+    result = await run_blocking(
         "aidp-ontology-binding-delete",
         ontology_service.delete_ontology_binding_impl,
         server_url,
         api_key,
-        binding_id=binding_id,
+        domain_id=domain_id,
+        kds_id=kds_id,
         lane="control-io",
         owner="config",
     )
-    return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
+    task = result.get("tag_clear_task") if isinstance(result, dict) else None
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "success": True,
+            "accepted": bool(task),
+            "task_id": (task or {}).get("task_id") if isinstance(task, dict) else None,
+            "task_type": (task or {}).get("task_type") if isinstance(task, dict) else None,
+        },
+    )
 
 
 @aidp_ontology_router.get("/knowledge-bases/{kds_id}/binding")
@@ -1036,20 +1419,14 @@ async def get_knowledge_base_binding(
     request: Request,
     kds_id: Annotated[str, Path(..., min_length=1, max_length=128)],
 ) -> JSONResponse:
-    """Demo-only KB-side binding lookup.
+    """Resolve a knowledge base's current ontology binding.
 
-    AIDP exposes no confirmed by-KB query yet. In real mode this endpoint
-    refuses instead of scanning every ontology's bindings, which would be
-    expensive and could silently miss records. Demo mode uses the mock's
-    legacy all-bindings list so the UCD tab can be demonstrated.
+    AIDP exposes no by-KB query, so this scans every domain's binding list and
+    filters locally (bounded by the service). Real and demo modes share the
+    same path; a failed scan degrades to "no binding" rather than inventing one.
     """
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-    if not AIDP_MOCK_MODE:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_IMPLEMENTED,
-            detail="AIDP 尚未提供按知识库查询当前绑定关系的对外接口",
-        )
     rows = await _load_bindings(user_id, tenant_id)
     match = next((row for row in rows if row["kds_id"] == kds_id), None)
     if match is None:
@@ -1073,6 +1450,141 @@ async def get_knowledge_base_binding(
 
 
 # ---------------------------------------------------------------------------
+# Relation endpoints
+# ---------------------------------------------------------------------------
+
+
+@aidp_ontology_router.get("/domains/{domain_id}/relations")
+async def list_ontology_relations(
+    request: Request,
+    domain_id: Annotated[str, _domain_id_path()],
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=500)] = 100,
+    relation_type: Annotated[Literal["is", "is-a"] | None, Query()] = None,
+) -> JSONResponse:
+    await _auth(request)
+    server_url, api_key = _credentials()
+    envelope = await run_blocking(
+        "aidp-ontology-relation-list",
+        ontology_service.list_ontology_relations_impl,
+        server_url,
+        api_key,
+        domain_id,
+        page=page,
+        size=size,
+        relation_type=relation_type,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
+
+
+@aidp_ontology_router.put("/domains/{domain_id}/relations")
+async def create_ontology_relation(
+    request: Request,
+    domain_id: Annotated[str, _domain_id_path()],
+    body: OntologyRelationRequest,
+) -> JSONResponse:
+    user_id, tenant_id = await _auth(request)
+    _require_ontology_manager(user_id, tenant_id)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-ontology-relation-create",
+        ontology_service.create_ontology_relation_impl,
+        server_url,
+        api_key,
+        domain_id,
+        {
+            "api_name": body.api_name,
+            "display_name": body.display_name,
+            "source_kind": body.source_kind,
+            "source_id": int(body.source_id),
+            "object_kind": body.object_kind,
+            "object_id": int(body.object_id),
+        },
+        lane="control-io",
+        owner="config",
+    )
+    relation_id = result.get("relation_id") or result.get("id")
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "relation_id": str(relation_id) if relation_id is not None else None,
+            "message": result.get("message"),
+        },
+    )
+
+
+@aidp_ontology_router.delete("/domains/{domain_id}/relations/{relation_id}")
+async def delete_ontology_relation(
+    request: Request,
+    domain_id: Annotated[str, _domain_id_path()],
+    relation_id: Annotated[str, Path(..., min_length=1, max_length=64)],
+) -> JSONResponse:
+    user_id, tenant_id = await _auth(request)
+    _require_ontology_manager(user_id, tenant_id)
+    server_url, api_key = _credentials()
+    success = await run_blocking(
+        "aidp-ontology-relation-delete",
+        ontology_service.delete_ontology_relation_impl,
+        server_url,
+        api_key,
+        domain_id,
+        relation_id,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
+
+
+# ---------------------------------------------------------------------------
+# Task endpoints
+# ---------------------------------------------------------------------------
+
+
+@aidp_ontology_router.get("/tasks")
+async def list_aidp_tasks(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    task_type: Annotated[str | None, Query(max_length=64)] = None,
+) -> JSONResponse:
+    await _auth(request)
+    server_url, api_key = _credentials()
+    envelope = await run_blocking(
+        "aidp-task-list",
+        ontology_service.list_tasks_impl,
+        server_url,
+        api_key,
+        page=page,
+        page_size=page_size,
+        task_type=task_type,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
+
+
+@aidp_ontology_router.get("/tasks/{task_id}")
+async def get_aidp_task(
+    request: Request,
+    task_id: Annotated[str, Path(..., min_length=1, max_length=64)],
+) -> JSONResponse:
+    await _auth(request)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-task-get",
+        ontology_service.get_task_impl,
+        server_url,
+        api_key,
+        task_id,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+# ---------------------------------------------------------------------------
 # Metadata field endpoints
 # ---------------------------------------------------------------------------
 
@@ -1086,8 +1598,14 @@ def _rule_summary(item: dict[str, Any]) -> dict[str, Any]:
         "enabled": bool(item.get("enabled", True)),
         "condition": item.get("condition"),
         "action": item.get("action"),
-        "created_at": item.get("created_at") or item.get("create_time"),
-        "updated_at": item.get("updated_at") or item.get("update_time"),
+        # Confirmed rule contract uses created_time/updated_time; the other
+        # spellings stay as fallbacks for older builds.
+        "created_at": item.get("created_time")
+        or item.get("created_at")
+        or item.get("create_time"),
+        "updated_at": item.get("updated_time")
+        or item.get("updated_at")
+        or item.get("update_time"),
     }
 
 
@@ -1649,9 +2167,28 @@ async def import_ontology(
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     _require_ontology_manager(user_id, tenant_id)
-    numeric_id = _numeric_domain_id(domain_id)
+    _numeric_domain_id(domain_id)
+    server_url, api_key = _credentials()
     try:
-        import_body, counts = build_import_request(body.document, numeric_id)
+        domain = await run_blocking(
+            "aidp-ontology-import-domain",
+            ontology_service.get_ontology_domain_impl,
+            server_url,
+            api_key,
+            domain_id,
+            lane="control-io",
+            owner="config",
+        )
+    except AppException as error:
+        logger.warning("AIDP import domain lookup failed for %s: %s", domain_id, error)
+        domain = {}
+    domain_name = (
+        domain.get("name") or domain.get("display_name") or domain.get("od_name")
+    )
+    if not isinstance(domain_name, str) or not domain_name.strip():
+        raise _bad_request("无法读取目标本体库名称，导入已取消")
+    try:
+        import_body, counts = build_import_request(body.document, domain_name.strip())
     except OntologyImportValidationError as error:
         logger.info(
             "Ontology import file %s rejected before submit with %d validation errors",
@@ -1660,7 +2197,6 @@ async def import_ontology(
         )
         raise _bad_request("导入文件校验失败", error.errors) from error
 
-    server_url, api_key = _credentials()
     payload = await run_blocking(
         "aidp-ontology-import",
         ontology_service.import_ontology_impl,

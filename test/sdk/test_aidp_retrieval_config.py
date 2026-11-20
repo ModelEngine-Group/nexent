@@ -28,7 +28,7 @@ def test_complete_payload_filters_channels(method):
     channels = active_channels(method)
     if channels & set(CHANNELS[:2]):
         hybrid = payload["hybrid_search_config"]
-        assert hybrid["hybrid_top_k"] == 0
+        assert hybrid["hybrid_top_k"] == 7
         for channel, prefix in zip(CHANNELS, ("vector", "full_text")):
             assert (f"{prefix}_candidates" in hybrid) == (channel in channels)
             if channel in channels:
@@ -78,7 +78,8 @@ def test_strict_validation(config, field):
 def test_boundary_zero_caps_and_jargon(k):
     c = resolve_config({"top_k": k, "reranking_mode":"jargon_coverage", "vector_candidates":500, "full_text_candidates":1})
     assert c["top_k"] == k
-    assert c["hybrid_top_k"] == c["graph_top_k"] == 0
+    assert c["hybrid_top_k"] == min(10, k)
+    assert c["graph_top_k"] == 0
     assert resolve_config({"hybrid_top_k":5,"graph_top_k":5})["top_k"] == 10
 
 

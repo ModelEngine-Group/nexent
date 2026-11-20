@@ -70,6 +70,11 @@ export interface AidpOntologyEntityCreatePayload {
   properties?: AidpOntologyEntityProperty[];
   primary_properties?: string[];
   type_id?: string;
+  /** AIDP create accepts up to 9 parent / synonym entity IDs. */
+  parent_entities?: string[];
+  synonym_entities?: string[];
+  /** Children exist only as is-a Relations; applied after the entity exists. */
+  child_entities?: string[];
 }
 
 export interface AidpOntologyEntityUpdatePayload {
@@ -77,6 +82,11 @@ export interface AidpOntologyEntityUpdatePayload {
   description?: string;
   properties?: AidpOntologyEntityProperty[];
   primary_properties?: string[];
+  /** Translated to Relations create/delete by the BFF. */
+  parent_entities?: string[];
+  child_entities?: string[];
+  /** Stored in the `synonym` property by the BFF. */
+  synonym_entities?: string[];
 }
 
 export interface AidpOntologyBinding {
@@ -97,7 +107,7 @@ export interface AidpOntologyBindingListResponse {
   total_reliable: boolean;
 }
 
-export type AidpMetadataFieldType = "string" | "number" | "time";
+export type AidpMetadataFieldType = "string" | "number" | "date";
 
 export interface AidpMetadataExtendedProperty {
   key: string;
@@ -190,6 +200,25 @@ export interface AidpOntologyRulePayload {
   action: AidpOntologyRuleJsonEnvelope<AidpOntologyRuleActionValue>;
 }
 
+export interface AidpOntologyTask {
+  task_id: string | null;
+  task_type: string | null;
+  status: string | null;
+  progress: number | null;
+  description: string;
+  error_message: string;
+  start_time: number | string | null;
+  end_time: number | string | null;
+}
+
+export interface AidpOntologyTaskListResponse {
+  value: AidpOntologyTask[];
+  total_count: number;
+  task_count: number | null;
+  has_more: boolean;
+  total_reliable: boolean;
+}
+
 export interface AidpChunk {
   chunk_id: number | string;
   chunk_text: string;
@@ -211,6 +240,8 @@ export interface AidpBatchMetadataResult {
   total: number;
   success_count: number;
   failed_count: number;
+  /** Confirmed AIDP response reports a partial-failure flag with counters. */
+  partial_failure?: boolean;
   success_list: Array<{ chunk_id: number | string }>;
   failed_list: Array<{ chunk_id: number | string; message: string }>;
 }
