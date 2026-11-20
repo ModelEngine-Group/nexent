@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-AGENT-FACTS-D3-001
   feature_id: OPS-AGENT-FACTS
-  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120]
-  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09, OPS-AGENT-FACTS-RULE-10, OPS-AGENT-FACTS-RULE-11, OPS-AGENT-FACTS-RULE-12]
+  requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120, OPS-AGENT-RANKINGS-20261120]
+  business_rule_ids: [OPS-AGENT-FACTS-RULE-01, OPS-AGENT-FACTS-RULE-02, OPS-AGENT-FACTS-RULE-03, OPS-AGENT-FACTS-RULE-04, OPS-AGENT-FACTS-RULE-05, OPS-AGENT-FACTS-RULE-06, OPS-AGENT-FACTS-RULE-07, OPS-AGENT-FACTS-RULE-08, OPS-AGENT-FACTS-RULE-09, OPS-AGENT-FACTS-RULE-10, OPS-AGENT-FACTS-RULE-11, OPS-AGENT-FACTS-RULE-12, OPS-AGENT-FACTS-RULE-13]
   title: Main Agent start, end and replay share one searchable fact
   type: INTEGRATION
   priority: P1
@@ -108,6 +108,12 @@ case:
   - order: 30
     action: Apply tenant, group, inclusive date and single-Agent filters, request successive pages and repeat unauthorized requests.
     expected: Only authorized filtered aggregates participate; sorting precedes paging and rejected tenants are not queried.
+  - order: 31
+    action: Query existing Agent rankings with omitted and explicit execution_count metric, total_tokens and success_rate over the multi-day publications used by the list proof.
+    expected: Default count ranking is unchanged; new ranks use the same filtered resource totals and stable descending order, exclude nulls, and return merged success_sample_count.
+  - order: 32
+    action: Apply tenant, group, inclusive dates and single-Agent selection, including a zero value, absent samples, ties and fewer than five eligible resources.
+    expected: Only authorized filtered values enter at most five ranked rows; zero remains valid, no eligible resources returns an empty array, and samples agree with merged successful and failed counts.
   expected_results:
   - The same document ID and index hold revisions 1 and 2.
   - The terminal replay retains revision 2 and the original terminal write version.
@@ -128,6 +134,7 @@ case:
   - Complete child invocation timing agrees exactly between raw trajectory, source facts, daily publication and queries, with independent invocation clocks and original execution dates.
   - Real Jiuwen main and child execution reconciles through source facts, published daily metrics and Ops queries with trajectory capture on or off.
   - Agent list Token and success-rate ordering matches exact filtered published resource aggregates before paging, with stable ties and nulls last.
+  - Agent Token and success-rate Top 5 match published filtered list values, with merged success samples and unchanged default count ranking.
   forbidden_side_effects:
   - An extra fact document or a document in the end month's partition.
   - An additional worker, provider request or Agent fact on SSE reconnection.
@@ -142,7 +149,8 @@ case:
   - A second main clock or terminal report, a span/monitoring timestamp mismatch, a count from preparation-only failure, a shifted statistic date or a changed main duration boundary.
   - Mixed parent or sibling clocks, duplicate child reports, changed execution dates or eligibility, or a changed success, Token or TTFT contract.
   - Replacing Jiuwen Runner or model transport with a fake, mixed main/child usage, lost execution context or metrics gated by trajectory configuration.
-  - Lexical or floating-point Token ordering, missing values coerced to zero, per-page or per-day sorting, unauthorized rows or changes to collection and ranking endpoints.
+  - Lexical or floating-point Token ordering, missing values coerced to zero, per-page or per-day sorting, unauthorized rows or changes to collection or the default execution-count ranking behavior.
+  - Null ranked values, invented success samples, averaging daily rates, unstable ties or changes to capture, storage, aggregation, other modules or northbound authentication.
   acceptance:
   - id: AC-01
     description: Main Agent observations update one source fact and replay is idempotent.
@@ -214,3 +222,8 @@ case:
     steps: [29, 30]
     expected_results: [19]
     forbidden_side_effects: [14]
+  - id: AC-15
+    description: Token and success-rate Top 5 reuse authorized filtered published resource totals and stable list sorting while preserving default call ranking.
+    steps: [31, 32]
+    expected_results: [20]
+    forbidden_side_effects: [15]

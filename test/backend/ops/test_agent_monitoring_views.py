@@ -195,6 +195,7 @@ async def test_rankings_choose_exact_top_five_with_stable_ties(view_app):
     app, _ = view_app
     data = (await get(app, "/rankings")).json()["data"]
     assert [row["agent_id"] for row in data] == [8, 6, 7, 4, 5]
+    assert (await get(app, "/rankings", metric="execution_count")).json()["data"] == data
 
 
 @pytest.mark.asyncio

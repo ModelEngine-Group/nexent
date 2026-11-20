@@ -1462,8 +1462,8 @@ async def test_agent_list_sorts_filtered_published_resource_totals(isolated_moni
     }
     evidence = {}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
-        async def read(actor="ops", **params):
-            return await client.get("/ops/v1/monitoring/agents", params={**selection, **params},
+        async def read(actor="ops", suffix="", **params):
+            return await client.get("/ops/v1/monitoring/agents" + suffix, params={**selection, **params},
                                     headers={"Authorization": f"Bearer {actor}"})
 
         for (metric, descending), order in expected.items():
@@ -1519,6 +1519,54 @@ async def test_agent_list_sorts_filtered_published_resource_totals(isolated_moni
         assert [(row["tenant_id"], row["agent_id"]) for row in global_rates][:3] == [
             (tenant, 22), (tenant, 23), (peer, 11),
         ]
+        count_ranking = await read(suffix="/rankings")
+        assert count_ranking.status_code == 200
+        assert count_ranking.json() == (await read(suffix="/rankings", metric="execution_count")).json()
+        assert [row["agent_id"] for row in count_ranking.json()["data"]] == [21, 22, 23, 24, 25]
+        assert "token_status" not in count_ranking.json()
+        assert all("success_sample_count" not in row["metrics"] for row in count_ranking.json()["data"])
+        ranks = {}
+        for metric, order in (("total_tokens", [21, 23, 22, 25, 26]), ("success_rate", [22, 23, 21, 25])):
+            response = await read(suffix="/rankings", metric=metric)
+            assert response.status_code == 200
+            body = response.json()
+            assert [row["agent_id"] for row in body["data"]] == order
+            lookup = {row["agent_id"]: row for row in evidence[f"{metric}:True"]["data"]["items"]}
+            for row in body["data"]:
+                if metric == "total_tokens":
+                    assert row == lookup[row["agent_id"]]
+                else:
+                    assert row["metrics"]["success_rate"] == lookup[row["agent_id"]]["metrics"]["success_rate"]
+                    assert row["metrics"]["success_sample_count"] == {21: 4, 22: 2, 23: 2, 25: 1}[row["agent_id"]]
+            if metric == "total_tokens":
+                assert body["token_status"] == evidence["total_tokens:True"]["token_status"]
+            else:
+                assert "token_status" not in body
+            prior = await read(suffix="/rankings", metric=metric, end_date=first.isoformat())
+            assert prior.status_code == 200
+            assert [row["agent_id"] for row in prior.json()["data"]] == (
+                [22, 21] if metric == "total_tokens" else [21, 22]
+            )
+            grouped = await read(suffix="/rankings", metric=metric, group_ids=[99])
+            assert grouped.status_code == 200
+            assert [row["agent_id"] for row in grouped.json()["data"]] == [22]
+            for number, eligible in ((21, True), (24, False), (25, True)):
+                single = await read(suffix="/rankings", metric=metric, agent_id=number)
+                assert single.status_code == 200
+                assert [row["agent_id"] for row in single.json()["data"]] == ([number] if eligible else [])
+            assert (await read(suffix="/rankings", metric=metric, tenant_id=peer)).status_code == 403
+            foreign = await read("admin", suffix="/rankings", metric=metric, tenant_id=peer)
+            assert foreign.status_code == 200
+            assert [(row["tenant_id"], row["agent_id"]) for row in foreign.json()["data"]] == [(peer, 11)]
+            global_rank = await read("admin", suffix="/rankings", metric=metric)
+            assert global_rank.status_code == 200
+            assert [(row["tenant_id"], row["agent_id"]) for row in global_rank.json()["data"]][:3] == (
+                [(tenant, 21), (tenant, 23), (peer, 11)] if metric == "total_tokens"
+                else [(tenant, 22), (tenant, 23), (peer, 11)]
+            )
+            assert body == (await read(suffix="/rankings", metric=metric)).json()
+            ranks[metric] = body
+        record_property("agent_rankings", json.dumps(ranks))
     record_property("agent_list_sorting", json.dumps(evidence))
 
 

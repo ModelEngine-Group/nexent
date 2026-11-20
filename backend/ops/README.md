@@ -352,7 +352,7 @@ the latest published snapshot on every request. The Web proxy adds `/api`.
 | --- | --- |
 | `GET /ops/v1/monitoring/agents` | `items`, `total`, `current_agent_count` |
 | `GET /ops/v1/monitoring/agents/trends` | Daily metrics in ascending date order, with per-day `coverage_state` |
-| `GET /ops/v1/monitoring/agents/rankings` | Exact top five Agents by `execution_count`, descending |
+| `GET /ops/v1/monitoring/agents/rankings` | Up to five Agents by `metric`: `execution_count` (default), `total_tokens` or `success_rate`, descending |
 
 Directory parameters are `search`, `sort_by` (`execution_count`,
 `avg_duration_ms`, `avg_ttft_ms`, `total_tokens` or `success_rate`),
@@ -364,11 +364,15 @@ authorized, filtered per-resource aggregates before pagination. Total Tokens
 are compared as exact integers; success rates use merged result counts across
 the selected dates. Missing values remain null and are distinct from zero.
 
-The [Agent frontend handoff](agent-monitoring-api.md) lists the three current
-page integration routes, field mappings and request/response examples. The
-existing execution-count Top 5 route is implemented. Total-Token and
-success-rate Top 5 remain unimplemented and will be scheduled separately;
-northbound interfaces remain deferred.
+The [Agent frontend handoff](agent-monitoring-api.md) lists the four current
+page integration routes, field mappings and request/response examples.
+Rankings reuse the list's filtered resource aggregates and stable ordering,
+exclude null values and preserve valid zero. Success-rate ranking items add
+`metrics.success_sample_count`, the merged succeeded plus failed count.
+Only Token ranking reads and returns Token data and publication status;
+default count and success-rate ranking remain independent of that dependency.
+Count, total-Token and success-rate Top 5 are implemented. Northbound interfaces
+remain deferred.
 
 Each resource includes `tenant_id`, `agent_id`, `is_current` and `metrics`.
 Current metadata includes `name`, `display_name`, `model_ids`,

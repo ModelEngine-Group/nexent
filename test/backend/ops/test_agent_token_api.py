@@ -81,9 +81,10 @@ async def test_trend_days_have_token_values_and_their_model_publication_status(a
 
 
 @pytest.mark.asyncio
-async def test_execution_rankings_keep_their_existing_query_dependency(app):
+@pytest.mark.parametrize("params", [{}, {"metric": "execution_count"}])
+async def test_execution_rankings_keep_their_existing_query_dependency(app, params):
     api, reader, _, _ = app
-    response = await get(api, "/rankings")
+    response = await get(api, "/rankings", **params)
     assert response.status_code == 200
     reader.assert_not_called()
 

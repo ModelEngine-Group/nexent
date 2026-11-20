@@ -31,8 +31,10 @@ feature:
   - rule_id: OPS-AGENT-FACTS-RULE-11
     description: Each child invocation shares an independent complete allocation-through-release-and-output timing result between monitoring and trajectory, regardless of capture flags. Actual execution start retains counting and date ownership; parent, sibling and nested clocks never mix.
   - rule_id: OPS-AGENT-FACTS-RULE-12
-    description: The Agent list sorts published per-resource total Tokens as exact integers or merged success rates after authorized filters and before pagination. Nulls remain last in either direction; equal values retain tenant-ID/Agent-ID order. Existing ranking routes are unchanged.
+    description: The Agent list sorts published per-resource total Tokens as exact integers or merged success rates after authorized filters and before pagination. Nulls remain last in either direction; equal values retain tenant-ID/Agent-ID order. Existing default execution-count ranking behavior is unchanged.
+  - rule_id: OPS-AGENT-FACTS-RULE-13
+    description: The existing Agent rankings route selects execution_count by default, total_tokens or success_rate. It orders filtered published resource aggregates descending with stable tenant/Agent ties, excludes null values, returns up to five resources, and includes merged succeeded-plus-failed success_sample_count for success-rate items.
   required_test_stages: [D3]
   source:
-    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120]
+    requirement_ids: [OPS-AGENT-FACTS-20261117, OPS-AGENT-RUNTIME-FACTS-20261118, OPS-AGENT-DAILY-20261118, OPS-AGENT-QUERY-20261118, OPS-AGENT-VIEWS-20261119, OPS-AGENT-CHILDREN-20261119, OPS-AGENT-SUCCESS-20261119, OPS-AGENT-TOKENS-20261119, OPS-AGENT-TTFT-20261119, OPS-AGENT-MAIN-TIMING-20261119, OPS-AGENT-CHILD-TIMING-20261120, OPS-AGENT-LIST-SORT-20261120, OPS-AGENT-RANKINGS-20261120]
     notes: Agent collection contract and shared Ops monitoring pipeline.

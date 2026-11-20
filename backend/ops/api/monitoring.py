@@ -223,10 +223,15 @@ def agent_trends(request: Request, scope: Annotated[AgentSelection, Depends(agen
 
 @ops_router.get("/agents/rankings", tags=["agent monitoring"])
 def agent_rankings(request: Request, scope: Annotated[AgentSelection, Depends(agent_selection)],
-                   user: Annotated[CurrentUser, Depends(authenticate)]):
-    items, _, _, status = _read_agent_views(request, scope, user, include_tokens=False)
-    ordered = _agent_items(items, "execution_count")
-    return {"data": [item for item in ordered if metric_value(item, "execution_count") is not None][:5], **status}
+                   user: Annotated[CurrentUser, Depends(authenticate)],
+                   metric: Literal["execution_count", "total_tokens", "success_rate"] = "execution_count"):
+    items, _, _, status = _read_agent_views(request, scope, user, include_tokens=metric == "total_tokens")
+    ordered = _agent_items(items, metric)
+    ranked = [item for item in ordered if _agent_metric_value(item, metric) is not None][:5]
+    if metric == "success_rate":
+        ranked = [{**item, "metrics": {**item["metrics"], "success_sample_count":
+                   item["metrics"]["succeeded_count"] + item["metrics"]["failed_count"]}} for item in ranked]
+    return {"data": ranked, **status}
 
 
 class RefreshSelection(BaseModel):

@@ -64,9 +64,9 @@ def sorting_app(monkeypatch):
     return app, views, tokens
 
 
-async def get(app, **params):
+async def get(app, suffix="", **params):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ops") as client:
-        return await client.get("/ops/v1/monitoring/agents", params={
+        return await client.get("/ops/v1/monitoring/agents" + suffix, params={
             "start_date": DAY.isoformat(), "end_date": DAY.isoformat(), **params,
         })
 
@@ -146,3 +146,103 @@ async def test_unsupported_sort_key_remains_a_validation_error(sorting_app):
     assert (await get(app, sort_by="unsupported_metric")).status_code == 422
     views.assert_not_called()
     tokens.assert_not_called()
+
+
+@pytest.fixture
+def ranking_app(sorting_app):
+    app, views, tokens = sorting_app
+    results = {1.0: (1, 0), 0.75: (3, 1), 0.5: (1, 1), 0.25: (1, 3), 0.0: (0, 2), None: (0, 0)}
+    for item in views.return_value[0]:
+        if item["metrics"] is not None:
+            success, failed = results[item["metrics"]["success_rate"]]
+            if item["agent_id"] == 3:
+                success, failed = 5, 5
+            item["metrics"].update(succeeded_count=success, failed_count=failed)
+    return app, views, tokens
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metric", ["total_tokens", "success_rate"])
+async def test_rankings_reuse_exact_stable_order_and_project_success_samples(ranking_app, metric):
+    app, views, tokens = ranking_app
+    original = deepcopy(views.return_value[0])
+    response = await get(app, "/rankings", metric=metric)
+    assert response.status_code == 200
+    body = response.json()
+    assert [(row["tenant_id"], row["agent_id"]) for row in body["data"]] == EXPECTED[metric, True][:5]
+    if metric == "success_rate":
+        assert [row["metrics"]["success_sample_count"] for row in body["data"]] == [1, 4, 2, 10, 2]
+        assert "token_status" not in body
+        tokens.assert_not_called()
+    else:
+        assert body["token_status"] == STATUS
+        assert body["data"][0]["tokens"]["total_tokens"]["value"] == "9007199254740993"
+        assert all("success_sample_count" not in (row["metrics"] or {}) for row in body["data"])
+    assert views.return_value[0] == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metric", ["total_tokens", "success_rate"])
+@pytest.mark.parametrize("include_zero", [True, False])
+async def test_rankings_exclude_unknowns_keep_zero_and_return_fewer_than_five(ranking_app, metric, include_zero):
+    app, views, tokens = ranking_app
+    selected = {5, 6, 10} | ({4} if include_zero else set())
+    views.return_value = ([row for row in views.return_value[0] if row["agent_id"] in selected], 4, [], STATUS)
+    tokens.return_value.agents = {key: value for key, value in tokens.return_value.agents.items() if key[1] in selected}
+    response = await get(app, "/rankings", metric=metric)
+    assert response.status_code == 200
+    assert [row["agent_id"] for row in response.json()["data"]] == ([4] if include_zero else [])
+    if include_zero and metric == "success_rate":
+        assert response.json()["data"][0]["metrics"]["success_rate"] == 0.0
+        assert response.json()["data"][0]["metrics"]["success_sample_count"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metric", ["total_tokens", "success_rate"])
+async def test_rankings_forward_all_authorized_filters(ranking_app, metric):
+    app, views, tokens = ranking_app
+    views.return_value = ([row for row in views.return_value[0] if row["agent_id"] == 3], 1, [], STATUS)
+    tokens.return_value.agents = {("a", 3): token_usage("10")}
+    response = await get(app, "/rankings", metric=metric, tenant_id="a", group_ids=[12, 13], agent_id=3,
+                         start_date="2026-11-18")
+    assert response.status_code == 200
+    assert [row["agent_id"] for row in response.json()["data"]] == [3]
+    selection = dict(tenant="a", start=date(2026, 11, 18), end=DAY, groups=[12, 13], agent_id=3)
+    views.assert_called_once_with(app.state.monitoring, **selection)
+    if metric == "total_tokens":
+        assert {key: value for key, value in tokens.call_args.kwargs.items() if key != "identities"} == selection
+    else:
+        tokens.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metric", ["total_tokens", "success_rate"])
+async def test_rankings_deny_foreign_tenant_before_either_reader(ranking_app, metric):
+    app, views, tokens = ranking_app
+    app.dependency_overrides[authenticate] = lambda: CurrentUser("operator", "a", "OPS")
+    assert (await get(app, "/rankings", metric=metric, tenant_id="b")).status_code == 403
+    views.assert_not_called()
+    tokens.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rankings_validate_metric_and_sanitize_token_failure(ranking_app):
+    app, views, tokens = ranking_app
+    assert (await get(app, "/rankings", metric="avg_duration_ms")).status_code == 422
+    views.assert_not_called()
+    tokens.assert_not_called()
+    tokens.side_effect = RuntimeError("private ES address")
+    response = await get(app, "/rankings", metric="total_tokens")
+    assert response.status_code == 503 and "private ES address" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_token_ranking_includes_historical_usage_without_execution_metrics(ranking_app):
+    app, _, tokens = ranking_app
+    tokens.return_value.agents["a", 9] = token_usage("9007199254740994")
+    response = await get(app, "/rankings", metric="total_tokens")
+    assert response.status_code == 200
+    first = response.json()["data"][0]
+    assert (first["tenant_id"], first["agent_id"]) == ("a", 9)
+    assert first["metrics"] is None and not first["is_current"]
+    assert first["tokens"]["total_tokens"]["value"] == "9007199254740994"
