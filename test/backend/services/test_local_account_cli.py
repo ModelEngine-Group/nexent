@@ -68,6 +68,19 @@ def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
     store.session.flush.assert_called()
 
 
+def test_bootstrap_reuses_existing_tenant_without_provisioning(store):
+    store.session.execute.return_value.scalar_one_or_none.return_value = "existing-tenant"
+
+    assert cli.bootstrap_super_admin("su@example.com", "Password123") == {"created": True}
+
+    store.member.assert_called_once_with(
+        "new-su", "existing-tenant", "SU", "su@example.com",
+        created_by="system", db_session=store.session,
+    )
+    added = {type(call.args[0]).__name__ for call in store.session.add.call_args_list}
+    assert "TenantGroupInfo" not in added
+
+
 def test_bootstrap_configuration_failure_prevents_account_writes(store):
     store.configuration.side_effect = RuntimeError("configuration unavailable")
 
