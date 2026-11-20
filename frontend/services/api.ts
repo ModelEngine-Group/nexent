@@ -500,6 +500,9 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/search`,
     kbChunkDetail: (id: string, chunkId: number | string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/${encodeURIComponent(String(chunkId))}`,
+    /** Image chunk's picture bytes via AIDP ViewImage (READ). */
+    kbChunkImage: (id: string, fileId: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/images/${encodeURIComponent(fileId)}`,
     /** DELETE with a `chunk_ids` JSON body; AIDP answers 204 No Content. */
     removeKbChunks: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,

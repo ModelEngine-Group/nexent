@@ -2120,6 +2120,60 @@ def remove_aidp_chunks_impl(
     return result if isinstance(result, dict) else {}
 
 
+def _get_view_image_path(kds_id: str, file_id: str, tenant_id: str | None = None) -> str:
+    """Build the ViewImage path that returns a chunk image as PNG bytes.
+
+    AIDP stores each image chunk's picture under
+    ``{kds_id}/{file_ino_no}/{image_uuid}.png`` (the chunk's ``file_url``) and
+    serves it by ``file_id = {file_ino_no}_{image_uuid}.png`` (2026-11-20
+    contract note, verified on five real knowledge bases).
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/ViewImage/{file_id}"
+    )
+
+
+def get_aidp_image_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_id: str,
+    tenant_id: str | None = None,
+) -> tuple[bytes, str]:
+    """Fetch one chunk image's binary content and its content type.
+
+    Unlike the JSON endpoints, ViewImage answers raw image bytes on success,
+    so this reads the body without JSON decoding. Failures follow AIDP's JSON
+    error envelope and map through the common upstream error handler.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+    url = urljoin(
+        f"{normalized_url}/", _get_view_image_path(kds_id, file_id, tenant_id)
+    )
+    logger.info("AIDP view-image: GET %s", url)
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = client.get(
+            url, headers={"Authorization": f"Bearer {api_key}"}
+        )
+        response.raise_for_status()
+    except httpx.RequestError as e:
+        logger.exception("AIDP image request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "view-image")
+    content_type = response.headers.get("Content-Type") or "image/png"
+    return response.content, content_type.split(";")[0].strip()
+
+
 # ==================== File summaries ====================
 
 

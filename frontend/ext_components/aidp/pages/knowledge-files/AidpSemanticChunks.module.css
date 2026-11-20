@@ -485,6 +485,30 @@
   word-break: break-word;
 }
 
+.detailImageWrap {
+  margin-top: 16px;
+}
+.detailImage {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border: 1px solid var(--chunk-border, #dfdfdf);
+  border-radius: 4px;
+}
+.detailImagePlaceholder,
+.detailImageFallback {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: center;
+  color: var(--chunk-muted, #777777);
+  font-size: 12px;
+  line-height: 20px;
+  border: 1px dashed var(--chunk-border, #dfdfdf);
+  border-radius: 4px;
+}
+
 .chunkTableWrap {
   margin-top: 16px;
 }

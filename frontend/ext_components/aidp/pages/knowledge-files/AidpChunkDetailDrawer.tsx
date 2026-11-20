@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Drawer, Spin, Tooltip } from "antd";
 import {
@@ -15,8 +15,10 @@ import {
 
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
 import { useAidpChunkDetail } from "./hooks/useAidpFileChunks";
+import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import {
+  deriveAidpImageFileId,
   isAidpChunkEditable,
   normalizeAidpChunkType,
 } from "@/ext_components/aidp/shared/utils/aidpChunkType";
@@ -124,6 +126,50 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
   const chunkType = normalizeAidpChunkType(chunk?.chunk_type);
   const tableData = chunkType === "TABLE" ? parsePipeTable(text) : null;
   const editable = isAidpChunkEditable(chunk);
+  const imageFileId =
+    chunkType === "IMAGE" ? deriveAidpImageFileId(chunk?.file_url) : undefined;
+
+  const [image, setImage] = useState<{
+    fileId?: string;
+    url: string | null;
+    failed: boolean;
+  }>({ fileId: imageFileId, url: null, failed: false });
+  // Reset the picture when a different chunk image is shown; adjusting state
+  // during render keeps the synchronous reset out of the effect below.
+  if (image.fileId !== imageFileId) {
+    setImage({ fileId: imageFileId, url: null, failed: false });
+  }
+  const imageLoading =
+    !!imageFileId &&
+    image.fileId === imageFileId &&
+    !image.url &&
+    !image.failed;
+
+  // Load the picture through the authenticated proxy: an <img> tag cannot
+  // carry the Authorization header, so the bytes arrive as a blob object URL.
+  useEffect(() => {
+    if (!imageFileId) return;
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    aidpKnowledgeService
+      .fetchChunkImage(kdsId, imageFileId, controller.signal)
+      .then(async (response) => {
+        const blob = await response.blob();
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImage({ fileId: imageFileId, url: objectUrl, failed: false });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setImage({ fileId: imageFileId, url: null, failed: true });
+        }
+        void error;
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [kdsId, imageFileId]);
 
   // Export only the detail response, without adding fields the UI does not
   // have. The file name follows the chunk id so downloads remain distinguishable.
@@ -244,6 +290,27 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
                   </span>
                 </div>
               </div>
+
+              {chunkType === "IMAGE" && (
+                <div className={styles.detailImageWrap}>
+                  {imageLoading ? (
+                    <div className={styles.detailImagePlaceholder}>
+                      <Spin size="small" />
+                    </div>
+                  ) : image.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- object URL from an authenticated fetch cannot be an optimized <Image>.
+                    <img
+                      className={styles.detailImage}
+                      src={image.url}
+                      alt={t("aidpKnowledge.chunkImageAlt")}
+                    />
+                  ) : image.failed ? (
+                    <div className={styles.detailImageFallback}>
+                      {t("aidpKnowledge.chunkImageUnavailable")}
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               {tableData ? (
                 <div className={styles.chunkTableWrap}>

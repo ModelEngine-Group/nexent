@@ -2044,13 +2044,21 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
     ]
     chunks = _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, [])
     for index, (text, pages) in enumerate(stubs):
+        chunk_type = _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)]
+        if chunk_type == "IMAGE":
+            # Real AIDP stores each image chunk's picture under
+            # "{kds_id}/{file_ino_no}/{image_uuid}.png" served through
+            # ViewImage; text/table chunks report the literal "null".
+            image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
+        else:
+            image_file_url = "null"
         chunks.append({
             "chunk_id": _next_chunk_id(),
             "chunk_text": text,
-            "chunk_type": _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)],
+            "chunk_type": chunk_type,
             "file_uuid": file_uuid,
             "file_name": file_name,
-            "file_url": f"/aidp/knowledge/{kds_id}/{file_name}",
+            "file_url": image_file_url,
             "page_ids": pages,
             "metadata": {"section": f"part-{index + 1}", "source": file_name},
         })
@@ -2162,6 +2170,53 @@ def remove_chunks(
     return Response(status_code=204)
 
 
+def _mock_png_bytes() -> bytes:
+    """Build a tiny solid-colour PNG without third-party imaging libraries."""
+    import struct
+    import zlib
+
+    width = height = 96
+    red, green, blue = 0x00, 0x67, 0xD1
+
+    def _chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    scanline = b"\x00" + bytes([red, green, blue]) * width
+    idat = zlib.compress(scanline * height)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(b"IHDR", ihdr)
+        + _chunk(b"IDAT", idat)
+        + _chunk(b"IEND", b"")
+    )
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/ViewImage/{{file_id}}")
+def view_image(
+    kds_id: str,
+    file_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Response:
+    """Serve a chunk image as PNG bytes, mirroring the live ViewImage contract.
+
+    The real service derives ``file_id`` from a chunk's ``file_url``
+    (``{kds_id}/{file_ino_no}/{image_uuid}.png`` -> ``{file_ino_no}_
+    {image_uuid}.png``); the mock accepts any well-formed id from this KB.
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.png", file_id):
+        raise HTTPException(status_code=400, detail="Invalid FileID format")
+    return Response(content=_mock_png_bytes(), media_type="image/png")
+
+
 @app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
 def get_chunk(
     kds_id: str,
@@ -2243,13 +2298,21 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
     ]
     chunks = _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, [])
     for index, (text, pages) in enumerate(stubs):
+        chunk_type = _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)]
+        if chunk_type == "IMAGE":
+            # Real AIDP stores each image chunk's picture under
+            # "{kds_id}/{file_ino_no}/{image_uuid}.png" served through
+            # ViewImage; text/table chunks report the literal "null".
+            image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
+        else:
+            image_file_url = "null"
         chunks.append({
             "chunk_id": _next_chunk_id(),
             "chunk_text": text,
-            "chunk_type": _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)],
+            "chunk_type": chunk_type,
             "file_uuid": file_uuid,
             "file_name": file_name,
-            "file_url": f"/aidp/knowledge/{kds_id}/{file_name}",
+            "file_url": image_file_url,
             "page_ids": pages,
             "metadata": {"section": f"part-{index + 1}", "source": file_name},
         })

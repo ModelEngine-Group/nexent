@@ -509,6 +509,28 @@ class AidpKnowledgeService {
     return (await response.json()) as AidpChunk;
   }
 
+  /**
+   * Fetch an image chunk's picture as a binary response.
+   *
+   * The caller turns the body into an object URL; an `<img>` tag cannot carry
+   * the Authorization header, so the image goes through an authenticated
+   * fetch like the document download/preview paths.
+   */
+  async fetchChunkImage(
+    id: string,
+    fileId: string,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    return fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkImage(id, fileId),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+        signal,
+      }
+    );
+  }
+
   /** Add one chunk; AIDP answers with the new chunk id. */
   async createChunk(
     id: string,

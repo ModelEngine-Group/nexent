@@ -3401,6 +3401,52 @@ def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
 
 
+class TestChunkImageEndpoint:
+    """The ViewImage proxy returns the picture bytes, not a JSON body."""
+
+    FILE_ID = "142515840_4e779b95-bc61-4d2d-bec4-3405717e1836.png"
+    PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    def test_view_image_requires_read_and_returns_png(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
+             patch.object(aidp_mgmt_app, "get_aidp_image_impl",
+                          return_value=(self.PNG_BYTES, "image/png")) as view_image:
+            response = client.get(
+                f"/aidp-mgmt/knowledge-bases/kb-1/images/{self.FILE_ID}",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.headers["Content-Type"] == "image/png"
+        assert response.content == self.PNG_BYTES
+        mock_perm.assert_called_once()
+        assert mock_perm.call_args.kwargs["required"] == "READ"
+        view_image.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", self.FILE_ID
+        )
+
+    def test_view_image_rejects_malformed_file_id(self):
+        client = _client()
+        response = client.get(
+            "/aidp-mgmt/knowledge-bases/kb-1/images/not%20a%20file.png",
+            headers=_bearer(),
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_view_image_missing_file_id_suffix_rejected(self):
+        client = _client()
+        response = client.get(
+            "/aidp-mgmt/knowledge-bases/kb-1/images/142515840_4e779b95-bc61-4d2d-bec4-3405717e1836",
+            headers=_bearer(),
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 class TestFileSummaryEndpoints:
     """Summary config on KB creation and the file summary/retry proxies."""
 

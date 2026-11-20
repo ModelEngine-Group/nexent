@@ -69,6 +69,7 @@ from ext_components.aidp.services.aidp_service import (
     get_aidp_chunk_impl,
     get_aidp_file_summary_impl,
     get_aidp_graph_template_impl,
+    get_aidp_image_impl,
     get_aidp_kb_impl,
     get_bound_agents,
     list_aidp_channels_impl,
@@ -1464,6 +1465,42 @@ async def search_chunks(
         owner="config",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/images/{file_id}")
+async def view_chunk_image(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    file_id: Annotated[
+        str,
+        Path(
+            pattern=r"^[A-Za-z0-9_-]+\.png$",
+            description="AIDP image file id: {file_ino_no}_{image_uuid}.png",
+        ),
+    ],
+) -> Response:
+    """Return an image chunk's picture as PNG bytes through AIDP ViewImage.
+
+    The ``file_id`` is derived on the page from the chunk's ``file_url``
+    (``{kds_id}/{file_ino_no}/{image_uuid}.png`` → ``{file_ino_no}_
+    {image_uuid}.png``). The upstream answer is binary, so the proxy returns
+    the bytes with AIDP's content type instead of a JSON body.
+    """
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+
+    server_url, api_key = _credentials()
+    content, content_type = await run_blocking(
+        "aidp-view-image",
+        get_aidp_image_impl,
+        server_url,
+        api_key,
+        kds_id,
+        file_id,
+        lane="control-io",
+        owner="config",
+    )
+    return Response(content=content, media_type=content_type)
 
 
 @aidp_mgmt_router.post("/knowledge-bases/{kds_id}/chunks")
