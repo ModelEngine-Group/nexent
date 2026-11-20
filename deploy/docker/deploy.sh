@@ -184,9 +184,11 @@ is_port_in_use() {
     return 1
   fi
 
-  # Fallback to netstat (works on Windows and many Linux distributions)
+  # Fallback to netstat (works on Windows and many Linux distributions).
+  # Restrict to LISTEN/LISTENING so an outbound ESTABLISHED connection whose
+  # remote column is :PORT (common on Windows Git Bash) is not a false conflict.
   if command -v netstat >/dev/null 2>&1; then
-    if netstat -an 2>/dev/null | grep -qE "[:\.]${port}[[:space:]]"; then
+    if netstat -an 2>/dev/null | grep -E 'LISTEN' | grep -qE "[:\.]${port}[[:space:]]"; then
       return 0
     fi
     return 1
