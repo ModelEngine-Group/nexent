@@ -114,6 +114,92 @@ def test_ac011_cancelled_response_cannot_start_maintenance(monkeypatch):
     assert managed.usage_baseline.actual_input_tokens is None
 
 
+def test_ac009_duplicate_completion_cannot_replace_usage_or_repeat_maintenance(monkeypatch):
+    managed = runtime()
+    memory = SimpleNamespace(steps=[TaskStep(task="x" * 500)])
+    model = SimpleNamespace(model_id="controlled")
+    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    compact = Mock(side_effect=lambda items, *args, **kwargs: items)
+    monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", compact)
+    first = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1800)))
+
+    duplicate = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=9999)))
+
+    assert first.maintenance_phase == "post_response"
+    assert duplicate is None
+    assert compact.call_count == 1
+    assert managed.usage_baseline.actual_input_tokens == 1800
+    assert managed.last_maintenance_evidence is first
+
+
+def test_ac011_post_response_assembly_failure_preserves_source_and_policy(monkeypatch, caplog):
+    managed = runtime()
+    memory = SimpleNamespace(steps=[TaskStep(task="x" * 500)])
+    model = SimpleNamespace(model_id="controlled")
+    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    original_steps = list(memory.steps)
+    sink = Mock()
+    managed.context_manager.config.history_summary_sink = sink
+    monkeypatch.setattr(managed.context_manager, "assemble_context_items",
+        Mock(side_effect=RuntimeError("assembly unavailable")))
+
+    result = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1900)))
+
+    assert result is None
+    assert memory.steps == original_steps
+    assert managed.context_manager._history_candidate is None
+    assert managed.context_manager._representation_overrides == {}
+    assert managed.context_manager.config.effective_input_limit_tokens == 2000
+    assert managed.context_manager.config.compaction_target_tokens == 1200
+    assert managed.context_manager.config.history_summary_sink is sink
+    assert "event=context_post_response_assembly_failed" in caplog.text
+    sink.assert_not_called()
+
+
+def test_ac011_cancellation_after_staging_rolls_back_without_persistence(monkeypatch):
+    from threading import Event
+
+    managed = runtime()
+    memory = SimpleNamespace(steps=[TaskStep(task="x" * 500)])
+    model = SimpleNamespace(model_id="controlled", stop_event=Event())
+    before = managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    manager = managed.context_manager
+    old_candidate, old_event = object(), {"previous": True}
+    manager._history_candidate = old_candidate
+    manager._representation_overrides = {"retained": "original"}
+    manager._pending_history_summary_event = old_event
+    original_steps = list(memory.steps)
+    sink = Mock()
+    manager.config.history_summary_sink = sink
+
+    def assemble(**kwargs):
+        if kwargs["maintenance"]:
+            assert manager.config.history_summary_sink is None
+            manager._history_candidate = object()
+            manager._representation_overrides = {"candidate": "uncommitted"}
+            manager._pending_history_summary_event = {"candidate": True}
+            model.stop_event.set()
+        return before
+
+    monkeypatch.setattr(manager, "assemble_context_items", assemble)
+    result = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1900)))
+
+    assert result.maintenance_phase != "post_response"
+    assert manager._history_candidate is old_candidate
+    assert manager._representation_overrides == {"retained": "original"}
+    assert manager._pending_history_summary_event is old_event
+    assert manager.config.effective_input_limit_tokens == 2000
+    assert manager.config.compaction_target_tokens == 1200
+    assert manager.config.history_summary_sink is sink
+    assert memory.steps == original_steps
+    assert managed.last_maintenance_evidence is None
+    sink.assert_not_called()
+
+
 def test_ac009_one_request_usage_can_only_be_accepted_once():
     baseline = ContextUsageBaseline()
     baseline.capture(100, "model")
