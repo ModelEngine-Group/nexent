@@ -181,9 +181,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
               name: entity.display_name || entity.api_name,
             })}
           </p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyEntityDeleteGap")}
-          </AidpOntologyGapNote>
         </div>
       ),
       width: 500,
@@ -268,10 +265,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       width: 500,
       content: (
         <div className={entityStyles.confirmBody}>
-          <p>{t("aidpKnowledge.ontologyEntityDeleteContent")}</p>
-          <AidpOntologyGapNote>
-            {t("aidpKnowledge.ontologyEntityDeleteGap")}
-          </AidpOntologyGapNote>
+          <p>{t("aidpKnowledge.ontologyEntityDeleteWarning")}</p>
         </div>
       ),
       okText: t("common.confirm"),
