@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import math
 from collections import defaultdict
 
@@ -56,6 +58,8 @@ def calculate_term_weights(text, use_idf=False, doc_freqs=None, total_docs=1):
             total_weight += combined_weight
 
     # Calculate TF weight (term frequency weight)
+    if total_weight == 0.0:
+        return {}
     tf_weights = {term: weight / total_weight for term, weight in term_stats.items()}
 
     # IDF enhancement (requires external document frequency data)
