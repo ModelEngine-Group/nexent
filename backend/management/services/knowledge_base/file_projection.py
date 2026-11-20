@@ -77,7 +77,7 @@ def merge_lifecycle_files(files_map, lifecycle_rows):
                 or "",
                 "processed_chunk_num": row.get("processed_chunks"),
                 "total_chunk_num": row.get("total_chunks"),
-                "file_id": row.get("file_id"),
+                "file_id": row.get("public_file_id") or row.get("file_id"),
                 "error_reason": row.get("error_message")
                 or row.get("error_code"),
                 "error_code": row.get("error_code"),

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 from contracts.knowledge import STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET
 from contracts.knowledge_deletion import DELETION_DATASET, DELETION_KNOWLEDGE_DATASET
+from contracts.knowledge_ingestion import ACTIVE_LEGACY_FILE_IDS
 from nexent.storage.models import StorageScope
 
 from infrastructure.rdb.cleanse_resources import TABLES, bind_cleanse_resources
@@ -18,7 +19,8 @@ def knowledge_deletion_ports(actor, *, context):
     try:
         records = bind_deletion_records(
             StorageScope("management", actor.tenant_id, actor.user_id,
-                         {DELETION_DATASET, DELETION_KNOWLEDGE_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET}), engine,
+                         {DELETION_DATASET, DELETION_KNOWLEDGE_DATASET, STORAGE_LEDGER_DATASET, STORAGE_LEDGER_HISTORY_DATASET,
+                          ACTIVE_LEGACY_FILE_IDS}), engine,
         )
         owned.append(records)
         resources = bind_cleanse_resources(

@@ -2,6 +2,7 @@
 """Current-reader DAC selects own/shared lifecycle metadata without Runtime impersonation."""
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from nexent.storage.models import StorageScope
 
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb import knowledge_file_read as module
+from infrastructure.rdb import knowledge_ingestion
 from infrastructure.rdb.cleanse_resources import bind_cleanse_resources
 from test.backend.services.test_cleanse_authorization import resources  # noqa: F401
 from test.backend.services.test_cleanse_jobs import context
@@ -39,6 +41,9 @@ def reader(resources, monkeypatch):  # noqa: F811
     monkeypatch.setattr(module, "files", table)
     engine = sa.create_engine("sqlite://")
     table.create(engine)
+    aliases = knowledge_ingestion.legacy_file_identities.to_metadata(table.metadata, schema=None)
+    monkeypatch.setattr(knowledge_ingestion, "legacy_file_identities", aliases)
+    aliases.create(engine)
     with engine.begin() as c:
         c.execute(
             table.insert(),
@@ -126,6 +131,7 @@ def reader(resources, monkeypatch):  # noqa: F811
             update=update,
             engine=engine,
             table=table,
+            aliases=aliases,
             opened=opened,
             ports=ports,
             actor_engine=actor_engine,
@@ -287,3 +293,32 @@ def test_missing_knowledge_base_keeps_original_missing_resource_message(reader):
     with pytest.raises(ValueError, match="Knowledge base 'missing' not found"):
         reader.service.error_info("missing", "a.txt", reader.actor, context=context())
     assert reader.opened == []
+
+
+
+@pytest.mark.parametrize("state", ["active", "reserved", "wrong-tenant", "wrong-kb", "original-present"])
+def test_reader_only_uses_active_alias_for_the_authorized_file(reader, state):
+    r = reader
+    canonical = "b" * 32
+    values = {"original_file_id": "legacy-file", "standard_file_id": canonical,
+        "tenant_id": "tenant-b" if state == "wrong-tenant" else "tenant-a",
+        "knowledge_id": 2 if state == "wrong-kb" else 1,
+        "lifecycle_revision": 3, "source_generation": 0, "plan_sha256": "d" * 64, "version": 1,
+        "created_by": "user-a", "updated_by": "user-a"}
+    if state != "reserved":
+        values["activated_at"] = datetime.now(timezone.utc)
+    with r.engine.begin() as conn:
+        conn.execute(r.aliases.insert(), values)
+        if state == "original-present":
+            conn.execute(r.table.insert(), {"file_id": "legacy-file", "tenant_id": "tenant-b",
+                "knowledge_id": 99, "index_name": "unrelated", "original_filename": "legacy.txt", "status": "FAILED",
+                "stage": "FAILED", "delete_flag": "Y"})
+    rows = r.service.files("kb-one", r.actor, context=context())
+    assert [row["file_id"] for row in rows] == [canonical]
+    assert rows[0]["public_file_id"] == ("legacy-file" if state == "active" else None)
+    if state == "active":
+        assert r.service.error_info("kb-one", "ignored", r.actor, file_id="legacy-file",
+            context=context())["error_code"] == "PARSE_FAILED"
+    else:
+        with pytest.raises(NotFound):
+            r.service.error_info("kb-one", "knowledge/a.txt", r.actor, file_id="legacy-file", context=context())

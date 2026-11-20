@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import sqlalchemy as sa
 from contracts.knowledge_ingestion import (
+    ACTIVE_LEGACY_FILE_IDS,
     INGESTION_DATASET,
     LEGACY_FILE_ID_OCCUPANCY,
     LEGACY_FILE_IDENTITIES,
@@ -39,8 +40,32 @@ legacy_file_identities = sa.Table(
     sa.Column("updated_by", sa.String(100), nullable=False),
     sa.Column("create_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     sa.Column("update_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    sa.Column("activated_at", sa.DateTime(timezone=True)),
     schema=SCHEMA,
 )
+
+
+def active_legacy_file_ids(lifecycle):
+    identities = legacy_file_identities
+    original = lifecycle.alias("original_lifecycle")
+    target = lifecycle.alias("standard_lifecycle")
+    names = ("original_file_id", "standard_file_id", "tenant_id", "knowledge_id")
+    projection = sa.select(*(identities.c[name] for name in names)).join(
+        target, sa.and_(
+            target.c.file_id == identities.c.standard_file_id,
+            target.c.tenant_id == identities.c.tenant_id,
+            target.c.knowledge_id == identities.c.knowledge_id,
+        ),
+    ).where(
+        identities.c.activated_at.is_not(None),
+        ~sa.exists(sa.select(1).where(original.c.file_id == identities.c.original_file_id)),
+    ).subquery(ACTIVE_LEGACY_FILE_IDS)
+    definition = DatasetDefinition(
+        ACTIVE_LEGACY_FILE_IDS, "original_file_id",
+        tuple(FieldDefinition(name, "integer" if name == "knowledge_id" else "string") for name in names),
+        frozenset({"management"}), tenant_field="tenant_id",
+    )
+    return definition, projection
 
 
 def bind_legacy_file_id_occupancy(actor_id, file_id, engine):
@@ -80,7 +105,7 @@ def reserve_legacy_file_identity(actor, plan, engine, *, context):
     identity = DatasetDefinition(
         LEGACY_FILE_IDENTITIES, "original_file_id",
         tuple(FieldDefinition(column.name, "integer" if isinstance(column.type, sa.Integer) else "string")
-              for column in legacy_file_identities.columns),
+              for column in legacy_file_identities.columns if column.name != "activated_at"),
         frozenset({"management"}), frozenset({"management"}), tenant_field="tenant_id",
     )
     store = SQLRecordStore(

@@ -138,7 +138,10 @@ class KnowledgeFileReader:
                 Comparison("index_name", "eq", index_name),
             ]
             if file_id:
-                terms.append(Comparison("file_id", "eq", file_id))
+                terms.append(Junction("or", (
+                    Comparison("file_id", "eq", file_id),
+                    Comparison("public_file_id", "eq", file_id),
+                )))
             else:
                 terms.append(
                     Junction(

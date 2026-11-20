@@ -1,13 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Read-only lifecycle and own/shared KB lookup bindings for Management readers."""
 
+from dataclasses import replace
+
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.knowledge_ingestion import FILE_KNOWLEDGE_READ_DATASET as KNOWLEDGE
 from contracts.knowledge_ingestion import FILE_READ_DATASET as FILES
 from nexent.storage.models import StorageScope
-from sqlalchemy import literal, select
+from sqlalchemy import String, and_, literal, select
 
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
+from infrastructure.rdb.knowledge_ingestion import active_legacy_file_ids
 from infrastructure.rdb.knowledge_search_records import KnowledgeRecord
 from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
@@ -115,10 +118,20 @@ def file_read_catalog():
 
 def bind_file_reads(tenant_id, user_id, engine):
     definition, table = file_read_catalog()
+    _, aliases = active_legacy_file_ids(table)
+    projection = select(
+        *(table.c[field.name] for field in definition.fields),
+        aliases.c.original_file_id.cast(String(64)).label("public_file_id"),
+    ).select_from(table.outerjoin(aliases, and_(
+        table.c.file_id == aliases.c.standard_file_id,
+        table.c.tenant_id == aliases.c.tenant_id,
+        table.c.knowledge_id == aliases.c.knowledge_id,
+    ))).subquery(FILES)
+    definition = replace(definition, fields=(*definition.fields, FieldDefinition("public_file_id", "string", nullable=True)))
     return SQLRecordStore(
         StorageScope("management", tenant_id, user_id, {FILES}),
         DatasetCatalog((definition,)),
-        {FILES: table},
+        {FILES: projection},
         engine,
         revision_fields={},
         audit_mappings={

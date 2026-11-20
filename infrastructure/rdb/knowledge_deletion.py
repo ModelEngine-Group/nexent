@@ -5,10 +5,12 @@ from dataclasses import replace
 
 from contracts.knowledge import STORAGE_LEDGER_HISTORY_DATASET as HISTORY
 from contracts.knowledge_deletion import DELETION_DATASET
+from contracts.knowledge_ingestion import ACTIVE_LEGACY_FILE_IDS
 from nexent.storage.errors import ScopeDenied
 
 from infrastructure.rdb.knowledge_deletion_metadata import metadata_catalog
 from infrastructure.rdb.knowledge_file_record import KnowledgeFileLifecycle
+from infrastructure.rdb.knowledge_ingestion import active_legacy_file_ids
 from infrastructure.rdb.record_audit import RecordAudit
 from infrastructure.rdb.record_store import SQLRecordStore
 from infrastructure.rdb.storage_ledger import ledger_catalog
@@ -52,10 +54,14 @@ def bind_deletion_records(scope, engine):
     metadata, knowledge, metadata_audit = metadata_catalog()
     history = replace(ledger, name=HISTORY, write_roles=frozenset(), active_field=None)
     tables = {DELETION_DATASET: table, ledger.name: ledger_table, HISTORY: ledger_table, metadata.name: knowledge}
+    definitions = [definition, ledger, history, metadata]
+    if ACTIVE_LEGACY_FILE_IDS in scope.namespaces:
+        aliases, tables[ACTIVE_LEGACY_FILE_IDS] = active_legacy_file_ids(table)
+        definitions.append(aliases)
     if not scope.namespaces <= tables.keys():
         raise ScopeDenied()
     return SQLRecordStore(
-        scope, DatasetCatalog((definition, ledger, history, metadata)),
+        scope, DatasetCatalog(tuple(definitions)),
         {name: tables[name] for name in scope.namespaces}, engine,
         revision_fields={DELETION_DATASET: "version", ledger.name: "version", metadata.name: 'version'},
         audit_mappings={DELETION_DATASET: RecordAudit(

@@ -79,3 +79,12 @@ def test_source_only_request_keeps_completed_file_visible_without_exposing_inter
     merge_lifecycle_files(files, [{'status': 'COMPLETED', 'object_name': 'object', 'original_filename': 'source.txt',
                                   'deletion_request': {'scope': 'source_only', 'user_id': 'editor-b'}}])
     assert files['object']['status'] == 'COMPLETED' and 'deletion_request' not in files['object']
+
+
+
+def test_list_keeps_the_original_public_id_after_activation():
+    files = {}
+    merge_lifecycle_files(files, [{
+        "file_id": "a" * 32, "public_file_id": "legacy-file", "object_name": "a.txt", "status": "COMPLETED",
+    }])
+    assert files["a.txt"]["file_id"] == "legacy-file"

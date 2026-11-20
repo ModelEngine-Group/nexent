@@ -21,6 +21,7 @@ from pydantic import Field, model_serializer, model_validator
 INGESTION_DATASET = "knowledge_ingestion_files"
 LEGACY_FILE_ID_OCCUPANCY = "legacy_file_id_occupancy"
 LEGACY_FILE_IDENTITIES = "legacy_file_identities"
+ACTIVE_LEGACY_FILE_IDS = "active_legacy_file_ids"
 LOCAL_SOURCE_DATASET = "management_local_sources"
 FILE_READ_DATASET = "management_file_lifecycle"
 FILE_KNOWLEDGE_READ_DATASET = "management_file_knowledge"

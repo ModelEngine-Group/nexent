@@ -1,9 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Resolve public aliases under live DAC before installing a deletion intent."""
 
-from contracts.agentos_knowledge import KnowledgeFileReference
 from contracts.knowledge_deletion import DELETION_DATASET, KnowledgeDeletionIntent
-from contracts.knowledge_ingestion import KnowledgeIngestionIntent
+from contracts.knowledge_ingestion import (
+    ACTIVE_LEGACY_FILE_IDS,
+    KnowledgeIngestionIntent,
+    is_canonical_file_id,
+    is_historical_file_id,
+)
 from management.services.knowledge_base.deletion_journal import DeletionJournal
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
@@ -123,10 +127,13 @@ def prepare_deletion(records, resources, index_name, path, scope, actor, *, file
     authorization.resolve_knowledge(knowledge['knowledge_id'], edit=True, cleanup=True, context=context)
     terms = [Comparison('knowledge_id', 'eq', knowledge['knowledge_id']), Comparison('index_name', 'eq', index_name)]
     if file_id is not None:
-        try:
-            KnowledgeFileReference(knowledge_id=knowledge['knowledge_id'], file_id=file_id, file_version=0)
-        except ValidationError:
-            raise ValueError('Invalid file_id') from None
+        if not is_canonical_file_id(file_id):
+            if not is_historical_file_id(file_id) or ACTIVE_LEGACY_FILE_IDS not in records.scope.namespaces:
+                raise ValueError('Invalid file_id')
+            alias = records.get(ACTIVE_LEGACY_FILE_IDS, file_id, context=context)
+            if alias is None or alias['knowledge_id'] != knowledge['knowledge_id']:
+                raise ValueError('Invalid file_id')
+            file_id = alias['standard_file_id']
         terms.append(Comparison('file_id', 'eq', file_id))
     else:
         terms.append(_selection(path))

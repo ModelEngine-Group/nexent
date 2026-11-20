@@ -1,15 +1,19 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-BE-DPR-DELETE-PUBLIC-01: public aliases select an existing authorized identity."""
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from contracts.knowledge_deletion import KnowledgeDeletionIntent
+from contracts.knowledge_deletion import DELETION_DATASET, KnowledgeDeletionIntent
+from contracts.knowledge_ingestion import ACTIVE_LEGACY_FILE_IDS
 from management.services.knowledge_base.deletion_selection import prepare_deletion
 from nexent.storage.errors import ScopeDenied, Unavailable
 from nexent.storage.models import StorageScope
 
+from infrastructure.rdb import knowledge_ingestion
 from infrastructure.rdb.cleanse_resources import bind_cleanse_resources
+from infrastructure.rdb.knowledge_deletion import bind_deletion_records
 from test.backend.services.test_cleanse_authorization import resources  # noqa: F401
 from test.backend.services.test_cleanse_jobs import context
 from test.backend.services.test_knowledge_deletion_journal import (
@@ -21,7 +25,7 @@ from test.backend.services.test_knowledge_ingestion_contract import (
 
 
 @pytest.fixture
-def selection(journal_setup, resources):  # noqa: F811
+def selection(journal_setup, resources, monkeypatch):  # noqa: F811
     s = journal_setup
     _, update, engine, tables = resources
     value = ingestion_intent(source={'space': 'files', 'key': 'source.txt', 'version': 'etag:v1', 'sha256': 'a' * 64})
@@ -29,11 +33,15 @@ def selection(journal_setup, resources):  # noqa: F811
         connection.execute(s.table.update().values(bucket_name='bucket', local_source_path='/local/source.txt',
             source_revision='etag:v1', source_upload_sha256='a' * 64, upload_owner_service='management',
             ingestion_request=value.model_dump(mode='json')))
+    aliases = knowledge_ingestion.legacy_file_identities.to_metadata(s.table.metadata, schema=None)
+    monkeypatch.setattr(knowledge_ingestion, 'legacy_file_identities', aliases)
+    aliases.create(s.engine)
     opened = []
 
     def select(path='source.txt', scope='full', *, file_id=None, user='user-a', tenant='tenant-a'):
         actor = SimpleNamespace(user_id=user, tenant_id=tenant)
-        records = s.port(user=user, tenant=tenant)
+        records = bind_deletion_records(
+            StorageScope('management', tenant, user, {DELETION_DATASET, ACTIVE_LEGACY_FILE_IDS}), s.engine)
         authorized = bind_cleanse_resources(StorageScope('management', tenant, user, set(tables)), engine)
         opened.extend((records, authorized))
         return prepare_deletion(records, authorized, 'kb-one', path, scope, actor, file_id=file_id, context=context())
@@ -162,3 +170,24 @@ def test_source_only_without_object_remains_a_client_error(selection):
     with pytest.raises(ValueError, match='A file without a storage object can only use full deletion'):
         s.select(None, scope='source_only', file_id=s.s.intent.file_id)
     assert s.s.row()['deletion_request'] is None
+
+
+
+def test_active_legacy_id_and_northbound_path_choose_the_same_deletion_intent(selection):
+    s = selection
+    original_id = 'legacy-file'
+    canonical = s.s.intent.file_id
+    with s.s.engine.begin() as conn:
+        conn.execute(s.aliases.insert(), {'original_file_id': original_id, 'standard_file_id': canonical,
+            'tenant_id': 'tenant-a', 'knowledge_id': 1, 'lifecycle_revision': 3, 'source_generation': 0,
+            'plan_sha256': 'd' * 64, 'version': 1, 'created_by': 'user-a', 'updated_by': 'user-a'})
+    with pytest.raises(ValueError, match='Invalid file_id'):
+        s.select(file_id=original_id)
+    with s.s.engine.begin() as conn:
+        conn.execute(s.aliases.update().values(activated_at=datetime.now(timezone.utc)))
+    _, by_old_id, _ = s.select('ignored', file_id=original_id)
+    _, by_path, _ = s.select('s3://bucket/source.txt')
+    assert by_old_id == by_path and by_old_id.file_id == canonical
+    s.update('cleanse_memberships', delete_flag='Y')
+    with pytest.raises(ScopeDenied):
+        s.select(file_id=original_id)
