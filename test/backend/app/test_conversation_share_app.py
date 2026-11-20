@@ -1,12 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from http import HTTPStatus
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from management.api.conversation import conversation_share as conversation_share_app
+
+from test.common.file_streams import object_stream
 
 app = FastAPI()
 app.include_router(conversation_share_app.router)
@@ -160,9 +160,9 @@ def test_download_share_asset_endpoint_success(mocker):
         },
     )
     mocker.patch(
-        "management.api.conversation.conversation_share.get_file_stream_impl",
+        "management.api.conversation.conversation_share.read_download",
         new_callable=AsyncMock,
-        return_value=(iter([b"abc"]), "application/pdf"),
+        return_value=(b"abc", "application/pdf"),
     )
 
     response = client.get("/share/share_token/assets/asset_1/download")
@@ -199,11 +199,9 @@ def test_preview_share_asset_endpoint_full_content(mocker):
         new_callable=AsyncMock,
         return_value=("attachments/user_1/report.pdf", "application/pdf", 6),
     )
-    stream = MagicMock()
-    stream.iter_chunks.return_value = iter([b"abcdef"])
-    stream.close = MagicMock()
+    stream = object_stream(b"abcdef")
     mock_get_stream = mocker.patch(
-        "management.api.conversation.conversation_share.get_preview_stream",
+        "management.api.conversation.conversation_share.open_preview",
         return_value=stream,
     )
 
@@ -213,7 +211,7 @@ def test_preview_share_asset_endpoint_full_content(mocker):
     assert response.content == b"abcdef"
     assert response.headers["content-length"] == "6"
     assert response.headers["accept-ranges"] == "bytes"
-    mock_get_stream.assert_called_once_with("attachments/user_1/report.pdf")
+    mock_get_stream.assert_awaited_once_with("attachments/user_1/report.pdf", ANY)
 
 
 def test_preview_share_asset_endpoint_partial_content(mocker):
@@ -226,11 +224,9 @@ def test_preview_share_asset_endpoint_partial_content(mocker):
         new_callable=AsyncMock,
         return_value=("attachments/user_1/report.pdf", "application/pdf", 10),
     )
-    stream = MagicMock()
-    stream.iter_chunks.return_value = iter([b"cde"])
-    stream.close = MagicMock()
+    stream = object_stream(b"cde")
     mock_get_stream = mocker.patch(
-        "management.api.conversation.conversation_share.get_preview_stream",
+        "management.api.conversation.conversation_share.open_preview",
         return_value=stream,
     )
 
@@ -243,7 +239,7 @@ def test_preview_share_asset_endpoint_partial_content(mocker):
     assert response.content == b"cde"
     assert response.headers["content-range"] == "bytes 2-4/10"
     assert response.headers["content-length"] == "3"
-    mock_get_stream.assert_called_once_with("attachments/user_1/report.pdf", 2, 4)
+    mock_get_stream.assert_awaited_once_with("attachments/user_1/report.pdf", ANY, 2, 4)
 
 
 def test_preview_share_asset_endpoint_invalid_range(mocker):

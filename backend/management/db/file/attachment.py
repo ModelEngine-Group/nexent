@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import io
+from contracts import file_types
 import os
 import uuid
 from datetime import datetime
@@ -139,7 +140,7 @@ def upload_file(
         "object_name": object_name,
         "file_name": os.path.basename(file_path),
         "file_size": os.path.getsize(file_path) if os.path.exists(file_path) else 0,
-        "content_type": get_content_type(file_path),
+        "content_type": file_types.get_content_type(file_path),
         "upload_time": datetime.now().isoformat(),
     }
 
@@ -213,7 +214,7 @@ def upload_fileobj(
         "object_name": object_name,
         "file_name": file_name,
         "file_size": file_size,
-        "content_type": get_content_type(file_name),
+        "content_type": file_types.get_content_type(file_name),
         "upload_time": datetime.now().isoformat(),
     }
 
@@ -292,13 +293,6 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     return minio_client.get_file_size(object_name, bucket)
 
 
-def get_file_size_from_minio_strict(
-    object_name: str,
-    bucket: Optional[str] = None,
-) -> Optional[int]:
-    """Return authoritative size, ``None`` only when MinIO confirms the object is missing."""
-    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
-    return minio_client.get_file_size_strict(object_name, bucket)
 
 
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
@@ -356,7 +350,7 @@ def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str,
 
     # Enhance file information
     for file in files:
-        file["content_type"] = get_content_type(file["key"])
+        file["content_type"] = file_types.get_content_type(file["key"])
 
         # Get presigned URL (valid for 24 hours)
         success, url = minio_client.get_file_url(file["key"], bucket, 86400)
@@ -414,87 +408,3 @@ def get_file_stream(object_name: str, bucket: Optional[str] = None) -> Optional[
         return io.BytesIO(binary_data)
     except Exception:
         return None
-
-
-def get_file_stream_raw(object_name: str, bucket: Optional[str] = None) -> Optional[Any]:
-    """
-    Get raw stream object from MinIO storage without reading it into memory.
-
-    Args:
-        object_name: Object name in MinIO
-        bucket: Bucket name, if not specified use default bucket
-
-    Returns:
-        Raw boto3 Body stream on success, or None if failed
-    """
-    success, result = minio_client.get_file_stream(object_name, bucket)
-    return result if success else None
-
-
-def get_file_range(object_name: str, start: int, end: int, bucket: Optional[str] = None) -> Optional[Any]:
-    """
-    Get a byte-range stream from MinIO storage.
-
-    Args:
-        object_name: Object name in MinIO
-        start: Start byte offset (inclusive)
-        end: End byte offset (inclusive), matching HTTP Range semantics.
-        bucket: Bucket name, if not specified use default bucket
-
-    Returns:
-        Raw boto3 Body stream on success, or None if failed
-    """
-    success, result = minio_client.get_file_range(object_name, start, end, bucket)
-    return result if success else None
-
-
-def get_content_type(file_path: str) -> str:
-    """
-    Get content type based on file extension
-
-    Args:
-        file_path: File path or name
-
-    Returns:
-        str: Content type
-    """
-    # File extension to MIME type mapping
-    mime_types = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".gif": "image/gif",
-        ".bmp": "image/bmp",
-        ".webp": "image/webp",
-        ".svg": "image/svg+xml",
-        ".pdf": "application/pdf",
-        ".doc": "application/msword",
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xls": "application/vnd.ms-excel",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".ppt": "application/vnd.ms-powerpoint",
-        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        ".txt": "text/plain",
-        ".csv": "text/csv",
-        ".md": "text/markdown",
-        ".html": "text/html",
-        ".htm": "text/html",
-        ".json": "application/json",
-        ".epub": "application/epub",
-        ".xml": "application/xml",
-        ".zip": "application/zip",
-        ".rar": "application/x-rar-compressed",
-        ".tar": "application/x-tar",
-        ".gz": "application/gzip",
-        ".mp3": "audio/mpeg",
-        ".mp4": "video/mp4",
-        ".avi": "video/x-msvideo",
-        ".mov": "video/quicktime",
-        ".wmv": "video/x-ms-wmv",
-    }
-
-    # Get file extension
-    _, ext = os.path.splitext(file_path.lower())
-
-    # Return corresponding MIME type, if no match return generic binary type
-    return mime_types.get(ext, "application/octet-stream")

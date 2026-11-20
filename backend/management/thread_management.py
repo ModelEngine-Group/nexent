@@ -10,6 +10,14 @@ from nexent.core.concurrency import LanePolicy, ThreadManager
 config_thread_manager = ThreadManager(
     service_name="config",
     lane_policies={
+        "file-stream": LanePolicy(
+            name="file-stream",
+            max_workers=5,
+            max_queue_size=5,
+            queue_timeout_seconds=30,
+            cancel_grace_seconds=5,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "file-upload": LanePolicy(
             name="file-upload",
             max_workers=MAX_CONCURRENT_UPLOADS,

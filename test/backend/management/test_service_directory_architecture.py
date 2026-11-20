@@ -145,6 +145,8 @@ MIGRATED_MODULES = {
     'file/service.py',
     'file/object_deletion.py',
     'file/preview_storage.py',
+    'file/download.py',
+    'file/streaming.py',
     'file/source_finalize.py',
     'file/source_publish.py',
     'file/source_reconcile.py',

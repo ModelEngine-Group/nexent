@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Preserved preview behavior assertions at the canonical lookup sites."""
 from time import monotonic
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from nexent.storage.models import OperationContext
@@ -81,42 +81,6 @@ class TestResolvePreviewFile:
             await resolve_preview_file('test/missing.pdf')
         assert 'File not found' in str(exc_info.value)
 
-class TestGetPreviewStream:
-    """Unit tests for get_preview_stream function."""
-
-    def test_full_stream_returned_when_no_range(self):
-        """Returns full stream when start and end are both None."""
-        from management.services.file.preview import get_preview_stream
-        mock_stream = MagicMock()
-        with patch_import_context('management.services.file.preview.get_file_stream_raw', return_value=mock_stream) as mock_get:
-            result = get_preview_stream('test/document.pdf')
-            assert result is mock_stream
-            mock_get.assert_called_once_with('test/document.pdf')
-
-    def test_range_stream_returned_when_start_end_given(self):
-        """Returns partial stream when start and end are provided."""
-        from management.services.file.preview import get_preview_stream
-        mock_stream = MagicMock()
-        with patch_import_context('management.services.file.preview.get_file_range', return_value=mock_stream) as mock_get:
-            result = get_preview_stream('test/document.pdf', start=0, end=1023)
-            assert result is mock_stream
-            mock_get.assert_called_once_with('test/document.pdf', 0, 1023)
-
-    def test_raises_not_found_when_stream_is_none(self):
-        """Raises NotFoundException when no-range stream source returns None."""
-        from contracts.errors.exceptions import NotFoundException
-        from management.services.file.preview import get_preview_stream
-        with patch_import_context('management.services.file.preview.get_file_stream_raw', return_value=None):
-            with pytest.raises(NotFoundException) as exc_info:
-                get_preview_stream('test/missing.pdf')
-            assert 'File not found' in str(exc_info.value)
-
-    def test_raises_value_error_when_only_one_range_bound_provided(self):
-        """Raises ValueError when start and end are not provided together."""
-        from management.services.file.preview import get_preview_stream
-        with pytest.raises(ValueError) as exc_info:
-            get_preview_stream('test/document.pdf', start=0)
-        assert 'provided together' in str(exc_info.value)
 
 class TestConvertOfficeToCachedPdf:
     """Retain preview cache and error contracts after removing the HTTP hop."""

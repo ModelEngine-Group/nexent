@@ -4,6 +4,7 @@
 import hashlib
 from contextlib import contextmanager
 from dataclasses import dataclass
+from threading import Lock
 from typing import BinaryIO
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -90,6 +91,7 @@ class _ObjectReader:
         self._body = body
         self._context = context
         self._closed = False
+        self._close_lock = Lock()
 
     def read(self, size=-1):
         self._context.remaining()
@@ -101,9 +103,11 @@ class _ObjectReader:
         return value
 
     def close(self):
-        if not self._closed:
+        with self._close_lock:
+            if self._closed:
+                return
             self._closed = True
-            self._body.close()
+        self._body.close()
 
 
 class S3ObjectStore:

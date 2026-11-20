@@ -5,13 +5,12 @@ Unit tests for backend/management/db/file/attachment.py
 Tests attachment database utility functions
 """
 
-from test.common.contract_stubs import install_business_constant_stubs
 import os
 import sys
-import pytest
-from unittest.mock import MagicMock, patch, mock_open, call
 from io import BytesIO
-from datetime import datetime
+from unittest.mock import MagicMock, call, patch
+
+from test.common.contract_stubs import install_business_constant_stubs
 
 # Add project root to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(
@@ -65,17 +64,37 @@ sys.modules['database'] = MagicMock()
 sys.modules['infrastructure.rdb.client'] = client_mock
 sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
+
 install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
+
 install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 sys.modules['infrastructure.rdb.client'] = client_mock
 sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
+
 install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Patch minio_client before importing
 with patch('management.db.file.attachment.minio_client', minio_client_mock):
-    from management.db.file.attachment import generate_object_name, upload_file, upload_fileobj, download_file, get_file_url, get_file_size_from_minio, get_file_size_from_minio_strict, file_exists, copy_file, list_files, delete_file, get_file_stream, get_file_stream_raw, get_file_range, get_content_type, build_s3_url, _normalize_object_and_bucket
+    from management.db.file.attachment import (
+        _normalize_object_and_bucket,
+        build_s3_url,
+        copy_file,
+        delete_file,
+        download_file,
+        file_exists,
+        generate_object_name,
+        get_file_size_from_minio,
+        get_file_stream,
+        get_file_url,
+        list_files,
+        upload_file,
+        upload_fileobj,
+    )
+
+
+from contracts.file_types import get_content_type
 
 
 class TestGenerateObjectName:
@@ -528,18 +547,6 @@ class TestGetFileSizeFromMinio:
         mock_client._ensure_initialized.assert_called_once()
         mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
 
-    @patch('management.db.file.attachment.minio_client')
-    def test_get_file_size_from_minio_strict_normalizes_and_preserves_missing(self, mock_client):
-        mock_client.get_file_size_strict.return_value = None
-
-        size = get_file_size_from_minio_strict(
-            's3://source-bucket/knowledge_base/test.txt'
-        )
-
-        assert size is None
-        mock_client.get_file_size_strict.assert_called_once_with(
-            'knowledge_base/test.txt', 'source-bucket'
-        )
 
 
 class TestListFiles:
@@ -821,63 +828,8 @@ class TestCopyFile:
             assert 'Copy failed' in result['error']
 
 
-class TestGetFileRange:
-    """Unit tests for get_file_range function."""
-
-    def test_range_calls_client_get_file_range(self):
-        """When start and end are provided, calls client.get_file_range."""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_body = MagicMock()
-            mock_client.get_file_range.return_value = (True, mock_body)
-
-            result = get_file_range('attachments/doc.pdf', start=0, end=1023)
-
-            assert result is mock_body
-            mock_client.get_file_range.assert_called_once_with('attachments/doc.pdf', 0, 1023, None)
-
-    def test_range_with_custom_bucket(self):
-        """Passes bucket parameter through to the underlying client call."""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_body = MagicMock()
-            mock_client.get_file_range.return_value = (True, mock_body)
-
-            result = get_file_range('attachments/doc.pdf', start=512, end=1023, bucket='my-bucket')
-
-            assert result is mock_body
-            mock_client.get_file_range.assert_called_once_with('attachments/doc.pdf', 512, 1023, 'my-bucket')
-
-    def test_range_returns_none_on_client_failure(self):
-        """Returns None when client returns success=False for a range request."""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_client.get_file_range.return_value = (False, 'NoSuchKey')
-
-            result = get_file_range('missing/doc.pdf', start=0, end=100)
-
-            assert result is None
 
 
-class TestGetFileStreamRaw:
-    """Unit tests for get_file_stream_raw function."""
-
-    def test_returns_raw_stream_on_success(self):
-        """Returns the underlying raw stream object on success."""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_body = MagicMock()
-            mock_client.get_file_stream.return_value = (True, mock_body)
-
-            result = get_file_stream_raw('attachments/doc.pdf')
-
-            assert result is mock_body
-            mock_client.get_file_stream.assert_called_once_with('attachments/doc.pdf', None)
-
-    def test_returns_none_on_failure(self):
-        """Returns None when client returns success=False."""
-        with patch('management.db.file.attachment.minio_client') as mock_client:
-            mock_client.get_file_stream.return_value = (False, 'error')
-
-            result = get_file_stream_raw('missing/doc.pdf')
-
-            assert result is None
 class TestS3UrlHelpers:
     """Test cases for S3 URL helpers and normalization."""
 

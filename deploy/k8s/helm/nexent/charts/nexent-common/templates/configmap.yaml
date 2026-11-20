@@ -26,6 +26,7 @@ data:
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
   MANAGEMENT_AGENTOS_URL: {{ .Values.config.services.managementAgentosUrl | quote }}
   MANAGEMENT_FILE_CLEANSE_ENABLED: {{ .Values.config.fileCleanse.enabled | quote }}
+  MANAGEMENT_FILE_STREAM_TIMEOUT_SECONDS: {{ .Values.config.fileStream.timeoutSeconds | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}

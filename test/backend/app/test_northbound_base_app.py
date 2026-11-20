@@ -6,8 +6,6 @@ Unit tests for northbound_base_app module.
 Tests cover FastAPI application configuration, CORS middleware, router inclusion,
 and basic A2A endpoint routing and error handling.
 """
-from test.common.contract_stubs import install_shared_contract_stub
-from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import asyncio
 import os
 import sys
@@ -16,9 +14,15 @@ import unittest
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
+
+from test.common.contract_stubs import (
+    install_business_constant_stubs,
+    install_business_contract_stubs,
+    install_shared_contract_stub,
+)
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -90,14 +94,16 @@ file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_to_minio = AsyncMock()
 file_mgmt_module.upload_files_impl = AsyncMock()
 file_mgmt_module.get_file_url_impl = AsyncMock()
-file_mgmt_module.get_file_stream_impl = AsyncMock()
 file_mgmt_module.list_files_impl = AsyncMock()
 file_mgmt_module.check_file_access = MagicMock(return_value=True)
 file_mgmt_module.check_file_access_batch = MagicMock(return_value={})
-file_mgmt_module.resolve_preview_file = AsyncMock()
-file_mgmt_module.get_preview_stream = MagicMock()
 file_mgmt_module.resolve_minio_upload_folder = MagicMock(return_value="attachments")
 sys.modules["management.services.file.service"] = file_mgmt_module
+
+file_download_module = types.ModuleType("management.services.file.download")
+file_download_module.read_download = AsyncMock()
+file_download_module.byte_chunks = MagicMock()
+sys.modules["management.services.file.download"] = file_download_module
 
 # management.services.knowledge_base.task_state - stub to avoid importing redis dependency
 redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
@@ -279,15 +285,17 @@ app_factory_module = types.ModuleType("backend.http.server.app_factory")
 
 # Import real register_exception_handlers to apply to the app
 try:
-    from backend.http.server.app_factory import register_exception_handlers as _real_register_exception_handlers
+    from backend.http.server.app_factory import (
+        register_exception_handlers as _real_register_exception_handlers,
+    )
 except Exception:
     _real_register_exception_handlers = None
 
 def register_exception_handlers(app):
     """Mock register_exception_handlers that adds exception handlers."""
     from fastapi import HTTPException
-    from starlette.exceptions import HTTPException as StarletteHTTPException
     from fastapi.responses import JSONResponse
+    from starlette.exceptions import HTTPException as StarletteHTTPException
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request, exc):
@@ -372,11 +380,10 @@ sys.modules["management.services.monitor.audit"] = MagicMock()
 auth_utils_module.get_user_language = lambda request: "en"
 sys.modules["management.services.knowledge_base.task_state"] = MagicMock()
 
-from management.api import northbound_application as northbound_base_app_module
 from contracts.a2a import GatewayA2AServerSettings as A2AServerSettings
-from management.api.northbound_application import northbound_app as app
-from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from management.api import northbound_application as northbound_base_app_module
+from management.api.northbound_application import northbound_app as app
 
 
 class TestNorthboundBaseApp(unittest.TestCase):

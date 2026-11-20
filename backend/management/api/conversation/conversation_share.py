@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from management.api.file.http import ObjectStreamingResponse
+from management.services.file.download import byte_chunks, open_preview, read_download
 from contracts.conversation import CreateConversationShareRequest
 from contracts.errors.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
 import logging
@@ -6,11 +8,11 @@ from datetime import datetime
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Header, HTTPException, Path as PathParam, Query
+from fastapi import APIRouter, Request, Header, HTTPException, Path as PathParam, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.storage.errors import DeadlineExceeded
+from contracts.errors.exceptions import ManagementReadBusyError
 from pydantic import BaseModel
-from starlette.background import BackgroundTask
 
 from contracts.errors.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
 from management.services.conversation.sharing import (
@@ -18,8 +20,7 @@ from management.services.conversation.sharing import (
     get_share_asset_service,
     get_share_snapshot_service,
 )
-from management.services.file.service import get_file_stream_impl
-from management.services.file.preview import get_preview_stream, resolve_preview_file
+from management.services.file.preview import resolve_preview_file
 from management.services.permission.identity.session import get_current_user_id
 
 from management.api.file.http import build_content_disposition_header
@@ -106,15 +107,16 @@ async def get_conversation_share_endpoint(share_token: str):
 async def download_share_asset_endpoint(
     share_token: str,
     asset_id: str,
+    http_request: Request,
     filename: Optional[str] = Query(None),
 ):
     try:
         asset = get_share_asset_service(share_token, asset_id)
         object_name = asset["object_name"]
-        file_stream, content_type = await get_file_stream_impl(object_name=object_name)
+        file_data, content_type = await read_download(object_name, http_request)
         download_filename = filename or asset.get("filename") or object_name.rsplit("/", 1)[-1]
         return StreamingResponse(
-            file_stream,
+            byte_chunks(file_data),
             media_type=content_type,
             headers={
                 "Content-Disposition": build_content_disposition_header(download_filename),
@@ -124,6 +126,10 @@ async def download_share_asset_endpoint(
         )
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to download asset'})
+    except ManagementReadBusyError:
+        raise
     except Exception as e:
         logger.error("Failed to download share asset: %s", str(e), exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to download asset")
@@ -133,6 +139,7 @@ async def download_share_asset_endpoint(
 async def preview_share_asset_endpoint(
     share_token: str,
     asset_id: str,
+    http_request: Request,
     filename: Optional[str] = Query(None),
     range_header: Optional[str] = Header(None, alias="range"),
 ):
@@ -181,12 +188,11 @@ async def preview_share_asset_endpoint(
     try:
         if parsed_range:
             start, end = parsed_range
-            stream = get_preview_stream(actual_name, start, end)
-            return StreamingResponse(
-                stream.iter_chunks(chunk_size=64 * 1024),
+            stream = await open_preview(actual_name, http_request, start, end)
+            return ObjectStreamingResponse(
+                stream,
                 status_code=HTTPStatus.PARTIAL_CONTENT,
                 media_type=content_type,
-                background=BackgroundTask(stream.close),
                 headers={
                     **common_headers,
                     "Content-Range": f"bytes {start}-{end}/{total_size}",
@@ -194,14 +200,17 @@ async def preview_share_asset_endpoint(
                 },
             )
 
-        stream = get_preview_stream(actual_name)
-        return StreamingResponse(
-            stream.iter_chunks(chunk_size=64 * 1024),
+        stream = await open_preview(actual_name, http_request)
+        return ObjectStreamingResponse(
+            stream,
             status_code=HTTPStatus.OK,
             media_type=content_type,
-            background=BackgroundTask(stream.close),
             headers={**common_headers, "Content-Length": str(total_size)},
         )
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to stream asset'})
+    except ManagementReadBusyError:
+        raise
     except Exception as e:
         logger.error("Failed to stream share asset preview: %s", str(e), exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to stream asset")

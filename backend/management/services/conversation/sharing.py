@@ -8,7 +8,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
-from management.db.file.attachment import get_content_type, get_file_size_from_minio
+from contracts.file_types import get_content_type
+from management.db.file.attachment import get_file_size_from_minio
 from management.db.conversation.repository import get_conversation
 from management.db.conversation.share import create_conversation_share, create_conversation_share_assets, get_active_conversation_share, get_share_asset
 from management.services.conversation.service import get_conversation_history_service

@@ -8,8 +8,23 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
 from fastapi import HTTPException
+from starlette.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
+
+
+class ObjectStreamingResponse(StreamingResponse):
+    """Close the owned SI producer even when send fails before background cleanup."""
+
+    def __init__(self, stream, **kwargs):
+        self._owner = stream
+        super().__init__(stream, **kwargs)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self._owner.aclose()
 
 
 def build_storage_proxy_url(presigned_url: str, storage_endpoint: Optional[str]) -> httpx.URL:

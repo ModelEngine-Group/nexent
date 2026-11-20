@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.file_types import get_content_type
 from infrastructure.system_configuration.runtime import get_config_snapshot
 import logging
 import os
@@ -19,17 +20,12 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException,
     FileTooLargeException,
-    NotFoundException,
 )
 from contracts.errors.ingestion import ingestion_error_fields
 from fastapi import UploadFile
 from management.db.file.attachment import (
     copy_file,
     generate_object_name,
-    get_content_type,
-    get_file_size_from_minio,
-    get_file_size_from_minio_strict,
-    get_file_stream,
     get_file_url,
     list_files,
     upload_fileobj,
@@ -37,7 +33,6 @@ from management.db.file.attachment import (
 from management.db.knowledge_base.file_lifecycle import transition_file_record
 from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.services.file.preview import build_preview_pdf_object_key
 from management.services.file.source_upload import upload_knowledge_source
 from management.services.file.upload_admission import admit_knowledge_uploads
 from management.services.file.upload_context import resolve_upload_context
@@ -642,20 +637,6 @@ async def get_file_url_impl(object_name: str, expires: int):
         raise Exception(
             f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}")
     return result
-
-
-async def get_file_stream_impl(object_name: str):
-    file_stream = get_file_stream(object_name=object_name)
-    if file_stream is None:
-        # The legacy read helper collapses missing keys and operational errors.
-        # Confirm absence without treating denied/unavailable storage as a 404.
-        if get_file_size_from_minio_strict(object_name) is None:
-            raise NotFoundException("Storage object does not exist")
-        raise Exception("File not found or failed to read from storage")
-    content_type = get_content_type(object_name)
-    return file_stream, content_type
-
-
 
 
 async def list_files_impl(prefix: str, limit: Optional[int] = None):

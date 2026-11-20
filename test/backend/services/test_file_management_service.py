@@ -6,18 +6,20 @@ without actual file system or MinIO connections.
 All external services and dependencies are mocked to isolate the tests.
 """
 
-from test.backend.management.import_patching import patch_import_context, patch_imports, set_import_attribute
 import importlib
 import os
 import sys
 import types
 from contextlib import contextmanager
-from types import SimpleNamespace
-import pytest
-from infrastructure.agentos_identity import ServicePrincipal
-from unittest.mock import patch, MagicMock, AsyncMock, Mock
-from pathlib import Path
 from io import BytesIO
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from infrastructure.agentos_identity import ServicePrincipal
+from test.backend.management.import_patching import patch_import_context, patch_imports
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -112,7 +114,6 @@ for _import_patch in reversed(_import_patches):
 upload_files_impl = file_management_service.upload_files_impl
 upload_to_minio = file_management_service.upload_to_minio
 get_file_url_impl = file_management_service.get_file_url_impl
-get_file_stream_impl = file_management_service.get_file_stream_impl
 list_files_impl = file_management_service.list_files_impl
 
 @pytest.fixture(scope="module", autouse=True)
@@ -123,15 +124,12 @@ def setup_patches():
         patch('management.db.file.attachment.minio_client', minio_mock),
         patch('management.db.file.attachment.upload_fileobj', MagicMock()),
         patch('management.db.file.attachment.get_file_url', MagicMock()),
-        patch('management.db.file.attachment.get_content_type', MagicMock()),
-        patch('management.db.file.attachment.get_file_stream', MagicMock()),
         patch('management.db.file.attachment.delete_file', MagicMock()),
         patch('management.db.file.attachment.list_files', MagicMock()),
         patch_import_context('management.services.file.service.admit_knowledge_uploads',
               side_effect=_stub_admit_knowledge_uploads),
         patch_import_context('management.services.file.service.transition_file_record',
               side_effect=_stub_transition_file_record),
-        patch_import_context('management.services.file.service.get_file_size_from_minio', MagicMock(return_value=0)),
         patch_import_context('management.services.file.service.upload_dir',
               Path("/test/uploads")),
         patch_import_context('management.services.file.service.resolve_upload_context', new_callable=AsyncMock, return_value=None),
@@ -1142,63 +1140,6 @@ class TestGetFileUrlImpl:
                 object_name="nonexistent/file.txt", expires=3600)
 
 
-class TestGetFileStreamImpl:
-    """Test cases for get_file_stream_impl function"""
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("size", [None, 0, 7])
-    async def test_failed_stream_distinguishes_missing_from_existing_object(self, mocker, size):
-        mocker.patch.object(file_management_service, "get_file_stream", return_value=None)
-        probe = mocker.patch.object(file_management_service, "get_file_size_from_minio_strict",
-                                    return_value=size)
-        with pytest.raises(Exception) as caught:
-            await get_file_stream_impl("workspace/owner/report.txt")
-        assert isinstance(caught.value, file_management_service.NotFoundException) == (size is None)
-        probe.assert_called_once_with("workspace/owner/report.txt")
-
-    @pytest.mark.asyncio
-    async def test_failed_stream_preserves_storage_probe_errors(self, mocker):
-        mocker.patch.object(file_management_service, "get_file_stream", return_value=None)
-        error = PermissionError("storage permission denied")
-        mocker.patch.object(file_management_service, "get_file_size_from_minio_strict",
-                            side_effect=error)
-        with pytest.raises(PermissionError) as caught:
-            await get_file_stream_impl("workspace/owner/report.txt")
-        assert caught.value is error
-
-    @pytest.mark.asyncio
-    async def test_get_file_stream_impl_success(self):
-        """Test successful file stream retrieval"""
-        # Mock successful result
-        mock_file_stream = BytesIO(b"test file content")
-        mock_content_type = "text/plain"
-
-        with patch_import_context('management.services.file.service.get_file_stream', MagicMock(return_value=mock_file_stream)) as mock_get_stream, \
-                patch_import_context('management.services.file.service.get_content_type', MagicMock(return_value=mock_content_type)) as mock_get_type:
-            # Execute
-            file_stream, content_type = await get_file_stream_impl(object_name="test/file.txt")
-
-            # Assertions
-            assert file_stream == mock_file_stream
-            assert content_type == mock_content_type
-            mock_get_stream.assert_called_once_with(
-                object_name="test/file.txt")
-            mock_get_type.assert_called_once_with("test/file.txt")
-
-    @pytest.mark.asyncio
-    async def test_get_file_stream_impl_failure(self):
-        """Test file stream retrieval failure"""
-        # Mock failed result (None file stream)
-        with patch_import_context('management.services.file.service.get_file_stream', MagicMock(return_value=None)) as mock_get_stream:
-            # Execute and assert exception
-            with pytest.raises(Exception) as exc_info:
-                await get_file_stream_impl(object_name="nonexistent/file.txt")
-
-            # Assertions
-            assert "File not found or failed to read from storage" in str(
-                exc_info.value)
-            mock_get_stream.assert_called_once_with(
-                object_name="nonexistent/file.txt")
 
 
 
@@ -1289,8 +1230,8 @@ class TestCheckFileAccess:
         ) is True
 
     def test_check_file_access_asset_owner_write_requires_managed_service(self):
-        from management.services.file.service import check_file_access
         from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+        from management.services.file.service import check_file_access
 
 
         assert check_file_access(
@@ -1302,7 +1243,6 @@ class TestCheckFileAccess:
 
     def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
         from management.services.file.service import check_file_access
-        from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
         assert check_file_access(
             "attachments/asset_owner/user1/doc.pdf",
@@ -1395,8 +1335,8 @@ class TestCheckFileAccess:
 
     def test_check_file_access_asset_owner_prefix_requires_asset_owner_tenant(self):
         """Asset-owner attachment paths are restricted to the asset-owner tenant."""
-        from management.services.file.service import check_file_access
         from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+        from management.services.file.service import check_file_access
 
         path = "attachments/asset_owner/user1/doc.pdf"
         assert check_file_access(path, "user1", ASSET_OWNER_TENANT_ID) is True
@@ -1407,8 +1347,8 @@ class TestResolveMinioUploadFolder:
     """Test cases for resolve_minio_upload_folder asset-owner branch."""
 
     def test_asset_owner_tenant_uses_dedicated_prefix(self):
-        from management.services.file.service import resolve_minio_upload_folder
         from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+        from management.services.file.service import resolve_minio_upload_folder
 
         result = resolve_minio_upload_folder(
             folder="attachments",

@@ -14,15 +14,7 @@ import pytest
 def preview(mocker):
     attachment = ModuleType("management.db.file.attachment")
     storage = Mock(side_effect=AssertionError("Unexpected storage operation"))
-    for name in (
-        "copy_file",
-        "delete_file",
-        "file_exists",
-        "get_content_type",
-        "get_file_range",
-        "get_file_size_from_minio",
-        "get_file_stream_raw",
-    ):
+    for name in ("copy_file", "delete_file", "file_exists", "get_file_size_from_minio"):
         setattr(attachment, name, storage)
     mocker.patch.dict("sys.modules", {attachment.__name__: attachment})
     path = (
@@ -45,8 +37,4 @@ def test_ac002_preview_key_matches_existing_contract(preview, name):
     assert (
         preview.build_preview_pdf_object_key(name)
         == f"preview/converted/{stem}_{digest}.pdf"
-    )
-    assert (
-        preview.build_preview_pdf_object_key(name, temporary=True)
-        == f"preview/converting/{stem}_{digest}.pdf.tmp"
     )

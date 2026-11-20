@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from management.api.file.http import ObjectStreamingResponse
+from management.services.file.download import byte_chunks, open_preview, read_download
 
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
 from management.api.file.http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
@@ -10,22 +12,22 @@ from typing import Annotated, List, Literal, Optional
 from urllib.parse import unquote, urlparse
 import httpx
 from nexent.storage.errors import DeadlineExceeded
+from nexent.storage.errors import StorageError
+from contracts.errors.exceptions import ManagementReadBusyError
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from starlette.background import BackgroundTask
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
 from contracts.constants.constants import CONFIG_SERVICE_NAME
 from management.services.file.service import (
     check_file_access,
-    get_file_stream_impl,
     get_file_url_impl,
     list_files_impl,
     upload_files_impl,
 )
 from management.services.file.object_deletion import delete_file_impl
-from management.services.file.preview import get_preview_stream, resolve_preview_file
+from management.services.file.preview import resolve_preview_file
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.identity.session import get_current_user_id
 from management.services.knowledge_base.ingestion import submit_knowledge_files
@@ -188,6 +190,7 @@ async def process_files(
 
 @file_management_config_router.get("/download/{object_name:path}")
 async def get_storage_file(
+    http_request: Request,
     object_name: str = PathParam(..., description="File object name"),
     download: str = Query(
         "ignore",
@@ -233,7 +236,7 @@ async def get_storage_file(
             result = await get_file_url_impl(object_name=object_name, expires=expires)
             return RedirectResponse(url=result["url"])
         elif download == "stream":
-            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
+            file_data, content_type = await read_download(object_name, http_request)
             logger.info(f"Streaming file: object_name={object_name}, content_type={content_type}")
 
             download_filename = filename
@@ -243,7 +246,7 @@ async def get_storage_file(
             content_disposition = build_content_disposition_header(download_filename)
 
             return StreamingResponse(
-                file_stream,
+                byte_chunks(file_data),
                 media_type=content_type,
                 headers={
                     "Content-Disposition": content_disposition,
@@ -252,15 +255,8 @@ async def get_storage_file(
                 },
             )
         elif download == "base64":
-            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
-            try:
-                data = file_stream.read()
-            except Exception as exc:
-                logger.error("Failed to read file stream for base64: %s", str(exc))
-                raise HTTPException(
-                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                    detail="Failed to read file content for base64 encoding",
-                )
+            file_data, content_type = await read_download(object_name, http_request)
+            data = file_data
 
             base64_content = base64.b64encode(data).decode("utf-8")
             return JSONResponse(
@@ -280,6 +276,10 @@ async def get_storage_file(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except NotFoundException as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found.") from e
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to get file.'})
+    except ManagementReadBusyError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get file: object_name={object_name}, error={str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to get file.")
@@ -524,6 +524,7 @@ async def get_storage_file_batch_urls(
 
 @file_management_config_router.get("/preview/{object_name:path}")
 async def preview_file(
+    http_request: Request,
     object_name: str = PathParam(..., description="File object name to preview"),
     filename: Annotated[Optional[str], Query(description="Original filename for display (optional)")] = None,
     range_header: Annotated[Optional[str], Header(alias="range")] = None,
@@ -610,12 +611,11 @@ async def preview_file(
     try:
         if start is not None:
             # 206 Partial Content
-            stream = get_preview_stream(actual_name, start, end)
-            return StreamingResponse(
-                stream.iter_chunks(chunk_size=64 * 1024),
+            stream = await open_preview(actual_name, http_request, start, end)
+            return ObjectStreamingResponse(
+                stream,
                 status_code=HTTPStatus.PARTIAL_CONTENT,
                 media_type=content_type,
-                background=BackgroundTask(stream.close),
                 headers={
                     **common_headers,
                     "Content-Range": f"bytes {start}-{end}/{total_size}",
@@ -624,12 +624,11 @@ async def preview_file(
             )
         else:
             # 200 Full Content — no Range header present.
-            stream = get_preview_stream(actual_name)
-            return StreamingResponse(
-                stream.iter_chunks(chunk_size=64 * 1024),
+            stream = await open_preview(actual_name, http_request)
+            return ObjectStreamingResponse(
+                stream,
                 status_code=HTTPStatus.OK,
                 media_type=content_type,
-                background=BackgroundTask(stream.close),
                 headers={
                     **common_headers,
                     "Content-Length": str(total_size),
@@ -638,6 +637,12 @@ async def preview_file(
     except NotFoundException as e:
         logger.error(f"[preview_file] File not found when streaming: object_name={object_name}, error={str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"File not found: {object_name}")
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to preview file'})
+    except ManagementReadBusyError:
+        raise
+    except StorageError:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"File not found: {object_name}") from None
     except Exception as e:
         logger.error(f"[preview_file] Unexpected error when streaming: object_name={object_name}, error={str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to preview file")

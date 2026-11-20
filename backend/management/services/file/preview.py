@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Management prepares previews through SI; public stream migration follows."""
+from contracts.file_types import get_content_type
+
+"""Management prepares previews through SI with one bounded conversion budget."""
 
 import asyncio
 import hashlib
@@ -12,14 +14,8 @@ from weakref import WeakValueDictionary
 from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, OFFICE_MIME_TYPES
 from contracts.errors.exceptions import (
     FileTooLargeException,
-    NotFoundException,
     OfficeConversionException,
     UnsupportedFileTypeException,
-)
-from management.db.file.attachment import (
-    get_content_type,
-    get_file_range,
-    get_file_stream_raw,
 )
 from management.services.file.office_preview import convert_preview
 from management.services.file.preview_storage import PreviewObjects
@@ -78,33 +74,6 @@ async def resolve_preview_file(object_name: str) -> tuple[str, str, int]:
         raise DeadlineExceeded(operation_id=context.operation_id) from error
     finally:
         cancelled.set()
-
-
-def get_preview_stream(
-    actual_object_name: str, start: int | None = None, end: int | None = None
-):
-    """
-    Fetch a preview stream for the given object, optionally limited to a byte range.
-
-    Args:
-        actual_object_name: Resolved object name (after Office conversion if needed)
-        start: Start byte offset (inclusive). Must be provided together with end.
-        end: End byte offset (inclusive), matching HTTP Range semantics.
-
-    Returns:
-        Raw boto3 Body stream
-    """
-    if (start is None) != (end is None):
-        raise ValueError("start and end must be provided together")
-
-    if start is None:
-        stream = get_file_stream_raw(actual_object_name)
-    else:
-        stream = get_file_range(actual_object_name, start, end)
-
-    if stream is None:
-        raise NotFoundException("File not found or failed to read from storage")
-    return stream
 
 
 async def _convert_office_to_cached_pdf(object_name, pdf_object_name, *, context):

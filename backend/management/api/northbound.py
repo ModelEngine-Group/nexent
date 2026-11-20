@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from management.services.file.download import byte_chunks, read_download
 
 """Northbound chat, knowledge and A2A HTTP routes."""
 
@@ -44,6 +45,7 @@ from fastapi.responses import (
 from management.services.permission.identity.session import get_user_language
 from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
+from contracts.errors.exceptions import ManagementReadBusyError
 from pydantic import ValidationError as PydanticValidationError
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
@@ -67,7 +69,6 @@ from management.services.agent.a2a.service import (
 )
 from management.services.file.service import (
     check_file_access,
-    get_file_stream_impl,
     get_file_url_impl,
     upload_files_impl,
 )
@@ -1154,7 +1155,7 @@ async def get_storage_file(
             result = await get_file_url_impl(object_name=object_name, expires=expires)
             return RedirectResponse(url=result["url"])
         if download == "stream":
-            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
+            file_data, content_type = await read_download(object_name, request)
             logger.info(
                 "Streaming file: object_name=%s, content_type=%s",
                 object_name,
@@ -1168,7 +1169,7 @@ async def get_storage_file(
             content_disposition = build_content_disposition_header(download_filename)
 
             return StreamingResponse(
-                file_stream,
+                byte_chunks(file_data),
                 media_type=content_type,
                 headers={
                     "Content-Disposition": content_disposition,
@@ -1177,15 +1178,8 @@ async def get_storage_file(
                 },
             )
         if download == "base64":
-            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
-            try:
-                data = file_stream.read()
-            except Exception as exc:
-                logger.error("Failed to read file stream for base64: %s", str(exc))
-                raise HTTPException(
-                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                    detail="Failed to read file content for base64 encoding",
-                )
+            file_data, content_type = await read_download(object_name, request)
+            data = file_data
 
             base64_content = base64.b64encode(data).decode("utf-8")
             return JSONResponse(
@@ -1210,6 +1204,11 @@ async def get_storage_file(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
+    except DeadlineExceeded:
+        return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={'message': 'Failed to get file.'})
+    except ManagementReadBusyError as error:
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail=RATE_LIMIT_EXCEEDED_DETAIL,
+                            headers={'Retry-After': str(error.retry_after_seconds)}) from None
     except Exception:
         logger.exception("Failed to get file")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to get file.")

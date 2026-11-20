@@ -30,6 +30,8 @@ config:
   timezone: "Asia/Shanghai"
   fileCleanse:
     enabled: "true"
+  fileStream:
+    timeoutSeconds: "900"
   # Service URLs (internal)
   services:
     gatewayUrl: "http://nexent-gateway:5013"

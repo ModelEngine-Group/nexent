@@ -1,4 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import asyncio
+
+from test.common.file_streams import consume_response, object_stream
 
 """
 Unit tests for management.api.file.file_management
@@ -66,8 +69,8 @@ async def _stub_upload_files_impl(
 async def _stub_get_file_url_impl(object_name: str, expires: int):
     return {"success": True, "url": f"http://example.com/{object_name}"}
 
-async def _stub_get_file_stream_impl(object_name: str):
-    return AsyncMock(), "application/octet-stream"
+async def _stub_read_download(object_name: str, request):
+    return b"", "application/octet-stream"
 
 async def _stub_delete_file_impl(
     object_name: str,
@@ -130,15 +133,13 @@ async def _stub_preprocess_files_generator(*_: Any, **__: Any) -> AsyncGenerator
 async def _stub_resolve_preview_file(object_name: str):
     return object_name, "application/pdf", 1024
 
-def _stub_get_preview_stream(actual_object_name, start=None, end=None):
-    mock_s = MagicMock()
-    mock_s.iter_chunks = MagicMock(return_value=iter([b"PDF content"]))
-    return mock_s
+async def _stub_open_preview(actual_object_name, request, start=None, end=None):
+    return object_stream(b'PDF content')
+
 
 sfms_stub.upload_to_minio = _stub_upload_to_minio
 sfms_stub.upload_files_impl = _stub_upload_files_impl
 sfms_stub.get_file_url_impl = _stub_get_file_url_impl
-sfms_stub.get_file_stream_impl = _stub_get_file_stream_impl
 sfms_stub.list_files_impl = _stub_list_files_impl
 sfms_stub.preprocess_files_generator = _stub_preprocess_files_generator
 sfms_stub.resolve_minio_upload_folder = _stub_resolve_minio_upload_folder
@@ -239,7 +240,8 @@ file_management_app = __import__(
     "management.api.file.file_management", fromlist=["*"]
 )
 file_management_app.resolve_preview_file = _stub_resolve_preview_file
-file_management_app.get_preview_stream = _stub_get_preview_stream
+file_management_app.open_preview = _stub_open_preview
+file_management_app.read_download = _stub_read_download
 
 
 def test_preview_preparation_deadline_keeps_production_envelope_without_error(monkeypatch, caplog):
@@ -421,22 +423,14 @@ async def test_upload_files_internal_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_storage_file_maps_unauthorized_error(monkeypatch):
+
     def unauthorized(*_args, **_kwargs):
-        raise file_management_app.UnauthorizedError("token expired")
-
-    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
-
+        raise file_management_app.UnauthorizedError('token expired')
+    monkeypatch.setattr(file_management_app, 'get_current_user_id', unauthorized)
     with pytest.raises(HTTPException) as raised:
-        await file_management_app.get_storage_file(
-            object_name="knowledge_base/a.txt",
-            download="",
-            expires=60,
-            filename=None,
-            authorization=MOCK_AUTH,
-        )
-
+        await file_management_app.get_storage_file(object_name='knowledge_base/a.txt', download='', expires=60, filename=None, authorization=MOCK_AUTH, http_request=make_download_request())
     assert raised.value.status_code == 401
-    assert raised.value.detail == "token expired"
+    assert raised.value.detail == 'token expired'
 
 
 @pytest.mark.asyncio
@@ -744,70 +738,49 @@ async def test_get_storage_files_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_storage_file_redirect(monkeypatch):
-    async def fake_get_url(object_name, expires):
-        return {"success": True, "url": "http://example.com/a"}
 
-    monkeypatch.setattr(file_management_app, "get_file_url_impl", fake_get_url)
-    resp = await file_management_app.get_storage_file(
-        object_name="knowledge_base/a.txt",
-        download="redirect",
-        expires=60,
-        filename="a.txt",
-        authorization=MOCK_AUTH
-    )
-    # Starlette RedirectResponse defaults to 307
+    async def fake_get_url(object_name, expires):
+        return {'success': True, 'url': 'http://example.com/a'}
+    monkeypatch.setattr(file_management_app, 'get_file_url_impl', fake_get_url)
+    resp = await file_management_app.get_storage_file(object_name='knowledge_base/a.txt', download='redirect', expires=60, filename='a.txt', authorization=MOCK_AUTH, http_request=make_download_request())
     assert 300 <= resp.status_code < 400
-    assert resp.headers["location"] == "http://example.com/a"
+    assert resp.headers['location'] == 'http://example.com/a'
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_stream(monkeypatch):
-    async def fake_get_stream(object_name):
-        async def gen():
-            yield b"chunk1"
-        return gen(), "text/plain"
 
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-    resp = await file_management_app.get_storage_file(
-        object_name="attachments/user1/a.txt",
-        download="stream",
-        expires=60,
-        filename="a.txt",
-        authorization=MOCK_AUTH
-    )
-    assert resp.headers["content-type"].startswith("text/plain")
-    assert resp.media_type == "text/plain"
-    # Content-Disposition should be "attachment" not "inline", and filename should be extracted from object_name
-    content_disposition = resp.headers.get("content-disposition", "")
-    assert "attachment" in content_disposition
-    assert "a.txt" in content_disposition
-    # consume stream
+    async def fake_get_stream(object_name, request):
+
+        async def gen():
+            yield b'chunk1'
+        return (b'chunk1', 'text/plain')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
+    resp = await file_management_app.get_storage_file(object_name='attachments/user1/a.txt', download='stream', expires=60, filename='a.txt', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.headers['content-type'].startswith('text/plain')
+    assert resp.media_type == 'text/plain'
+    content_disposition = resp.headers.get('content-disposition', '')
+    assert 'attachment' in content_disposition
+    assert 'a.txt' in content_disposition
     chunks = []
-    async for part in resp.body_iterator:  # type: ignore[attr-defined]
+    async for part in resp.body_iterator:
         chunks.append(part)
-    assert b"chunk1" in b"".join(chunks)
+    assert b'chunk1' in b''.join(chunks)
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_base64_success(monkeypatch):
     """get_storage_file should return JSON with base64 content when download=base64."""
-    async def fake_get_stream(object_name):
+
+    async def fake_get_stream(object_name, request):
+
         class FakeStream:
+
             def read(self):
-                return b"hello-bytes"
-
-        return FakeStream(), "image/png"
-
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-
-    resp = await file_management_app.get_storage_file(
-        object_name="attachments/user1/img.png",
-        download="base64",
-        expires=60,
-        filename=None,
-        authorization=MOCK_AUTH
-    )
-
+                return b'hello-bytes'
+        return (FakeStream().read(), 'image/png')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
+    resp = await file_management_app.get_storage_file(object_name='attachments/user1/img.png', download='base64', expires=60, filename=None, authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 200
     data = resp.body.decode()
     assert '"success":true' in data
@@ -817,98 +790,65 @@ async def test_get_storage_file_base64_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_base64_read_error(monkeypatch):
     """get_storage_file should raise HTTPException when reading stream fails in base64 mode."""
-    async def fake_get_stream(object_name):
+
+    async def fake_get_stream(object_name, request):
+
         class FakeStream:
+
             def read(self):
-                raise RuntimeError("read-failed")
-
-        return FakeStream(), "image/png"
-
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-
+                raise RuntimeError('read-failed')
+        return (FakeStream().read(), 'image/png')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
     with pytest.raises(Exception) as exc_info:
-        await file_management_app.get_storage_file(
-            object_name="attachments/user1/img.png",
-            download="base64",
-            expires=60,
-            filename=None,
-            authorization=MOCK_AUTH
-        )
-
-    assert "Failed to read file content for base64 encoding" in str(exc_info.value)
+        await file_management_app.get_storage_file(object_name='attachments/user1/img.png', download='base64', expires=60, filename=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'Failed to get file.' in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_metadata(monkeypatch):
-    async def fake_get_url(object_name, expires):
-        return {"success": True, "url": "http://example.com/x"}
 
-    monkeypatch.setattr(file_management_app, "get_file_url_impl", fake_get_url)
-    result = await file_management_app.get_storage_file(
-        object_name="knowledge_base/x",
-        download="ignore",
-        expires=10,
-        filename="x.txt",
-        authorization=MOCK_AUTH
-    )
-    assert result["url"] == "http://example.com/x"
+    async def fake_get_url(object_name, expires):
+        return {'success': True, 'url': 'http://example.com/x'}
+    monkeypatch.setattr(file_management_app, 'get_file_url_impl', fake_get_url)
+    result = await file_management_app.get_storage_file(object_name='knowledge_base/x', download='ignore', expires=10, filename='x.txt', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert result['url'] == 'http://example.com/x'
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_error(monkeypatch):
-    async def boom_url(object_name, expires):
-        raise RuntimeError("x")
 
-    monkeypatch.setattr(file_management_app, "get_file_url_impl", boom_url)
+    async def boom_url(object_name, expires):
+        raise RuntimeError('x')
+    monkeypatch.setattr(file_management_app, 'get_file_url_impl', boom_url)
     with pytest.raises(Exception) as ei:
-        await file_management_app.get_storage_file(
-            object_name="knowledge_base/x",
-            download="ignore",
-            expires=1,
-            filename="x.txt",
-            authorization=MOCK_AUTH
-        )
-    assert "Failed to get file information" in str(ei.value) or "Failed to get file" in str(ei.value)
+        await file_management_app.get_storage_file(object_name='knowledge_base/x', download='ignore', expires=1, filename='x.txt', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'Failed to get file information' in str(ei.value) or 'Failed to get file' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_access_denied_for_attachments(monkeypatch):
     """Test that access to other user's attachments is forbidden."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
-        if object_name.startswith("attachments/"):
-            expected_prefix = f"attachments/{user_id}"
+
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission='READ'):
+        if object_name.startswith('attachments/'):
+            expected_prefix = f'attachments/{user_id}'
             return object_name.startswith(expected_prefix)
-        return object_name.startswith("knowledge_base/")
-
-    monkeypatch.setattr(file_management_app, "check_file_access", fake_check_access)
-
+        return object_name.startswith('knowledge_base/')
+    monkeypatch.setattr(file_management_app, 'check_file_access', fake_check_access)
     with pytest.raises(Exception) as ei:
-        await file_management_app.get_storage_file(
-            object_name="attachments/other_user/file.txt",
-            download="ignore",
-            expires=60,
-            filename="file.txt",
-            authorization=MOCK_AUTH
-        )
-    assert "permission" in str(ei.value).lower() or "forbidden" in str(ei.value).lower()
+        await file_management_app.get_storage_file(object_name='attachments/other_user/file.txt', download='ignore', expires=60, filename='file.txt', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'permission' in str(ei.value).lower() or 'forbidden' in str(ei.value).lower()
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_allows_knowledge_base_access(monkeypatch):
     """Test that knowledge_base files are accessible to all authenticated users."""
+
     async def fake_get_url(object_name, expires):
-        return {"success": True, "url": "http://example.com/shared"}
-
-    monkeypatch.setattr(file_management_app, "get_file_url_impl", fake_get_url)
-
-    result = await file_management_app.get_storage_file(
-        object_name="knowledge_base/shared.pdf",
-        download="redirect",
-        expires=60,
-        filename="shared.pdf",
-        authorization=MOCK_AUTH
-    )
-    assert result.headers["location"] == "http://example.com/shared"
+        return {'success': True, 'url': 'http://example.com/shared'}
+    monkeypatch.setattr(file_management_app, 'get_file_url_impl', fake_get_url)
+    result = await file_management_app.get_storage_file(object_name='knowledge_base/shared.pdf', download='redirect', expires=60, filename='shared.pdf', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert result.headers['location'] == 'http://example.com/shared'
 
 
 # --- remove_storage_file tests ---
@@ -1165,104 +1105,77 @@ def test_build_content_disposition_header_sanitizes_leading_dots():
 @pytest.mark.asyncio
 async def test_get_storage_file_stream_with_filename(monkeypatch):
     """Test get_storage_file stream mode with filename parameter"""
-    async def fake_get_stream(object_name):
-        async def gen():
-            yield b"chunk1"
-        return gen(), "application/pdf"
 
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-    resp = await file_management_app.get_storage_file(
-        object_name="attachments/user1/file.pdf",
-        download="stream",
-        expires=60,
-        filename="原始文件名.pdf",
-        authorization=MOCK_AUTH
-    )
-    assert resp.media_type == "application/pdf"
-    content_disposition = resp.headers.get("content-disposition", "")
-    assert "原始文件名.pdf" in content_disposition or "filename*=UTF-8" in content_disposition
+    async def fake_get_stream(object_name, request):
+
+        async def gen():
+            yield b'chunk1'
+        return (b'chunk1', 'application/pdf')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
+    resp = await file_management_app.get_storage_file(object_name='attachments/user1/file.pdf', download='stream', expires=60, filename='原始文件名.pdf', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.media_type == 'application/pdf'
+    content_disposition = resp.headers.get('content-disposition', '')
+    assert '原始文件名.pdf' in content_disposition or 'filename*=UTF-8' in content_disposition
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_stream_without_filename(monkeypatch):
     """Test get_storage_file stream mode without filename parameter (extract from object_name)"""
-    async def fake_get_stream(object_name):
-        async def gen():
-            yield b"chunk1"
-        return gen(), "text/plain"
 
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-    resp = await file_management_app.get_storage_file(
-        object_name="attachments/user1/test.txt",
-        download="stream",
-        expires=60,
-        filename=None,
-        authorization=MOCK_AUTH
-    )
-    assert resp.media_type == "text/plain"
-    content_disposition = resp.headers.get("content-disposition", "")
-    assert "test.txt" in content_disposition
+    async def fake_get_stream(object_name, request):
+
+        async def gen():
+            yield b'chunk1'
+        return (b'chunk1', 'text/plain')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
+    resp = await file_management_app.get_storage_file(object_name='attachments/user1/test.txt', download='stream', expires=60, filename=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.media_type == 'text/plain'
+    content_disposition = resp.headers.get('content-disposition', '')
+    assert 'test.txt' in content_disposition
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_stream_chinese_object_name_has_ascii_headers(monkeypatch):
     """Chinese object keys must be encoded before being placed in download headers."""
-    chinese_object_name = "knowledge_base/新员工入职培训手册.docx"
+    chinese_object_name = 'knowledge_base/新员工入职培训手册.docx'
 
-    async def fake_get_stream(object_name):
+    async def fake_get_stream(object_name, request):
         assert object_name == chinese_object_name
 
         async def gen():
-            yield b"docx-content"
-
-        return gen(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-    resp = await file_management_app.get_storage_file(
-        object_name=chinese_object_name,
-        download="stream",
-        expires=60,
-        filename=None,
-        authorization=MOCK_AUTH
-    )
-
-    content_disposition = resp.headers.get("content-disposition", "")
-    etag = resp.headers.get("etag", "")
+            yield b'docx-content'
+        return (b'docx-content', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
+    resp = await file_management_app.get_storage_file(object_name=chinese_object_name, download='stream', expires=60, filename=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    content_disposition = resp.headers.get('content-disposition', '')
+    etag = resp.headers.get('etag', '')
     assert "filename*=UTF-8''" in content_disposition
-    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in content_disposition
-    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in etag
+    assert '%E6%96%B0%E5%91%98%E5%B7%A5' in content_disposition
+    assert '%E6%96%B0%E5%91%98%E5%B7%A5' in etag
     assert etag.isascii()
 
 
 @pytest.mark.asyncio
 async def test_get_storage_file_stream_error(monkeypatch):
     """Test get_storage_file stream mode error handling"""
-    async def fake_get_stream(object_name):
-        raise RuntimeError("Stream error")
 
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+    async def fake_get_stream(object_name, request):
+        raise RuntimeError('Stream error')
+    monkeypatch.setattr(file_management_app, 'read_download', fake_get_stream)
     with pytest.raises(Exception) as ei:
-        await file_management_app.get_storage_file(
-            object_name="attachments/user1/test.txt",
-            download="stream",
-            expires=60,
-            filename="test.txt",
-            authorization=MOCK_AUTH
-        )
-    assert "Failed to get file information" in str(ei.value) or "Failed to get file" in str(ei.value)
+        await file_management_app.get_storage_file(object_name='attachments/user1/test.txt', download='stream', expires=60, filename='test.txt', authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'Failed to get file information' in str(ei.value) or 'Failed to get file' in str(ei.value)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("download", ["stream", "base64"])
 async def test_missing_storage_download_returns_404(monkeypatch, download):
-    async def missing(object_name):
-        raise file_management_app.NotFoundException("Storage object does not exist")
 
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", missing)
+    async def missing(object_name, request):
+        raise file_management_app.NotFoundException('Storage object does not exist')
+    monkeypatch.setattr(file_management_app, 'read_download', missing)
     with pytest.raises(HTTPException) as caught:
-        await file_management_app.get_storage_file(
-            object_name="attachments/user1/missing.txt", download=download,
-            expires=60, filename=None, authorization=MOCK_AUTH)
+        await file_management_app.get_storage_file(object_name='attachments/user1/missing.txt', download=download, expires=60, filename=None, authorization=MOCK_AUTH, http_request=make_download_request())
     assert caught.value.status_code == 404
 
 
@@ -1681,217 +1594,125 @@ def test_ensure_http_scheme_double_slash():
 
 # --- Tests for preview_file endpoint ---
 
-def _make_mock_stream(content: bytes = b"content"):
-    """Helper: return a mock boto3 Body with iter_chunks."""
-    mock_s = MagicMock()
-    mock_s.iter_chunks = MagicMock(return_value=iter([content]))
-    mock_s.close = MagicMock()
-    return mock_s
+def _make_mock_stream(content: bytes = b'content'):
+    return object_stream(content)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_pdf_success(monkeypatch):
     """PDF file: 200 response with inline disposition, Accept-Ranges, ETag."""
-    mock_stream = _make_mock_stream(b"PDF content")
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 2048)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=mock_stream))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename="test.pdf",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    assert resp.media_type == "application/pdf"
+    mock_stream = _make_mock_stream(b'PDF content')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 2048)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=mock_stream))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename='test.pdf', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.media_type == 'application/pdf'
     assert resp.status_code == 200
-    cd = resp.headers.get("content-disposition", "")
-    assert "inline" in cd
-    assert "test.pdf" in cd
-    assert resp.headers.get("accept-ranges") == "bytes"
-    assert resp.headers.get("content-length") == "2048"
-    assert resp.headers.get("cache-control") == "public, max-age=3600"
-    assert "knowledge_base/test.pdf" in resp.headers.get("etag", "")
-    assert resp.background is not None
-    await resp.background()
-    mock_stream.close.assert_called_once()
+    cd = resp.headers.get('content-disposition', '')
+    assert 'inline' in cd
+    assert 'test.pdf' in cd
+    assert resp.headers.get('accept-ranges') == 'bytes'
+    assert resp.headers.get('content-length') == '2048'
+    assert resp.headers.get('cache-control') == 'public, max-age=3600'
+    assert 'knowledge_base/test.pdf' in resp.headers.get('etag', '')
+    assert await consume_response(resp) == b'PDF content'
+    mock_stream.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_preview_file_image_success(monkeypatch):
     """Image file: 200 response with correct content type."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/photo.png", "image/png", 512)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"PNG data")))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/photo.png",
-        filename="photo.png",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    assert resp.media_type == "image/png"
-    assert "inline" in resp.headers.get("content-disposition", "")
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/photo.png', 'image/png', 512)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream(b'PNG data')))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/photo.png', filename='photo.png', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.media_type == 'image/png'
+    assert 'inline' in resp.headers.get('content-disposition', '')
 
 
 @pytest.mark.asyncio
 async def test_preview_file_text_success(monkeypatch):
     """Text file: 200 response with correct content type."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/readme.txt", "text/plain", 128)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"Hello World")))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/readme.txt",
-        filename="readme.txt",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    assert resp.media_type == "text/plain"
-    assert "inline" in resp.headers.get("content-disposition", "")
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/readme.txt', 'text/plain', 128)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream(b'Hello World')))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/readme.txt', filename='readme.txt', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.media_type == 'text/plain'
+    assert 'inline' in resp.headers.get('content-disposition', '')
 
 
 @pytest.mark.asyncio
 async def test_preview_file_without_filename_extracts_from_path(monkeypatch):
     """No filename parameter: extracts name from the last path segment."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/subfolder/document.pdf", "application/pdf", 1024)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream()))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/subfolder/document.pdf",
-        filename=None,
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    assert "document.pdf" in resp.headers.get("content-disposition", "")
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/subfolder/document.pdf', 'application/pdf', 1024)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream()))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/subfolder/document.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'document.pdf' in resp.headers.get('content-disposition', '')
 
 
 @pytest.mark.asyncio
 async def test_preview_file_chinese_filename(monkeypatch):
     """Chinese filename: RFC 5987 UTF-8 encoded in Content-Disposition."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 1024)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream()))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename="测试文档.pdf",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    cd = resp.headers.get("content-disposition", "")
-    assert "inline" in cd
-    assert "filename*=UTF-8" in cd or "测试文档" in cd
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 1024)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream()))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename='测试文档.pdf', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    cd = resp.headers.get('content-disposition', '')
+    assert 'inline' in cd
+    assert 'filename*=UTF-8' in cd or '测试文档' in cd
 
 
 @pytest.mark.asyncio
 async def test_preview_file_chinese_object_name_has_ascii_etag(monkeypatch):
     """Chinese characters in an object key must not leak into ASGI response headers."""
-    object_name = "knowledge_base/新员工入职培训手册.docx"
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=(object_name, "application/pdf", 1024)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream()))
-
-    resp = await file_management_app.preview_file(
-        object_name=object_name,
-        filename="新员工入职培训手册.docx",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    etag = resp.headers.get("etag", "")
-    assert "新员工" not in etag
-    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in etag
+    object_name = 'knowledge_base/新员工入职培训手册.docx'
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=(object_name, 'application/pdf', 1024)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream()))
+    resp = await file_management_app.preview_file(object_name=object_name, filename='新员工入职培训手册.docx', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    etag = resp.headers.get('etag', '')
+    assert '新员工' not in etag
+    assert '%E6%96%B0%E5%91%98%E5%B7%A5' in etag
     assert etag.isascii()
 
 
 @pytest.mark.asyncio
 async def test_preview_file_simple_object_name_without_slash(monkeypatch):
     """Object name without slash: uses it directly as display filename."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/simple.pdf", "application/pdf", 256)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream()))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/simple.pdf",
-        filename=None,
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    assert "simple.pdf" in resp.headers.get("content-disposition", "")
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/simple.pdf', 'application/pdf', 256)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream()))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/simple.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'simple.pdf' in resp.headers.get('content-disposition', '')
 
 
 @pytest.mark.asyncio
 async def test_preview_file_office_converted_to_pdf(monkeypatch):
     """Office document: resolve returns PDF path; response is application/pdf."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/converted/report_abc.pdf", "application/pdf", 8192)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"Converted PDF")))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/report.docx",
-        filename="report.docx",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
-    assert resp.media_type == "application/pdf"
-    assert "inline" in resp.headers.get("content-disposition", "")
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/converted/report_abc.pdf', 'application/pdf', 8192)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream(b'Converted PDF')))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/report.docx', filename='report.docx', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert resp.media_type == 'application/pdf'
+    assert 'inline' in resp.headers.get('content-disposition', '')
 
 
 @pytest.mark.asyncio
 async def test_preview_file_access_denied(monkeypatch):
     """Test preview_file access denied for other user's attachments."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
-        if object_name.startswith("attachments/"):
-            expected_prefix = f"attachments/{user_id}"
+
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission='READ'):
+        if object_name.startswith('attachments/'):
+            expected_prefix = f'attachments/{user_id}'
             return object_name.startswith(expected_prefix)
-        return object_name.startswith("knowledge_base/")
-
-    monkeypatch.setattr(file_management_app, "check_file_access", fake_check_access)
-
+        return object_name.startswith('knowledge_base/')
+    monkeypatch.setattr(file_management_app, 'check_file_access', fake_check_access)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="attachments/other_user/file.pdf",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "permission" in str(ei.value).lower() or "forbidden" in str(ei.value).lower()
+        await file_management_app.preview_file(object_name='attachments/other_user/file.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'permission' in str(ei.value).lower() or 'forbidden' in str(ei.value).lower()
 
 
 @pytest.mark.asyncio
 async def test_preview_file_allows_knowledge_base(monkeypatch):
     """Test preview_file allows knowledge_base files."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/shared.pdf", "application/pdf", 1024)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream()))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/shared.pdf",
-        filename=None,
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/shared.pdf', 'application/pdf', 1024)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream()))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/shared.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 200
-    assert resp.media_type == "application/pdf"
+    assert resp.media_type == 'application/pdf'
 
 
 # --- Range request tests ---
@@ -1899,86 +1720,50 @@ async def test_preview_file_allows_knowledge_base(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_range_request_returns_206(monkeypatch):
     """Valid Range header: 206 with Content-Range and correct Content-Length."""
-    mock_stream = _make_mock_stream(b"partial chunk")
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 10000)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=mock_stream))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename=None,
-        range_header="bytes=0-4095",
-        authorization=MOCK_AUTH
-    )
-
+    mock_stream = _make_mock_stream(b'partial chunk')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 10000)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=mock_stream))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header='bytes=0-4095', authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 206
-    assert resp.headers.get("content-range") == "bytes 0-4095/10000"
-    assert resp.headers.get("content-length") == "4096"
-    assert resp.headers.get("accept-ranges") == "bytes"
-    assert resp.background is not None
-    await resp.background()
-    mock_stream.close.assert_called_once()
+    assert resp.headers.get('content-range') == 'bytes 0-4095/10000'
+    assert resp.headers.get('content-length') == '4096'
+    assert resp.headers.get('accept-ranges') == 'bytes'
+    assert await consume_response(resp) == b'partial chunk'
+    mock_stream.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_preview_file_range_suffix_form(monkeypatch):
     """Suffix range (bytes=-N): 206 with correct Content-Range."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 10000)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"tail chunk")))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename=None,
-        range_header="bytes=-500",
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 10000)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream(b'tail chunk')))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header='bytes=-500', authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 206
-    assert resp.headers.get("content-range") == "bytes 9500-9999/10000"
-    assert resp.headers.get("content-length") == "500"
+    assert resp.headers.get('content-range') == 'bytes 9500-9999/10000'
+    assert resp.headers.get('content-length') == '500'
 
 
 @pytest.mark.asyncio
 async def test_preview_file_range_open_ended(monkeypatch):
     """Open-ended range (bytes=N-): 206 reaching end of file."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 1000)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream",
-                        MagicMock(return_value=_make_mock_stream(b"tail")))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename=None,
-        range_header="bytes=500-",
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 1000)))
+    monkeypatch.setattr(file_management_app, 'open_preview', AsyncMock(return_value=_make_mock_stream(b'tail')))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header='bytes=500-', authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 206
-    assert resp.headers.get("content-range") == "bytes 500-999/1000"
-    assert resp.headers.get("content-length") == "500"
+    assert resp.headers.get('content-range') == 'bytes 500-999/1000'
+    assert resp.headers.get('content-length') == '500'
 
 
 @pytest.mark.asyncio
 async def test_preview_file_empty_file_returns_200_without_stream(monkeypatch):
     """Empty file: return 200 with zero content length and no stream fetch."""
     mock_get_stream = MagicMock()
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/empty.txt", "text/plain", 0)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream", mock_get_stream)
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/empty.txt",
-        filename="empty.txt",
-        range_header=None,
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/empty.txt', 'text/plain', 0)))
+    monkeypatch.setattr(file_management_app, 'open_preview', mock_get_stream)
+    resp = await file_management_app.preview_file(object_name='knowledge_base/empty.txt', filename='empty.txt', range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 200
-    assert resp.media_type == "text/plain"
-    assert resp.headers.get("content-length") == "0"
+    assert resp.media_type == 'text/plain'
+    assert resp.headers.get('content-length') == '0'
     mock_get_stream.assert_not_called()
 
 
@@ -1986,52 +1771,28 @@ async def test_preview_file_empty_file_returns_200_without_stream(monkeypatch):
 async def test_preview_file_empty_file_ignores_range_and_returns_200(monkeypatch):
     """Empty file with Range header: still return 200 empty response."""
     mock_get_stream = MagicMock()
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/empty.txt", "text/plain", 0)))
-    monkeypatch.setattr(file_management_app, "get_preview_stream", mock_get_stream)
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/empty.txt",
-        filename="empty.txt",
-        range_header="bytes=0-10",
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/empty.txt', 'text/plain', 0)))
+    monkeypatch.setattr(file_management_app, 'open_preview', mock_get_stream)
+    resp = await file_management_app.preview_file(object_name='knowledge_base/empty.txt', filename='empty.txt', range_header='bytes=0-10', authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 200
-    assert resp.headers.get("content-length") == "0"
+    assert resp.headers.get('content-length') == '0'
     mock_get_stream.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_preview_file_invalid_range_returns_416(monkeypatch):
     """Out-of-bounds Range: 416 with Content-Range: bytes */total."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 10000)))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename=None,
-        range_header="bytes=20000-30000",
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 10000)))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header='bytes=20000-30000', authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 416
-    assert "bytes */10000" in resp.headers.get("content-range", "")
+    assert 'bytes */10000' in resp.headers.get('content-range', '')
 
 
 @pytest.mark.asyncio
 async def test_preview_file_malformed_range_returns_416(monkeypatch):
     """Malformed Range header: 416."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 1000)))
-
-    resp = await file_management_app.preview_file(
-        object_name="knowledge_base/test.pdf",
-        filename=None,
-        range_header="invalid-range",
-        authorization=MOCK_AUTH
-    )
-
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 1000)))
+    resp = await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header='invalid-range', authorization=MOCK_AUTH, http_request=make_download_request())
     assert resp.status_code == 416
 
 
@@ -2040,162 +1801,104 @@ async def test_preview_file_malformed_range_returns_416(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_too_large_error(monkeypatch):
     """FileTooLargeException from resolve_preview_file -> HTTP 413."""
-    _FileTooLargeException = sys.modules["contracts.errors.exceptions"].FileTooLargeException
+    _FileTooLargeException = sys.modules['contracts.errors.exceptions'].FileTooLargeException
 
     async def fake_resolve(object_name):
-        raise _FileTooLargeException("File size 110 MB exceeds the 100 MB preview limit")
-
-    monkeypatch.setattr(file_management_app, "resolve_preview_file", fake_resolve)
-
+        raise _FileTooLargeException('File size 110 MB exceeds the 100 MB preview limit')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', fake_resolve)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/huge.pdf",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "100 MB" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/huge.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert '100 MB' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_not_found_from_resolve(monkeypatch):
     """NotFoundException from resolve_preview_file -> HTTP 404."""
-    _NotFoundException = sys.modules["contracts.errors.exceptions"].NotFoundException
+    _NotFoundException = sys.modules['contracts.errors.exceptions'].NotFoundException
 
     async def fake_resolve(object_name):
-        raise _NotFoundException("The specified key does not exist")
-
-    monkeypatch.setattr(file_management_app, "resolve_preview_file", fake_resolve)
-
+        raise _NotFoundException('The specified key does not exist')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', fake_resolve)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/missing/file.pdf",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "File not found" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/missing/file.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'File not found' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_not_found_from_stream(monkeypatch):
-    """NotFoundException from get_preview_stream -> HTTP 404."""
-    not_found_exception = sys.modules["contracts.errors.exceptions"].NotFoundException
-
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 1024)))
+    """NotFoundException from open_preview -> HTTP 404."""
+    not_found_exception = sys.modules['contracts.errors.exceptions'].NotFoundException
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 1024)))
 
     def fake_stream(actual_name, start=None, end=None):
-        raise not_found_exception("File not found during streaming")
-
-    monkeypatch.setattr(file_management_app, "get_preview_stream", fake_stream)
-
+        raise not_found_exception('File not found during streaming')
+    monkeypatch.setattr(file_management_app, 'open_preview', fake_stream)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/test.pdf",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "File not found" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'File not found' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_unexpected_error_from_stream(monkeypatch):
-    """Unexpected exception from get_preview_stream should map to HTTP 500."""
-    monkeypatch.setattr(file_management_app, "resolve_preview_file",
-                        AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 1024)))
+    """Unexpected exception from open_preview should map to HTTP 500."""
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', AsyncMock(return_value=('knowledge_base/test.pdf', 'application/pdf', 1024)))
 
     def fake_stream(actual_name, start=None, end=None):
-        raise RuntimeError("stream broken")
-
-    monkeypatch.setattr(file_management_app, "get_preview_stream", fake_stream)
-
+        raise RuntimeError('stream broken')
+    monkeypatch.setattr(file_management_app, 'open_preview', fake_stream)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/test.pdf",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "Failed to preview file" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'Failed to preview file' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_unsupported_format_error(monkeypatch):
     """UnsupportedFileTypeException from resolve_preview_file -> HTTP 400."""
-    _UnsupportedFileTypeException = sys.modules["contracts.errors.exceptions"].UnsupportedFileTypeException
+    _UnsupportedFileTypeException = sys.modules['contracts.errors.exceptions'].UnsupportedFileTypeException
 
     async def fake_resolve(object_name):
-        raise _UnsupportedFileTypeException("Unsupported file format for preview")
-
-    monkeypatch.setattr(file_management_app, "resolve_preview_file", fake_resolve)
-
+        raise _UnsupportedFileTypeException('Unsupported file format for preview')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', fake_resolve)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/archive.zip",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "not supported for preview" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/archive.zip', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'not supported for preview' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_internal_error(monkeypatch):
     """Unexpected exception from resolve_preview_file -> HTTP 500."""
+
     async def fake_resolve(object_name):
-        raise Exception("Internal server error")
-
-    monkeypatch.setattr(file_management_app, "resolve_preview_file", fake_resolve)
-
+        raise Exception('Internal server error')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', fake_resolve)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/test.pdf",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "Failed to preview file" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/test.pdf', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'Failed to preview file' in str(ei.value)
 
 
 @pytest.mark.asyncio
 async def test_preview_file_maps_unauthorized_error(monkeypatch):
+
     def unauthorized(_authorization):
-        raise file_management_app.UnauthorizedError("token expired")
-
-    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
-
+        raise file_management_app.UnauthorizedError('token expired')
+    monkeypatch.setattr(file_management_app, 'get_current_user_id', unauthorized)
     with pytest.raises(HTTPException) as raised:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/a.txt",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH,
-        )
-
+        await file_management_app.preview_file(object_name='knowledge_base/a.txt', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
     assert raised.value.status_code == 401
-    assert raised.value.detail == "token expired"
+    assert raised.value.detail == 'token expired'
 
 
 @pytest.mark.asyncio
 async def test_preview_file_office_conversion_error(monkeypatch):
     """OfficeConversionException (subclass of Exception) -> HTTP 500."""
-    _OfficeConversionException = sys.modules["contracts.errors.exceptions"].OfficeConversionException
+    _OfficeConversionException = sys.modules['contracts.errors.exceptions'].OfficeConversionException
 
     async def fake_resolve(object_name):
-        raise _OfficeConversionException("LibreOffice conversion failed")
-
-    monkeypatch.setattr(file_management_app, "resolve_preview_file", fake_resolve)
-
+        raise _OfficeConversionException('LibreOffice conversion failed')
+    monkeypatch.setattr(file_management_app, 'resolve_preview_file', fake_resolve)
     with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="knowledge_base/report.docx",
-            filename=None,
-            range_header=None,
-            authorization=MOCK_AUTH
-        )
-    assert "Failed to preview file" in str(ei.value)
+        await file_management_app.preview_file(object_name='knowledge_base/report.docx', filename=None, range_header=None, authorization=MOCK_AUTH, http_request=make_download_request())
+    assert 'Failed to preview file' in str(ei.value)
 
 
 # --- _parse_range_header unit tests ---
@@ -2336,3 +2039,9 @@ class TestFileAuditEntries:
         assert '"files_count":1' in messages[0]
         assert '"filenames":["note.txt"]' in messages[0]
         assert "secret attachment body" not in messages[0]
+
+
+def make_download_request():
+    async def receive():
+        await asyncio.Event().wait()
+    return types.SimpleNamespace(receive=receive)
