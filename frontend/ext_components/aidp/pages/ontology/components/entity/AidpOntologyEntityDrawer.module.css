@@ -1,0 +1,122 @@
+.propertyList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.propertyRow {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr)
+    auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.propertyDense {
+  margin-bottom: 0;
+}
+
+@media (max-width: 767px) {
+  .propertyRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.relationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #191919;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.propertyPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.propertyToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid #f0f0f0;
+  background: transparent;
+  color: #191919;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.propertyHeader {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr)
+    auto;
+  gap: 8px;
+  color: #191919;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.propertyHeader em {
+  margin-right: 4px;
+  color: #e02128;
+  font-style: normal;
+}
+
+.valueControl {
+  width: 100%;
+}
+
+.addProperty {
+  align-self: flex-start;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.primaryProperties {
+  margin-top: 12px;
+}
+
+.fieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.helpIcon {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
+}
+
+.kindControl {
+  width: 100%;
+}
+
+.kindControl :global(.ant-segmented-group) {
+  display: flex;
+}
+
+.kindControl :global(.ant-segmented-item) {
+  flex: 1;
+  text-align: center;
+}

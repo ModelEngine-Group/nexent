@@ -240,8 +240,10 @@ app.include_router(evaluator_router)
 app.include_router(evaluation_annotation_router)
 if ENABLE_AIDP_KNOWLEDGE:
     from ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
+    from ext_components.aidp.apps.aidp_ontology_app import aidp_ontology_router
 
     app.include_router(aidp_mgmt_router)
+    app.include_router(aidp_ontology_router)
 # New memory architecture routers (upstream #3497)
 app.include_router(memory_config_router)
 app.include_router(memory_record_router)

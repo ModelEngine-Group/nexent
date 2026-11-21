@@ -33,6 +33,7 @@ import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpG
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
 import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeInformationTab";
+import AidpKnowledgeOntologyTab from "./components/AidpKnowledgeOntologyTab";
 import AidpSensitiveWordsPage from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordsPage";
 import AidpKnowledgeFilesPanel from "@/ext_components/aidp/pages/knowledge-files/components/AidpKnowledgeFilesPanel";
 import { formatDetailDateTime } from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
@@ -46,7 +47,8 @@ interface AidpKnowledgeFilesPageProps {
   initialTab?: DetailTab;
 }
 
-type DetailTab = "files" | "tasks" | "information" | "sensitive-words";
+type DetailTab =
+  "files" | "tasks" | "information" | "ontology" | "sensitive-words";
 
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
 
@@ -239,6 +241,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             label: t("aidpKnowledge.detailTabInformation"),
           },
           {
+            key: "ontology",
+            label: t("aidpKnowledge.detailTabOntology"),
+          },
+          {
             key: "sensitive-words",
             label: t("aidpKnowledge.detailTabSensitiveWords"),
           },
@@ -275,6 +281,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           onEditMetadata={() => setEditingKbMode("metadata")}
           onRefreshDetail={() => detailQuery.refetch()}
         />
+      )}
+
+      {activeTab === "ontology" && (
+        <AidpKnowledgeOntologyTab kdsId={knowledgeBase.kds_id} />
       )}
 
       {activeTab === "sensitive-words" && (

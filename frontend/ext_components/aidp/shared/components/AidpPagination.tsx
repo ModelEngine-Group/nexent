@@ -19,7 +19,9 @@ interface AidpPaginationProps {
   /** True when the backend reports a confirmed global total. */
   totalReliable: boolean;
   hasMore: boolean;
-  /** Optional selected-row count shown next to the total. */
+  /** Tab toolbars already show the trusted total; hide the duplicate here. */
+  showTotal?: boolean;
+  /** When provided, render UCD-style "total / selected" instead of a plain total. */
   selectedCount?: number;
   /** Optional short hint displayed after the selected count. */
   selectionHint?: string;
@@ -35,6 +37,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
   total,
   totalReliable,
   hasMore,
+  showTotal = true,
   selectedCount,
   selectionHint,
   onPageChange,
@@ -58,11 +61,14 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
       locale={i18n.language.startsWith("zh") ? zhCN : enUS}
     >
       <div className={styles.pagination}>
-        {totalReliable && (
+        {totalReliable && showTotal && (
           <span className={styles.paginationTotal}>
-            {t("aidpKnowledge.showTotal", { count: total })}
-            {selectedCount !== undefined &&
-              ` ${t("aidpKnowledge.selectedCount", { count: selectedCount })}`}
+            {typeof selectedCount === "number"
+              ? t("aidpKnowledge.showTotalSelected", {
+                  total,
+                  selected: selectedCount,
+                })
+              : t("aidpKnowledge.showTotal", { count: total })}
             {selectionHint ? ` · ${selectionHint}` : ""}
           </span>
         )}

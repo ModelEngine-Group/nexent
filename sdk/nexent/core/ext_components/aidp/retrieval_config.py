@@ -11,9 +11,10 @@ DEFAULTS = {
     "search_method": ALL_CHANNELS, "top_k": 10, "score_threshold": 0.0,
     "reranking_enable": True, "reranking_mode": "performance", "rewrite_enable": False,
     "query_expansion_enable": False, "related_search_enable": False, "multi_modal": True,
-    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0,
+    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 10,
     "graph_top_k": 0, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
     "graph_score_threshold": 0.0, "graph_reranking_enable": True,
+    "ontology_enhance_enable": False, "rule_enable": False,
 }
 CONFIG_KEYS = frozenset(DEFAULTS)
 INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
@@ -43,7 +44,14 @@ def merge_config(*layers):
 
 def resolve_config(config):
     """Fill defaults and normalize the method without validation side effects."""
-    result = {**DEFAULTS, **merge_config(config)}
+    merged = merge_config(config)
+    # Real AIDP rejects hybrid_top_k=0, so a missing or legacy zero value
+    # resolves to 10 (bounded by top_k). Explicit positive caps are kept.
+    if not merged.get("hybrid_top_k"):
+        merged["hybrid_top_k"] = min(
+            DEFAULTS["hybrid_top_k"], merged.get("top_k", DEFAULTS["top_k"])
+        )
+    result = {**DEFAULTS, **merged}
     result["search_method"] = normalize_method(result["search_method"])
     if not result["reranking_enable"]:
         result["graph_reranking_enable"] = False
@@ -51,7 +59,8 @@ def resolve_config(config):
 
 
 BOOLEAN_KEYS = frozenset({"reranking_enable", "rewrite_enable", "query_expansion_enable",
-                          "related_search_enable", "multi_modal", "graph_reranking_enable"})
+                          "related_search_enable", "multi_modal", "graph_reranking_enable",
+                          "ontology_enhance_enable", "rule_enable"})
 THRESHOLD_KEYS = frozenset({"score_threshold", "vector_score_threshold",
                             "full_text_score_threshold", "graph_score_threshold"})
 
@@ -86,6 +95,14 @@ def validate_config(config, inherited=None):
     ):
         raise ValueError("graph_reranking_enable: requires reranking_enable")
     result = resolve_config(merged)
+    if (
+        result["ontology_enhance_enable"]
+        and result["reranking_enable"]
+        and result["reranking_mode"] == "jargon_coverage"
+    ):
+        raise ValueError(
+            "ontology_enhance_enable: change reranking_mode before enabling entity enhancement"
+        )
     channels = active_channels(result["search_method"])
     hybrid = bool(channels & {"vector_search", "full_text_search"})
     graph = "graph_search" in channels
@@ -114,6 +131,14 @@ def prepare_config(config, inherited):
 
 
 def build_payload(config, query, kds_list, metadata_condition=None):
+    if (
+        config.get("ontology_enhance_enable") is True
+        and config.get("reranking_enable") is True
+        and config.get("reranking_mode") == "jargon_coverage"
+    ):
+        raise ValueError(
+            "ontology_enhance_enable: change reranking_mode before enabling entity enhancement"
+        )
     channels = active_channels(config["search_method"])
     payload = {key: config[key] for key in (
         "search_method", "score_threshold", "reranking_enable", "rewrite_enable",
@@ -141,4 +166,8 @@ def build_payload(config, query, kds_list, metadata_condition=None):
         payload["graph_search_config"] = graph
     if metadata_condition:
         payload["metadata_condition"] = metadata_condition
+    if config.get("ontology_enhance_enable") is True:
+        payload["ontology_enhance_enable"] = True
+    if config.get("rule_enable") is True:
+        payload["rule_enable"] = True
     return payload
