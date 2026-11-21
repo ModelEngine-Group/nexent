@@ -522,13 +522,7 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(kdsId)}`,
       bindingByKb: (kdsId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/binding`,
-      relations: (domainId: string) =>
-        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/relations`,
-      relation: (domainId: string, relationId: string) =>
-        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/relations/${encodeURIComponent(relationId)}`,
       tasks: `${API_BASE_URL}/aidp-mgmt/ontology/tasks`,
-      task: (taskId: string) =>
-        `${API_BASE_URL}/aidp-mgmt/ontology/tasks/${encodeURIComponent(taskId)}`,
       metadataFields: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields`,
       metadataField: (domainId: string, fieldRef: string | number) =>
@@ -541,12 +535,6 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/count`,
       rule: (domainId: string, ruleId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/${encodeURIComponent(ruleId)}`,
-      chunks: (kdsId: string) =>
-        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/chunks`,
-      chunk: (kdsId: string, chunkId: string | number) =>
-        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/chunks/${encodeURIComponent(String(chunkId))}`,
-      batchMetadata: (kdsId: string) =>
-        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/chunks/metadata`,
       demoMode: `${API_BASE_URL}/aidp-mgmt/ontology/demo-mode`,
       export: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/export`,

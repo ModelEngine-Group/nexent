@@ -7,17 +7,6 @@
   flex: 1;
 }
 
-.switcherRow {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.switcher :global(.ant-segmented-item) {
-  min-height: 32px;
-  line-height: 32px;
-}
-
 .body {
   display: flex;
   flex-direction: column;

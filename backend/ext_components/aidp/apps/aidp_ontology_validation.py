@@ -52,9 +52,8 @@ def _forbidden(message: str) -> AppException:
 def _require_ontology_manager(user_id: str, tenant_id: str) -> None:
     """Only existing management roles may change ontology definitions.
 
-    Knowledge-base binding and chunk annotation are gated separately by the
-    target KB permission so a KB owner can bind or annotate without acquiring
-    platform-wide ontology rights.
+    Knowledge-base binding is gated separately by the target KB permission so
+    a KB owner can bind without acquiring platform-wide ontology rights.
     """
     role = get_user_role_by_tenant(user_id, tenant_id)
     if not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):

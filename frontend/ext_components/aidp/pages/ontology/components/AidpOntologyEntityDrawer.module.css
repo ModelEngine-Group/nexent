@@ -17,32 +17,9 @@
   margin-bottom: 0;
 }
 
-.propertyPrimary {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 32px;
-  white-space: nowrap;
-}
-
-.propertyPrimary :global(.ant-checkbox-wrapper) {
-  font-size: 13px;
-}
-
-.propertyEmpty {
-  color: #8c8c8c;
-  font-size: 14px;
-  line-height: 22px;
-}
-
 @media (max-width: 767px) {
   .propertyRow {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .propertyPrimary {
-    grid-column: 1 / -1;
-    justify-content: space-between;
   }
 }
 
@@ -61,22 +38,6 @@
   font-size: 14px;
   font-weight: 500;
   line-height: 22px;
-}
-
-.relationTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #191919;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
-}
-
-.relationHint {
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 20px;
 }
 
 .propertyPanel {

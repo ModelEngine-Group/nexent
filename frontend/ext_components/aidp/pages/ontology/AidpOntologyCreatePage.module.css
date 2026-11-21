@@ -6,13 +6,6 @@
   padding-bottom: 24px;
 }
 
-.subtitle {
-  margin: 4px 0 0;
-  color: var(--aidp-secondary);
-  font-size: 14px;
-  line-height: 22px;
-}
-
 .panel {
   display: flex;
   flex-direction: column;

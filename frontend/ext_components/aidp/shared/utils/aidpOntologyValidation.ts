@@ -7,8 +7,6 @@ export const ONTOLOGY_DESCRIPTION_MAX_CHARS = 512;
 export const METADATA_FIELD_NAME_MAX_CHARS = 63;
 export const METADATA_FIELD_NAME_MAX_BYTES = 64;
 export const METADATA_FIELD_LIMIT = 20;
-export const METADATA_KEY_MAX_BYTES = 64;
-export const METADATA_VALUE_MAX_BYTES = 256;
 export const ENTITY_API_NAME_MAX_CHARS = 64;
 export const ENTITY_DESCRIPTION_MAX_CHARS = 512;
 
@@ -40,23 +38,6 @@ export const validateFieldName = (value: string): string | null => {
   }
   if (utf8ByteLength(name) > METADATA_FIELD_NAME_MAX_BYTES) {
     return `字段名不能超过 ${METADATA_FIELD_NAME_MAX_BYTES} 字节`;
-  }
-  return null;
-};
-
-export const validateMetadataText = (
-  fieldName: string,
-  value: string
-): string | null => {
-  if (utf8ByteLength(value) > METADATA_VALUE_MAX_BYTES) {
-    return `字段「${fieldName}」的值不能超过 ${METADATA_VALUE_MAX_BYTES} 字节`;
-  }
-  return null;
-};
-
-export const validateMetadataKey = (key: string): string | null => {
-  if (utf8ByteLength(key) > METADATA_KEY_MAX_BYTES) {
-    return `字段键不能超过 ${METADATA_KEY_MAX_BYTES} 字节`;
   }
   return null;
 };

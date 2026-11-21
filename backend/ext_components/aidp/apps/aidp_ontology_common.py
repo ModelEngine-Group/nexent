@@ -42,7 +42,6 @@ async def _load_bindings(
     tenant_id: str,
     *,
     domain_id: str | None = None,
-    readable_only: bool = True,
 ) -> list[dict[str, Any]]:
     """Load binding rows and drop KBs the caller cannot read.
 
@@ -63,7 +62,7 @@ async def _load_bindings(
     role = get_user_role_by_tenant(user_id, tenant_id)
     # Ontology managers see every binding so the tab agrees with the trusted
     # binding count. Other callers only see knowledge bases they can read.
-    if readable_only and rows and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
+    if rows and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         allowed = await run_blocking(
             "aidp-ontology-binding-access",
             perms.filter_accessible_kds,
@@ -183,9 +182,6 @@ def _domain_summary(item: dict[str, Any], binding_count: int | None) -> dict[str
         "metadata_count": _optional_count(item.get("metadata_count")),
         "entity_count": _optional_count(item.get("entity_count")),
         "rule_count": _optional_count(item.get("rule_count")),
-        "created_by": item.get("created_by")
-        or item.get("creator_name")
-        or item.get("create_user"),
         "create_time": item.get("create_time") or item.get("created_at"),
         "update_time": item.get("update_time") or item.get("updated_at"),
     }
@@ -193,7 +189,6 @@ def _domain_summary(item: dict[str, Any], binding_count: int | None) -> dict[str
 
 def _entity_summary(
     item: dict[str, Any],
-    binding_count: int | None,
     *,
     entity_id: str | None = None,
     kind: str | None = None,
@@ -218,13 +213,8 @@ def _entity_summary(
         "parent_entities": item.get("parent_entities") or [],
         "synonym_entities": item.get("synonym_entities") or [],
         "child_entities": item.get("child_entities") or item.get("children") or [],
-        "chunk_count": item.get("chunk_count")
-        if isinstance(item.get("chunk_count"), int)
-        else None,
-        "extended_properties": item.get("extended_properties") or [],
         "create_time": item.get("create_time") or item.get("createTime"),
         "update_time": item.get("update_time") or item.get("updateTime"),
-        "bound_kb_count": binding_count,
     }
 
 

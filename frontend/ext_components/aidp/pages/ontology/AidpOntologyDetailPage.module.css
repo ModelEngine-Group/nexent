@@ -5,44 +5,6 @@
   --aidp-muted: #8c8c8c;
 }
 
-.breadcrumb {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  min-width: 0;
-  color: var(--aidp-secondary);
-  font-size: 18px;
-  line-height: 28px;
-}
-
-.breadcrumbLink {
-  color: var(--aidp-secondary);
-  text-decoration: none;
-}
-
-.breadcrumbLink:hover {
-  color: var(--aidp-primary);
-}
-
-.breadcrumbLink:focus-visible {
-  outline: 2px solid var(--aidp-primary);
-  outline-offset: 2px;
-}
-
-.breadcrumbSeparator {
-  color: #c9c9c9;
-}
-
-.breadcrumbCurrent {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--aidp-text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .hero {
   display: flex;
   flex-direction: column;
@@ -104,21 +66,6 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-
-.backButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: #191919;
-  border-radius: 6px;
-}
-
-.backButton:hover {
-  color: var(--aidp-primary);
-  background: #f3f3f3;
 }
 
 .titleEdit {
@@ -203,10 +150,6 @@
   line-height: 20px;
 }
 
-.overviewNote {
-  width: 100%;
-}
-
 .tabs {
   flex-shrink: 0;
   margin-top: 16px;
@@ -253,21 +196,6 @@
 
 .errorAlert {
   margin-top: 16px;
-}
-
-.confirmBody {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: var(--aidp-text);
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.confirmWarning {
-  color: var(--aidp-muted);
-  font-size: 14px;
-  line-height: 22px;
 }
 
 @media (max-width: 767px) {

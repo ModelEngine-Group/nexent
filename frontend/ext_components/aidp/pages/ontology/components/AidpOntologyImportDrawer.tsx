@@ -177,7 +177,7 @@ const AidpOntologyImportDrawer: React.FC<AidpOntologyImportDrawerProps> = ({
         <div className={drawerStyles.footer}>
           {result ? (
             <Button type="primary" onClick={handleClose}>
-              {t("aidpKnowledge.ontologyAnnotateDone")}
+              {t("aidpKnowledge.ontologyImportDone")}
             </Button>
           ) : (
             <>

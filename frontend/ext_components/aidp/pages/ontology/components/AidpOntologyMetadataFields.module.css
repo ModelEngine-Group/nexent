@@ -1,53 +1,3 @@
-.columnTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.columnTitle :global(.ant-tag) {
-  margin-inline-end: 0;
-  font-size: 11px;
-  line-height: 18px;
-}
-
-.nameCell {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.idText {
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.muted {
-  color: #8c8c8c;
-}
-
-.selectionBar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border: 1px solid #bae0ff;
-  border-radius: 8px;
-  background: #f0f7ff;
-  color: #191919;
-  font-size: 13px;
-  line-height: 20px;
-  flex-shrink: 0;
-}
-
-.selectionBar :global(.ant-btn) {
-  height: 20px;
-  padding: 0;
-  font-size: 13px;
-}
-
 .confirmBody {
   display: flex;
   flex-direction: column;
@@ -62,76 +12,10 @@
   line-height: 22px;
 }
 
-.demoPanel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 4px;
-  padding: 16px;
-  border: 1px dashed #ffccc7;
-  border-radius: 8px;
-  background: #fffafa;
-}
-
-.demoPanelTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #191919;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
-}
-
-.inlineFields {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.inlineFields :global(.ant-form-item) {
-  flex: 1;
-  min-width: 0;
-}
-
-.rangeItem {
-  flex: 1;
-  margin-bottom: 0 !important;
-}
-
 .detailBody {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.detailSectionTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  color: #191919;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
-}
-
-@media (max-width: 767px) {
-  .inlineFields {
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .inlineFields :global(.ant-form-item) {
-    width: 100%;
-  }
-}
-
-.nameLine {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
 }
 
 .nameLink {
@@ -156,30 +40,6 @@
 .nameLink:focus-visible {
   outline: 2px solid #0067d1;
   outline-offset: 2px;
-}
-
-.metadataFooter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-  padding: 4px 2px;
-  color: #595959;
-  font-size: 13px;
-  line-height: 20px;
-  flex-shrink: 0;
-}
-
-.metadataFooter :global(.ant-btn) {
-  height: 20px;
-  padding: 0;
-  font-size: 13px;
-}
-
-.candidatePanel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .typeSegmented {

@@ -14,7 +14,6 @@ export interface AidpOntologyDomain {
   metadata_count?: number | null;
   entity_count?: number | null;
   rule_count?: number | null;
-  created_by?: string | null;
   create_time?: string | number | null;
   update_time?: string | number | null;
 }
@@ -49,13 +48,8 @@ export interface AidpOntologyEntity {
   synonym_entities: unknown[];
   child_entities?: unknown[];
   /** Optional AIDP audit values; absent fields render as an em dash. */
-  create_time?: string | null;
-  update_time?: string | null;
-  /** Demo-only count; AIDP has no per-entity chunk count API. */
-  chunk_count?: number | null;
-  extended_properties?: Array<{ key: string; value: string }>;
-  /** Count of knowledge bases bound to the owning ontology domain. */
-  bound_kb_count: number | null;
+  create_time?: string | number | null;
+  update_time?: string | number | null;
   /** False when the per-row detail call failed and properties are unknown. */
   detail_loaded?: boolean | null;
   /** Create-only: child relations failed after the entity itself was created. */
@@ -67,7 +61,6 @@ export interface AidpOntologyEntityListResponse {
   total_count: number;
   has_more: boolean;
   total_reliable: boolean;
-  bound_kb_count: number | null;
 }
 
 export interface AidpOntologyEntityCreatePayload {
@@ -198,7 +191,6 @@ export interface AidpOntologyTask {
   task_type: string | null;
   status: string | null;
   progress: number | null;
-  description: string;
   error_message: string;
   start_time: number | string | null;
   end_time: number | string | null;
@@ -210,33 +202,6 @@ export interface AidpOntologyTaskListResponse {
   task_count: number | null;
   has_more: boolean;
   total_reliable: boolean;
-}
-
-export interface AidpChunk {
-  chunk_id: number | string;
-  chunk_text: string;
-  chunk_type: string;
-  file_name: string;
-  file_url: string;
-  page_ids: number[];
-  metadata: Record<string, unknown>;
-}
-
-export interface AidpChunkListResponse {
-  value: AidpChunk[];
-  total_count: number;
-  has_more: boolean;
-  total_reliable: boolean;
-}
-
-export interface AidpBatchMetadataResult {
-  total: number;
-  success_count: number;
-  failed_count: number;
-  /** Confirmed AIDP response reports a partial-failure flag with counters. */
-  partial_failure?: boolean;
-  success_list: Array<{ chunk_id: number | string }>;
-  failed_list: Array<{ chunk_id: number | string; message: string }>;
 }
 
 export interface AidpOntologyExportPayload {

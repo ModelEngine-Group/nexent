@@ -32,16 +32,7 @@ logger = logging.getLogger("aidp_ontology_service")
 _ONTOLOGY_TIMEOUT_SECONDS = 60.0
 
 
-_CHUNK_BATCH_MAX_IDS = 100
-
-
 _METADATA_FIELD_LIMIT = 20
-
-
-_METADATA_KEY_MAX_BYTES = 64
-
-
-_METADATA_VALUE_MAX_BYTES = 256
 
 
 _METADATA_TYPES = ("string", "number", "date")
@@ -74,19 +65,6 @@ def _domain_id_value(domain_id: Any) -> int:
             "AIDP ontology domain ID must not be negative",
         )
     return value
-
-
-def _get_chunks_path(kds_id: str, tenant_id: str | None = None) -> str:
-    # Confirmed real-environment route is KB-side; the tenant-scoped path is
-    # kept only as a fallback for deployments that still expose it.
-    return f"/KnowledgeBase/KnowledgeBases/{kds_id}/Chunks"
-
-
-def _get_legacy_chunks_path(kds_id: str, tenant_id: str | None = None) -> str:
-    return (
-        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
-        f"/KnowledgeBases/{kds_id}/Chunks"
-    )
 
 
 def _ontology_request(
@@ -187,12 +165,12 @@ def _list_envelope(
 ) -> dict[str, Any]:
     """Normalize every AIDP list envelope into one Nexent shape.
 
-    The deployed service answers with four different envelopes depending on the
-    endpoint: ``value/next_link/total_count`` (domains, rules, domain bindings),
-    ``items/next_link/page/page_size/total`` (entities, chunks, relations),
-    ``value/has_next/next_link/total_count`` (Metadata fields) and
-    ``task_list/total`` (Tasks). Items and totals may sit at the top level or
-    inside a ``data`` wrapper, so both levels are inspected.
+    The deployed service uses three envelopes in this module:
+    ``value/next_link/total_count`` (domains, rules, domain bindings),
+    ``items/next_link/page/page_size/total`` (entities, relations), and
+    ``value/has_next/next_link/total_count`` (Metadata fields). Items and totals
+    may sit at the top level or inside a ``data`` wrapper, so both levels are
+    inspected. Tasks are normalized separately because they use ``task_list``.
     """
     data = payload.get("data") if isinstance(payload, dict) else None
     source = data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
@@ -236,14 +214,4 @@ def _list_envelope(
 METADATA_FIELD_LIMIT = _METADATA_FIELD_LIMIT
 
 
-METADATA_KEY_MAX_BYTES = _METADATA_KEY_MAX_BYTES
-
-
-METADATA_VALUE_MAX_BYTES = _METADATA_VALUE_MAX_BYTES
-
-
 METADATA_TYPES = _METADATA_TYPES
-
-
-CHUNK_BATCH_MAX_IDS = _CHUNK_BATCH_MAX_IDS
-

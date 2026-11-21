@@ -4,9 +4,6 @@ import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 import type {
-  AidpBatchMetadataResult,
-  AidpChunk,
-  AidpChunkListResponse,
   AidpOntologyBinding,
   AidpOntologyBindingListResponse,
   AidpOntologyDomain,
@@ -25,7 +22,6 @@ import type {
   AidpOntologyRule,
   AidpOntologyRuleListResponse,
   AidpOntologyRulePayload,
-  AidpOntologyTask,
   AidpOntologyTaskListResponse,
 } from "../types/ontology";
 
@@ -231,12 +227,6 @@ class AidpOntologyService {
     );
   }
 
-  getTask(taskId: string): Promise<AidpOntologyTask> {
-    return jsonRequest<AidpOntologyTask>(
-      API_ENDPOINTS.aidpMgmt.ontology.task(taskId)
-    );
-  }
-
   getKnowledgeBaseBinding(
     kdsId: string
   ): Promise<{ binding: AidpOntologyBinding | null }> {
@@ -382,41 +372,6 @@ class AidpOntologyService {
     return jsonRequest<{ success: boolean }>(
       API_ENDPOINTS.aidpMgmt.ontology.rule(domainId, ruleId),
       { method: "DELETE" }
-    );
-  }
-
-  listChunks(
-    kdsId: string,
-    fileUuid: string,
-    page = 1,
-    pageSize = 20
-  ): Promise<AidpChunkListResponse> {
-    return jsonRequest<AidpChunkListResponse>(
-      buildUrl(API_ENDPOINTS.aidpMgmt.ontology.chunks(kdsId), {
-        file_uuid: fileUuid,
-        page,
-        page_size: pageSize,
-      })
-    );
-  }
-
-  getChunk(kdsId: string, chunkId: string | number): Promise<AidpChunk> {
-    return jsonRequest<AidpChunk>(
-      API_ENDPOINTS.aidpMgmt.ontology.chunk(kdsId, chunkId)
-    );
-  }
-
-  batchSetChunkMetadata(
-    kdsId: string,
-    payload: {
-      domain_id: string;
-      metadata: Record<string, unknown>;
-      chunk_ids: Array<string | number>;
-    }
-  ): Promise<AidpBatchMetadataResult> {
-    return jsonRequest<AidpBatchMetadataResult>(
-      API_ENDPOINTS.aidpMgmt.ontology.batchMetadata(kdsId),
-      { method: "PATCH", body: JSON.stringify(payload) }
     );
   }
 

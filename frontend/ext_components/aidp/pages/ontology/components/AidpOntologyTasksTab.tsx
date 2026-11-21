@@ -34,7 +34,6 @@ type TaskStatus =
 interface DemoTaskRow {
   id: string;
   name: string;
-  description: string;
   status: TaskStatus;
   progress: number | null;
   startTime: string;
@@ -63,7 +62,6 @@ const TASK_STATUS_MAP: Record<string, TaskStatus> = {
 const toTaskRow = (task: AidpOntologyTask): DemoTaskRow => ({
   id: task.task_id ?? "—",
   name: task.task_type ?? "—",
-  description: task.description || "",
   status: TASK_STATUS_MAP[String(task.status ?? "").toLowerCase()] ?? "queued",
   progress: task.progress,
   startTime: formatAidpDateTime(task.start_time),
@@ -83,8 +81,6 @@ const DEMO_TASKS: DemoTaskRow[] = [
   {
     id: "29303-3",
     name: "同步实体",
-    description:
-      "将实体新增或修改的标签同步至全部知识库，并补齐关联知识库的实体标签。",
     status: "queued",
     progress: 0,
     startTime: "2023-01-12 15:30",
@@ -93,8 +89,6 @@ const DEMO_TASKS: DemoTaskRow[] = [
   {
     id: "29303-4",
     name: "新增元数据",
-    description:
-      "将实体新增或修改的标签同步至全部知识库，并补齐关联知识库的实体标签。",
     status: "success",
     progress: 100,
     startTime: "2023-01-12 15:30",
@@ -103,8 +97,6 @@ const DEMO_TASKS: DemoTaskRow[] = [
   {
     id: "29303-5",
     name: "更新元数据",
-    description:
-      "将实体新增或修改的标签同步至全部知识库，并补齐关联知识库的实体标签。",
     status: "running",
     progress: 45,
     startTime: "2023-01-12 15:30",
@@ -113,8 +105,6 @@ const DEMO_TASKS: DemoTaskRow[] = [
   {
     id: "29303-6",
     name: "新增元数据",
-    description:
-      "将实体新增或修改的标签同步至全部知识库，并补齐关联知识库的实体标签。",
     status: "failed",
     progress: 50,
     startTime: "2023-01-12 15:30",
@@ -126,8 +116,6 @@ const DEMO_TASKS: DemoTaskRow[] = [
   {
     id: "29303-7",
     name: "新增元数据",
-    description:
-      "将实体新增或修改的标签同步至全部知识库，并补齐关联知识库的实体标签。",
     status: "terminated",
     progress: 50,
     startTime: "2023-01-12 15:30",

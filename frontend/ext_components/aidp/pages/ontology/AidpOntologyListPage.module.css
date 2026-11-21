@@ -172,19 +172,6 @@
   line-height: 20px;
 }
 
-.cardUpdated,
-.cardCounts,
-.cardCounts span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cardCounts {
-  gap: 12px;
-  margin-left: auto;
-}
-
 .tableArea {
   min-width: 0;
   min-height: 0;
@@ -303,29 +290,9 @@
   margin: 40px auto;
 }
 
-.emptyIcon {
-  color: #bfbfbf;
-  font-size: 48px;
-}
-
 .paginationRow {
   flex-shrink: 0;
   padding-top: 16px;
-}
-
-.confirmBody {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: var(--aidp-text);
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.confirmWarning {
-  color: #8c8c8c;
-  font-size: 14px;
-  line-height: 22px;
 }
 
 @media (max-width: 767px) {

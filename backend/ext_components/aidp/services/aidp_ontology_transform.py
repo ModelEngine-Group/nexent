@@ -360,10 +360,6 @@ def build_import_request(document: Any, domain_name: str) -> tuple[dict[str, Any
     return request_body, counts
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
 def unwrap_payload(payload: Any) -> dict[str, Any]:
     """Return the effective data object of an AIDP envelope."""
     if not isinstance(payload, dict):

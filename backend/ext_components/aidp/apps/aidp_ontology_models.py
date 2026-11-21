@@ -18,7 +18,6 @@ from ext_components.aidp.apps.aidp_ontology_validation import (
     _validate_domain_name,
     _validate_field_name,
 )
-from ext_components.aidp.services.aidp_ontology_common import CHUNK_BATCH_MAX_IDS
 
 
 class EntityPropertyRequest(BaseModel):
@@ -258,23 +257,6 @@ class OntologyMetadataFieldRenameRequest(BaseModel):
     @classmethod
     def validate_field_name(cls, value: str) -> str:
         return _validate_field_name(value)
-
-
-class ChunkMetadataUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    domain_id: str = Field(
-        ..., min_length=1, description="Ontology domain that owns the fields"
-    )
-    metadata: dict[str, Any] = Field(..., min_length=1)
-    chunk_ids: list[int | str] = Field(..., min_length=1)
-
-    @field_validator("chunk_ids")
-    @classmethod
-    def validate_chunk_ids(cls, value: list[int | str]) -> list[int | str]:
-        if len(value) > CHUNK_BATCH_MAX_IDS:
-            raise ValueError(f"单次最多标注 {CHUNK_BATCH_MAX_IDS} 个 Chunk")
-        return value
 
 
 class OntologyExportRequest(BaseModel):

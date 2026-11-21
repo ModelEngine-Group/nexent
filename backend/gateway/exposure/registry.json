@@ -6878,39 +6878,6 @@
       ]
     },
     {
-      "method": "PATCH",
-      "path": "/api/aidp-mgmt/ontology/knowledge-bases/{kds_id}/chunks/metadata",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-67025b3b4f9388b9",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/aidp-mgmt/ontology/knowledge-bases/{kds_id}/chunks",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-fe3c54d28265c683",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
-      "path": "/api/aidp-mgmt/ontology/knowledge-bases/{kds_id}/chunks/{chunk_id}",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-93fc508c9b6156ce",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
       "method": "POST",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/export",
       "transport": "http",

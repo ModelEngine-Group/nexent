@@ -280,27 +280,23 @@ async def list_ontology_entities(
     await _auth(request)
     server_url, api_key = _credentials()
     page_size = size or page_size
-    envelope, count = await asyncio.gather(
-        run_blocking(
-            "aidp-ontology-entity-list",
-            list_ontology_entities_impl,
-            server_url,
-            api_key,
-            domain_id,
-            page=page,
-            page_size=page_size,
-            keyword=keyword,
-            kind=kind,
-            lane="control-io",
-            owner="config",
-        ),
-        _binding_count(domain_id),
+    envelope = await run_blocking(
+        "aidp-ontology-entity-list",
+        list_ontology_entities_impl,
+        server_url,
+        api_key,
+        domain_id,
+        page=page,
+        page_size=page_size,
+        keyword=keyword,
+        kind=kind,
+        lane="control-io",
+        owner="config",
     )
     rows = await _enrich_entity_rows(
         server_url, api_key, domain_id, envelope["value"], kind or "entity"
     )
-    envelope["value"] = [_entity_summary(item, count) for item in rows]
-    envelope["bound_kb_count"] = count
+    envelope["value"] = [_entity_summary(item) for item in rows]
     return JSONResponse(status_code=HTTPStatus.OK, content=envelope)
 
 
@@ -401,7 +397,6 @@ async def create_ontology_entity(
             relation_error = str(exc)
     summary = _entity_summary(
         result,
-        await _binding_count(domain_id),
         entity_id=str(entity_id) if entity_id is not None else None,
         kind=body.kind,
     )
@@ -417,18 +412,15 @@ async def get_ontology_entity(
 ) -> JSONResponse:
     await _auth(request)
     server_url, api_key = _credentials()
-    result, count = await asyncio.gather(
-        run_blocking(
-            "aidp-ontology-entity-get",
-            get_ontology_entity_impl,
-            server_url,
-            api_key,
-            domain_id,
-            entity_id,
-            lane="control-io",
-            owner="config",
-        ),
-        _binding_count(domain_id),
+    result = await run_blocking(
+        "aidp-ontology-entity-get",
+        get_ontology_entity_impl,
+        server_url,
+        api_key,
+        domain_id,
+        entity_id,
+        lane="control-io",
+        owner="config",
     )
     row = dict(result)
     row["entity_id"] = entity_id
@@ -442,7 +434,7 @@ async def get_ontology_entity(
     )
     return JSONResponse(
         status_code=HTTPStatus.OK,
-        content=_entity_summary(enriched[0], count, entity_id=entity_id),
+        content=_entity_summary(enriched[0], entity_id=entity_id),
     )
 
 
@@ -509,11 +501,7 @@ async def update_ontology_entity(
     )
     return JSONResponse(
         status_code=HTTPStatus.OK,
-        content=_entity_summary(
-            result,
-            await _binding_count(domain_id),
-            entity_id=entity_id,
-        ),
+        content=_entity_summary(result, entity_id=entity_id),
     )
 
 
