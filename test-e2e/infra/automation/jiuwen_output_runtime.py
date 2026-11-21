@@ -38,7 +38,21 @@ async def persist_output(monkeypatch, info, output):
                                  "content": "Current task"}, "owner")
     info.conversation_id, info.user_id = conversation, "owner"
     reference = AgentRunReference(conversation_id=conversation, run_id=uuid.uuid4().hex)
-    values = [("agentos_observer", event) for event in output]
+    from runtime.agentos.prepared_run import _execution_record
+
+    values = []
+    for event in output:
+        if event.get("type") == "execution_result":
+            key, record = _execution_record(info.observer.execution_history, event)
+            assert record is not None
+            fact = record.payload()
+            for field in ("invocation_id", "tool_call_id", "step_id"):
+                if isinstance(event.get(field), str):
+                    fact[field] = event[field]
+            values.append(("agentos_execution_fact", fact))
+            info.observer.execution_history.bind_run(key, reference.run_id, len(values))
+        else:
+            values.append(("agentos_observer", event))
     values.append(("agentos_terminal", {"status": info.attempt_outcome}))
     frames = tuple(f"id: {reference.run_id}:{index}\nevent: {kind}\ndata: {json.dumps(value)}\n\n".encode()
                    for index, (kind, value) in enumerate(values, 1))

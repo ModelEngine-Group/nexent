@@ -284,3 +284,45 @@ def assert_defaulted_skill_history(info, output, state):
     register_authorized_sources([item], store, "restored-owner")
     sources = store.authorized_sources("restored-owner")
     assert any(source.source_kind == "tool_result" and source.text == result["result"] for source in sources)
+
+
+@pytest.mark.parametrize("protocol", ["native", "text"])
+def test_persisted_original_is_readable_by_fresh_codeagent(
+    monkeypatch, tmp_path, protocol
+):
+    from execution_owner_runtime import run_historical_reader
+    from management.db.conversation.repository import (
+        get_conversation_history,
+        get_historical_context,
+    )
+
+    with context_database(monkeypatch):
+        with monkeypatch.context() as seed:
+            info, output, state = asyncio.run(
+                run_historical_reader(
+                    seed, None, None, None, seed=True, protocol=protocol
+                )
+            )
+        assert state["business_calls"] == 1
+        assistant, _, _ = asyncio.run(persist_output(monkeypatch, info, output))
+        before = get_conversation_history(info.conversation_id, "owner")
+        historical = get_historical_context(
+            info.conversation_id, None, "owner", "spike-tenant", before_message_index=2
+        )
+        result = next(
+            record
+            for turn in historical["conversation_turns"]
+            for record in turn["execution_records"]
+            if record["record_type"] == "execution_result"
+        )
+        event = json.loads(result["content"])
+        reference = (
+            f"message:{assistant['message_id']}/unit-index:{result['unit_index']}"
+        )
+        asyncio.run(
+            run_historical_reader(
+                monkeypatch, historical, reference, event["content"], protocol=protocol
+            )
+        )
+        assert get_conversation_history(info.conversation_id, "owner") == before
+        assert state["business_calls"] == 1

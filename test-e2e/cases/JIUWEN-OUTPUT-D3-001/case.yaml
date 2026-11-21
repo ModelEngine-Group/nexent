@@ -45,6 +45,11 @@ case:
       failure and a native MCP tool timeout in both protocols and locales, then persist and reload each run.
     expected: Failed runs identify model or MCP origins and retain error codes and request identity; recovered local-tool
       errors remain visible without failing the run. Public stream and history contain the same safe localized diagnostics.
+  - order: 4
+    action: Reload the authorized persisted tool source and run a fresh CodeAgent reader through controlled HTTP
+      model responses and the real SDK.
+    expected: The actually rendered historical reference is readable under the fresh run owner with exact source
+      bytes; no business tool is replayed and source facts remain unchanged.
   expected_results:
   - Observations retain ordered content/reasoning blocks, exact tool results, full provider IDs, unique local IDs
     and invocation grouping; usage absent is unknown. Public step capacity and processing mode agree with the actual
@@ -55,7 +60,9 @@ case:
     storage, with final blocks unambiguously linked. Internal context and final protocol envelopes cannot leak into
     public answers or saved display. Step labels and other non-mergeable content survive exactly one envelope rather
     than acquiring a second serialized event inside their content. A valid empty awaiting_input terminal is not
-    treated as an invalid final answer; source records remain unchanged by history projection.
+    treated as an invalid final answer; source records remain unchanged by history projection. A fresh CodeAgent
+    run can read the exact authorized persisted original advertised in its context, without replaying its business
+    tool or changing saved facts.
   - Specific localized error text and existing optional metadata agree across SSE, subscriber cache, saved facts
     and historical projection without replacing the original cause.
   forbidden_side_effects:
@@ -68,6 +75,7 @@ case:
     steps:
     - 1
     - 2
+    - 4
     expected_results:
     - 1
     - 2
