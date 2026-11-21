@@ -38,7 +38,7 @@ def test_complete_payload_filters_channels(method):
         assert "hybrid_search_config" not in payload
     assert ("graph_search_config" in payload) == ("graph_search" in channels)
     if "graph_search" in channels:
-        assert payload["graph_search_config"] == {"graph_top_k": 0, "graph_score_threshold": 0, "graph_reranking_enable": True}
+        assert payload["graph_search_config"] == {"graph_score_threshold": 0, "graph_reranking_enable": True}
 
 
 def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
@@ -88,6 +88,10 @@ def test_method_normalization_and_inactive_quota():
     assert normalize_method("graph_search|vector_search|full_text_search") == ALL_CHANNELS
     p = build_payload(validate_config({"search_method":"graph_search","hybrid_top_k":100,"vector_candidates":1}),"q",["kb"])
     assert "hybrid_search_config" not in p
+    p = build_payload(validate_config({"search_method":"vector_search","hybrid_top_k":5}),"q",["kb"])
+    assert p["hybrid_search_config"]["hybrid_top_k"] == 5
+    p = build_payload(validate_config({"search_method":"graph_search","graph_top_k":5}),"q",["kb"])
+    assert p["graph_search_config"]["graph_top_k"] == 5
 
 
 def test_fixed_candidates_are_not_followed_by_layer_equality():
