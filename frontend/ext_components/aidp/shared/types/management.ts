@@ -24,6 +24,12 @@ export interface AidpKbDetail {
   llm_model_name?: string | null;
   is_exist_graph?: boolean | null;
   graph_config?: string | Record<string, unknown> | null;
+  /** Whether AIDP generates a per-file summary for this KB. */
+  summary_enable?: boolean;
+  /** AIDP LLM model_name used for summaries; empty when disabled/legacy. */
+  summary_model?: string;
+  /** Hidden mirror of summary_enable; explicit false means "not previewable". */
+  summary_preview?: boolean;
   /** Sensitive word interception for files ingested after it is enabled. */
   sensitive_intercept_enable?: number | null;
   created_by?: string | null;
@@ -282,6 +288,10 @@ export interface AidpCreateKbPayload {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   /** Group IDs granted the in-group permission. */
   group_ids?: number[];
+  /** AIDP file summary configuration; same fields on create and update. */
+  summary_enable?: boolean;
+  summary_model?: string;
+  summary_preview?: boolean;
 }
 
 /**
@@ -320,6 +330,12 @@ export interface AidpUpdateKbPayload {
   is_exist_graph?: boolean;
   /** Partial structured graph configuration update; merged into the stored AIDP config. */
   graph_config?: AidpGraphConfigUpdate;
+  /** File summary switch; same field as on creation. */
+  summary_enable?: boolean;
+  /** AIDP LLM model_name; required when summary_enable is true. */
+  summary_model?: string;
+  /** Hidden mirror of summary_enable; the backend always forces it to match. */
+  summary_preview?: boolean;
 }
 
 /** Body for PATCH /aidp-mgmt/aidp-permissions/{kds_id}. */
@@ -329,6 +345,12 @@ export interface AidpSetPermissionPayload {
   /** Only include metadata fields when their values have changed. */
   name?: string;
   description?: string;
+  /** File summary switch; same field as on creation. */
+  summary_enable?: boolean;
+  /** AIDP LLM model_name; required when summary_enable is true. */
+  summary_model?: string;
+  /** Hidden mirror of summary_enable; the backend always forces it to match. */
+  summary_preview?: boolean;
 }
 
 export interface AidpSaveSettingsResult {

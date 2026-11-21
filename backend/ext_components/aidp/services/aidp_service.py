@@ -12,6 +12,10 @@ from typing import Any, Dict, List
 from urllib.parse import quote, urljoin
 
 import httpx
+from nexent.core.ext_components.aidp.retrieval_config import (
+    build_payload,
+    resolve_config,
+)
 from nexent.utils.http_client_manager import http_client_manager
 
 from contracts.errors.codes import ErrorCode
@@ -19,6 +23,7 @@ from contracts.errors.exceptions import AppException
 from ext_components.aidp.services.aidp_client import (
     _AIDP_DOWNLOAD_TIMEOUT_SECONDS,
     _AIDP_READ_TIMEOUT_SECONDS,
+    _get_retrieval_path,
     _build_list_query,
     _extract_upstream_error,
     _get_channels_path,
@@ -1665,6 +1670,7 @@ def list_aidp_docs_impl(
         )
 
 
+
 # ==================== Knowledge-file history (all-status listing) ====================
 
 # Channel entries are read through alias lists because AIDP deployments spell
@@ -2162,11 +2168,6 @@ def get_aidp_graph_template_impl(
     except ValueError as exc:
         logger.exception("Failed to parse AIDP graph template response")
         raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Invalid AIDP graph template JSON") from exc
-
-
-def _get_retrieval_path(tenant_id: str | None = None) -> str:
-    """Build the tenant-scoped retrieval (FusionSearch) API path."""
-    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Retrieval/FusionSearch"
 
 
 def fusion_search_impl(

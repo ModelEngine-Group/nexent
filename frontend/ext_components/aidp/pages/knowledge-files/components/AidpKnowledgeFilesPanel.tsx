@@ -15,6 +15,7 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   FolderOutlined,
+  InfoCircleOutlined,
   MoreOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -33,6 +34,7 @@ import { ApiError } from "@/services/api";
 import log from "@/lib/logger";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
+import AidpFileDetailView from "@/ext_components/aidp/pages/knowledge-files/AidpFileDetailView";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { useAidpFolderTree } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpFolderTree";
@@ -118,7 +120,7 @@ const FILE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   created_at: 100,
   updated_at: 100,
   file_status: 80,
-  actions: 105,
+  actions: 135,
 };
 
 // AIDP caps a single batch document removal request at 10 files.
@@ -172,6 +174,9 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<AidpDocumentItem | null>(null);
+  // The file detail replaces the list while open: it hosts the preview, the
+  // summary tab and the semantic chunk panel for one file.
+  const [detailFile, setDetailFile] = useState<AidpDocumentItem | null>(null);
   const [moveFailures, setMoveFailures] = useState<FileMoveFailure | null>(
     null
   );
@@ -190,7 +195,8 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     fileMoveRequest !== null ||
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
-    previewFile !== null;
+    previewFile !== null ||
+    detailFile !== null;
 
   const treeQuery = useAidpFolderTree(
     knowledgeBase.kds_id,
@@ -1204,7 +1210,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
       title: t("aidpKnowledge.detailOperation"),
       key: "actions",
       fixed: "right",
-      width: 120,
+      width: 150,
       render: (_value, record) => {
         if (record.kind === "folder") {
           const items = folderMenuItems();
@@ -1242,6 +1248,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         const menuItems = fileMenuItems(record.file);
         return (
           <div className="flex items-center gap-2 whitespace-nowrap">
+            <Tooltip title={t("aidpKnowledge.fileDetailOpen")}>
+              <Button
+                type="text"
+                size="small"
+                icon={<InfoCircleOutlined />}
+                disabled={!record.file.file_uuid}
+                aria-label={t("aidpKnowledge.fileDetailOpen")}
+                onClick={() => setDetailFile(toDocumentItem(record.file))}
+              />
+            </Tooltip>
             <Tooltip title={t("aidpKnowledge.download")}>
               <Button
                 type="text"
@@ -1319,6 +1335,24 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     segments.length > 0
       ? segments[segments.length - 1].label
       : knowledgeBase.kds_name;
+
+  if (detailFile) {
+    return (
+      <AidpFileDetailView
+        kdsId={knowledgeBase.kds_id}
+        file={detailFile}
+        canEdit={canEdit}
+        summaryEnabled={knowledgeBase.summary_enable === true}
+        summaryPreview={knowledgeBase.summary_preview === true}
+        onBack={() => {
+          setDetailFile(null);
+          // The list paused polling while the detail was open; refresh once
+          // on return so ingestion changes are reflected.
+          refreshAll();
+        }}
+      />
+    );
+  }
 
   return (
     <section className="flex min-h-[420px] grow shrink-0 basis-auto flex-col bg-white">

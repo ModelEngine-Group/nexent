@@ -272,3 +272,52 @@ class OntologyImportRequest(BaseModel):
 
     file_name: str = Field("ontology.json", min_length=1, max_length=255)
     document: dict[str, Any] = Field(..., description="Parsed AIDP export JSON")
+
+
+class ChunkMetadataExportRequest(BaseModel):
+    """Body for exporting one chunk's user metadata via the ontology domain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kds_id: int = Field(..., ge=0, description="Knowledge base that owns the chunk")
+    chunk_id: int = Field(..., ge=0, description="Chunk to export")
+
+
+class ChunkMetadataImportRequest(BaseModel):
+    """Body for writing user metadata onto a batch of chunks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kds_id: int = Field(..., ge=0, description="Knowledge base that owns the chunks")
+    metadata_json: dict = Field(..., description="At least one field/value pair")
+    chunk_id_list: list[int] = Field(..., min_length=1, description="Chunk ids")
+
+    @field_validator("metadata_json")
+    @classmethod
+    def validate_metadata_json(cls, value: dict) -> dict:
+        if not value:
+            raise ValueError("metadata_json must not be empty")
+        if len(value) > 20:
+            raise ValueError("metadata_json must not exceed 20 fields")
+        for key, item in value.items():
+            if not isinstance(key, str) or len(key.encode("utf-8")) > 64:
+                raise ValueError("metadata_json keys must be at most 64 bytes")
+            if not isinstance(item, str) or len(item.encode("utf-8")) > 256:
+                raise ValueError("metadata_json values must be at most 256 bytes")
+        return value
+
+
+class OntologyMetadataBatchUnbindSyncRequest(BaseModel):
+    """Body for the synchronous domain-wide metadata unbind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    metadata_id_list: list[int] = Field(..., min_length=1, description="Field ids")
+
+
+class OntologyTagSyncRequest(BaseModel):
+    """Body for triggering the domain-scoped auto-tagging task."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kb_ids: list[int] = Field(..., min_length=1, description="Knowledge base ids")

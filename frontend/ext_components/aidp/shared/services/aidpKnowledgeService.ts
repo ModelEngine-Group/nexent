@@ -37,6 +37,17 @@ import type {
   AidpFileRenameResponse,
   AidpDocumentItem,
 } from "../types/management";
+import type {
+  AidpChunk,
+  AidpChunkCreatePayload,
+  AidpChunkCreateResponse,
+  AidpChunkListResponse,
+  AidpChunkUpdatePayload,
+} from "../types/chunks";
+import type {
+  AidpFileSummaryResponse,
+  AidpSummaryRetryResponse,
+} from "../types/summary";
 
 function buildUrl(
   base: string,
@@ -604,7 +615,7 @@ class AidpKnowledgeService {
 
   /**
    * Remove multiple documents from an AIDP knowledge base in one request.
-   * AIDP reports per-file outcomes via summary/success_list/failed_list.
+   * AIDP reports per-file outcomes via partial_success_list/failed_list.
    */
   async removeDocs(
     id: string,
@@ -620,6 +631,213 @@ class AidpKnowledgeService {
       body: JSON.stringify({ file_uuids: fileUuids }),
     });
     return response.json();
+  }
+
+  /**
+   * List the semantic chunks AIDP generated for one file.
+   *
+   * The upstream contract filters by `file_uuid` only (no keyword search) and
+   * reports a global `total_count`; when the backend could not obtain one it
+   * marks the total unreliable so the page falls back to `has_more`.
+   */
+  async listChunks(
+    id: string,
+    fileUuid: string,
+    page: number = 1,
+    pageSize: number = 20,
+    signal?: AbortSignal
+  ): Promise<AidpChunkListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbChunks(id), {
+      file_uuid: fileUuid,
+      page,
+      page_size: pageSize,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : 0,
+      has_more: result.has_more === true,
+      total_reliable: result.total_reliable !== false,
+    };
+  }
+
+  /**
+   * Search chunk content in one file through the Nexent backend's dedicated
+   * FusionSearch proxy. The backend applies the AIDP file-name condition; the
+   * page does not call the model-facing aidp_search tool.
+   */
+  async searchChunks(
+    id: string,
+    fileUuid: string,
+    fileName: string,
+    query: string,
+    topk: number = 20,
+    signal?: AbortSignal
+  ): Promise<AidpChunkListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbChunkSearch(id), {
+      file_uuid: fileUuid,
+      file_name: fileName,
+      query,
+      topk,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : 0,
+      has_more: false,
+      total_reliable: true,
+    };
+  }
+
+  /** Read one chunk's full text and read-only metadata. */
+  async getChunk(
+    id: string,
+    chunkId: number | string,
+    signal?: AbortSignal
+  ): Promise<AidpChunk> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkDetail(id, chunkId),
+      { method: "GET", headers: getAuthHeaders(), signal }
+    );
+    return (await response.json()) as AidpChunk;
+  }
+
+  /**
+   * Fetch an image chunk's picture as a binary response.
+   *
+   * The caller turns the body into an object URL; an `<img>` tag cannot carry
+   * the Authorization header, so the image goes through an authenticated
+   * fetch like the document download/preview paths.
+   */
+  async fetchChunkImage(
+    id: string,
+    fileId: string,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    return fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkImage(id, fileId),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+        signal,
+      }
+    );
+  }
+
+  /** Add one chunk; AIDP answers with the new chunk id. */
+  async createChunk(
+    id: string,
+    payload: AidpChunkCreatePayload
+  ): Promise<AidpChunkCreateResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunks(id),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    return (await response.json()) as AidpChunkCreateResponse;
+  }
+
+  /**
+   * Update one chunk's text; no other field is writable upstream.
+   *
+   * AIDP regenerates the chunk vector and answers with the full updated chunk,
+   * which the page uses to refresh the detail's text/page_ids/metadata.
+   */
+  async updateChunk(
+    id: string,
+    chunkId: number | string,
+    payload: AidpChunkUpdatePayload
+  ): Promise<AidpChunk> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbChunkDetail(id, chunkId),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    return (await response.json()) as AidpChunk;
+  }
+
+  /**
+   * Remove the selected chunks in one AIDP request (1-2000 ids).
+   *
+   * The upstream contract is a DELETE with a JSON body and a 204 empty reply;
+   * the response is deliberately not parsed.
+   */
+  async removeChunks(id: string, chunkIds: number[]): Promise<void> {
+    await fetchWithErrorHandling(API_ENDPOINTS.aidpMgmt.removeKbChunks(id), {
+      method: "DELETE",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chunk_ids: chunkIds }),
+    });
+  }
+
+  /** Read one file's AIDP summary (READ permission). */
+  async getFileSummary(
+    id: string,
+    fileUuid: string,
+    signal?: AbortSignal
+  ): Promise<AidpFileSummaryResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbFileSummary(id, fileUuid),
+      { method: "GET", headers: getAuthHeaders(), signal }
+    );
+    const result = await response.json();
+    return {
+      result:
+        result && typeof result.result === "object" && result.result !== null
+          ? result.result
+          : {},
+    };
+  }
+
+  /**
+   * Retry summary generation for the requested files.
+   *
+   * AIDP always expects a non-empty `file_uuids` array, including a single
+   * file retry; per-file success/failure lists are returned unchanged.
+   */
+  async retryFileSummaries(
+    id: string,
+    fileUuids: string[]
+  ): Promise<AidpSummaryRetryResponse> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.retryKbFileSummaries(id),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ file_uuids: fileUuids }),
+      }
+    );
+    return (await response.json()) as AidpSummaryRetryResponse;
   }
 
   /**

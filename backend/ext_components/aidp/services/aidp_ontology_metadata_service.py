@@ -164,3 +164,103 @@ def batch_unbind_metadata_impl(
         operation="batch-unbind-metadata",
         json_body={"metadata_id_list": metadata_ids, "creator": creator},
     )
+
+
+def export_chunk_metadata_impl(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    *,
+    kds_id: int,
+    chunk_id: int,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Export one chunk's user metadata through the ontology domain.
+
+    AIDP answers ``{od_id, kds_id, chunk_id, metadata_json}``; an empty
+    ``metadata_json`` means the chunk carries no user metadata.
+    """
+    return _ontology_request(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/Metadata/MetadataExport",
+        operation="export-chunk-metadata",
+        json_body={"kds_id": kds_id, "chunk_id": chunk_id},
+    )
+
+
+def import_chunk_metadata_impl(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    *,
+    kds_id: int,
+    metadata_json: dict[str, str],
+    chunk_id_list: list[int],
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Write user metadata onto a batch of chunks through the ontology domain.
+
+    AIDP validates field names against the domain's metadata definitions and
+    reports per-chunk results (``chunk_results``) plus ``partial_failure``;
+    the proxy forwards that shape unchanged.
+    """
+    return _ontology_request(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/Metadata/MetadataImport",
+        operation="import-chunk-metadata",
+        json_body={
+            "kds_id": kds_id,
+            "metadata_json": metadata_json,
+            "chunk_id_list": list(chunk_id_list),
+        },
+    )
+
+
+def batch_unbind_metadata_sync_impl(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    *,
+    metadata_ids: list[int],
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Run the synchronous domain-wide metadata unbind.
+
+    Unlike the async variant this call answers with aggregate counts plus
+    per-field results; unbinding clears chunk column values only and keeps
+    the field definitions.
+    """
+    return _ontology_request(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/Metadata/BatchUnbind",
+        operation="batch-unbind-metadata-sync",
+        json_body={"metadata_id_list": list(metadata_ids)},
+    )
+
+
+def sync_ontology_tags_impl(
+    server_url: str,
+    api_key: str,
+    *,
+    kb_ids: list[int],
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Queue the domain-scoped auto-tagging task (``OntologyDomain/TagSync``).
+
+    AIDP answers a bare ``{task_id, task_type:"ontology_auto_extract"}``
+    snapshot; tags surface later on chunk reads.
+    """
+    return _ontology_request(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_ontology_path(tenant_id)}/TagSync",
+        operation="sync-ontology-tags",
+        json_body={"kb_ids": list(kb_ids)},
+    )

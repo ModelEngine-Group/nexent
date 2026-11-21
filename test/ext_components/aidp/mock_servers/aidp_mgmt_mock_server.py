@@ -27,6 +27,11 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Retry  (retry failed docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/OcrAnnotate/{file_uuid}  (preview doc)
+  - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Chunks?file_uuid=  (page a file's chunks)
+  - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Chunks/{chunk_id}   (read one chunk)
+  - PUT    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Chunks              (add a chunk)
+  - PATCH  /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Chunks/{chunk_id}   (update chunk text)
+  - DELETE /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Chunks              (remove chunks, JSON body, 204)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
 
 Document status simulation (drives the "processing status" UI):
@@ -44,8 +49,8 @@ Document status simulation (drives the "processing status" UI):
     and supports page, page_size, file-name keyword, and numeric status filters.
     Tune the default page size with ``POST /_mock/history-page-size?size=N``.
   * ``GET .../OcrAnnotate/{file_uuid}`` serves docx/xlsx/pptx/pdf/txt unchanged
-    and answers every other format with a synthetic PDF - which is what real AIDP
-    does - reporting the name it served in the ``X-File-Name`` header, so a
+    and answers every other format with a PDF, reporting the name it served
+    in the ``X-File-Name`` header, so a
     converted document no longer carries its uploaded extension.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
@@ -166,6 +171,17 @@ _FOLDERS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
 # survive an upload, but they are kept in memory only: ``_save_state`` serializes
 # metadata, and a mock restart legitimately loses the bytes it received.
 _DOCUMENT_PAYLOADS: dict[str, bytes] = {}
+
+# Document chunks, keyed by KB id; each chunk carries the ``file_uuid`` it
+# belongs to. Real AIDP derives them while chunking an ingested file, so this
+# mock generates a deterministic set per file the first time that file's chunks
+# are requested, then stores and mutates exactly like the live service.
+_DOCUMENT_CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
+# ``"{kds_id}:{file_uuid}"`` entries whose chunks were already generated. Kept
+# separately so deleting every chunk is not undone by the next list request.
+_DOCUMENT_CHUNK_GENERATED_FILES: set[str] = set()
+_NEXT_DOCUMENT_CHUNK_ID: int = 1
+_DOCUMENT_CHUNK_TYPES = ("TEXT", "TEXT", "TABLE", "TEXT", "IMAGE")
 
 # Ontology, binding, metadata-definition and chunk state. AIDP owns these
 # objects in production; the mock keeps small deterministic fixtures so the
@@ -759,7 +775,7 @@ def _seed_ontology_data() -> None:
 
 
 def _save_state() -> None:
-    """Atomically persist KB, document and sensitive-word state to disk.
+    """Atomically persist KB, document, chunk and sensitive-word state to disk.
 
     Writes to a temporary file and then renames it into place, so a crash
     mid-write cannot corrupt the existing state file. Silently no-ops the
@@ -770,6 +786,9 @@ def _save_state() -> None:
     payload = {
         "knowledge_bases": _KNOWLEDGE_BASES,
         "documents_by_kb": _DOCUMENTS_BY_KB,
+        "chunks_by_kb": _DOCUMENT_CHUNKS_BY_KB,
+        "chunk_generated_files": sorted(_DOCUMENT_CHUNK_GENERATED_FILES),
+        "next_chunk_id": _NEXT_DOCUMENT_CHUNK_ID,
         "sensitive_words_by_kb": _SENSITIVE_WORDS,
         "folders_by_kb": _FOLDERS_BY_KB,
         "ontology": {
@@ -799,6 +818,7 @@ def _load_state() -> None:
     is unreadable or not valid JSON, logs a warning and falls back to seeds
     — this keeps the mock usable after accidental file corruption.
     """
+    global _NEXT_DOCUMENT_CHUNK_ID
     if _STATE_FILE.exists():
         try:
             with open(_STATE_FILE, "r", encoding="utf-8") as f:
@@ -811,6 +831,17 @@ def _load_state() -> None:
                 raise ValueError("state file payload is not {dict, dict}")
             _KNOWLEDGE_BASES.update(kb_data)
             _DOCUMENTS_BY_KB.update(doc_data)
+            chunk_data = payload.get("chunks_by_kb", {})
+            if isinstance(chunk_data, dict):
+                _DOCUMENT_CHUNKS_BY_KB.update(chunk_data)
+            generated = payload.get("chunk_generated_files", [])
+            if isinstance(generated, list):
+                _DOCUMENT_CHUNK_GENERATED_FILES.update(
+                    item for item in generated if isinstance(item, str)
+                )
+            next_id = payload.get("next_chunk_id")
+            if isinstance(next_id, int) and not isinstance(next_id, bool):
+                _NEXT_DOCUMENT_CHUNK_ID = max(_NEXT_DOCUMENT_CHUNK_ID, next_id)
             if isinstance(word_data, dict):
                 _SENSITIVE_WORDS.update(word_data)
             if isinstance(folder_data, dict):
@@ -1448,6 +1479,11 @@ def _public_kb_detail(kb: Dict[str, Any]) -> Dict[str, Any]:
                 "caption_enable", 1 if kb.get("vlm_model") else 0
             ),
             "chunk_mode": kb.get("chunk_mode", 0),
+            "summary_enable": bool(kb.get("summary_enable", False)),
+            "summary_model": kb.get("summary_model") or "",
+            "summary_preview": bool(
+                kb.get("summary_preview", kb.get("summary_enable", False))
+            ),
         }
         kms_config = json.dumps(kms_config, ensure_ascii=False)
     result["kms_config_str"] = kms_config
@@ -1470,6 +1506,11 @@ def _public_kb_detail(kb: Dict[str, Any]) -> Dict[str, Any]:
 
     result["vlm_model"] = kb.get("vlm_model", "")
     result["similarity"] = kb.get("similarity", 0.0)
+    result["summary_enable"] = bool(kb.get("summary_enable", False))
+    result["summary_model"] = kb.get("summary_model") or ""
+    result["summary_preview"] = bool(
+        kb.get("summary_preview", result["summary_enable"])
+    )
     result["is_exist_graph"] = bool(kb.get("is_exist_graph", False))
     result["is_personal"] = kb.get("is_personal", 0)
     result["state"] = kb.get("state", 4)
@@ -1506,6 +1547,15 @@ def _document_content(document: Dict[str, Any]) -> bytes:
     payload = _DOCUMENT_PAYLOADS.get(str(document.get("file_uuid")))
     if payload is not None:
         return payload
+    if _DOCUMENT_FIXTURE_DIR is not None:
+        try:
+            fixture_name = f"{uuid.UUID(str(document.get('file_uuid')))}.bin"
+        except ValueError:
+            fixture_name = None
+        if fixture_name:
+            fixture = _DOCUMENT_FIXTURE_DIR / fixture_name
+            if fixture.is_file():
+                return fixture.read_bytes()
     return (
         f"Mock AIDP content for {document.get('file_name', 'download')}\n"
     ).encode("utf-8")
@@ -1523,6 +1573,10 @@ def _content_disposition(filename: str) -> str:
 # Extensions AIDP can render itself: those are served byte-for-byte, everything
 # else is converted, which is why only these keep their extension in the name
 # reported through ``X-File-Name``.
+_PREVIEW_FIXTURE_DIR: Optional[Path] = None
+_DOCUMENT_FIXTURE_DIR: Optional[Path] = None
+
+
 _NATIVE_PREVIEW_EXTENSIONS = {"docx", "xlsx", "pptx", "pdf", "txt"}
 
 
@@ -1568,7 +1622,8 @@ def _preview_payload(document: Dict[str, Any]) -> tuple[bytes, str]:
 
     Mirrors AIDP: docx/xlsx/pptx/pdf/txt come back unchanged, every other format
     comes back as a PDF whose name replaces the uploaded extension. The served
-    name is what the caller reads from ``X-File-Name``.
+    name is what the caller reads from ``X-File-Name``. Explicit local fixtures
+    preserve demo content; without them conversion uses a synthetic placeholder.
     """
     filename = str(document.get("file_name") or "document")
     stem, dot, extension = filename.rpartition(".")
@@ -1576,6 +1631,19 @@ def _preview_payload(document: Dict[str, Any]) -> tuple[bytes, str]:
         return _document_content(document), filename
 
     served_name = f"{stem or 'document'}.pdf"
+    if _PREVIEW_FIXTURE_DIR is not None:
+        # Resolve fixtures by canonical document UUID, never by an uploaded path.
+        try:
+            fixture_name = f"{uuid.UUID(str(document.get('file_uuid')))}.pdf"
+        except ValueError:
+            fixture_name = None
+        if fixture_name:
+            fixture = _PREVIEW_FIXTURE_DIR / fixture_name
+            if fixture.is_file():
+                content = fixture.read_bytes()
+                if content.startswith(b"%PDF-"):
+                    return content, served_name
+                raise ValueError("Preview fixture is not a PDF")
     return _synthetic_pdf(f"AIDP conversion of {filename}"), served_name
 
 
@@ -1694,12 +1762,18 @@ class CreateKbBody(BaseModel):
     vlm_model: str = ""
     is_exist_graph: bool = False
     graph_config: Optional[str] = None
+    summary_enable: bool = False
+    summary_model: Optional[str] = None
+    summary_preview: Optional[bool] = None
     sensitive_intercept_enable: int = 0
 
 
 class UpdateKbBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    summary_enable: Optional[bool] = None
+    summary_model: Optional[str] = None
+    summary_preview: Optional[bool] = None
     chunk_mode: Optional[int] = None
     chunk_token_num: Optional[int] = None
     chunk_overlap_num: Optional[int] = None
@@ -1846,6 +1920,39 @@ class DownloadFileBody(BaseModel):
     file_uuid: uuid.UUID = Field(...)
 
 
+class CreateChunkBody(BaseModel):
+    """Body of PUT .../Chunks (add one chunk to a file)."""
+
+    file_uuid: uuid.UUID = Field(...)
+    chunk_text: str = Field(..., min_length=1, max_length=10240)
+
+
+class UpdateChunkBody(BaseModel):
+    """Body of PATCH .../Chunks/{chunk_id} (text is the only writable field)."""
+
+    chunk_text: str = Field(..., min_length=1, max_length=10240)
+
+
+class RetrySummariesBody(BaseModel):
+    """Body of POST .../KnowledgeFiles/RetrySummary."""
+
+    file_uuids: List[uuid.UUID] = Field(..., min_length=1)
+
+
+class SummaryStatusBody(BaseModel):
+    """Body of POST /_mock/summary-status."""
+
+    kds_id: str
+    file_uuid: uuid.UUID
+    status: Literal["pending", "success", "failed"]
+    summary_text: Optional[str] = None
+
+
+class RemoveChunksBody(BaseModel):
+    """Body of DELETE .../Chunks."""
+
+    chunk_ids: List[int] = Field(..., min_length=1, max_length=2000)
+
 class CreateSensitiveWordBody(BaseModel):
     word: str = Field(..., min_length=1, max_length=64)
     mode: Literal["BLACK", "WHITE"]
@@ -1894,6 +2001,25 @@ def _check_auth(authorization: Optional[str]) -> None:
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
+
+
+class CreateChunkBody(BaseModel):
+    """Body of PUT .../Chunks (add one chunk to a file)."""
+
+    file_uuid: uuid.UUID = Field(...)
+    chunk_text: str = Field(..., min_length=1, max_length=10240)
+
+
+class UpdateChunkBody(BaseModel):
+    """Body of PATCH .../Chunks/{chunk_id} (text is the only writable field)."""
+
+    chunk_text: str = Field(..., min_length=1, max_length=10240)
+
+
+class RemoveChunksBody(BaseModel):
+    """Body of DELETE .../Chunks."""
+
+    chunk_ids: List[int] = Field(..., min_length=1, max_length=2000)
 
 
 class FailNextMiddleware(BaseHTTPMiddleware):
@@ -2215,6 +2341,11 @@ def create_knowledge_base(
     _check_auth(authorization)
     _validate_graph_request(body)
 
+    if body.summary_enable and not (body.summary_model or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="summary_model is required when summary_enable is true",
+        )
     kds_id = f"aidp-kb-{uuid.uuid4().hex[:8]}"
     now = int(time.time())
     new_kb = {
@@ -2232,6 +2363,13 @@ def create_knowledge_base(
         new_kb["is_multimodal"] = body.is_multimodal
     if body.vision_model:
         new_kb["vision_model"] = body.vision_model
+    new_kb["summary_enable"] = body.summary_enable
+    new_kb["summary_model"] = (
+        body.summary_model.strip() if body.summary_enable and body.summary_model else ""
+    )
+    new_kb["summary_preview"] = (
+        body.summary_preview if body.summary_preview is not None else body.summary_enable
+    )
 
     _KNOWLEDGE_BASES[kds_id] = new_kb
     _DOCUMENTS_BY_KB[kds_id] = []
@@ -2286,6 +2424,20 @@ def update_knowledge_base(
         kb["chunk_overlap_num"] = body.chunk_overlap_num
     if body.topk is not None:
         kb["topk"] = body.topk
+    if body.summary_enable is not None:
+        if body.summary_enable and not (body.summary_model or "").strip():
+            raise HTTPException(
+                400, "summary_model is required when summary_enable is true"
+            )
+        kb["summary_enable"] = body.summary_enable
+        kb["summary_model"] = (
+            body.summary_model.strip() if body.summary_enable and body.summary_model else ""
+        )
+        kb["summary_preview"] = (
+            body.summary_preview
+            if body.summary_preview is not None
+            else body.summary_enable
+        )
     if body.caption_enable is not None:
         kb["caption_enable"] = body.caption_enable
     if body.vlm_model is not None:
@@ -3048,8 +3200,605 @@ def preview_document(
 
 
 # =============================================================================
+# Document chunks (semantic slicing)
+# =============================================================================
+def _public_chunk(chunk: Dict[str, Any]) -> Dict[str, Any]:
+    """Return chunk fields without any mock-only private keys."""
+    return {key: value for key, value in chunk.items() if not key.startswith("_")}
+
+
+def _file_chunks(kds_id: str, file_uuid: str) -> List[Dict[str, Any]]:
+    return [
+        chunk
+        for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
+        if chunk.get("file_uuid") == file_uuid
+    ]
+
+
+def _next_chunk_id() -> int:
+    global _NEXT_DOCUMENT_CHUNK_ID
+    chunk_id = _NEXT_DOCUMENT_CHUNK_ID
+    _NEXT_DOCUMENT_CHUNK_ID += 1
+    return chunk_id
+
+
+def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generate a deterministic chunk set for a file the first time it is read.
+
+    Real AIDP chunks each ingested file; the mock has no parser, so it writes a
+    fixed set once and then treats it like user data (edits and removals stick,
+    including deleting every chunk).
+    """
+    file_uuid = str(document.get("file_uuid"))
+    marker = f"{kds_id}:{file_uuid}"
+    if marker in _DOCUMENT_CHUNK_GENERATED_FILES:
+        return _file_chunks(kds_id, file_uuid)
+
+    file_name = str(document.get("file_name") or "document")
+    stubs = [
+        ("这是文件的标题与概述部分，用于验证语义切片的查看与编辑。", [1]),
+        ("第二段正文示例：AIDP 在入库时按语义边界切分文本，每个切片带有页码与元数据。", [1]),
+        ("核心指标对照\n\n<table><thead><tr><th>指标</th><th>取值</th><th>说明</th></tr></thead><tbody><tr><td>准确率</td><td>98%</td><td>测试集结果</td></tr><tr><td>召回率</td><td>95%</td><td>测试集结果</td></tr></tbody></table>", [2]),
+        ("第三段正文示例：切片的文本可在此页面修改，修改只提交 chunk_text 字段。", [2, 3]),
+        ("图片说明示例：该切片对应文档中的插图说明文字。", [3]),
+    ]
+    chunks = _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, [])
+    for index, (text, pages) in enumerate(stubs):
+        chunk_type = _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)]
+        if chunk_type == "IMAGE":
+            # Real AIDP stores each image chunk's picture under
+            # "{kds_id}/{file_ino_no}/{image_uuid}.png" served through
+            # ViewImage; text/table chunks report the literal "null".
+            image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
+        else:
+            image_file_url = "null"
+        chunk = {
+            "chunk_id": _next_chunk_id(),
+            "chunk_text": text,
+            "chunk_type": chunk_type,
+            "file_uuid": file_uuid,
+            "file_name": file_name,
+            "file_url": image_file_url,
+            "page_ids": pages,
+            "metadata": {"section": f"part-{index + 1}", "source": file_name},
+            "metadata_json": {},
+        }
+        # User-defined metadata from the bound ontology domain; the page shows
+        # this field instead of AIDP's system metadata.
+        if index in (0, 4):
+            chunk["metadata_json"] = {"部门": "研发", "密级": "内部"}
+        # Newer AIDP builds return ontology auto-tags on `tag`; only some
+        # chunks carry them, so the page must treat the field as optional.
+        if index in (0, 2):
+            chunk["tag"] = ["示例实体", "自动打标"]
+        chunks.append(chunk)
+    _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
+    _save_state()
+    return _file_chunks(kds_id, file_uuid)
+
+
+def _require_file(kds_id: str, file_uuid: str) -> Dict[str, Any]:
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    document = _find_document(kds_id, file_uuid)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+    return document
+
+
+def _require_chunk(kds_id: str, chunk_id: int) -> Dict[str, Any]:
+    chunk = next(
+        (
+            item
+            for item in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
+            if item.get("chunk_id") == chunk_id
+        ),
+        None,
+    )
+    if chunk is None:
+        raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} not found")
+    return chunk
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+def list_chunks(
+    kds_id: str,
+    file_uuid: uuid.UUID = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Page through the chunks of one file, as the live contract declares."""
+    _check_auth(authorization)
+    document = _require_file(kds_id, str(file_uuid))
+    chunks = _ensure_file_chunks(kds_id, document)
+    start = (page - 1) * page_size
+    items = [_public_chunk(chunk) for chunk in chunks[start:start + page_size]]
+    # The current contract sends next_link=null on the last page.
+    has_next = page * page_size < len(chunks)
+    next_link = None
+    if has_next:
+        next_link = (
+            f"{_KB_PREFIX}/{kds_id}/Chunks?file_uuid={file_uuid}"
+            f"&page={page + 1}&page_size={page_size}"
+        )
+    logger.info(
+        "LIST CHUNKS  kds_id=%s file=%s page=%d returned=%d total=%d",
+        kds_id, file_uuid, page, len(items), len(chunks),
+    )
+    return JSONResponse(content={
+        "value": items,
+        "next_link": next_link,
+        "total_count": len(chunks),
+    })
+
+
+@app.put(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+def create_chunk(
+    kds_id: str,
+    body: CreateChunkBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Add one chunk and answer with its id, as the live service does."""
+    _check_auth(authorization)
+    document = _require_file(kds_id, str(body.file_uuid))
+    if not body.chunk_text.strip():
+        raise HTTPException(status_code=400, detail="chunk_text must not be blank")
+    chunk = {
+        "chunk_id": _next_chunk_id(),
+        "chunk_text": body.chunk_text,
+        "chunk_type": "TEXT",
+        "file_uuid": str(body.file_uuid),
+        "file_name": str(document.get("file_name") or ""),
+        "file_url": f"/aidp/knowledge/{kds_id}/{document.get('file_name') or ''}",
+        "page_ids": [],
+        "metadata": {},
+    }
+    _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, []).append(chunk)
+    _DOCUMENT_CHUNK_GENERATED_FILES.add(f"{kds_id}:{body.file_uuid}")
+    _save_state()
+    return JSONResponse(content={"chunk_id": str(chunk["chunk_id"])})
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Chunks/Remove")
+def remove_chunks(
+    kds_id: str,
+    body: RemoveChunksBody,
+    authorization: Optional[str] = Header(default=None),
+) -> Response:
+    """Remove the requested chunks; the live contract answers 204 with no body.
+
+    The 2026-11-20 verified contract uses POST /Chunks/Remove; the earlier
+    DELETE /Chunks variant is not served by the real deployment (405).
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    targets = set(body.chunk_ids)
+    _DOCUMENT_CHUNKS_BY_KB[kds_id] = [
+        chunk
+        for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
+        if chunk.get("chunk_id") not in targets
+    ]
+    _save_state()
+    return Response(status_code=204)
+
+
+def _mock_png_bytes() -> bytes:
+    """Build a tiny solid-colour PNG without third-party imaging libraries."""
+    import struct
+    import zlib
+
+    width = height = 96
+    red, green, blue = 0x00, 0x67, 0xD1
+
+    def _chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    scanline = b"\x00" + bytes([red, green, blue]) * width
+    idat = zlib.compress(scanline * height)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(b"IHDR", ihdr)
+        + _chunk(b"IDAT", idat)
+        + _chunk(b"IEND", b"")
+    )
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/ViewImage/{{file_id}}")
+def view_image(
+    kds_id: str,
+    file_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Response:
+    """Serve a chunk image as PNG bytes, mirroring the live ViewImage contract.
+
+    The real service derives ``file_id`` from a chunk's ``file_url``
+    (``{kds_id}/{file_ino_no}/{image_uuid}.png`` -> ``{file_ino_no}_
+    {image_uuid}.png``); the mock accepts any well-formed id from this KB.
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.png", file_id):
+        raise HTTPException(status_code=400, detail="Invalid FileID format")
+    return Response(content=_mock_png_bytes(), media_type="image/png")
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def get_chunk(
+    kds_id: str,
+    chunk_id: int,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Read one chunk."""
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    return JSONResponse(content=_public_chunk(_require_chunk(kds_id, chunk_id)))
+
+
+@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def update_chunk(
+    kds_id: str,
+    chunk_id: int,
+    body: UpdateChunkBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Update one chunk's text."""
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    chunk = _require_chunk(kds_id, chunk_id)
+    if not body.chunk_text.strip():
+        raise HTTPException(status_code=400, detail="chunk_text must not be blank")
+    chunk["chunk_text"] = body.chunk_text
+    _save_state()
+    return JSONResponse(content=_public_chunk(chunk))
+
+# =============================================================================
 # Ingestion channels + knowledge-file history
 # =============================================================================
+
+
+# =============================================================================
+# Document chunks (semantic slicing)
+# =============================================================================
+def _public_chunk(chunk: Dict[str, Any]) -> Dict[str, Any]:
+    """Return chunk fields without any mock-only private keys."""
+    return {key: value for key, value in chunk.items() if not key.startswith("_")}
+
+
+def _file_chunks(kds_id: str, file_uuid: str) -> List[Dict[str, Any]]:
+    return [
+        chunk
+        for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
+        if chunk.get("file_uuid") == file_uuid
+    ]
+
+
+def _next_chunk_id() -> int:
+    global _NEXT_DOCUMENT_CHUNK_ID
+    chunk_id = _NEXT_DOCUMENT_CHUNK_ID
+    _NEXT_DOCUMENT_CHUNK_ID += 1
+    return chunk_id
+
+
+def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generate a deterministic chunk set for a file the first time it is read.
+
+    Real AIDP chunks each ingested file; the mock has no parser, so it writes a
+    fixed set once and then treats it like user data (edits and removals stick,
+    including deleting every chunk).
+    """
+    file_uuid = str(document.get("file_uuid"))
+    marker = f"{kds_id}:{file_uuid}"
+    if marker in _DOCUMENT_CHUNK_GENERATED_FILES:
+        return _file_chunks(kds_id, file_uuid)
+
+    file_name = str(document.get("file_name") or "document")
+    stubs = [
+        ("这是文件的标题与概述部分，用于验证语义切片的查看与编辑。", [1]),
+        ("第二段正文示例：AIDP 在入库时按语义边界切分文本，每个切片带有页码与元数据。", [1]),
+        ("核心指标对照\n\n<table><thead><tr><th>指标</th><th>取值</th><th>说明</th></tr></thead><tbody><tr><td>准确率</td><td>98%</td><td>测试集结果</td></tr><tr><td>召回率</td><td>95%</td><td>测试集结果</td></tr></tbody></table>", [2]),
+        ("第三段正文示例：切片的文本可在此页面修改，修改只提交 chunk_text 字段。", [2, 3]),
+        ("图片说明示例：该切片对应文档中的插图说明文字。", [3]),
+    ]
+    chunks = _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, [])
+    for index, (text, pages) in enumerate(stubs):
+        chunk_type = _DOCUMENT_CHUNK_TYPES[index % len(_DOCUMENT_CHUNK_TYPES)]
+        if chunk_type == "IMAGE":
+            # Real AIDP stores each image chunk's picture under
+            # "{kds_id}/{file_ino_no}/{image_uuid}.png" served through
+            # ViewImage; text/table chunks report the literal "null".
+            image_file_url = f"{kds_id}/{document.get('file_ino_no')}/{uuid.uuid4()}.png"
+        else:
+            image_file_url = "null"
+        chunk = {
+            "chunk_id": _next_chunk_id(),
+            "chunk_text": text,
+            "chunk_type": chunk_type,
+            "file_uuid": file_uuid,
+            "file_name": file_name,
+            "file_url": image_file_url,
+            "page_ids": pages,
+            "metadata": {"section": f"part-{index + 1}", "source": file_name},
+            "metadata_json": {},
+        }
+        # User-defined metadata from the bound ontology domain; the page shows
+        # this field instead of AIDP's system metadata.
+        if index in (0, 4):
+            chunk["metadata_json"] = {"部门": "研发", "密级": "内部"}
+        # Newer AIDP builds return ontology auto-tags on `tag`; only some
+        # chunks carry them, so the page must treat the field as optional.
+        if index in (0, 2):
+            chunk["tag"] = ["示例实体", "自动打标"]
+        chunks.append(chunk)
+    _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
+    _save_state()
+    return _file_chunks(kds_id, file_uuid)
+
+
+def _require_file(kds_id: str, file_uuid: str) -> Dict[str, Any]:
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    document = _find_document(kds_id, file_uuid)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+    return document
+
+
+def _require_chunk(kds_id: str, chunk_id: int) -> Dict[str, Any]:
+    chunk = next(
+        (
+            item
+            for item in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
+            if item.get("chunk_id") == chunk_id
+        ),
+        None,
+    )
+    if chunk is None:
+        raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} not found")
+    return chunk
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+def list_chunks(
+    kds_id: str,
+    file_uuid: uuid.UUID = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Page through the chunks of one file, as the live contract declares."""
+    _check_auth(authorization)
+    document = _require_file(kds_id, str(file_uuid))
+    chunks = _ensure_file_chunks(kds_id, document)
+    start = (page - 1) * page_size
+    items = [_public_chunk(chunk) for chunk in chunks[start:start + page_size]]
+    # The current contract sends next_link=null on the last page.
+    has_next = page * page_size < len(chunks)
+    next_link = None
+    if has_next:
+        next_link = (
+            f"{_KB_PREFIX}/{kds_id}/Chunks?file_uuid={file_uuid}"
+            f"&page={page + 1}&page_size={page_size}"
+        )
+    logger.info(
+        "LIST CHUNKS  kds_id=%s file=%s page=%d returned=%d total=%d",
+        kds_id, file_uuid, page, len(items), len(chunks),
+    )
+    return JSONResponse(content={
+        "value": items,
+        "next_link": next_link,
+        "total_count": len(chunks),
+    })
+
+
+@app.put(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+def create_chunk(
+    kds_id: str,
+    body: CreateChunkBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Add one chunk and answer with its id, as the live service does."""
+    _check_auth(authorization)
+    document = _require_file(kds_id, str(body.file_uuid))
+    if not body.chunk_text.strip():
+        raise HTTPException(status_code=400, detail="chunk_text must not be blank")
+    chunk = {
+        "chunk_id": _next_chunk_id(),
+        "chunk_text": body.chunk_text,
+        "chunk_type": "TEXT",
+        "file_uuid": str(body.file_uuid),
+        "file_name": str(document.get("file_name") or ""),
+        "file_url": f"/aidp/knowledge/{kds_id}/{document.get('file_name') or ''}",
+        "page_ids": [],
+        "metadata": {},
+    }
+    _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, []).append(chunk)
+    _DOCUMENT_CHUNK_GENERATED_FILES.add(f"{kds_id}:{body.file_uuid}")
+    _save_state()
+    return JSONResponse(content={"chunk_id": str(chunk["chunk_id"])})
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/Chunks/Remove")
+def remove_chunks(
+    kds_id: str,
+    body: RemoveChunksBody,
+    authorization: Optional[str] = Header(default=None),
+) -> Response:
+    """Remove the requested chunks; the live contract answers 204 with no body.
+
+    The 2026-11-20 verified contract uses POST /Chunks/Remove; the earlier
+    DELETE /Chunks variant is not served by the real deployment (405).
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    targets = set(body.chunk_ids)
+    _DOCUMENT_CHUNKS_BY_KB[kds_id] = [
+        chunk
+        for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
+        if chunk.get("chunk_id") not in targets
+    ]
+    _save_state()
+    return Response(status_code=204)
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def get_chunk(
+    kds_id: str,
+    chunk_id: int,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Read one chunk."""
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    return JSONResponse(content=_public_chunk(_require_chunk(kds_id, chunk_id)))
+
+
+@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def update_chunk(
+    kds_id: str,
+    chunk_id: int,
+    body: UpdateChunkBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Update one chunk's text."""
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    chunk = _require_chunk(kds_id, chunk_id)
+    if not body.chunk_text.strip():
+        raise HTTPException(status_code=400, detail="chunk_text must not be blank")
+    chunk["chunk_text"] = body.chunk_text
+    _save_state()
+    return JSONResponse(content=_public_chunk(chunk))
+
+
+# =============================================================================
+# File summaries
+# =============================================================================
+def _summary_preview_enabled(kb: Dict[str, Any]) -> bool:
+    return bool(kb.get("summary_enable")) and bool(
+        kb.get("summary_preview", kb.get("summary_enable"))
+    )
+
+
+def _ensure_summary_state(kb: Dict[str, Any], document: Dict[str, Any]) -> Dict[str, Any]:
+    """Give a file a deterministic summary the first time it is requested."""
+    status = document.get("_summary_status")
+    if status not in {"pending", "success", "failed"}:
+        document["_summary_status"] = "success"
+        document["_summary_text"] = (
+            f"{document.get('file_name', '文件')} 的摘要："
+            f"该摘要由 Mock 按知识库配置生成，模型为 {kb.get('summary_model') or '-'}。"
+        )
+    return document
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/{{file_uuid}}/Summary")
+def get_file_summary(
+    kds_id: str,
+    file_uuid: uuid.UUID,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Read one file summary; preview disabled returns an empty result."""
+    _check_auth(authorization)
+    kb = _KNOWLEDGE_BASES.get(kds_id)
+    if kb is None:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    document = _find_document(kds_id, str(file_uuid))
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+    if not _summary_preview_enabled(kb):
+        return JSONResponse(content={"result": {}})
+    document = _ensure_summary_state(kb, document)
+    _save_state()
+    result = {
+        "summary_status": document.get("_summary_status"),
+        "summary_model": kb.get("summary_model") or "",
+    }
+    if result["summary_status"] == "success":
+        result["summary_text"] = document.get("_summary_text") or ""
+    return JSONResponse(content={"result": result})
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/RetrySummary")
+def retry_file_summaries(
+    kds_id: str,
+    body: RetrySummariesBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Retry failed summaries and report per-file success/failure."""
+    _check_auth(authorization)
+    kb = _KNOWLEDGE_BASES.get(kds_id)
+    if kb is None:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+    success_list: List[Dict[str, Any]] = []
+    failed_list: List[Dict[str, Any]] = []
+    for file_uuid in body.file_uuids:
+        document = _find_document(kds_id, str(file_uuid))
+        if document is None:
+            failed_list.append({
+                "file_uuid": str(file_uuid),
+                "err_code": 404,
+                "message": "File not found",
+            })
+            continue
+        if not _summary_preview_enabled(kb):
+            failed_list.append({
+                "file_uuid": str(file_uuid),
+                "err_code": 400,
+                "message": "Summary is disabled for this knowledge base",
+            })
+            continue
+        document = _ensure_summary_state(kb, document)
+        if document.get("_summary_status") != "failed":
+            failed_list.append({
+                "file_uuid": str(file_uuid),
+                "err_code": 409,
+                "message": "Summary is not in failed state",
+            })
+            continue
+        document["_summary_status"] = "pending"
+        document["_summary_text"] = ""
+        success_list.append({"file_uuid": str(file_uuid)})
+    _save_state()
+    return JSONResponse(content={
+        "partial_success_list": success_list,
+        "failed_list": failed_list,
+    })
+
+
+@app.post("/_mock/summary-status")
+def set_summary_status(body: SummaryStatusBody) -> JSONResponse:
+    """Test control: force one file summary into any state."""
+    kb = _KNOWLEDGE_BASES.get(body.kds_id)
+    if kb is None:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {body.kds_id} not found")
+    document = _find_document(body.kds_id, str(body.file_uuid))
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {body.file_uuid} not found")
+    document["_summary_status"] = body.status
+    if body.summary_text is not None:
+        document["_summary_text"] = body.summary_text
+    elif body.status != "success":
+        document["_summary_text"] = ""
+    _save_state()
+    return JSONResponse(content={
+        "kds_id": body.kds_id,
+        "file_uuid": str(body.file_uuid),
+        "status": body.status,
+    })
 
 
 @app.get(f"{_KB_PREFIX}/{{kds_id}}/Channels")
@@ -3249,7 +3998,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
                 "tags": ["知识库", "问答"],
                 "standards": {"TEST_STANDARD": {"level_id": "TEST_E", "level_name": "E", "authority": "mock"}},
             },
-            "chunk_type": "text",
+            "chunk_type": "TEXT",
             "file_url": "",
             "pages": [1],
             "retrieval_sources": ["vector_search", "full_text_search"],
@@ -3258,7 +4007,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "id": 10002, "score": 0.94, "title": "AIDP产品介绍.pdf",
             "text": "AIDP Search keeps each retrieval chunk independent so citations can identify their own metadata snapshot.",
             "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "citations", "count": 1, "enabled": True},
-            "chunk_type": "text", "file_url": "", "pages": [2],
+            "chunk_type": "TEXT", "file_url": "", "pages": [2],
             "retrieval_sources": ["vector_search"],
         },
     ],
@@ -3269,7 +4018,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "title": "常见问题汇总.txt",
             "text": "If no results are returned, verify the selected knowledge base IDs and API key.",
             "metadata": {"knowledge_base_id": "aidp-kb-faq", "section": "troubleshooting"},
-            "chunk_type": "text",
+            "chunk_type": "TEXT",
             "file_url": "",
             "pages": [1],
             "retrieval_sources": ["vector_search", "full_text_search", "graph_search"],
@@ -3349,7 +4098,7 @@ def _match_metadata(chunk: Dict[str, Any], condition: Optional[MetadataCondition
         lowered_val = str(val).lower()
         if op == "contains":
             results.append(lowered_val in lowered_cv)
-        elif op in ("equals", "is"):
+        elif op in ("equals", "is", "="):
             results.append(lowered_cv == lowered_val)
         elif op in ("not_equals", "is not"):
             results.append(lowered_cv != lowered_val)
@@ -3367,6 +4116,31 @@ def _match_metadata(chunk: Dict[str, Any], condition: Optional[MetadataCondition
             results.append(False)
     return all(results) if condition.logical_operator == "and" else any(results)
 
+
+def _retrieval_chunks_for_kb(kb_id: str) -> List[Dict[str, Any]]:
+    """Use seeded retrieval fixtures, or adapt uploaded document chunks.
+
+    The management mock owns the chunks created through the Chunk CRUD
+    endpoints; FusionSearch needs the same data for local demos.
+    """
+    static_chunks = _CHUNKS_BY_KB.get(kb_id)
+    if static_chunks:
+        return static_chunks
+    chunks = []
+    for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kb_id, []):
+        chunks.append({
+            "id": chunk.get("chunk_id"),
+            "score": 0.8,
+            "title": chunk.get("file_name", ""),
+            "text": chunk.get("chunk_text", ""),
+            "metadata": chunk.get("metadata", {}),
+            "chunk_type": chunk.get("chunk_type", "TEXT"),
+            "file_url": chunk.get("file_url", ""),
+            "pages": chunk.get("page_ids", []),
+            "retrieval_sources": ["vector_search", "full_text_search"],
+            "_search_dynamic": True,
+        })
+    return chunks
 
 _LAST_FUSION_REQUEST: Optional[Dict[str, Any]] = None
 
@@ -3412,13 +4186,20 @@ def fusion_search(
     for kb_id in request.kds_list:
         kb = _KNOWLEDGE_BASES.get(kb_id, {})
         graph_available = bool(kb.get("is_exist_graph"))
-        for chunk in _chunks_for_kb(kb_id):
+        source_chunks = _retrieval_chunks_for_kb(kb_id) or _chunks_for_kb(kb_id)
+        for chunk in source_chunks:
             if not _match_metadata(chunk, request.metadata_condition):
                 continue
             if not request.multi_modal_enable and chunk.get("chunk_type") == "image":
                 continue
 
             haystack = f"{chunk.get('title', '')} {chunk.get('text', '')}".lower()
+            if (
+                chunk.get("_search_dynamic")
+                and query_terms
+                and not any(term in haystack for term in query_terms)
+            ):
+                continue
             boost = min(0.05 * sum(1 for t in query_terms if t in haystack), 0.15)
             base_score = round(float(chunk.get("score", 0.5)) + boost, 4)
             reachable = [source for source in chunk.get("retrieval_sources", ["vector_search"])
@@ -3510,7 +4291,6 @@ def fusion_search(
                  if request.metadata_condition is not None else None),
                 request.search_method, len(payload))
     return JSONResponse(content={"result": payload, "total_return_count": len(payload)})
-
 
 # =============================================================================
 # ModelService — lists VLM/LLM models applicable to AIDP applications
@@ -5477,6 +6257,9 @@ def reset_state() -> Dict[str, str]:
     _KNOWLEDGE_BASES.clear()
     _DOCUMENTS_BY_KB.clear()
     _DOCUMENT_PAYLOADS.clear()
+    _DOCUMENT_CHUNKS_BY_KB.clear()
+    _DOCUMENT_CHUNK_GENERATED_FILES.clear()
+
     _ONTOLOGY_IMPORT_FAIL_API_NAMES.clear()
     _ONTOLOGY_METADATA_FAIL_CHUNK_IDS.clear()
     _SENSITIVE_WORDS.clear()
@@ -5497,7 +6280,11 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=30081, help="Bind port (default: 30081)")
     parser.add_argument("--api-key", default=EXPECTED_API_KEY, help="Expected Bearer API key")
     parser.add_argument("--upload-seconds", type=float, default=10.0, help="Upload response delay (default: 10 seconds)")
+    parser.add_argument("--preview-dir", type=Path, help="Optional UUID-named converted PDF fixtures for local preview demos")
+    parser.add_argument("--document-dir", type=Path, help="Optional UUID-named original byte fixtures for local demos")
     args = parser.parse_args()
+    _PREVIEW_FIXTURE_DIR = args.preview_dir.resolve() if args.preview_dir else None
+    _DOCUMENT_FIXTURE_DIR = args.document_dir.resolve() if args.document_dir else None
     if not 0 <= args.upload_seconds <= 600:
         parser.error("--upload-seconds must be between 0 and 600")
     _UPLOAD_SECONDS = args.upload_seconds
