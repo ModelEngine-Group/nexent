@@ -30,6 +30,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -755,6 +756,9 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
           </Dropdown>
         </div>
       </div>
+      <AidpOntologyGapNote>
+        {t("aidpKnowledge.ontologyEntitySearchGap")}
+      </AidpOntologyGapNote>
       {query.isError && entities.length > 0 && (
         <div className={styles.inlineError} role="alert">
           {errorMessage}
