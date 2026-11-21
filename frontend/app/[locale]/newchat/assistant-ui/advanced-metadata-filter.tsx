@@ -214,10 +214,7 @@ function FileConditionRow({
           disabled={disabled}
           allowClear
           maxLength={256}
-          placeholder={t(
-            "chat.knowledgeScope.filterFileNamePlaceholder",
-            "请输入文件名关键词，回车搜索"
-          )}
+          placeholder={t("chat.knowledgeScope.filterFileNamePlaceholder")}
           onChange={(event) =>
             updateCondition({
               operator: condition.operator,
@@ -231,30 +228,24 @@ function FileConditionRow({
           suffix={
             <Search
               className="size-3.5 cursor-pointer text-muted-foreground"
-              aria-label={t(
-                "chat.knowledgeScope.filterSearchAction",
-                "搜索文件"
-              )}
+              aria-label={t("chat.knowledgeScope.filterSearchAction")}
               onClick={runSearch}
             />
           }
         />
         {searching ? (
           <div className="mt-2 text-xs text-muted-foreground">
-            {t("chat.knowledgeScope.filterSearching", "搜索中…")}
+            {t("chat.knowledgeScope.filterSearching")}
           </div>
         ) : results !== null ? (
           <div className="mt-2 max-h-60 overflow-y-auto rounded-md border border-border">
             {targets.length === 0 ? (
               <div className="px-3 py-2 text-xs text-muted-foreground">
-                {t(
-                  "chat.knowledgeScope.filterSearchNoTargets",
-                  "请先选择知识库"
-                )}
+                {t("chat.knowledgeScope.filterSearchNoTargets")}
               </div>
             ) : visibleResults.length === 0 ? (
               <div className="px-3 py-2 text-xs text-muted-foreground">
-                {t("chat.knowledgeScope.filterSearchEmpty", "没有匹配的文件")}
+                {t("chat.knowledgeScope.filterSearchEmpty")}
               </div>
             ) : (
               <>
@@ -271,22 +262,18 @@ function FileConditionRow({
                     </span>
                     <span className="max-w-[45%] shrink-0 truncate text-[11px] text-muted-foreground">
                       {result.knowledgeBases.length > 1
-                        ? t(
-                            "chat.knowledgeScope.filterSearchSameName",
-                            "同名于 {{count}} 个库",
-                            { count: result.knowledgeBases.length }
-                          )
+                        ? t("chat.knowledgeScope.filterSearchSameName", {
+                            count: result.knowledgeBases.length,
+                          })
                         : result.knowledgeBases[0]}
                     </span>
                   </button>
                 ))}
                 {results.length > SEARCH_DISPLAY_LIMIT ? (
                   <div className="px-3 py-2 text-[11px] text-muted-foreground">
-                    {t(
-                      "chat.knowledgeScope.filterSearchTruncated",
-                      "仅显示前 {{count}} 条",
-                      { count: SEARCH_DISPLAY_LIMIT }
-                    )}
+                    {t("chat.knowledgeScope.filterSearchTruncated", {
+                      count: SEARCH_DISPLAY_LIMIT,
+                    })}
                   </div>
                 ) : null}
               </>
@@ -300,10 +287,7 @@ function FileConditionRow({
           size="small"
           className="mt-0.5 shrink-0 text-muted-foreground"
           icon={<X size={14} />}
-          aria-label={t(
-            "chat.knowledgeScope.filterRemoveCondition",
-            "删除条件"
-          )}
+          aria-label={t("chat.knowledgeScope.filterRemoveCondition")}
           disabled={disabled}
           onClick={onRemove}
         />
@@ -358,20 +342,12 @@ export function AdvancedMetadataFilter({
     <div className="border-t border-border px-1 pb-1 pt-3">
       <div className="flex items-center gap-2">
         <span className="text-[14px] font-medium">
-          {t("chat.knowledgeScope.advancedFilter", "高级筛选")}
+          {t("chat.knowledgeScope.advancedFilter")}
         </span>
-        <Tooltip
-          title={t(
-            "chat.knowledgeScope.advancedFilterHint",
-            "按文件元数据限制进入检索的 chunk"
-          )}
-        >
+        <Tooltip title={t("chat.knowledgeScope.advancedFilterHint")}>
           <Info
             className="size-3.5 text-muted-foreground"
-            aria-label={t(
-              "chat.knowledgeScope.advancedFilterHint",
-              "按文件元数据限制进入检索的 chunk"
-            )}
+            aria-label={t("chat.knowledgeScope.advancedFilterHint")}
           />
         </Tooltip>
         <Switch
@@ -388,20 +364,14 @@ export function AdvancedMetadataFilter({
         />
         {!enabled ? (
           <span className="ml-auto text-xs text-muted-foreground">
-            {t(
-              "chat.knowledgeScope.advancedFilterOffHint",
-              "开启开关进行高级筛选设置"
-            )}
+            {t("chat.knowledgeScope.advancedFilterOffHint")}
           </span>
         ) : null}
       </div>
       {enabled ? (
         <div className="mt-2 space-y-2">
           <p className="text-xs text-muted-foreground">
-            {t(
-              "chat.knowledgeScope.advancedFilterOnHint",
-              "设定高级筛选后，满足筛选规则的 chunk 才会被检索"
-            )}
+            {t("chat.knowledgeScope.advancedFilterOnHint")}
           </p>
           <div className="space-y-2">
             {conditions.map((condition, index) => (
@@ -428,12 +398,12 @@ export function AdvancedMetadataFilter({
             disabled={disabled || conditions.length >= MAX_CONDITIONS}
             onClick={addCondition}
           >
-            {t("chat.knowledgeScope.filterAddCondition", "添加文件")} (
-            {conditions.length}/{MAX_CONDITIONS})
+            {t("chat.knowledgeScope.filterAddCondition")} ({conditions.length}/
+            {MAX_CONDITIONS})
           </Button>
           <div className="flex items-center gap-3 pt-1">
             <span className="text-[13px]">
-              {t("chat.knowledgeScope.filterMatchLabel", "条件组合方式")}
+              {t("chat.knowledgeScope.filterMatchLabel")}
             </span>
             <Radio.Group
               value={match}
@@ -447,10 +417,10 @@ export function AdvancedMetadataFilter({
               className="flex flex-wrap gap-4 text-sm leading-[22px] text-[#191919]"
             >
               <Radio value="all">
-                {t("chat.knowledgeScope.filterMatchAll", "满足全部")}
+                {t("chat.knowledgeScope.filterMatchAll")}
               </Radio>
               <Radio value="any">
-                {t("chat.knowledgeScope.filterMatchAny", "满足其一")}
+                {t("chat.knowledgeScope.filterMatchAny")}
               </Radio>
             </Radio.Group>
           </div>
