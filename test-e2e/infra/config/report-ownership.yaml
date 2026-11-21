@@ -100,8 +100,6 @@ feature_overrides:
   AGENT-PUBLICATION: agent_config
   AGENT-REPO-SORT-MAIN-TAG: agent_repository
   AIDP-RETRIEVAL: knowledge
-  AIDP-ONTOLOGY: knowledge
-  AIDP-METADATA: knowledge
   AUTH-LOCAL: system
   CAS-USER-DISPLAY: system
   CHAT-AGENT-DISCOVERY: runtime
