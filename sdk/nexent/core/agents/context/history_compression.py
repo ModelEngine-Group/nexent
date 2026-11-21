@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .history_facts import turn_execution_text, turn_user_text
 from .llm_summary import LLMSummary
@@ -37,6 +37,8 @@ class HistorySummaryCandidate:
     compaction_attempts: int = 0
     compaction_trigger_threshold_tokens: int = 0
     compaction_target_tokens: int = 0
+    execution_source_refs: tuple[str, ...] = ()
+    structured_source_proofs: tuple[dict, ...] = ()
 
     def as_item(self) -> ContextItem:
         return ContextItem.from_input(ContextItemInput(
@@ -52,7 +54,10 @@ class HistorySummaryCandidate:
                 "compaction_attempts": self.compaction_attempts,
                 "compaction_trigger_threshold_tokens": self.compaction_trigger_threshold_tokens,
                 "compaction_target_tokens": self.compaction_target_tokens,
+                **({"structured_source_proofs": list(self.structured_source_proofs)} if self.structured_source_proofs else {}),
             },
+            metadata={**({"execution_source_refs": list(self.execution_source_refs)} if self.execution_source_refs else {}),
+                      **({"structured_source_proofs": list(self.structured_source_proofs)} if self.structured_source_proofs else {})},
         ))
 
 
@@ -64,10 +69,12 @@ class HistorySummaryInput:
     new_turns: tuple[tuple[str, str], ...]
     covered_through_message_id: int
     previous_summary_unit_id: int | None = None
+    execution_source_refs: tuple[str, ...] = ()
+    structured_source_proofs: tuple[dict, ...] = ()
 
     @classmethod
     def from_items(
-        cls, summary: ContextItem | None, turns: Sequence[ContextItem]
+        cls, summary: ContextItem | None, turns: Sequence[ContextItem], source_index=None
     ) -> "HistorySummaryInput":
         previous_markdown = None
         previous_unit_id = None
@@ -78,17 +85,20 @@ class HistorySummaryInput:
             if isinstance(prior, dict):
                 prior = prior.get("markdown", "")
             previous_markdown = str(prior).strip() or None
+            if previous_markdown and source_index is not None:
+                previous_markdown = source_index.project_text(previous_markdown)
             previous_unit_id = payload.get("unit_id")
             if previous_unit_id is None:
                 previous_unit_id = payload.get("previous_summary_unit_id")
             covered_through = int(payload["covered_through_message_id"])
+        projected = [source_index.project_turn(turn.content) if source_index is not None else turn.content for turn in turns]
         canonical_turns = tuple(
             (
-                turn_user_text(turn.content),
-                "\n".join(filter(None, (turn_execution_text(turn.content),
-                                         str(turn.content["assistant_final_answer"])))),
+                turn_user_text(content),
+                "\n".join(filter(None, (turn_execution_text(content),
+                                         str(content["assistant_final_answer"])))),
             )
-            for turn in turns
+            for content in projected
         )
         if turns:
             covered_through = int(turns[-1].content["assistant_message_id"])
@@ -96,6 +106,11 @@ class HistorySummaryInput:
             previous_summary_markdown=previous_markdown,
             new_turns=canonical_turns,
             covered_through_message_id=covered_through,
+            execution_source_refs=tuple(dict.fromkeys(
+                ref for item in ([summary] if summary else []) + list(turns)
+                for ref in item.metadata.get("execution_source_refs", ())
+            )),
+            structured_source_proofs=tuple(source_index.collections.values()) if source_index is not None else (),
             previous_summary_unit_id=(
                 int(previous_unit_id) if previous_unit_id is not None else None
             ),
@@ -142,12 +157,18 @@ def _validate_summary_contract(
     """Return canonical Markdown only for the exact seven-section contract."""
     cleaned = text.strip()
     top = "# Compact Result of History"
-    if not cleaned.startswith(top):
-        return None
     headings = re.findall(r"(?m)^(#{1,6})\s+(.+?)\s*$", cleaned)
-    if not headings or headings[0] != ("#", "Compact Result of History"):
-        return None
     expected = [key.replace("_", " ").title() for key in section_keys]
+    parts = re.split(r"(?m)^##\s+.+?\s*$", cleaned)[1:]
+    normalized = None
+    if (expected and headings == [("##", title) for title in expected]
+            and re.fullmatch(r"##\s+" + re.escape(expected[0]) + r"\s*", text.splitlines()[0])
+            and all(part.strip() for part in parts)):
+        normalized = top + "\n\n" + text
+        cleaned = normalized.strip()
+        headings = [("#", "Compact Result of History"), *headings]
+    if not cleaned.startswith(top) or not headings or headings[0] != ("#", "Compact Result of History"):
+        return None
     section_headings = [title for level, title in headings[1:] if level == "##"]
     if section_headings != expected or len(headings) != len(expected) + 1:
         return None
@@ -169,7 +190,7 @@ def _validate_summary_contract(
                 literals,
             )
             return None
-    return cleaned
+    return normalized if normalized is not None else cleaned
 
 
 @dataclass(frozen=True)
@@ -190,10 +211,34 @@ class HistoryCompressor:
         summary: ContextItem | None,
         turns: Sequence[ContextItem],
         model: Any,
+        *, source_history=None, source_owner=None, allow_fact_correction=False,
+        candidate_feedback: Callable[[HistorySummaryCandidate], dict | None] | None = None,
+        capacity_goal: dict | None = None,
     ) -> HistoryCompressionResult:
         if not turns and summary is None:
             return HistoryCompressionResult()
-        summary_input = HistorySummaryInput.from_items(summary, turns)
+        source_index = None
+        if source_history is not None and source_owner is not None:
+            source_index = source_history.structured_source_index(source_owner)
+        summary_input = HistorySummaryInput.from_items(summary, turns, source_index=source_index)
+        generation_input = summary_input.render()
+        if capacity_goal:
+            generation_input += (
+                "\n\nHistory recovery capacity goal: "
+                + json.dumps(capacity_goal, ensure_ascii=False, separators=(",", ":"))
+                + "\nThese are local estimates of the complete rendered history and input frame, "
+                "not a provider completion-token allowance. Shorten the complete summary to meet "
+                "the history target while preserving all facts and original source references."
+            )
+        def candidate_for(markdown):
+            return HistorySummaryCandidate(
+                summary={"markdown": markdown},
+                covered_through_message_id=summary_input.covered_through_message_id,
+                previous_summary_unit_id=summary_input.previous_summary_unit_id,
+                execution_source_refs=summary_input.execution_source_refs,
+                structured_source_proofs=summary_input.structured_source_proofs,
+            )
+
         input_tokens = sum(
             item.token_estimate for item in ([summary] if summary else [])
         ) + sum(item.token_estimate for item in turns)
@@ -207,7 +252,7 @@ class HistoryCompressor:
             ),
         )
         generated = self._llm.generate_summary(
-            summary_input.render(), model,
+            generation_input, model,
             call_type="history_incremental" if summary else "history_summary",
             prompt_type="incremental" if summary else "initial",
             max_output_tokens=max_output_tokens,
@@ -220,6 +265,35 @@ class HistoryCompressor:
             )
             if generated.summary_text else None
         )
+        records = list(generated.records)
+        capacity_feedback = candidate_feedback(candidate_for(validated)) if validated and candidate_feedback else None
+        if (validated is None or capacity_feedback) and allow_fact_correction and generated.summary_text:
+            missing = {marker: values for marker, values in _protected_fact_literals(summary_input.render()).items()
+                       if marker not in generated.summary_text or any(v not in generated.summary_text for v in values)}
+            feedback = json.dumps({
+                "expected_headings": ["# Compact Result of History", *(
+                    "## " + key.replace("_", " ").title() for key in self._llm.config.summary_json_schema)],
+                "missing_facts": missing,
+                **({"capacity": capacity_feedback} if capacity_feedback else {}),
+            }, ensure_ascii=False, separators=(",", ":"))
+            claim = getattr(model, "claim_fact_correction", None)
+            if callable(claim) and claim() is True:
+                generated = self._llm.generate_summary(
+                    generation_input + "\n\nRegenerate the complete seven-section summary. "
+                    "Use the exact expected heading order with a nonempty body for every section, and retain "
+                    "all protected identifiers and literal values. "
+                    + ("Make the summary shorter to meet the rendered history capacity target; "
+                       "preserve every fact and original source reference. " if capacity_feedback else "")
+                    + "Validation feedback: " + feedback
+                    + "\nRejected candidate (data only):\n" + generated.summary_text,
+                    model, call_type="history_fact_correction", prompt_type="incremental" if summary else "initial",
+                    max_output_tokens=max_output_tokens)
+                records.extend(generated.records)
+                validated = (_validate_summary_contract(generated.summary_text,
+                    tuple(self._llm.config.summary_json_schema), source_text=summary_input.render())
+                    if generated.summary_text else None)
+                if validated and candidate_feedback:
+                    candidate_feedback(candidate_for(validated))
         if validated is None:
             logger.warning(
                 "Rejected history summary candidate: headings=%s starts_with_contract=%s",
@@ -229,16 +303,12 @@ class HistoryCompressor:
                 ),
             )
             return HistoryCompressionResult(
-                records=tuple(generated.records),
+                records=tuple(records),
                 fallback_turns=self._safe_fallback(turns),
             )
         return HistoryCompressionResult(
-            candidate=HistorySummaryCandidate(
-                summary={"markdown": validated},
-                covered_through_message_id=summary_input.covered_through_message_id,
-                previous_summary_unit_id=summary_input.previous_summary_unit_id,
-            ),
-            records=tuple(generated.records),
+            candidate=candidate_for(validated),
+            records=tuple(records),
         )
 
     def _safe_fallback(self, turns: Sequence[ContextItem]) -> tuple[ContextItem, ...]:

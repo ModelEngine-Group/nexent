@@ -136,6 +136,8 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
             assert result["result"]
         if protocol=="native":assert any(e["provider_call_id"] for e in tools)
         assistant,saved,wire=asyncio.run(persist_output(monkeypatch,info,output))
+        if resource == "chain" and protocol == "native":
+            assert_defaulted_skill_history(info, output, state)
         public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines()
                   if line.startswith("data:")]
         forbidden = {"model_output", "tool_result", "step_observation", "run_terminal"}
@@ -244,3 +246,83 @@ def test_clarification_terminal_history_before_and_after_submission(monkeypatch,
         assert response["unit_index"] == card["unit_index"]
         check_public_history()
         assert records() == before
+
+
+def assert_defaulted_skill_history(info, output, state):
+    """Prove actual SDK formatting survives the backend-bound cross-turn loader."""
+    from management.db.conversation.repository import get_historical_context
+    from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
+    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+
+    call = next(event for event in output if event["type"] == "tool"
+                and event.get("tool_name") == "read_skill_md")
+    assert call["tool_arguments"] == {"skill_name": "fixture_skill", "additional_files": None}
+    assert json.loads(call["raw_arguments"]) == {"skill_name": "fixture_skill"}
+    assert call["provider_call_id"] == "fixture_read_skill_md"
+    assert call["source_protocol"] == "model_native_fc"
+    assert call["call_index"] == 0 and call["call_count"] == 1 and call["call_group_id"]
+    result = next(event for event in output if event["type"] == "tool_result"
+                  and event["local_call_id"] == call["local_call_id"])
+    assert result["provider_call_id"] == call["provider_call_id"]
+    assert "SKILL_GUIDE_MARKER" in result["result"]
+    assert any(message.get("tool_call_id") == call["provider_call_id"]
+               for request in state["requests"] for message in request["messages"])
+    history = get_historical_context(info.conversation_id, None, "owner", "spike-tenant",
+                                     before_message_index=2)
+    assert history and len(history["conversation_turns"]) == 1
+    item = ContextItem.from_input(ContextItemInput(id="restored", type="conversation_turn",
+                                                  content=history["conversation_turns"][0]))
+    messages = ContextManager(message_format="openai_chat_completions").build_context_messages([item])
+    restored_call = next(tool for message in messages for tool in message.get("tool_calls", [])
+                         if tool["id"] == call["provider_call_id"])
+    assert json.loads(restored_call["function"]["arguments"]) == {"skill_name": "fixture_skill"}
+    restored_result = next(message for message in messages
+                           if message.get("tool_call_id") == call["provider_call_id"])
+    assert restored_result["role"] == "tool" and restored_result["content"] == result["result"]
+    store = ExecutionHistory()
+    register_authorized_sources([item], store, "restored-owner")
+    sources = store.authorized_sources("restored-owner")
+    assert any(source.source_kind == "tool_result" and source.text == result["result"] for source in sources)
+
+
+@pytest.mark.parametrize("protocol", ["native", "text"])
+def test_persisted_original_is_readable_by_fresh_codeagent(
+    monkeypatch, tmp_path, protocol
+):
+    from execution_owner_runtime import run_historical_reader
+    from management.db.conversation.repository import (
+        get_conversation_history,
+        get_historical_context,
+    )
+
+    with context_database(monkeypatch):
+        with monkeypatch.context() as seed:
+            info, output, state = asyncio.run(
+                run_historical_reader(
+                    seed, None, None, None, seed=True, protocol=protocol
+                )
+            )
+        assert state["business_calls"] == 1
+        assistant, _, _ = asyncio.run(persist_output(monkeypatch, info, output))
+        before = get_conversation_history(info.conversation_id, "owner")
+        historical = get_historical_context(
+            info.conversation_id, None, "owner", "spike-tenant", before_message_index=2
+        )
+        result = next(
+            record
+            for turn in historical["conversation_turns"]
+            for record in turn["execution_records"]
+            if record["record_type"] == "execution_result"
+        )
+        event = json.loads(result["content"])
+        reference = (
+            f"message:{assistant['message_id']}/unit-index:{result['unit_index']}"
+        )
+        asyncio.run(
+            run_historical_reader(
+                monkeypatch, historical, reference, event["content"], protocol=protocol
+            )
+        )
+        assert get_conversation_history(info.conversation_id, "owner") == before
+        assert state["business_calls"] == 1

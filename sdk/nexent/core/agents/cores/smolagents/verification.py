@@ -14,6 +14,7 @@ from smolagents.utils import truncate_content
 from nexent.core.agents.contracts.config import AgentVerificationConfig, GuardrailConfig, GuardrailRule
 from nexent.core.prompts import load_prompt
 from nexent.core.utils.observer import MessageObserver, ProcessType
+from nexent.core.agents.cores.smolagents.output_protocol import has_unquoted_match
 from nexent.monitor import get_monitoring_manager
 
 
@@ -770,11 +771,6 @@ def render_tool_input_refusal(decision: "GuardrailDecision", tool_name: str) -> 
 class VerificationController:
     """Layered verification for critical ReAct events and final answers."""
 
-    _ERROR_RE = re.compile(
-        r"(traceback|exception|error:|failed|timeout|unauthorized|permission denied)",
-        re.IGNORECASE,
-    )
-    _EMPTY_RE = re.compile(r"^\s*(execution logs:\s*)?(last output from code snippet:\s*)?\s*$", re.IGNORECASE)
     _RAW_TAG_RE = re.compile(r"</?(code|run)>|<display:[^>]+>|</display>")
     _CITATION_RE = re.compile(r"\[\[[a-e]\d+\]\]")
     _LIGHTWEIGHT_CONVERSATION_RE = re.compile(
@@ -849,13 +845,6 @@ class VerificationController:
     def _build_pass_summary(self, result: VerificationResult) -> str:
         if result.event == "tool_precheck":
             return "动作非空、语法正常，未发现越权风险"
-        if result.event == "retrieval":
-            return "检索返回可用内容，未发现错误信号"
-        if result.event == "handoff":
-            return "子任务返回可用结论，未发现错误信号"
-        if result.event in {"tool_result", "code_execution"}:
-            return "执行结果非空，未发现错误信号"
-
         if result.event == "final_answer":
             if "Lightweight conversational task" in (result.user_visible_note or ""):
                 return "轻量对话无需外部证据，答案非空且格式正常"
@@ -875,15 +864,8 @@ class VerificationController:
             "non_empty_code": "动作非空",
             "python_syntax": "语法正常",
             "action_scope": "未发现越权风险",
-            "tool_relevance_signal": "动作与任务相关",
-            "observation_present": "结果非空",
-            "tool_error_handled": "未发现未处理错误",
-            "retrieval_has_evidence": "检索证据可用",
-            "handoff_has_substance": "子任务结论可用",
             "final_answer_non_empty": "答案非空",
             "no_unresolved_raw_tags": "无内部标记",
-            "no_unresolved_placeholders": "无占位符",
-            "previous_errors_acknowledged": "未发现未处理错误",
             "intent_coverage": "覆盖用户目标",
             "evidence_grounding": "证据支撑充分",
             "citation_integrity": "引用格式正常",
@@ -898,16 +880,9 @@ class VerificationController:
             "format_safety",
             "final_answer_non_empty",
             "no_unresolved_raw_tags",
-            "no_unresolved_placeholders",
-            "previous_errors_acknowledged",
-            "observation_present",
-            "tool_error_handled",
-            "retrieval_has_evidence",
-            "handoff_has_substance",
             "non_empty_code",
             "python_syntax",
             "action_scope",
-            "tool_relevance_signal",
         ]
         passed_names = {check.name for check in checks if check.passed}
         return [label_map[name] for name in ordered_names if name in passed_names and name in label_map]
@@ -916,7 +891,6 @@ class VerificationController:
         self,
         code_action: str,
         step_number: int,
-        available_tool_names: Optional[List[str]] = None,
     ) -> VerificationResult:
         if not self._should_verify_step("tool_precheck"):
             return self._pass("tool_precheck")
@@ -933,7 +907,7 @@ class VerificationController:
 
         syntax_ok = True
         try:
-            ast.parse(code_text)
+            tree = ast.parse(code_text)
         except SyntaxError as exc:
             syntax_ok = False
             checks.append(VerificationCheck(
@@ -944,31 +918,12 @@ class VerificationController:
             ))
         if syntax_ok:
             checks.append(VerificationCheck(name="python_syntax", passed=True))
-
-        dangerous_terms = [
-            "__import__",
-            "eval(",
-            "exec(",
-            "subprocess",
-            "os.system",
-            "shutil.rmtree",
-            "socket.",
-        ]
-        dangerous_hits = [term for term in dangerous_terms if term in code_text]
-        checks.append(VerificationCheck(
-            name="action_scope",
-            passed=not dangerous_hits,
-            reason=f"Potentially unsafe code terms: {', '.join(dangerous_hits)}" if dangerous_hits else "",
-            fix_hint="Use the platform-provided tools instead of direct system or network operations.",
-        ))
-
-        if available_tool_names:
-            used_tools = [name for name in available_tool_names if re.search(rf"\b{re.escape(name)}\s*\(", code_text)]
+            restricted = self._restricted_action_terms(tree)
             checks.append(VerificationCheck(
-                name="tool_relevance_signal",
-                passed=bool(used_tools) or "print(" in code_text,
-                reason="" if used_tools or "print(" in code_text else "No known tool call or printed observation was detected.",
-                fix_hint="Call a relevant tool with keyword arguments, or print the evidence needed for the next step.",
+                name="action_scope",
+                passed=not restricted,
+                reason=f"Potentially unsafe Python operations: {', '.join(restricted)}" if restricted else "",
+                fix_hint="Use the platform-provided tools instead of direct system or network operations.",
             ))
 
         return self._result_from_checks(
@@ -978,68 +933,37 @@ class VerificationController:
             step_number=step_number,
         )
 
-    def verify_after_tool_call(
-        self,
-        code_action: str,
-        observation: str,
-        step_number: int,
-        is_final_answer: bool = False,
-    ) -> VerificationResult:
-        event = self._classify_step_event(code_action, is_final_answer)
-        if not self._should_verify_step(event):
-            return self._pass(event)
-
-        observation_text = observation or ""
-        checks = [
-            VerificationCheck(
-                name="observation_present",
-                passed=not self._EMPTY_RE.match(observation_text),
-                reason="" if observation_text.strip() else "The action produced no visible observation.",
-                fix_hint="Retry with better parameters, inspect tool errors, or explain that evidence is unavailable.",
-            ),
-            VerificationCheck(
-                name="tool_error_handled",
-                passed=not self._ERROR_RE.search(observation_text),
-                reason="The observation contains an error signal." if self._ERROR_RE.search(observation_text) else "",
-                fix_hint="Do not ignore this tool error. Diagnose it, retry safely, or state the limitation.",
-            ),
-        ]
-
-        if event == "retrieval":
-            checks.append(VerificationCheck(
-                name="retrieval_has_evidence",
-                passed=not self._looks_empty_retrieval(observation_text),
-                reason="Retrieval appears empty or has no usable evidence." if self._looks_empty_retrieval(observation_text) else "",
-                fix_hint="Search again with refined terms or say that supporting evidence was not found.",
-            ))
-
-        if event == "handoff":
-            checks.append(VerificationCheck(
-                name="handoff_has_substance",
-                passed=not self._looks_empty_handoff(observation_text),
-                reason="The delegated agent returned no useful result." if self._looks_empty_handoff(observation_text) else "",
-                fix_hint="Reassign a narrower task or proceed with clearly stated limitations.",
-            ))
-
-        return self._result_from_checks(
-            event=event,
-            checks=checks,
-            blocking_names=set(),
-            step_number=step_number,
-        )
+    @staticmethod
+    def _restricted_action_terms(tree: ast.AST) -> list[str]:
+        hits = set()
+        restricted_references = {"os.system", "shutil.rmtree"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in {"__import__", "subprocess"}:
+                hits.add(node.id)
+            elif isinstance(node, ast.alias) and node.name.split(".")[0] == "subprocess":
+                hits.add("subprocess")
+            elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "subprocess":
+                hits.add("subprocess")
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                reference = f"{node.value.id}.{node.attr}"
+                if reference in restricted_references or node.value.id == "socket":
+                    hits.add(reference)
+            elif isinstance(node, ast.Call):
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if name in {"eval", "exec"}:
+                    hits.add(name)
+        return sorted(hits)
 
     def verify_before_final_answer(
         self,
         candidate: Any,
-        observation: str,
         step_number: int,
     ) -> VerificationResult:
         if not self.is_enabled() or not self.config.final_verification_enabled:
             return self._pass("final_answer")
 
         answer = "" if candidate is None else str(candidate)
-        observation_text = observation or ""
-        recent_error_signal = self._has_recent_error_signal(observation_text)
+        has_raw_tags = has_unquoted_match(answer, self._RAW_TAG_RE)
         checks = [
             VerificationCheck(
                 name="final_answer_non_empty",
@@ -1049,28 +973,16 @@ class VerificationController:
             ),
             VerificationCheck(
                 name="no_unresolved_raw_tags",
-                passed=not self._RAW_TAG_RE.search(answer),
-                reason="The final answer still contains internal execution/display tags." if self._RAW_TAG_RE.search(answer) else "",
+                passed=not has_raw_tags,
+                reason="The final answer still contains internal execution/display tags." if has_raw_tags else "",
                 fix_hint="Convert internal tags to user-facing Markdown before answering.",
-            ),
-            VerificationCheck(
-                name="no_unresolved_placeholders",
-                passed=not any(marker in answer for marker in ["{{", "}}", "<TODO>", "TODO:"]),
-                reason="The final answer contains unresolved placeholders." if any(marker in answer for marker in ["{{", "}}", "<TODO>", "TODO:"]) else "",
-                fix_hint="Replace placeholders with real content or remove them.",
-            ),
-            VerificationCheck(
-                name="previous_errors_acknowledged",
-                passed=not recent_error_signal or self._mentions_limitation(answer),
-                reason="A recent error signal is not acknowledged in the final answer." if recent_error_signal and not self._mentions_limitation(answer) else "",
-                fix_hint="Acknowledge the failed operation, retry, or state what could not be verified.",
             ),
         ]
 
         return self._result_from_checks(
             event="final_answer",
             checks=checks,
-            blocking_names={"final_answer_non_empty", "no_unresolved_raw_tags", "no_unresolved_placeholders"},
+            blocking_names={"final_answer_non_empty", "no_unresolved_raw_tags"},
             step_number=step_number,
         )
 
@@ -1080,6 +992,8 @@ class VerificationController:
         candidate: Any,
         memory_summary: str,
         round_number: int,
+        *,
+        execution_failed: bool = False,
     ) -> VerificationResult:
         if not self.is_enabled() or not self.config.final_verification_enabled:
             return self._pass("final_answer", phase="final_pass")
@@ -1089,7 +1003,6 @@ class VerificationController:
 
         deterministic = self.verify_before_final_answer(
             candidate=candidate,
-            observation=memory_summary,
             step_number=round_number,
         )
         if not deterministic.passed:
@@ -1102,7 +1015,7 @@ class VerificationController:
             self.emit(deterministic, round_number)
             return deterministic
 
-        policy = self._build_final_verification_policy(task, memory_summary)
+        policy = self._build_final_verification_policy(task, execution_failed=execution_failed)
         if policy["task_profile"] == "lightweight_conversation":
             deterministic.phase = "final_pass"
             deterministic.user_visible_note = "Lightweight conversational task; deterministic checks passed."
@@ -1152,7 +1065,7 @@ class VerificationController:
         round_number: int,
         policy: Optional[Dict[str, Any]] = None,
     ) -> VerificationResult:
-        policy = policy or self._build_final_verification_policy(task, memory_summary)
+        policy = policy or self._build_final_verification_policy(task)
         monitoring_manager = get_monitoring_manager()
         attrs = {
             "agent.verification.event": "final_answer",
@@ -1219,7 +1132,7 @@ class VerificationController:
         memory_summary: str,
         policy: Optional[Dict[str, Any]] = None,
     ) -> List[ChatMessage]:
-        policy = policy or self._build_final_verification_policy(task, memory_summary)
+        policy = policy or self._build_final_verification_policy(task)
         clean_memory_summary = self._strip_internal_verification_feedback(memory_summary or "")
         system_prompt = load_prompt("en", "agent/answer_verifier")["system_prompt"]
         user_prompt = json.dumps(
@@ -1366,14 +1279,13 @@ class VerificationController:
         self.emit(result, step_number)
         return result
 
-    def _build_final_verification_policy(self, task: str, memory_summary: str) -> Dict[str, Any]:
-        clean_memory_summary = self._strip_internal_verification_feedback(memory_summary or "")
+    def _build_final_verification_policy(self, task: str, *, execution_failed: bool = False) -> Dict[str, Any]:
         lightweight = self._is_lightweight_conversation_task(task)
         evidence_required = (not lightweight) and bool(self._EVIDENCE_DEMAND_RE.search(task or ""))
         return {
             "task_profile": "lightweight_conversation" if lightweight else "task_oriented",
             "evidence_required": evidence_required,
-            "tool_error_check_required": self._has_recent_error_signal(clean_memory_summary),
+            "tool_error_check_required": execution_failed,
         }
 
     def _is_lightweight_conversation_task(self, task: str) -> bool:
@@ -1399,32 +1311,5 @@ class VerificationController:
             cleaned.append(line)
         return "\n".join(cleaned)
 
-    def _has_recent_error_signal(self, text: str) -> bool:
-        clean_text = self._strip_internal_verification_feedback(text or "")
-        return bool(self._ERROR_RE.search(clean_text))
-
-    def _classify_step_event(self, code_action: str, is_final_answer: bool) -> str:
-        if is_final_answer:
-            return "final_answer"
-        code = code_action or ""
-        lowered = code.lower()
-        if "knowledge_base_search" in lowered or "search(" in lowered or "_search" in lowered:
-            return "retrieval"
-        if "task=" in code and re.search(r"\w+\s*\(\s*task\s*=", code):
-            return "handoff"
-        return "code_execution"
-
     def _pass(self, event: str, phase: str = "pass") -> VerificationResult:
         return VerificationResult(passed=True, severity="info", event=event, phase=phase)
-
-    def _looks_empty_retrieval(self, text: str) -> bool:
-        lowered = (text or "").lower()
-        return any(marker in lowered for marker in ["no result", "no results", "[]", "未找到", "无结果", "没有找到"])
-
-    def _looks_empty_handoff(self, text: str) -> bool:
-        lowered = (text or "").lower()
-        return any(marker in lowered for marker in ["cannot help", "unable", "no answer", "无法", "不能", "空"])
-
-    def _mentions_limitation(self, answer: str) -> bool:
-        lowered = (answer or "").lower()
-        return any(marker in lowered for marker in ["无法", "失败", "错误", "未能", "cannot", "unable", "failed", "error", "limitation"])

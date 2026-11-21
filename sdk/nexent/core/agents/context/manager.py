@@ -12,13 +12,12 @@ import threading
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, Literal, Optional, Sequence
 
 from nexent.core.agents.contracts.context import ContextEvidence, FinalContext, ModelMessage
-
 from nexent.monitor.run_capture import capture_context_assembly, capture_current_context_input
 
-from .budget import extract_message_text, message_role
+from .budget import message_role
 from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
 from .llm_summary import LLMSummary
@@ -32,13 +31,31 @@ from .summary_cache import CompressionCallRecord
 
 
 logger = logging.getLogger("agent_context")
+MessageFormat = Literal["codeagent", "openai_chat_completions", "openai_responses"]
 
 
 class ContextManager:
     """Owns ordering, budget checks, compaction and final rendering."""
 
-    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None):
+    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: int | None = None,
+                 *, message_format: MessageFormat = "codeagent",
+                 request_token_estimator: Callable[[Sequence[Any], Sequence[Any]], int] | None = None):
+        if message_format == "openai_responses":
+            raise NotImplementedError("Responses context messages are not implemented")
+        if not isinstance(message_format, str) or message_format not in {"codeagent", "openai_chat_completions"}:
+            raise ValueError(f"Unknown context message format: {message_format}")
+        from .native_history import render_native_turn
+        from .rendering import ContextItemRenderer, render_chat_action
+
+        self._message_format = message_format
+        handlers = {}
+        if message_format == "openai_chat_completions":
+            handlers = {ContextItemType.CONVERSATION_TURN: render_native_turn,
+                        ContextItemType.CURRENT_ACTION: render_chat_action}
+        self._item_renderer = ContextItemRenderer(handlers)
+        self._request_token_estimator = request_token_estimator
         self.config = config or ContextManagerConfig()
+        self.use_result_observations = False
         if max_steps is not None:
             self.config.keep_recent_steps = min(self.config.keep_recent_steps, max_steps)
         if self.config.max_summary_input_tokens <= 0:
@@ -51,6 +68,7 @@ class ContextManager:
         self._llm = LLMSummary(self.config, self._renderer)
         self._history_compressor = HistoryCompressor(self._llm)
         self._history_candidate: HistorySummaryCandidate | None = None
+        self._pending_capacity_candidate: HistorySummaryCandidate | None = None
         self._current_item_cache: dict[int, ContextItem] = {}
         self._step_local_log: list[CompressionCallRecord] = []
         self.compression_calls_log: list[CompressionCallRecord] = []
@@ -61,6 +79,11 @@ class ContextManager:
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
         self._run_compaction_attempts = 0
+        self._representation_overrides: dict[str, tuple[str, ContextItem]] = {}
+
+    @property
+    def message_format(self) -> str:
+        return self._message_format
 
     def _compaction_trigger_threshold_tokens(self) -> int:
         return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
@@ -95,6 +118,7 @@ class ContextManager:
         self._history_candidate = None
         self._run_compaction_attempts = 0
         self._current_item_cache.clear()
+        self._representation_overrides.clear()
         source = self._item_source(items)
         if fallback_system_prompt and not any(item.type == ContextItemType.SYSTEM for item in source):
             source.append(
@@ -123,14 +147,14 @@ class ContextManager:
 
     def assemble_final_context(self, *, model, memory, current_run_start_idx,
                                tools=None, purpose="step", task=None, final_answer_templates=None,
-                               run_context=None, force_compaction=False,
+                               run_context=None, force_compaction=False, maintenance=False,
                                request_system_messages=(), request_tail_messages=()):
         """Compatibility entry for the old native-memory SDK interface."""
         from .compatibility import assemble_legacy_context
         return assemble_legacy_context(
             self, model=model, memory=memory, current_run_start_idx=current_run_start_idx,
             tools=tools, purpose=purpose, task=task, final_answer_templates=final_answer_templates,
-            run_context=run_context, force_compaction=force_compaction,
+            run_context=run_context, force_compaction=force_compaction, maintenance=maintenance,
             request_system_messages=request_system_messages, request_tail_messages=request_tail_messages,
         )
 
@@ -146,6 +170,8 @@ class ContextManager:
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
         force_compaction: bool = False,
+        maintenance: bool = False,
+        history_only_recovery: bool = False,
         request_system_messages: Sequence[ModelMessage] = (),
         request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
@@ -165,7 +191,12 @@ class ContextManager:
                 }
             ]
             persisted_items.append(self._history_candidate.as_item())
-        items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
+        original_items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
+        items = []
+        for item in original_items:
+            saved = self._representation_overrides.get(item.id)
+            source_fingerprint = self._fingerprint(item.content)
+            items.append(saved[1] if saved is not None and saved[0] == source_fingerprint else item)
         purpose_stable, purpose_dynamic = self._purpose_messages(
             purpose=purpose,
             task=task,
@@ -193,7 +224,8 @@ class ContextManager:
             and (
                 force_compaction
                 or (
-                    self.config.effective_input_limit_tokens > 0
+                    maintenance
+                    and self.config.effective_input_limit_tokens > 0
                     and raw_tokens >= self._compaction_trigger_threshold_tokens()
                 )
             )
@@ -201,10 +233,8 @@ class ContextManager:
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
             if (turns or summary) and self._run_compaction_attempts < 3:
-                original_history_tokens = sum(
-                    item.token_estimate for item in final_items
-                    if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
-                )
+                original_history_tokens = self._history_token_cost(
+                    final_items, purpose_stable, purpose_dynamic, canonical_tools)
                 compressible_history_tokens = original_history_tokens
                 non_history_tokens = max(0, raw_tokens - original_history_tokens)
                 if (
@@ -225,8 +255,15 @@ class ContextManager:
                     # new turn cannot reach Target and steadily degrades it.
                     history_target = max(
                         0,
-                        self.config.effective_input_limit_tokens - non_history_tokens,
+                        self.config.effective_input_limit_tokens - non_history_tokens - int(history_only_recovery),
                     )
+                if history_only_recovery and original_history_tokens > 0:
+                    required_saving = max(
+                        self.config.minimum_history_reduction_tokens,
+                        math.ceil(original_history_tokens * self.config.minimum_history_reduction_ratio),
+                    )
+                    # An explicit Provider rejection can contradict the local estimate.
+                    history_target = min(history_target, max(0, original_history_tokens - required_saving))
                 # A checkpoint with no uncovered turns is already canonical.
                 # If it is within the useful history target, fixed request
                 # content is the remaining excess and cannot be reclaimed by
@@ -244,24 +281,37 @@ class ContextManager:
                 for _ in range(remaining_attempts if should_compress_history else 0):
                     self._run_compaction_attempts += 1
                     attempt = self._run_compaction_attempts
-                    result = self._history_compressor.compress(current_summary, current_turns, model)
+                    source_options = ({"source_history": self.config.execution_history,
+                                       "source_owner": self.config.execution_owner}
+                                      if self.config.execution_history is not None and self.config.execution_owner else {})
+                    if history_only_recovery:
+                        source_options["allow_fact_correction"] = True
+                        source_options["capacity_goal"] = self._history_capacity_feedback(
+                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                        source_options["candidate_feedback"] = lambda candidate: self._history_capacity_feedback(
+                            final_items, purpose_stable, purpose_dynamic, canonical_tools, candidate)
+                    result = self._history_compressor.compress(current_summary, current_turns, model, **source_options)
                     attempts = attempt
                     self._record_compression(result.records)
                     candidate = result.candidate
                     if candidate is None:
                         compaction_stop_reason = "invalid_candidate"
-                        if last_valid is None and result.fallback_turns:
+                        if last_valid is None and result.fallback_turns and not maintenance and not history_only_recovery:
                             fallback_by_id = {item.id: item for item in result.fallback_turns}
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
                     candidate_item = candidate.as_item()
-                    previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
-                    previous_tokens += sum(item.token_estimate for item in current_turns)
+                    previous_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                    replacement = [item for item in final_items if item.type not in {
+                        ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
+                    candidate_tokens = self._history_token_cost(
+                        replacement, purpose_stable, purpose_dynamic, canonical_tools)
                     required_saving = max(
                         self.config.minimum_history_reduction_tokens,
                         math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
                     )
-                    if previous_tokens - candidate_item.token_estimate < required_saving:
+                    if previous_tokens - candidate_tokens < required_saving:
                         compaction_stop_reason = "insufficient_candidate_reduction"
                         break
                     last_valid = candidate
@@ -272,7 +322,7 @@ class ContextManager:
                     complete_tokens = self._estimate_items(
                         final_items, purpose_stable, purpose_dynamic, canonical_tools
                     )
-                    if candidate_item.token_estimate <= history_target:
+                    if candidate_tokens <= history_target:
                         compaction_stop_reason = "history_target_reached"
                         break
                     if complete_tokens <= self._compaction_target_tokens():
@@ -283,7 +333,8 @@ class ContextManager:
                     if should_compress_history:
                         compaction_stop_reason = "compaction_attempts_exhausted"
                 if last_valid is not None:
-                    final_history_tokens = last_valid.as_item().token_estimate
+                    final_history_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
                     last_valid = replace(
                         last_valid,
                         history_tokens_before=original_history_tokens,
@@ -292,28 +343,39 @@ class ContextManager:
                         compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
                         compaction_target_tokens=self._compaction_target_tokens(),
                     )
-                    self._history_candidate = last_valid
+                    if history_only_recovery:
+                        self._pending_capacity_candidate = last_valid
+                    else:
+                        self._history_candidate = last_valid
                     new_coverage = last_valid.covered_through_message_id
                     final_items = [
                         item for item in final_items if item.type != ContextItemType.HISTORY_SUMMARY
                     ] + [last_valid.as_item()]
-                    persist_status = self._persist_candidate(last_valid)
-                    self._pending_history_summary_event = {
-                        **deepcopy(last_valid.as_item().content),
-                        "persist_status": persist_status,
-                        "status": "accepted",
-                    }
+                    persist_status = "staged" if history_only_recovery else self._persist_candidate(last_valid)
+                    if not history_only_recovery:
+                        self._pending_history_summary_event = {
+                            **deepcopy(last_valid.as_item().content),
+                            "persist_status": persist_status,
+                            "status": "accepted",
+                        }
                 elif should_compress_history:
                     self._emit_history_summary_status("idle")
 
-            final_items = self._compact_to_compaction_target(
-                final_items,
-                purpose_stable,
-                purpose_dynamic,
-                canonical_tools,
-                model=model,
-            )
+            if not history_only_recovery:
+                final_items = self._compact_to_compaction_target(
+                    final_items,
+                    purpose_stable,
+                    purpose_dynamic,
+                    canonical_tools,
+                    model=model,
+                )
 
+        if maintenance or force_compaction:
+            originals = {item.id: item for item in original_items}
+            for item in final_items:
+                original = originals.get(item.id)
+                if original is not None and item is not original:
+                    self._representation_overrides[item.id] = (self._fingerprint(original.content), item)
         final_items.sort(key=lambda item: item.layout_key)
         rendered = self.build_context_messages(final_items)
         # Stable item messages remain first for KV-cache reuse.
@@ -321,7 +383,7 @@ class ContextManager:
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
         memory_messages = [*stable, *dynamic]
         messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
-        final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
+        final_tokens = self.estimate_request_tokens(messages, canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
         self._last_compressed_token_count = final_tokens
         effective_limit = self.config.effective_input_limit_tokens
@@ -329,7 +391,7 @@ class ContextManager:
         attempts_exhausted = history_triggered and len(self._step_local_log) >= 3
         if exceeds_limit:
             logger.warning(
-                "Context exceeds Effective Input Limit after compaction: %s > %s",
+                "Context exceeds Effective Input Limit after assembly: %s > %s",
                 final_tokens, effective_limit,
             )
 
@@ -621,15 +683,58 @@ class ContextManager:
             ],
         )
 
-    def _estimate_items(self, items, stable, dynamic, tools):
-        return self._message_tokens([*self.build_context_messages(items), *stable, *dynamic]) + self._tools_tokens(
-            tools
+    def _history_capacity_feedback(self, items, stable, dynamic, tools, candidate=None):
+        before = self._history_token_cost(items, stable, dynamic, tools)
+        fixed = self._estimate_items(items, stable, dynamic, tools) - before
+        limit = self.config.effective_input_limit_tokens or self.config.context_window_tokens
+        required = max(self.config.minimum_history_reduction_tokens,
+                       math.ceil(before * self.config.minimum_history_reduction_ratio))
+        target = max(0, min(before - required, limit - fixed - 1))
+        goal = {"context_window_tokens": limit, "protected_frame_tokens": fixed,
+                "history_before_tokens": before, "current_full_tokens": before + fixed,
+                "history_target_tokens": target, "history_tokens_to_reclaim": max(0, before - target)}
+        if candidate is None:
+            return goal
+        replacement = [item for item in items if item.type not in {
+            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate.as_item()]
+        after = self._history_token_cost(replacement, stable, dynamic, tools)
+        full = self._estimate_items(replacement, stable, dynamic, tools)
+        reason = ("insufficient_candidate_reduction" if before - after < required
+                  else "input_window_exceeded" if full >= limit else "accepted")
+        logger.info(
+            "event=history_capacity_candidate history_before=%s history_after=%s full=%s limit=%s reason=%s",
+            before, after, full, limit, reason,
         )
+        if reason == "accepted":
+            return None
+        return {**goal, "reason": reason, "candidate_history_tokens": after, "candidate_full_tokens": full}
+
+    def _estimate_items(self, items, stable, dynamic, tools):
+        return self.estimate_request_tokens([*self.build_context_messages(items), *stable, *dynamic], tools)
+
+    def _history_token_cost(self, items, stable, dynamic, tools):
+        without_history = [item for item in items if item.type not in {
+            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}]
+        return max(0, self._estimate_items(items, stable, dynamic, tools)
+                   - self._estimate_items(without_history, stable, dynamic, tools))
+
+    def estimate_request_tokens(self, messages, tools):
+        if self._request_token_estimator is not None:
+            return self._request_token_estimator(messages, tools)
+        return self._message_tokens(messages) + self._tools_tokens(tools)
 
     def _message_tokens(self, messages):
-        return max(
-            0, int(sum(len(extract_message_text(message)) for message in messages) / self.config.chars_per_token)
-        )
+        payload = []
+        for message in messages:
+            source = message if isinstance(message, dict) else {
+                key: getattr(message, key, None)
+                for key in ("role", "content", "tool_calls", "tool_call_id", "reasoning_content")
+            }
+            payload.append({key: self._to_json_value(value) for key, value in source.items()
+                            if key in {"role", "content", "tool_calls", "tool_call_id", "reasoning_content"}
+                            and value is not None})
+        return max(0, math.ceil(len(json.dumps(payload, ensure_ascii=False, default=str))
+                                / self.config.chars_per_token))
 
     def _tools_tokens(self, tools):
         return (
@@ -685,9 +790,7 @@ class ContextManager:
             self._items = normalized
 
     def build_context_messages(self, items=None):
-        from .rendering import ContextItemRenderer
-
-        return ContextItemRenderer().render(sorted(self._item_source(items), key=lambda item: item.layout_key))
+        return self._item_renderer.render(sorted(self._item_source(items), key=lambda item: item.layout_key))
 
     def build_system_prompt(self):
         return self.build_context_messages()

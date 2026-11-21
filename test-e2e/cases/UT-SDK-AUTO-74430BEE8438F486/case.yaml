@@ -7,6 +7,7 @@ case:
   business_rule_ids:
   - F-171-RULE-01
   - F-171-RULE-02
+  - F-171-RULE-03
   title: W2 预算契约字段改名：context_budget_snapshot 序列化、parse 校验与派发边界｜核心流程
   type: SDK-UT
   priority: P1
@@ -42,13 +43,11 @@ case:
   - order: 5
     action: 实例化 OpenAIModel（最小参数），对 context_budget_snapshot 赋值一致性字典，断言属性回读为 ContextBudgetSnapshot（每次运行时赋值都走 parse 校验）；确认已移除旧关键字
       safe_input_budget_snapshot。
-    expected: 派发边界：调用方 max_tokens 与 snapshot.requested_output_tokens 冲突时抛 CallerMaxTokensOverrideForbidden；W1-W2 指纹/provider/model
+    expected: 派发边界：调用方历史输出长度参数被忽略且不会发送；W1-W2 指纹/provider/model
       不一致时抛 ContextBudgetCapacityMismatch；无 capacity_snapshot 时跳过一致性校验。
   - order: 6
-    action: 派发边界 max_tokens：构造 snapshot(requested_output_tokens=X)，用 mock 的 self.client.chat.completions.create 调用 _dispatch_chat_completion，分别验证调用方
-      max_tokens 与 X 不一致时抛 CallerMaxTokensOverrideForbidden(snapshot_value=X, caller_value=传入值)、未传 max_tokens 时 completion_kwargs
-      被填充为 X。
-    expected: 显式预算或缺少旧版 W1 预留元数据时按快照填充；W1 明确无默认预留且无显式预算时省略 max_tokens，保留内部上下文预算。
+    action: 派发边界构造一致性快照，并分别提交缺省、不匹配及相同的历史max_tokens值。
+    expected: 全部调用均省略输出长度字段，历史值不注入也不触发旧输出预算冲突错误。
   - order: 7
     action: 派发边界 W1-W2 一致性：传入 capacity_snapshot（capacity_fingerprint/provider/model_name）与快照 w1_fingerprint/provider/model_name
       不一致时，断言抛 ContextBudgetCapacityMismatch 且 field 为 w1_fingerprint/provider/model_name 中的对应项；capacity_snapshot 为空或三字段均缺省时跳过该校验（迁移窗口）。
@@ -61,18 +60,18 @@ case:
       Key/Token/Password/模型密钥。
   - order: 9
     action: 以真实容量解析器、预算计算器、AgentConfig 和模型适配器构建空预留及显式预留变体，通过受控 HTTP transport 检查 OpenAI 客户端实际 JSON；核对输入上限、压缩阈值及快照往返。
-    expected: 空预留不发送隐式 max_tokens；显式预留正常发送；内部预算、指纹及上下文阈值保留。
+    expected: 空预留及历史显式预留均不发送 max_tokens；内部容量、指纹及上下文阈值保留。
   expected_results:
   - AgentConfig/AgentRunInfo 的序列化键为 context_budget_snapshot，旧键 safe_input_budget_snapshot 不出现；process-local 字段不落入序列化输出。
   - parse_context_budget_snapshot 对一致性字典返回 ContextBudgetSnapshot，新字段名 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
     参与契约，soft_budget/hard_budget 旧字段被移除。
   - 类型既非 ContextBudgetSnapshot 也非 dict 的输入在派发边界抛 TypeError，不吞异常、不返回伪成功。
   - OpenAIModel.context_budget_snapshot 属性每次运行时赋值都经 parse 校验并回读为 ContextBudgetSnapshot。
-  - 派发边界：调用方 max_tokens 与 snapshot.requested_output_tokens 冲突时抛 CallerMaxTokensOverrideForbidden；W1-W2 指纹/provider/model 不一致时抛
+  - 派发边界：调用方历史输出长度参数被忽略且不会发送；W1-W2 指纹/provider/model 不一致时抛
     ContextBudgetCapacityMismatch；无 capacity_snapshot 时跳过一致性校验。
-  - 显式预算或缺少旧版 W1 预留元数据时按快照填充；W1 明确无默认预留且无显式预算时省略 max_tokens，保留内部上下文预算。
+  - 有无显式预算和旧版 W1 预留元数据均省略输出长度字段，保留内部上下文容量检查。
   - 追踪属性使用新字段名（w2.budget_fingerprint/w2.w1_fingerprint/context.effective_input_limit_tokens 等）；日志/Trace 不出现明文 API Key/Token/Password/模型密钥。
-  - 空预留不发送隐式 max_tokens；显式预留正常发送；内部预算、指纹及上下文阈值保留。
+  - 空预留及历史显式预留均不发送 max_tokens；内部容量、指纹及上下文阈值保留。
   forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
@@ -87,9 +86,9 @@ case:
     参与契约，soft_budget/hard_budget 旧字段被移除。
   - 类型既非 ContextBudgetSnapshot 也非 dict 的输入在派发边界抛 TypeError，不吞异常、不返回伪成功。
   - OpenAIModel.context_budget_snapshot 属性每次运行时赋值都经 parse 校验并回读为 ContextBudgetSnapshot。
-  - 派发边界：调用方 max_tokens 与 snapshot.requested_output_tokens 冲突时抛 CallerMaxTokensOverrideForbidden；W1-W2 指纹/provider/model 不一致时抛
+  - 派发边界：调用方历史输出长度参数被忽略且不会发送；W1-W2 指纹/provider/model 不一致时抛
     ContextBudgetCapacityMismatch；无 capacity_snapshot 时跳过一致性校验。
-  - 显式预算或缺少旧版 W1 预留元数据时按快照填充；W1 明确无默认预留且无显式预算时省略 max_tokens，保留内部上下文预算。
+  - 有无显式预算和旧版 W1 预留元数据均省略输出长度字段，保留内部上下文容量检查。
   - 追踪属性使用新字段名（w2.budget_fingerprint/w2.w1_fingerprint/context.effective_input_limit_tokens 等）；日志/Trace 不出现明文 API Key/Token/Password/模型密钥。
   acceptance:
   - id: AC-01

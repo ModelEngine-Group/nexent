@@ -53,6 +53,9 @@ class ContextRuntime(Protocol):
     def prepare_run(self, *, memory: AgentMemory, fallback_system_prompt: str) -> None:
         """Initialize the run's system state before a TaskStep is appended."""
 
+    def begin_request(self, *, model: Model, recovery_finalize=None) -> None:
+        """Start one logical main completion, retaining its budget across rebuilds."""
+
     def prepare_step(
         self,
         *,
@@ -64,6 +67,16 @@ class ContextRuntime(Protocol):
         request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
         """Return all model messages for the current step."""
+
+    def capture_request(self, messages, tools, model) -> None:
+        """Capture the final outgoing input for accepted-response calibration."""
+
+    def check_input_capacity(self, messages, tools, model) -> int:
+        """Reject an oversized input without invoking normal maintenance."""
+
+    def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
+                      request_system_messages=None, request_tail_messages=None):
+        """Maintain context with current request framing after the accepted tool step."""
 
     def prepare_final_answer(
         self,
@@ -86,6 +99,7 @@ class ContextRuntime(Protocol):
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ModelMessage] = (),
         request_tail_messages: Sequence[ModelMessage] = (),
+        recovery_origin: str = "provider_overflow_recovery",
     ) -> FinalContext:
         """Force a source-backed step rebuild after Provider overflow."""
 
@@ -98,6 +112,7 @@ class ContextRuntime(Protocol):
         task: str,
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
+        recovery_origin: str = "provider_overflow_recovery",
     ) -> FinalContext:
         """Force a source-backed final-answer rebuild after Provider overflow."""
 
@@ -171,6 +186,9 @@ class UnconfiguredContextRuntime:
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
+
+    def complete_step(self, **kwargs):
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def recover_step(self, **kwargs) -> FinalContext:

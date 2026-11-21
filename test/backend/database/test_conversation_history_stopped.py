@@ -37,10 +37,10 @@ def history_db(monkeypatch):
             connection.execute(text("INSERT INTO nexent.conversation_message_t VALUES (:id, 1, :idx, :role, :body, :files, :status, :deleted)"),
                                {"id": mid, "idx": mid if index is None else index, "role": role, "body": content, "files": json.dumps(files) if files else None, "status": status, "deleted": deleted})
 
-    def unit(uid, mid, kind, content, status="completed", deleted="N"):
+    def unit(uid, mid, kind, content, status="completed", deleted="N", tool_call_id=None):
         with engine.begin() as connection:
-            connection.execute(text("INSERT INTO nexent.conversation_message_unit_t (unit_id, message_id, conversation_id, unit_index, unit_type, unit_content, unit_status, delete_flag) VALUES (:id, :mid, 1, :id, :kind, :body, :status, :deleted)"),
-                               {"id": uid, "mid": mid, "kind": kind, "body": content, "status": status, "deleted": deleted})
+            connection.execute(text("INSERT INTO nexent.conversation_message_unit_t (unit_id, message_id, conversation_id, unit_index, unit_type, unit_content, unit_status, delete_flag, tool_call_id) VALUES (:id, :mid, 1, :id, :kind, :body, :status, :deleted, :tool_call_id)"),
+                               {"id": uid, "mid": mid, "kind": kind, "body": content, "status": status, "deleted": deleted, "tool_call_id": tool_call_id})
 
     yield module, message, unit
     engine.dispose()
@@ -139,3 +139,218 @@ def test_completed_history_keeps_only_persisted_execution_evidence(history_db):
     assert "Saved result" in str(records) and "Saved failure" in str(records)
     assert all(text not in str(records) for text in ["Never replay", "Not committed", "Deleted error"])
     assert "s3://files/old.txt" in projected["attachments"]
+
+
+@pytest.mark.parametrize("boundary", ["message_id", "message_index"])
+def test_history_returns_resolved_boundary_and_excludes_current_and_future_rows(history_db, boundary):
+    module, message, _ = history_db
+    message(11, "user", "Prior task", index=0)
+    message(12, "assistant", "Prior answer", index=1)
+    message(23, "user", "Current task", index=2)
+    message(24, "assistant", "Future answer", index=3)
+    args = {"current_user_message_id": 23 if boundary == "message_id" else None}
+    if boundary == "message_index":
+        args["before_message_index"] = 2
+
+    result = module.get_historical_context(1, user_id="owner", tenant_id="tenant", **args)
+
+    assert result["current_user_message_index"] == 2
+    assert [turn["user_message"] for turn in result["conversation_turns"]] == ["Prior task"]
+    assert [turn["assistant_final_answer"] for turn in result["conversation_turns"]] == ["Prior answer"]
+    assert module.get_historical_context(1, user_id="other-owner", tenant_id="tenant", **args) is None
+
+
+
+def test_native_history_facts_survive_authorized_database_and_prepared_roundtrip(history_db):
+    from contracts.agentos import PreparedHistoryTurn
+    from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
+
+    module, message, unit = history_db
+    message(1, "user", "old request")
+    message(2, "assistant", "finished")
+    message(3, "user", "current")
+    common = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+              "turn_id": "run-a", "local_call_id": "local", "tool_call_id": "local",
+              "provider_call_id": "provider", "invocation_id": None}
+    call = {**common, "type": "tool", "source_protocol": "model_native_fc", "call_group_id": "step-a",
+            "call_index": 0, "call_count": 1, "tool_name": "lookup", "tool_arguments": {"id": 1}}
+    result = {**common, "type": "tool_result", "result": "real error", "is_error": True}
+    unit(1, 2, "tool", json.dumps(call), tool_call_id="local")
+    unit(2, 2, "tool_result", json.dumps(result), tool_call_id="local")
+    # A lookalike business result cannot satisfy the row identity binding.
+    unit(3, 2, "tool_result", json.dumps(result), tool_call_id="another-local")
+    turn = module.get_historical_context(1, 3, "owner", "tenant")["conversation_turns"][0]
+    assert turn["execution_records"][0]["execution_event"]["name"] == "lookup"
+    assert "execution_event" not in turn["execution_records"][2]
+    prepared = PreparedHistoryTurn.model_validate({k: v for k, v in turn.items() if k != "attachments"})
+    item = ContextItem.from_input(ContextItemInput(id="turn:1:2", type="conversation_turn",
+                                                content=prepared.model_dump(exclude={"attachment_refs"})))
+    messages = ContextManager(message_format="openai_chat_completions").build_context_messages([item])
+    assert messages[1]["tool_calls"][0]["function"]["name"] == "lookup"
+    assert messages[2] == {"role": "tool", "tool_call_id": "provider", "content": "real error"}
+    assert "read_only" in str(messages[3])
+
+
+def test_fix01_closed_action_preserves_raw_storage_and_authorized_roundtrip(history_db):
+    from contracts.agentos import PreparedHistoryTurn
+    from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
+
+    module, message, unit = history_db
+    message(1, 'user', 'prior question')
+    message(2, 'assistant', 'actual answer')
+    message(3, 'user', 'new question')
+    unit(1, 2, 'tool', json.dumps({'tool_name': 'write', 'tool_arguments': {'body': 'EXPANDED' * 12000}}))
+    unit(2, 2, 'execution_logs', 'actual result')
+    unit(3, 2, 'execution_result', json.dumps({
+        'content': '<STDOUT>actual result</STDOUT>', 'covered_unit_indices': [1, 2],
+        'model_action': {'schema_version': 1, 'agent_core': 'smolagents', 'dispatch_state': 'dispatched',
+                         'step_number': 1, 'tool_calls': [{'id': 'python', 'name': 'python_interpreter',
+                                                        'arguments': 'write(body=computed)'}]},
+    }))
+    turn = module.get_historical_context(1, 3, 'owner', 'tenant')['conversation_turns'][0]
+    assert 'EXPANDED' in turn['execution_records'][0]['content']
+    prepared = PreparedHistoryTurn.model_validate({k: v for k, v in turn.items() if k != 'attachments'})
+    item = ContextItem.from_input(ContextItemInput(id='old', type='conversation_turn',
+                                  content=prepared.model_dump(exclude={'attachment_refs'})))
+    text = str(ContextManager(message_format='codeagent').build_context_messages([item]))
+    assert 'write(body=computed)' in text and 'actual result' in text and 'EXPANDED' not in text
+    assert 'message:2/unit-index:3' in text
+    assert module.get_historical_context(1, 3, 'other-owner', 'tenant') is None
+
+
+def test_b010_checkpoint_private_sources_follow_authorized_boundary_not_message_id(history_db):
+    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+    from nexent.core.agents.context.models import ContextItem, ContextItemInput
+
+    module, message, unit = history_db
+    message(90, "user", "old task", index=0)
+    message(100, "assistant", "earliest answer", index=1)
+    message(101, "assistant", "saved partial answer", "stopped", index=1)
+    message(40, "user", "covered task", index=2)
+    message(42, "assistant", "covered answer", index=3)
+    message(10, "user", "uncovered task", index=4)
+    message(11, "assistant", "uncovered answer", index=5)
+    message(12, "user", "current task", index=6)
+    body = json.dumps({"content": "<STDOUT>private original 中段</STDOUT>"})
+    unit(1, 100, "execution_result", body)
+    unit(2, 42, "execution_result", body)
+    unit(7, 101, "execution_result", body)
+    unit(3, 42, "execution_result", body, status="streaming")
+    unit(4, 42, "execution_result", body, deleted="Y")
+    unit(5, 11, "execution_result", body)
+    unit(6, 42, "history_summary", json.dumps({
+        "summary": {"task_overview": "accepted checkpoint"}, "covered_through_message_id": 42}))
+    result = module.get_historical_context(1, 12, "owner", "tenant")
+    summary = result["history_summary"]
+    execution = [s for s in summary["execution_sources"] if s["record_type"] == "execution_result"]
+    users = [s for s in summary["execution_sources"] if s["record_type"] == "user_message"]
+    assert [(s["message_id"], s["unit_index"]) for s in execution] == [(100, 1), (101, 7), (42, 2)]
+    assert [(s["message_id"], s["unit_index"]) for s in users] == [(90, None), (40, None)]
+    assert [turn["assistant_message_id"] for turn in result["conversation_turns"]] == [11]
+    store = ExecutionHistory()
+    item = ContextItem.from_input(ContextItemInput(id="history", type="history_summary", content=summary))
+    register_authorized_sources([item], store, "next-run")
+    assert "中段" in store.read("next-run", "message:100/unit-index:1")
+    assert json.loads(store.read("next-run", "message:90/user-message"))["text"] == "old task"
+    assert module.get_historical_context(1, 12, "owner", "foreign-tenant") is None
+    assert module.get_historical_context(1, 12, "foreign-user", "tenant") is None
+
+
+def test_sc004_checkpoint_exports_only_bound_real_native_sources(history_db):
+    from nexent.core.agents.context import ContextItem, ContextItemInput
+    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+
+    module, message, unit = history_db
+    message(1, "user", "original instruction", index=0)
+    message(2, "assistant", "accepted native answer", index=1)
+    message(3, "user", "current task", index=2)
+    event = {"schema_version":1,"runtime_mode":"native_agent","agent_core":"jiuwen","type":"tool_result",
+        "local_call_id":"actual-local","tool_call_id":"actual-local","provider_call_id":"distinct-provider",
+        "turn_id":"native-turn","invocation_id":None,"parent_call_id":None,
+        "result":"真实 original 123456789.01234567890123456789","is_error":False}
+    unit(1,2,"tool_result",json.dumps(event),tool_call_id="actual-local")
+    unit(2,2,"tool_result",json.dumps({**event,"local_call_id":"wrong-local"}),tool_call_id="actual-local")
+    unit(3,2,"tool_result",json.dumps(event),tool_call_id=None)
+    unit(4,2,"tool_result",json.dumps({"result":"unbound legacy"}))
+    unit(5,2,"history_summary",json.dumps({"summary":{"task_overview":"old native work"},"covered_through_message_id":2}))
+    result = module.get_historical_context(1,3,"owner","tenant")
+    sources=result['history_summary']['execution_sources']
+    native=[s for s in sources if s['record_type']=='tool_result']
+    assert len(native)==1 and native[0]['unit_index']==1 and native[0]['tool_call_id']=='actual-local'
+    assert [s['content'] for s in sources if s['record_type']=='user_message']==['original instruction']
+    history=ExecutionHistory()
+    item=ContextItem.from_input(ContextItemInput(id='checkpoint',type='history_summary',content=result['history_summary']))
+    register_authorized_sources([item],history,'new-native-owner')
+    assert json.loads(history.read('new-native-owner','message:2/unit-index:1'))['text']==event['result']
+    assert history.authorized_sources('new-native-owner')[0].source_kind=='tool_result'
+
+
+@pytest.mark.parametrize("message_format", ["codeagent", "openai_chat_completions"])
+def test_sc006_history_proof_survives_real_summary_persistence_and_reload(history_db, monkeypatch, message_format):
+    from nexent.core.agents.context import ContextItem, ContextItemInput
+    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+
+    module,message,unit=history_db
+    original=json.dumps({'rows':[{'id':f'persisted-row-{i:04d}','amount':1000+i,'text':'original '*200} for i in range(40)]})
+    message(1,'user',original,index=0); message(2,'assistant','accepted old work',index=1); message(3,'user','next',index=2)
+    native={'schema_version':1,'runtime_mode':'native_agent','agent_core':'jiuwen','type':'tool_result',
+        'local_call_id':'local-proof','tool_call_id':'local-proof','provider_call_id':'provider-proof',
+        'turn_id':'proof-turn','invocation_id':None,'parent_call_id':None,'result':original,'is_error':False}
+    unit(1,2,'tool_result',json.dumps(native),tool_call_id='local-proof')
+    old_session=module.get_db_session
+    with old_session() as session:
+        for name in ('created_by','updated_by','create_time','update_time'):
+            session.execute(text(f'ALTER TABLE nexent.conversation_message_unit_t ADD COLUMN {name} TEXT'))
+        session.commit()
+    @contextmanager
+    def committing_session():
+        with old_session() as session:
+            yield session
+            session.commit()
+    monkeypatch.setattr(module,'get_db_session',committing_session)
+    history=ExecutionHistory()
+    history.restore_sources('old-owner',[{'message_id':1,'unit_index':None,'source_kind':'user_message','text':original,'parts':(original,)}])
+    proofs=list(history.structured_source_index('old-owner').collections.values())
+    unit_id=module.save_history_summary(1,'owner','tenant',{'task_overview':'accepted old work'},2,structured_source_proofs=proofs)
+    restored=module.get_historical_context(1,3,'owner','tenant')['history_summary']
+    assert restored['unit_id']==unit_id and restored['structured_source_proofs']==proofs
+    next_history=ExecutionHistory(); item=ContextItem.from_input(ContextItemInput(id='checkpoint',type='history_summary',content=restored))
+    register_authorized_sources([item],next_history,'new-owner')
+    offset=original.index('persisted-row-0020')
+    assert json.loads(next_history.read('new-owner','message:1/user-message',offset,80))['text']==original[offset:offset+80]
+    assert {s['record_type'] for s in item.content['execution_sources']}=={'user_message','tool_result'}
+    assert json.loads(next_history.read('new-owner','message:2/unit-index:1',offset,80))['text']==original[offset:offset+80]
+    from nexent.core.agents.context import ContextManager, ContextManagerConfig
+    from types import SimpleNamespace
+    manager=ContextManager(ContextManagerConfig(context_window_tokens=20000,effective_input_limit_tokens=20000,
+        chars_per_token=1,compaction_trigger_threshold_tokens=16000,compaction_target_tokens=12000,
+        policy_layers={'platform':{'processing_mode':'adaptive_compact'}}),message_format=message_format)
+    run_context=manager.prepare_items_context('system',items=[restored_item for restored_item in
+        register_authorized_sources([item],next_history,'new-owner')])
+    called=[]
+    original_compress=manager._history_compressor.compress
+    def observe(*args,**kwargs):
+        called.append(True)
+        return original_compress(*args,**kwargs)
+    monkeypatch.setattr(manager._history_compressor,'compress',observe)
+    current=[ContextItem.from_input(ContextItemInput(id='resource',type='knowledge_base',content={'text':'x'*17000}))]
+    plain=manager.assemble_context_items(model=SimpleNamespace(model_id='controlled'),current_items=current,
+        run_context=run_context)
+    assert 17000 <= plain.evidence.final_token_estimate < 20000
+    maintained=manager.assemble_context_items(model=SimpleNamespace(model_id='controlled'),current_items=current,
+        run_context=run_context,maintenance=True)
+    assert not maintained.evidence.history_compression_triggered
+    assert not called, 'Private archived originals must not trigger history maintenance absent a rendered-history need'
+
+
+def test_sc009_user_source_preserves_stored_text_when_model_annotations_differ(history_db, monkeypatch):
+    from types import SimpleNamespace
+    module,_,_=history_db
+    monkeypatch.setattr(module,'format_annotations_for_llm',lambda body,annotations:'Model-facing annotation\n'+body)
+    turn=module._history_turn(SimpleNamespace(message_content='original stored text',message_id=1,minio_files=None),
+        'answer',2,annotations=[{'type':'fixture'}])
+    assert turn['user_message']=='Model-facing annotation\noriginal stored text'
+    assert turn['user_source_content']=='original stored text'

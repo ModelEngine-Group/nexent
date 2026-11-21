@@ -1,0 +1,113 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-STABILITY-20261120
+  change_type: bugfix
+  bug_id: RUNTIME-STABILITY-20261120
+  title: Recover committed history within capacity and trace actual Jiuwen tools
+  description: Isolated PR4336 follow-up for cross-turn representation and tool-observation defects.
+  observed_behavior: CodeAgent history reinjects executor-expanded arguments and loses accepted action representations;
+    Jiuwen actual tool boundaries lack consistent TOOL spans.
+  expected_behavior: Backend-bound completed actions and committed views survive turns with raw facts retained;
+    actual tool calls have safe correlated spans.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Current-run actions were covered, but cross-turn canonical action restoration was not. Jiuwen SSE
+      proof did not require TOOL spans or full IDs for the actual default-formatted Skill call and cross-turn restore.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - CMSR-005
+    - JIUWEN-OUTPUT
+    - CHAT-TRAJECTORY
+    modified:
+    - F-171
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D3-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    modified:
+    - AGENT-HISTORY-D3-001
+    - JIUWEN-OUTPUT-D3-001
+    - CONTEXT-POST-RESPONSE-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Restore native completed actions and accepted summary or preview through authorized storage and signed transport;
+      keep uncovered facts, errors, owner-scoped originals and hard capacity checks.
+    - Trace actual Jiuwen calls with stable identities and correct parent context, keeping returned structured errors
+      separate from execution exceptions.
+    - Recover eligible committed history after typed capacity rejection using one shared transaction and bounded
+      summary requests and inherited parent/task deadlines without inventing a wallclock limit from transport timeout; atomically register private checkpoint sources and expose bounded native recall
+      without rendering originals.
+    - Share one correction claim between invalid contract/facts and valid but ineffective history candidates;
+      use actual rendered capacity feedback within the existing three summary subrequests and transactional checks.
+    - Carry a freshly measured local rendered-history goal in every existing history-only recovery generation,
+      including the first and ordinary later iterations, and retain it for format/fact correction without another claim.
+    - Match only actual registered LocalFunction schema defaults after the existing exact path; preserve original
+      provider IDs, group metadata and raw arguments through persisted native history and authorized tool sources.
+    reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
+      required. No duplicate D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
+    - test/sdk/core/agents/test_persisted_codeagent_actions.py
+    - test/backend/services/test_agent_execution_history_stream.py
+    - test/backend/database/test_conversation_history_stopped.py
+    - test/sdk/core/agents/test_jiuwen_tool_spans.py
+    - test/sdk/core/agents/test_history_capacity_recovery.py
+    - test/sdk/core/agents/test_checkpoint_execution_sources.py
+    - test/sdk/core/agents/test_jiuwen_history_capacity_recovery.py
+    - test/sdk/core/agents/test_jiuwen_checkpoint_reader.py
+    - test/sdk/core/agents/test_structured_source_proofs.py
+    - test/sdk/core/agents/test_structured_history_sources.py
+    - test/sdk/core/agents/test_history_fact_correction.py
+    - test/backend/app/test_history_source_contracts.py
+    - test/backend/services/test_agentos_conversation_projection.py
+    - test/sdk/core/agents/test_history_summary_contract.py
+    - test/sdk/core/agents/test_history_capacity_feedback.py
+  notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/09 Runtime Stability Repairs 20261120.md
+    FIX01 and RSR-003; RSR-001 delegated to stacked PR4378; RSR-002 withdrawn after complete Phoenix events proved
+    usage was retained. Approved isolated follow-up from2c18. No original worktree/VM change, C/O change, guessed
+    execution, business normalization, added retries or full4355. AGENT-HISTORY-D3-001 manual AC-06 is strengthened
+    for real-model cross-turn restoration and must be executed in the unified container window; CMSR and POST-RESPONSE
+    are adjacent regression obligations. No new D1. Formal mappings are subset obligations, not full execution claims.
+    Approved Option B changes F-171-RULE-03 with an explicit rejection-only exception. Existing post-response HTTP
+    Case remains normal-path regression with fitting-frame qualification and self-contained owned provider cleanup;
+    manual AGENT-HISTORY AC-07 owns actual two-runtime/model recovery and recall proof. Current implementation UT
+    is not D3 real-model acceptance; new container/Phoenix evidence remains pending. No extra D1 or new generic
+    historical user-message browser. v11 real summary failure is protected-marker overreach across source-backed
+    bulk. Approved limited user_message/tool_result/execution_result kinds remain separate; existing source proof,
+    owner reader and internal checkpoint contracts are extended, with strict outside facts and numeric/array identity.
+    No arbitrary history RPC or per-task/model exception. Row/character/depth/proof-count thresholds are not introduced;
+    actual useful reduction and existing C/deadline/three-summary budget govern. Formal owned HTTP Case covers all
+    three kinds with typed checkpoint continuation; real AC-08 remains separately required. v12 deadline audit removes
+    recovery-only connection-timeout multipliers: inherit actual parent/task deadlines, retain transport timeout,
+    cancellation and three subrequests. Existing deadline/reentry UT and owned HTTP Case are reused; no new Feature.
+    v12 turn05 failed before proof validation because XML decoding rejected ANSI in a real canonical execution_result.
+    Decode the existing escaped channel format losslessly, retain exact canonical roundtrip and batch authorization,
+    preserve raw controls and CR in recall, and reject malformed markup without skipping sources. Source-order proof
+    revalidation is retained and separately regressed; actual sealed data passes both orders after decoding.
+    v13 actual response has exactly seven complete ordered H2 sections and all protected facts but misses the fixed
+    H1: prepend only that constant for this exact shape, preserve response body, then apply all existing validation.
+    Other invalid text may reuse the same one format-or-fact correction claim within existing calls/deadline/input
+    capacity; never directly accept malformed structure or facts. No regular prompt or model policy change.
+    v14 turn08 first real summary is accepted; second passes contract/facts but expands the rendered history.
+    Extend the same correction claim with actual rendered capacity feedback only in history-only recovery.
+    Preserve positive-but-unfitting iterations and the total three-summary-subrequest budget, not a new physical
+    attempt limit; retain transport retries and all usage. No C/O, output-cap, protected-content or 5-percent
+    criterion change. Existing owned HTTP/SSE Case adds correction-fit and still-oversized rollback variants.
+    v15 actual position2 carried a target but still exceeded C; position3 lacked a target and expanded again.
+    Every original recovery generation must receive its current local rendered goal, explicitly distinguished
+    from provider completion-token allowances. Normal maintenance/main prompts and all call/claim limits remain.
+    The missing hint does not prove the full cause of provider behavior or guarantee a future fitting response.
+    Original full failed frame/live revision and claim were not captured; readonly delta bounds and static
+    control-flow inference stay labeled as such. New real-container/two-runtime/Phoenix acceptance remains pending.
+    v17 actual LocalFunction formatting injects omitted optional None; exact-only matching loses provider/group
+    metadata, degrading next-turn native history and original source registration. Recognize only declared schema
+    defaults when no old exact candidate exists; keep ambiguity, MCP, nested, raw arguments and execution unchanged.
+    Strengthen the existing JIUWEN-OUTPUT-D3-001 native resource-chain HTTP/SSE/SDK/PostgreSQL assertion; no new Case.
+    Old null-ID history remains readonly. New container/model/Phoenix acceptance requires new conversations.'

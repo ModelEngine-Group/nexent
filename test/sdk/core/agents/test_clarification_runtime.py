@@ -49,12 +49,14 @@ class RecordTool(Tool):
 
 @pytest.fixture
 def build_agent():
-    def build(outputs, tools=None, **kwargs):
+    def build(outputs, tools=None, *, context_window=128000, **kwargs):
         observer = MessageObserver()
         model = ScriptedModel(outputs)
         agent = CoreAgent(
             observer=observer, model=model, tools=tools or [], enable_clarification=True,
-            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig())),
+            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig(
+                context_window_tokens=context_window, effective_input_limit_tokens=context_window,
+            ))),
             verbosity_level=0, **kwargs,
         )
         return agent, model, observer
@@ -321,3 +323,12 @@ def test_clarification_uses_existing_content_guardrail(build_agent, action):
         assert len(cards) == 1
         assert cards[0]["content"]["questions"][0]["title"] == "Filtered question"
         assert result == "1. Filtered question"
+
+
+def test_clarification_fixture_keeps_the_configured_hard_capacity_guard(build_agent):
+    """Protocol retry tests use a large window; small windows still reject before inference."""
+    agent, model, observer = build_agent([f"<code>{CODE}</code>"], context_window=1000)
+    with pytest.raises(ValueError, match="combined context window"):
+        agent.run("Help", max_steps=1)
+    assert model.calls == []
+    assert not any(event["type"] == "human_interaction" for event in events(observer))

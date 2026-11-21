@@ -59,7 +59,7 @@ def test_ac078_constructor_requires_and_applies_tenant_model(monkeypatch):
 
     config = {
         "model_name": "test-model", "base_url": "http://model", "api_key": "secret",
-        "max_input_tokens": 1000, "model_factory": "openai", "ssl_verify": False,
+        "context_window_tokens": 1000, "max_input_tokens": 100, "model_factory": "openai", "ssl_verify": False,
         "display_name": "Test", "timeout_seconds": 3,
     }
     model = object()
@@ -164,3 +164,18 @@ def test_ac059_prompt_is_yaml_driven_and_forbids_json_and_evidence_ids():
     assert "evidence IDs" in prompt["system"]
     assert "no level-one heading" in prompt["system"]
     assert "Task mode: {task_mode}" in prompt["user"]
+
+
+def test_ac013_dreaming_ignores_retired_input_capacity(monkeypatch):
+    config = {"model_name": "controlled", "base_url": "http://model", "api_key": "synthetic",
+              "context_window_tokens": 10000, "max_input_tokens": 1}
+    monkeypatch.setattr(memory_dreaming_summarizer.tenant_config_manager, "get_model_config", lambda **kwargs: config)
+    monkeypatch.setattr(memory_dreaming_summarizer, "OpenAIModel", lambda **kwargs: object())
+    monkeypatch.setattr(memory_dreaming_summarizer, "get_model_name_from_config", lambda config: "controlled")
+    first = TenantDreamingSummarizer("tenant", "user")
+    config["max_input_tokens"] = 9000
+    second = TenantDreamingSummarizer("tenant", "user")
+    assert first.max_summarization_input_chars == second.max_summarization_input_chars == 30000
+    config.pop("context_window_tokens")
+    with pytest.raises(ValueError, match="combined model context window"):
+        TenantDreamingSummarizer("tenant", "user")

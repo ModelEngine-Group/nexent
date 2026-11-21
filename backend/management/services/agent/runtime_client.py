@@ -210,8 +210,19 @@ async def forward_conversation_run(
 
 
 async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):
-    response = await _agentos_client().resume(payload, user_id, tenant_id)
-    return present_public_resume(response, payload, user_id)
+    client = _agentos_client()
+    response = await client.resume(payload, user_id, tenant_id)
+    if payload.after_event_id is None or response.status_code != 200:
+        return present_public_resume(response, payload, user_id)
+    # Validate the original cursor before replaying any prefix. An unopened
+    # iterator cannot run its finally block, so also release its HTTP owner.
+    try:
+        await response.body_iterator.aclose()
+    finally:
+        if response.background is not None:
+            await response.background()
+    prefix = await client.resume(payload.model_copy(update={"after_event_id": None}), user_id, tenant_id)
+    return present_public_resume(prefix, payload, user_id, replay_from_start=True)
 
 
 async def forward_agent_stop(

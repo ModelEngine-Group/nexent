@@ -1,14 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Read only the execution results authorized to the current Agent instance."""
+"""Read only historical originals authorized to the current Agent instance."""
 from smolagents.tools import Tool
 
 
 class ReadExecutionOutputTool(Tool):
     _nexent_execute_on_host = True
     name = "read_execution_output"
-    description = "Read original execution output using OUTPUT_REF, with Unicode character offset and a bounded length."
+    description = "Read authorized historical user or tool originals using OUTPUT_REF, with Unicode character offset and a bounded length."
     inputs = {
-        "output_ref": {"type": "string", "description": "Exact OUTPUT_REF from a compact execution result."},
+        "output_ref": {"type": "string", "description": "Exact OUTPUT_REF from a compact result or history summary."},
         "offset": {"type": "integer", "description": "Unicode character offset; initially zero.", "nullable": True},
         "max_chars": {"type": "integer", "description": "Maximum characters, up to 16000.", "nullable": True},
     }
@@ -21,7 +21,10 @@ class ReadExecutionOutputTool(Tool):
         self.on_read = on_read
 
     def forward(self, output_ref: str, offset: int = 0, max_chars: int = 4000) -> str:
-        result = self.history.read(self.owner, output_ref, offset, max_chars)
+        result = self.history.read(
+            self.owner, output_ref, 0 if offset is None else offset,
+            4000 if max_chars is None else max_chars,
+        )
         self.on_read()
         return result
 

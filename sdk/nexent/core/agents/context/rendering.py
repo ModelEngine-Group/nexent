@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from html import escape
 from typing import Any
 
@@ -57,6 +58,13 @@ def _render_summary(item: ContextItem) -> list[dict[str, Any]]:
         text = summary
     else:
         text = _summary_dict_to_markdown(summary, labels)
+    refs = item.metadata.get("execution_source_refs") or ()
+    if refs:
+        text += "\n\nOriginal historical sources (read with read_execution_output):\n" + "\n".join(
+            "<OUTPUT_REF>" + escape(reference) + "</OUTPUT_REF>" for reference in refs)
+    proofs = item.metadata.get("structured_source_proofs") or ()
+    if proofs:
+        text += "\n\nTrusted structured original data:\n" + json.dumps(proofs, ensure_ascii=False, separators=(",", ":"))
     return [_text_message("user", f"{labels['summary_prefix']}\n{text}")]
 
 
@@ -103,8 +111,6 @@ def _render_tool_arguments(arguments: Any) -> str:
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
-    from .execution_history import result_text
-
     c = item.content
     labels = load_prompt(item.metadata.get("language", "en"), "agent/context_sections")["history"]
     parts = [
@@ -149,6 +155,8 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
             duplicate = value in (repr(output), repr(output.removesuffix("\n")))
         if duplicate:
             del fields["RETURN_VALUE"]
+    if item.metadata.get("use_result_observations", False):
+        return _render_result_observation(c, calls, fields)
     if c.get("summary"):
         parts.append(f"outcome:\n<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>")
     elif c.get("preview") is not None:
@@ -167,6 +175,49 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
         parts.append("<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>")
     parts.extend(["</completed_action>", "</completed_action_history>"])
     return [_text_message("assistant", "\n".join(parts))]
+
+
+def render_chat_action(item: ContextItem) -> list[dict[str, Any]]:
+    """Keep real native messages; code actions stay explicit read-only evidence."""
+    if "messages" in item.content:
+        messages = deepcopy(item.content["messages"])
+        if any(message.get("role") not in {"system", "developer", "user", "assistant", "tool"}
+               or message.get("role") == "tool" and not message.get("tool_call_id") for message in messages):
+            raise ContextItemRenderingError("Invalid Chat Completions action messages")
+        return messages
+    return _render_current_action(item.model_copy(update={
+        "metadata": {**item.metadata, "use_result_observations": False},
+    }))
+
+
+def _render_result_observation(content: dict, calls: list, fields: dict) -> list[dict[str, Any]]:
+    from .execution_history import result_text
+
+    messages = []
+    if calls:
+        records = [
+            {
+                "id": call["id"],
+                "type": "function",
+                "function": {"name": call["name"], "arguments": call["arguments"]},
+            }
+            if isinstance(call, dict) and {"name", "arguments", "id"} <= call.keys()
+            else call
+            for call in calls
+        ]
+        messages.append(_text_message("tool-call", f"Executed action:\n{records}"))
+    if content.get("summary"):
+        body = f"<SUMMARIED_RESULT>{escape(content['summary'])}</SUMMARIED_RESULT>"
+    elif content.get("preview") is not None:
+        body = '<OUTPUT preview="head_tail">' + escape(content["preview"]) + "</OUTPUT>"
+    else:
+        body = result_text(fields)
+    if (content.get("summary") or content.get("preview") is not None) and fields.get("ERROR"):
+        body += "\n<ERROR>" + escape(fields["ERROR"]) + "</ERROR>"
+    if content.get("output_ref"):
+        body += "\n<OUTPUT_REF>" + escape(content["output_ref"]) + "</OUTPUT_REF>"
+    messages.append(_text_message("tool-response", f"<RESULT>\n{body}\n</RESULT>"))
+    return messages
 
 
 class ContextItemRenderer:

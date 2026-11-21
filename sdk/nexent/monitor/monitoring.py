@@ -1460,6 +1460,9 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
+            "context.maintenance_phase": getattr(evidence, "maintenance_phase", "prepare"),
+            "context.usage_source": getattr(evidence, "usage_source", "estimated"),
+            "context.calibrated_input_estimate": getattr(evidence, "calibrated_input_estimate", 0),
             "context.effective_input_limit_tokens": getattr(
                 evidence, "effective_input_limit_tokens", 0
             ),
@@ -1520,6 +1523,7 @@ class MonitoringManager:
         tool_name: str,
         agent_name: str,
         tool_input: Optional[Dict] = None,
+        safe_diagnostics: bool = False,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """
@@ -1580,17 +1584,21 @@ class MonitoringManager:
 
         with self._tracer.start_as_current_span(
             span_name,
-            attributes=openinference_attrs
+            attributes=openinference_attrs,
+            **({"record_exception": False, "set_status_on_exception": False} if safe_diagnostics else {}),
         ) as span:
             start_time = time.time()
             success = True
             try:
                 yield span
-            except Exception as e:
+            except BaseException as e:
+                if not safe_diagnostics and not isinstance(e, Exception):
+                    raise
                 success = False
-                span.set_status(Status(StatusCode.ERROR, str(e)))
+                detail = type(e).__name__ if safe_diagnostics else str(e)
+                span.set_status(Status(StatusCode.ERROR, detail))
                 span.set_attribute("error.type", type(e).__name__)
-                span.set_attribute("error.message", str(e))
+                span.set_attribute("error.message", detail)
                 span.set_attribute("agent.tool.success", False)
                 if self._agent_error_count:
                     self._agent_error_count.add(

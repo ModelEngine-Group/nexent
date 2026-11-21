@@ -3061,6 +3061,8 @@ class TestCreateAgentConfig:
             mock_create_tools.return_value = []
             mock_get_template.return_value = {
                 "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"}
+            mock_tenant_config.get_model_config.return_value = {
+                "model_name": "default", "model_factory": "openai", "context_window_tokens": 32768}
             mock_tenant_config.get_app_config.side_effect = [
                 "TestApp", "Test Description"]
             mock_build_memory.return_value = Mock(
@@ -3094,8 +3096,8 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
-                capacity_snapshot=None,
-                context_budget_snapshot=None,
+                capacity_snapshot=ANY,
+                context_budget_snapshot=ANY,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -3118,6 +3120,8 @@ class TestCreateAgentConfig:
         )
 
         with (
+            patch('management.services.agent.preparation.compiler.get_model_by_model_id', return_value={
+                "model_name": "selected", "display_name": "selected", "model_factory": "openai", "context_window_tokens": 32768}),
             patch(
                 'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
@@ -3179,6 +3183,8 @@ class TestCreateAgentConfig:
             mock_get_template.return_value = {
                 "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"
             }
+            mock_tenant_config.get_model_config.return_value = {
+                "model_name": "default", "model_factory": "openai", "context_window_tokens": 32768}
             mock_tenant_config.get_app_config.side_effect = [
                 "TestApp",
                 "Test Description",
@@ -4920,18 +4926,16 @@ class TestAdditionalAgentInfoCoverage:
         with pytest.raises(ValidationError, match="must be an object"):
             _normalize_tool_params_request("not-an-object")
 
-    def test_resolve_input_budget_uses_legacy_fallback_for_unknown_capacity(self):
+    def test_resolve_input_budget_rejects_unknown_capacity_without_fixed_fallback(self):
         model_budget._CAPACITY_WARNING_EMITTED.clear()
-        with patch(
-            'management.services.model.run_budget.resolve_capacity',
-            side_effect=MockProviderCapabilityUnknown("unknown provider"),
-        ), patch('management.services.model.run_budget.logger') as mock_logger:
-            result = _resolve_input_budget({"model_id": 7, "model_name": "unknown"})
-
-        assert result == (32768, None, None)
+        with patch('management.services.model.run_budget.resolve_capacity',
+                   side_effect=MockProviderCapabilityUnknown("unknown provider")), \
+                patch('management.services.model.run_budget.logger') as mock_logger:
+            with pytest.raises(MockProviderCapabilityUnknown):
+                _resolve_input_budget({"model_id": 7, "model_name": "unknown"})
         mock_logger.warning.assert_called_once()
 
-    def test_resolve_context_budget_returns_none_for_uncertain_basis(self):
+    def test_resolve_context_budget_propagates_capacity_errors(self):
         capacity = MockModelCapacitySnapshot(model_name="legacy-model")
         calculator = MagicMock()
         calculator.calculate_context_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
@@ -4939,14 +4943,13 @@ class TestAdditionalAgentInfoCoverage:
             'management.services.model.run_budget.ContextBudgetCalculator',
             return_value=calculator,
         ):
-            result = _resolve_context_budget(
-                capacity_snapshot=capacity,
-                tenant_id="tenant-1",
-                agent_requested_output_tokens=None,
-                request_requested_output_tokens=512,
-            )
-
-        assert result is None
+            with pytest.raises(MockUncertaintyReserveBasisUnknown, match="missing context"):
+                _resolve_context_budget(
+                    capacity_snapshot=capacity,
+                    tenant_id="tenant-1",
+                    agent_requested_output_tokens=None,
+                    request_requested_output_tokens=512,
+                )
 
     def test_inject_plan_tools_adds_tools_once(self):
         tools = []
@@ -7529,13 +7532,12 @@ def test_saved_outlet_window_and_request_default_control_capacity_without_agent_
              "profile_schema_version": 1, "context_window_tokens": 200000,
              "max_input_tokens": 180000, "max_output_tokens": 32000,
              "default_max_output_tokens": 2048}
-    snapshot = MockModelCapacitySnapshot(context_window_tokens=200000, provider_input_limit_tokens=180000)
+    snapshot = MockModelCapacitySnapshot(context_window_tokens=200000, provider_input_limit_tokens=200000)
     with patch("management.services.model.run_budget.resolve_capacity", return_value=snapshot) as resolver:
         budget, monitoring, actual = _resolve_input_budget(model)
-    assert actual is snapshot and budget == 180000
+    assert actual is snapshot and budget == 200000
     assert resolver.call_args.kwargs["operator_overrides"] == {
-        "context_window_tokens": 200000, "max_input_tokens": 180000,
-        "max_output_tokens": 32000, "default_output_reserve_tokens": 2048}
+        "context_window_tokens": 200000, "max_output_tokens": 32000}
     assert model["context_window_tokens"] == 200000
     assert monitoring["context_window_tokens"] == 200000
 

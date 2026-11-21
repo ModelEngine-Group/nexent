@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Executable Management launcher retained for deployment command compatibility."""
 
+import inspect
 import logging
 import logging.config
 import warnings
@@ -31,4 +32,16 @@ logger = logging.getLogger("config")
 if __name__ == "__main__":
     logger.info("Starting server initialization...")
     logger.info(f"APP version is: {APP_VERSION}")
-    uvicorn.run(app, host="0.0.0.0", port=5010, log_level="info", log_config=get_uvicorn_logging_config(categories=["config"]))
+    # Isolate keep-alive requests from transport callbacks carrying an ended span.
+    # Keep older launch signatures compatible.
+    request_context_options = {}
+    if "reset_contextvars" in inspect.signature(uvicorn.run).parameters:
+        request_context_options["reset_contextvars"] = True
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=5010,
+        log_level="info",
+        log_config=get_uvicorn_logging_config(categories=["config"]),
+        **request_context_options,
+    )

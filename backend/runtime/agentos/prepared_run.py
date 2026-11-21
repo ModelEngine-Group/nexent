@@ -91,6 +91,8 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
         raise
 
     status = "failed"
+    facts = {}
+    index = 0
     try:
         versions = {
             "agent_id": payload.resource.agent_id,
@@ -134,30 +136,37 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
                             continue
                         index += 1
                         fact = record.payload()
-                        for field in ("invocation_id", "tool_call_id"):
+                        for field in ("invocation_id", "tool_call_id", "step_id"):
                             if isinstance(observer_event.get(field), str):
                                 fact[field] = observer_event[field]
                         await _append_event(journal, index, "agentos_execution_fact", fact)
                         history.bind_run(key, identity.run_id, index)
-                        facts[index] = (record, fact.get("summary"))
+                        facts[index] = (record, fact.get("summary"), fact.get("model_view"))
                         continue
                     index += 1
                     await _append_event(journal, index, "agentos_observer", observer_event)
-        for fact_index, (record, original_summary) in facts.items():
-            if record.summary and record.summary != original_summary:
-                index += 1
-                await _append_event(journal, index, "agentos_execution_summary", {
-                    "fact_sequence": fact_index, "summary": record.summary,
-                })
         status = info.attempt_outcome or "completed"
         return status
     except asyncio.CancelledError:
         status = "stopped"
         raise
     finally:
-        if slot is not None:
-            slot.worker = info.thread_future
-        release_prepared_run(info, identity.conversation_id, identity.user_id, status)
+        try:
+            for fact_index, (record, original_summary, original_view) in facts.items():
+                update = {}
+                if record.summary and record.summary != original_summary:
+                    update["summary"] = record.summary
+                if record.model_view is not None and record.model_view != original_view:
+                    update["model_view"] = record.model_view
+                if update:
+                    index += 1
+                    await _append_event(journal, index, "agentos_execution_summary", {
+                        "fact_sequence": fact_index, **update,
+                    })
+        finally:
+            if slot is not None:
+                slot.worker = info.thread_future
+            release_prepared_run(info, identity.conversation_id, identity.user_id, status)
 
 
 async def _finish_producer(runner, monitor, identity, journal, status):

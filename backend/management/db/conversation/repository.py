@@ -3154,6 +3154,7 @@ def save_history_summary(
     compaction_attempts: Optional[int] = None,
     compaction_trigger_threshold_tokens: Optional[int] = None,
     compaction_target_tokens: Optional[int] = None,
+    structured_source_proofs: Optional[list[dict]] = None,
     *, db_session=None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
@@ -3244,6 +3245,8 @@ def save_history_summary(
             "summary": summary,
             "covered_through_message_id": covered_through_message_id,
         }
+        if structured_source_proofs:
+            payload["structured_source_proofs"] = structured_source_proofs
         if previous_summary_unit_id is not None:
             payload["previous_summary_unit_id"] = int(previous_summary_unit_id)
         if trigger:
@@ -3322,6 +3325,7 @@ def _history_turn(user, assistant_text: str, assistant_id=None,
         user_message = format_annotations_for_llm(user_message, annotations)
     return {
         "user_message": user_message,
+        **({"user_source_content": user.message_content or ""} if user_message != (user.message_content or "") else {}),
         "assistant_final_answer": assistant_text,
         "attachments": user.minio_files,
         "user_message_id": user.message_id,
@@ -3508,34 +3512,74 @@ def get_historical_context(
             records = session.execute(select(
                 ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
                 ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
-                ConversationMessageUnit.invocation_id,
+                ConversationMessageUnit.invocation_id, ConversationMessageUnit.unit_index,
             ).where(
                 ConversationMessageUnit.conversation_id == conversation_id,
                 ConversationMessageUnit.message_id.in_(assistant_ids),
                 ConversationMessageUnit.unit_type.in_([
-                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result",
                 ]),
                 ConversationMessageUnit.unit_status == "completed",
                 ConversationMessageUnit.delete_flag == "N",
             ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
             by_message = {}
+            from nexent.core.agents.context.native_history import decode_history_event
+
             for record in records:
-                by_message.setdefault(record.message_id, []).append({
+                history_record = {
                     "record_type": record.unit_type, "content": record.unit_content,
                     "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
-                })
+                    "unit_index": record.unit_index,
+                }
+                event = decode_history_event(history_record)
+                if event is not None:
+                    history_record["execution_event"] = event
+                by_message.setdefault(record.message_id, []).append(history_record)
             for turn in turns:
                 if turn["assistant_message_id"] in by_message:
                     turn["execution_records"] = by_message[turn["assistant_message_id"]]
 
         summary_result = None
         if summary_record and summary_payload:
+            sources = session.execute(select(
+                ConversationMessageUnit.message_id, ConversationMessageUnit.unit_index,
+                ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.tool_call_id,
+            ).join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id).where(
+                ConversationMessageUnit.conversation_id == conversation_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.message_index <= boundary_index,
+                ConversationMessage.message_role == "assistant", ConversationMessage.status.in_(["completed", "stopped"]),
+                ConversationMessage.delete_flag == "N",
+                ConversationMessageUnit.unit_type.in_(["execution_result", "tool_result"]),
+                ConversationMessageUnit.invocation_id.is_(None),
+                ConversationMessageUnit.unit_status == "completed", ConversationMessageUnit.delete_flag == "N",
+            ).order_by(ConversationMessage.message_index, ConversationMessageUnit.unit_index)).all()
+            from nexent.core.agents.context.native_history import decode_history_event
+            sources = [source for source in sources if source.unit_type != "tool_result" or (
+                source.tool_call_id and (event := decode_history_event({
+                    "record_type": source.unit_type, "content": source.unit_content,
+                    "tool_call_id": source.tool_call_id, "invocation_id": None,
+                })) is not None and isinstance(event.get("call_id"), str) and event["call_id"])]
+            users = session.execute(select(
+                ConversationMessage.message_id, ConversationMessage.message_content,
+            ).where(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.message_index <= boundary_index,
+                ConversationMessage.message_role == "user", ConversationMessage.status.in_(["completed", "stopped"]),
+                ConversationMessage.delete_flag == "N",
+            ).order_by(ConversationMessage.message_index)).all()
             summary_result = {
                 "unit_id": summary_record.unit_id,
                 **summary_payload,
+                "execution_sources": [{"message_id": source.message_id, "unit_index": source.unit_index,
+                                       "content": source.unit_content, "record_type": source.unit_type,
+                                       "tool_call_id": source.tool_call_id} for source in sources]
+                    + [{"message_id": user.message_id, "unit_index": None, "record_type": "user_message",
+                        "content": user.message_content or ""} for user in users],
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
-                "current_user_message_index": current.message_index}
+                "current_user_message_index": before_message_index}
 
 
 def _remove_scope_references(
