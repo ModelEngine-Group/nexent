@@ -560,15 +560,20 @@ export const Composer: FC<ComposerProps> = ({
       message.error(t("chat.knowledgeScope.embeddingMismatch"));
       return;
     }
+    const aidpDisabled = !enableAidpKnowledge || ids.length === 0;
+    const existingFilter = knowledgeScope?.aidp.metadata_filter;
     const scope: ConversationKnowledgeScope = {
-      schema_version: 1,
+      schema_version: knowledgeScope?.schema_version ?? 1,
       local: {
         mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
         knowledge_ids: enableAidpKnowledge ? [] : ids,
       },
       aidp: {
-        mode: enableAidpKnowledge && ids.length ? "override" : "disabled",
+        mode: !aidpDisabled ? "override" : "disabled",
         kds_ids: enableAidpKnowledge ? ids : [],
+        ...(!aidpDisabled && existingFilter
+          ? { metadata_filter: existingFilter }
+          : {}),
       },
     };
     setKnowledgeSaving(true);

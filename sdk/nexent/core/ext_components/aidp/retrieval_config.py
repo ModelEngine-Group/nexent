@@ -113,7 +113,7 @@ def prepare_config(config, inherited):
     return raw
 
 
-def build_payload(config, query, kds_list):
+def build_payload(config, query, kds_list, metadata_condition=None):
     channels = active_channels(config["search_method"])
     payload = {key: config[key] for key in (
         "search_method", "score_threshold", "reranking_enable", "rewrite_enable",
@@ -121,7 +121,12 @@ def build_payload(config, query, kds_list):
     payload.update(query=query, kds_list=kds_list, topk=config["top_k"], multi_modal_enable=config["multi_modal"])
     if config["reranking_enable"]:
         payload["reranking_mode"] = config["reranking_mode"]
-    hybrid = {"hybrid_top_k": config["hybrid_top_k"]}
+    # AIDP validates hybrid_top_k/graph_top_k as 1-100 when the key is present.
+    # The product meaning of 0 is "no separate cap"; the wire equivalent is to
+    # omit the key so AIDP applies its own default fallback.
+    hybrid = {}
+    if config["hybrid_top_k"] > 0:
+        hybrid["hybrid_top_k"] = config["hybrid_top_k"]
     for channel, prefix in (("vector_search", "vector"), ("full_text_search", "full_text")):
         if channel in channels:
             for suffix in ("candidates", "score_threshold"):
@@ -130,6 +135,10 @@ def build_payload(config, query, kds_list):
     if channels & {"vector_search", "full_text_search"}:
         payload["hybrid_search_config"] = hybrid
     if "graph_search" in channels:
-        payload["graph_search_config"] = {key: config[key] for key in (
-            "graph_top_k", "graph_score_threshold", "graph_reranking_enable")}
+        graph = {key: config[key] for key in ("graph_score_threshold", "graph_reranking_enable")}
+        if config["graph_top_k"] > 0:
+            graph["graph_top_k"] = config["graph_top_k"]
+        payload["graph_search_config"] = graph
+    if metadata_condition:
+        payload["metadata_condition"] = metadata_condition
     return payload

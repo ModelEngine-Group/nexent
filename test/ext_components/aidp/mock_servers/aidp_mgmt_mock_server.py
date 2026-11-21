@@ -1327,7 +1327,9 @@ class HybridSearchConfig(BaseModel):
 
     vector_candidates: int = Field(default=10, ge=1, le=500)
     full_text_candidates: int = Field(default=10, ge=1, le=500)
-    hybrid_top_k: int = Field(0, ge=0, le=100)
+    # Present values mirror the real AIDP contract (1-100); omission means
+    # "no separate cap", which the mock evaluates as falling back to topk.
+    hybrid_top_k: Optional[int] = Field(None, ge=1, le=100)
     vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -1335,7 +1337,7 @@ class HybridSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Per-channel knobs for the graph part of a FusionSearch call."""
 
-    graph_top_k: int = Field(0, ge=0, le=100)
+    graph_top_k: Optional[int] = Field(None, ge=1, le=100)
     graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     graph_reranking_enable: bool = True
 
@@ -1396,8 +1398,8 @@ class FusionSearchRequest(BaseModel):
             raise ValueError("hybrid_search_config must not be sent for pure graph retrieval")
         if not graph and self.graph_search_config is not None:
             raise ValueError("graph_search_config must not be sent without graph retrieval")
-        h = self.hybrid_search_config.hybrid_top_k if self.hybrid_search_config else 0
-        g = self.graph_search_config.graph_top_k if self.graph_search_config else 0
+        h = (self.hybrid_search_config.hybrid_top_k or 0) if self.hybrid_search_config else 0
+        g = (self.graph_search_config.graph_top_k or 0) if self.graph_search_config else 0
         if hybrid and h > self.topk:
             raise ValueError("hybrid_top_k must not exceed topk")
         if graph and g > self.topk:
@@ -2860,22 +2862,76 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
+def _metadata_value(chunk: Dict[str, Any], field: str) -> str:
+    """Read a filterable field, falling back to the chunk title for file names.
+
+    Real AIDP stores ``original_file_name`` with the file identity; the static
+    chunk fixtures only carry a title, so the title is the local equivalent.
+    """
+    value = str(chunk.get("metadata", {}).get(field, ""))
+    if not value and field in ("original_file_name", "file_name"):
+        value = str(chunk.get("title") or "")
+    return value
+
+
+def _chunks_for_kb(kds_id: str) -> List[Dict[str, Any]]:
+    """Return the KB's searchable chunks.
+
+    Static fixtures cover the seed KBs. KBs created or imported at runtime (the
+    file-scope demo KBs) only exist in the state documents, so synthesize one
+    searchable chunk per active document. The synthesized chunk carries
+    ``original_file_name`` so the conversation metadata filter can be exercised
+    locally the same way the real service applies it.
+    """
+    chunks = _CHUNKS_BY_KB.get(kds_id)
+    if chunks:
+        return chunks
+    synthetic: List[Dict[str, Any]] = []
+    id_base = 900000 + (sum(ord(char) for char in kds_id) % 1000) * 100
+    for index, document in enumerate(_active_documents(kds_id)):
+        name = str(document.get("file_name") or "").strip()
+        if not name:
+            continue
+        synthetic.append({
+            "id": id_base + index,
+            "score": round(0.9 - index * 0.001, 4),
+            "title": name,
+            "text": f"{name} local mock content for metadata-filter verification.",
+            "metadata": {
+                "original_file_name": name,
+                "knowledge_base_id": kds_id,
+            },
+            "chunk_type": "text",
+            "file_url": "",
+            "pages": [1],
+            "retrieval_sources": ["vector_search", "full_text_search"],
+        })
+    return synthetic
+
+
 def _match_metadata(chunk: Dict[str, Any], condition: Optional[MetadataCondition]) -> bool:
     if not condition or not condition.conditions:
         return True
-    meta = chunk.get("metadata", {})
     results = []
     for c in condition.conditions:
         field = c.get("name", "")
         op = c.get("comparison_operator", "contains")
         val = c.get("value", "")
-        cv = str(meta.get(field, ""))
+        cv = _metadata_value(chunk, field)
+        lowered_cv = cv.lower()
+        lowered_val = str(val).lower()
         if op == "contains":
-            results.append(val.lower() in cv.lower())
-        elif op == "equals":
-            results.append(cv.lower() == val.lower())
-        elif op == "not_equals":
-            results.append(cv.lower() != val.lower())
+            results.append(lowered_val in lowered_cv)
+        elif op in ("equals", "is"):
+            results.append(lowered_cv == lowered_val)
+        elif op in ("not_equals", "is not"):
+            results.append(lowered_cv != lowered_val)
+        elif op == "start with":
+            results.append(lowered_cv.startswith(lowered_val))
+        elif op == "end with":
+            results.append(lowered_cv.endswith(lowered_val))
+        elif op == "not contains":
+            results.append(lowered_val not in lowered_cv)
         elif op == "empty":
             results.append(cv in ("", "None"))
         elif op == "not_empty":
@@ -2918,7 +2974,7 @@ def fusion_search(
     for kb_id in request.kds_list:
         kb = _KNOWLEDGE_BASES.get(kb_id, {})
         graph_available = bool(kb.get("is_exist_graph"))
-        for chunk in _CHUNKS_BY_KB.get(kb_id, []):
+        for chunk in _chunks_for_kb(kb_id):
             if not _match_metadata(chunk, request.metadata_condition):
                 continue
             if not request.multi_modal_enable and chunk.get("chunk_type") == "image":
@@ -2979,7 +3035,7 @@ def fusion_search(
     results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
 
     # Hybrid caps the combined vector+full-text part; graph is capped above.
-    if hybrid and hybrid.hybrid_top_k > 0:
+    if hybrid and (hybrid.hybrid_top_k or 0) > 0:
         hybrid_hits = [hit for hit in results
                        if {"vector_search", "full_text_search"} & set(hit["sources"])]
         overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}
@@ -3010,8 +3066,11 @@ def fusion_search(
             item["pages"] = chunk.get("pages", [])
         payload.append(item)
 
-    logger.info("SEARCH  query=%r kds=%r method=%s returned=%d",
-                request.query, request.kds_list, request.search_method, len(payload))
+    logger.info("SEARCH  query=%r kds=%r metadata=%r method=%s returned=%d",
+                request.query, request.kds_list,
+                (request.metadata_condition.model_dump(exclude_none=True)
+                 if request.metadata_condition is not None else None),
+                request.search_method, len(payload))
     return JSONResponse(content={"result": payload, "total_return_count": len(payload)})
 
 

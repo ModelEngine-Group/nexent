@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 from enum import Enum
 
 if TYPE_CHECKING:
@@ -23,6 +23,9 @@ class ResolvedKnowledgeScope:
     local_display_names: List[str] = field(default_factory=list)
     aidp_kds_ids: List[str] = field(default_factory=list)
     aidp_display_names: List[str] = field(default_factory=list)
+    aidp_metadata_filter: Dict[str, Any] = field(
+        default_factory=lambda: {"enabled": False}
+    )
     local_disabled: bool = False
     aidp_disabled: bool = False
     local_capable: bool = True
@@ -60,6 +63,60 @@ class ClassifiedIngestionException:
 
 
 KnowledgeScopeMode = Literal["inherit", "override", "disabled"]
+AidpMetadataFilterOperator = Literal["contains", "is", "starts_with", "ends_with"]
+AIDP_FILTER_VALUE_MAX_LENGTH = 256
+
+
+class AidpFileNameCondition(BaseModel):
+    """One conversation-scoped file-name condition for AIDP retrieval."""
+
+    operator: AidpMetadataFilterOperator = "contains"
+    value: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=AIDP_FILTER_VALUE_MAX_LENGTH,
+        ),
+    ]
+
+
+AIDP_FILTER_CONDITIONS_MAX = 20
+AidpMetadataFilterMatch = Literal["all", "any"]
+
+
+class AidpMetadataFilterRequest(BaseModel):
+    """Conversation-scoped advanced filter inside the effective AIDP range.
+
+    The UI exposes one or more file-name conditions with a single match policy
+    (all/any).
+    """
+
+    enabled: bool = False
+    match: AidpMetadataFilterMatch = "all"
+    conditions: List[AidpFileNameCondition] = Field(
+        default_factory=list, max_length=AIDP_FILTER_CONDITIONS_MAX
+    )
+
+    @model_validator(mode="after")
+    def validate_conditions(self):
+        unique = []
+        seen = set()
+        for condition in self.conditions:
+            key = (condition.operator, condition.value)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(condition)
+        if self.enabled:
+            if not unique:
+                raise ValueError(
+                    "enabled AIDP metadata filter requires a file-name condition"
+                )
+            self.conditions = unique
+        else:
+            self.conditions = []
+        return self
 
 
 class LocalKnowledgeScopeRequest(BaseModel):
@@ -96,6 +153,9 @@ class AidpKnowledgeScopeRequest(BaseModel):
 
     mode: KnowledgeScopeMode = "inherit"
     kds_ids: List[str] = Field(default_factory=list, max_length=10)
+    metadata_filter: AidpMetadataFilterRequest = Field(
+        default_factory=AidpMetadataFilterRequest
+    )
 
     @field_validator("kds_ids")
     @classmethod
@@ -113,6 +173,10 @@ class AidpKnowledgeScopeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_and_ids(self):
+        if self.metadata_filter.enabled and self.mode == "disabled":
+            raise ValueError(
+                "AIDP disabled mode does not accept a metadata filter"
+            )
         if self.mode == "override" and not self.kds_ids:
             raise ValueError("AIDP override mode requires at least one kds_id")
         if self.mode != "override" and self.kds_ids:

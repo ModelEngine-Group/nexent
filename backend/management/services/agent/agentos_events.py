@@ -107,6 +107,7 @@ def knowledge_scope_event_content(resolved) -> dict:
                 "disabled": resolved.aidp_disabled,
                 "kds_ids": resolved.aidp_kds_ids,
                 "display_names": resolved.aidp_display_names,
+                "metadata_filter": resolved.aidp_metadata_filter,
             },
         },
         "warnings": resolved.warnings,

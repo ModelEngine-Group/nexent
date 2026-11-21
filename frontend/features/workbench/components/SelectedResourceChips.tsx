@@ -66,12 +66,19 @@ export function SelectedResourceChips({
           const mode = nextIds.length
             ? ("override" as const)
             : ("disabled" as const);
+          const existingFilter = scope.aidp.metadata_filter;
           onKnowledgeChange?.({
             ...scope,
             [source]:
               source === "local"
                 ? { mode, knowledge_ids: nextIds }
-                : { mode, kds_ids: nextIds },
+                : {
+                    mode,
+                    kds_ids: nextIds,
+                    ...(mode !== "disabled" && existingFilter
+                      ? { metadata_filter: existingFilter }
+                      : {}),
+                  },
           });
         },
       }));
