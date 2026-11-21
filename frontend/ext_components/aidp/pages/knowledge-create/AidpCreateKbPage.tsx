@@ -69,6 +69,7 @@ const AIDP_CREATE_DEFAULTS = {
   caption_enable: 0,
   summary_enable: false,
   is_exist_graph: false,
+  sensitive_intercept_enable: false,
   graph_domain: "常规" as const,
   graph_hop: 2,
   /** UI switch; the submitted `no_think_mode` is its inverse. */
@@ -212,6 +213,8 @@ const AidpCreateKbPage: React.FC = () => {
       caption_enable: AIDP_CREATE_DEFAULTS.caption_enable === 1,
       summary_enable: AIDP_CREATE_DEFAULTS.summary_enable,
       is_exist_graph: AIDP_CREATE_DEFAULTS.is_exist_graph,
+      sensitive_intercept_enable:
+        AIDP_CREATE_DEFAULTS.sensitive_intercept_enable,
       graph_domain: AIDP_CREATE_DEFAULTS.graph_domain,
       graph_hop: AIDP_CREATE_DEFAULTS.graph_hop,
       graph_thinking: AIDP_CREATE_DEFAULTS.graph_thinking,
@@ -293,6 +296,7 @@ const AidpCreateKbPage: React.FC = () => {
         summary_model: values.summary_enable
           ? values.summary_model || undefined
           : undefined,
+        sensitive_intercept_enable: values.sensitive_intercept_enable ? 1 : 0,
         is_exist_graph: !!values.is_exist_graph,
         graph_config: graphConfig,
         ingroup_permission: permission,

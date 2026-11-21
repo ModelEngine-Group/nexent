@@ -20,22 +20,40 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
-import gateway.authentication.auth as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, UnauthorizedError
+from contracts.errors.exceptions import AppException
 from contracts.roles import has_any_role
+from ext_components.aidp.apps.aidp_folder_routes import aidp_folder_router
+from ext_components.aidp.apps.aidp_mgmt_common import (
+    _auth,
+    _credentials,
+    _normalize_folder_path,
+    _relative_path_to_directory,
+)
+from ext_components.aidp.apps.aidp_sensitive_word_routes import (
+    aidp_sensitive_word_router,
+)
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -64,13 +82,11 @@ from ext_components.aidp.services.aidp_service import (
     count_aidp_docs_impl,
     create_aidp_chunk_impl,
     create_aidp_kb_impl,
-    delete_aidp_kb_impl,
     get_aidp_chunk_impl,
     get_aidp_file_summary_impl,
     get_aidp_graph_template_impl,
     get_aidp_image_impl,
     get_aidp_kb_impl,
-    get_bound_agents,
     list_aidp_channels_impl,
     list_aidp_chunks_impl,
     list_aidp_doc_history_impl,
@@ -90,11 +106,16 @@ from ext_components.aidp.services.aidp_service import (
     upload_aidp_docs_impl,
 )
 from management.db.identity.user_tenant import get_user_role_by_tenant
+from management.services.knowledge_base.providers.shared_aidp import (
+    delete_aidp_kb_impl,
+    get_bound_agents,
+)
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.services.tag.library import TagManagementService
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
+aidp_mgmt_router.include_router(aidp_folder_router)
+aidp_mgmt_router.include_router(aidp_sensitive_word_router)
 logger = logging.getLogger("aidp_mgmt_app")
 
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
@@ -156,7 +177,10 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
     user_id: str,
 ) -> None:
     """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
-
+    # Imported lazily: the tag service pulls in the MCP container stack, which
+    # is unnecessary for the rest of the AIDP router and makes test collection
+    # depend on Docker/paramiko being importable.
+    from management.services.tag.library import TagManagementService
 
     TagManagementService.cleanup_document_assignments_for_knowledge_base(
         tenant_id, "aidp", knowledge_base_id, user_id
@@ -188,6 +212,13 @@ class CreateKbRequest(BaseModel):
     topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
     similarity: float = Field(0.0, ge=0, le=1, description="Similarity score threshold")
     caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
+    sensitive_intercept_enable: int = Field(
+        0,
+        ge=0,
+        le=1,
+        strict=True,
+        description="Sensitive word interception toggle for future files, int 0 or 1",
+    )
     chunk_mode: int = Field(
         0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
     )
@@ -275,6 +306,12 @@ class UpdateKbRequest(BaseModel):
     topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
     caption_enable: Optional[int] = Field(
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
+    )
+    sensitive_intercept_enable: Optional[int] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Sensitive word interception toggle, int 0 or 1",
     )
     vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
     is_exist_graph: Optional[bool] = Field(
@@ -474,29 +511,6 @@ class RemoveAidpChunksRequest(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
-# Auth helpers
-# ---------------------------------------------------------------------------
-
-
-async def _auth(request: Request) -> tuple[str, str]:
-    """Resolve ``(user_id, tenant_id)`` from the Authorization header.
-
-    Raises 401 for missing/invalid tokens or empty tenant contexts so the
-    caller never has to defend against partially-authenticated state.
-    """
-    auth = request.headers.get("Authorization")
-    if not auth:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Missing Authorization header")
-    try:
-        user_id, tenant_id = auth_utils_module.get_current_user_id(auth)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
-    if not tenant_id:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="No tenant context")
-    return user_id, tenant_id
-
-
 def _infer_is_multimodal(detail: dict) -> bool:
     """Reverse-derive ``is_multimodal`` from AIDP detail response.
 
@@ -534,6 +548,21 @@ def _coerce_optional_bool(value) -> bool | None:
         if normalized in {"false", "0", "no", "否", ""}:
             return False
     return None
+
+
+def _normalize_int_toggle(value: Any, default: int = 0) -> int:
+    """Normalize an AIDP 0/1 toggle without hiding an explicit enabled value."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return 1 if value else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "是"}:
+            return 1
+        if normalized in {"0", "false", "no", "否", ""}:
+            return 0
+    return default
 
 
 def _normalize_kb_config_fields(detail: dict) -> dict:
@@ -588,6 +617,12 @@ def _normalize_kb_config_fields(detail: dict) -> dict:
         summary_model.strip() if isinstance(summary_model, str) else ""
     )
 
+    # Historical KBs predate the sensitive-word toggle; treat a missing value
+    # as disabled while keeping an explicit upstream 1 intact.
+    detail["sensitive_intercept_enable"] = _normalize_int_toggle(
+        detail.get("sensitive_intercept_enable"), 0
+    )
+
     # Normalize the graph configuration for the frontend. AIDP serializes the
     # three graph toggles as "是"/"否" and the hop count as a string, while the
     # detail view and its inline editors expect native booleans and numbers.
@@ -629,10 +664,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
         status_code=HTTPStatus.CONFLICT,
         detail="Knowledge base already exists for this tenant",
     )
-
-
-def _credentials() -> tuple[str, str]:
-    return AIDP_SERVER_URL, AIDP_API_KEY
 
 
 def _is_user_role(user_id: str, tenant_id: str) -> bool:
@@ -867,6 +898,12 @@ async def list_knowledge_bases(
             "is_multimodal": _infer_is_multimodal(detail or row),
             "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
             "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
+            "sensitive_intercept_enable": _normalize_int_toggle(
+                detail.get("sensitive_intercept_enable")
+                if detail.get("sensitive_intercept_enable") is not None
+                else row.get("sensitive_intercept_enable"),
+                0,
+            ),
             "created_at": _timestamp_to_iso(row.get("create_time")),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
@@ -1210,11 +1247,57 @@ async def upload_documents(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     files: List[UploadFile] = File(..., description="Files to upload"),
+    target_folder: Annotated[
+        Optional[str],
+        Form(description="Destination folder path; root is '/'"),
+    ] = None,
+    relative_paths: Annotated[
+        Optional[List[str]],
+        Form(description="One relative path per file, preserving directory levels"),
+    ] = None,
 ) -> JSONResponse:
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
+    normalized_target: str | None = None
+    normalized_relative_paths: list[str] | None = None
+    if target_folder is not None:
+        try:
+            normalized_target = _normalize_folder_path(target_folder)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if relative_paths is not None:
+        if target_folder is None:
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths requires target_folder",
+            )
+        if len(relative_paths) != len(files):
+            raise HTTPException(
+                status_code=422,
+                detail="relative_paths must have one entry per uploaded file",
+            )
+        try:
+            normalized_relative_paths = [
+                _relative_path_to_directory(path) for path in relative_paths
+            ]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     valid_files, validation_failures = _validate_upload_files(files)
+    # Validation drops files, so the relative paths have to follow the original
+    # upload order instead of being zipped with the shortened list.
+    valid_file_ids = {id(file) for file in valid_files}
+    valid_relative_paths = (
+        [
+            path
+            for file, path in zip(files, normalized_relative_paths)
+            if id(file) in valid_file_ids
+        ]
+        if normalized_relative_paths is not None
+        else None
+    )
     server_url, api_key = _credentials()
     if valid_files:
         result = await run_blocking(
@@ -1224,6 +1307,8 @@ async def upload_documents(
             api_key,
             kds_id,
             valid_files,
+            normalized_target,
+            valid_relative_paths,
             lane="control-io",
             owner="config",
         )
@@ -1268,7 +1353,7 @@ async def remove_documents(
         server_url,
         api_key,
         kds_id,
-        [str(file_uuid) for file_uuid in body.file_uuids],
+        list(body.file_uuids),
         lane="control-io",
         owner="config",
     )
@@ -1295,7 +1380,7 @@ async def download_document(
         server_url,
         api_key,
         kds_id,
-        str(body.file_uuid),
+        body.file_uuid,
     )
     response_headers = {
         "Content-Disposition": aidp_response.headers["Content-Disposition"],
@@ -1381,7 +1466,7 @@ async def preview_document(
         server_url,
         api_key,
         kds_id,
-        str(file_uuid),
+        file_uuid,
     )
     return _stream_aidp_preview(aidp_response)
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}/chunks")
@@ -1868,7 +1953,7 @@ async def retry_upload_tasks(
     """Retry selected failed tasks; the upstream request always carries a UUID array."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-    file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
+    file_uuids = list(dict.fromkeys(body.file_uuids))
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-retry-upload-tasks",

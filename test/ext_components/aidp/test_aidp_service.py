@@ -60,11 +60,6 @@ def aidp_service_module():
     register_module(module_name, module)
     spec.loader.exec_module(module)
 
-    # Remote API tests isolate binding persistence, covered by cascade tests.
-    module.get_db_session = MagicMock()
-    module.remove_tool_knowledge_references = MagicMock()
-    module.remove_conversation_knowledge_bindings = MagicMock()
-
     try:
         yield module
     finally:
@@ -954,6 +949,27 @@ class TestNormalizeAidpDoc:
         assert raw == snapshot
 
 
+class TestNormalizeFolderTreeFile:
+    """Folder/Files must not invent a creation time from update_time."""
+
+    def test_keeps_first_upload_time(self):
+        from ext_components.aidp.services import aidp_folder_service
+
+        result = aidp_folder_service._normalize_folder_tree_file(
+            {"first_upload_time": 1700000000, "update_time": 1700003600}
+        )
+        assert "2023-11-14" in result["created_at"]
+
+    def test_blank_created_at_when_only_update_time_exists(self):
+        from ext_components.aidp.services import aidp_folder_service
+
+        result = aidp_folder_service._normalize_folder_tree_file(
+            {"update_time": 1700003600}
+        )
+        assert result["created_at"] is None
+        assert result["updated_at"] is not None
+
+
 # ---------------------------------------------------------------------------
 # Small gap coverage for existing function tests
 # ---------------------------------------------------------------------------
@@ -1358,17 +1374,23 @@ class TestIsKbApplicable:
 class TestResolveTenantId:
     """Tests for _resolve_tenant_id helper."""
 
-    def test_explicit_string_tenant(self, aidp_service_module):
-        result = aidp_service_module._resolve_tenant_id("my-tenant")
+    def test_explicit_string_tenant(self):
+        from ext_components.aidp.services import aidp_client
+
+        result = aidp_client._resolve_tenant_id("my-tenant")
         assert result == "my-tenant"
 
-    def test_none_uses_configured(self, aidp_service_module):
-        result = aidp_service_module._resolve_tenant_id(None)
+    def test_none_uses_configured(self):
+        from ext_components.aidp.services import aidp_client
+
+        result = aidp_client._resolve_tenant_id(None)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_whitespace_falls_back(self, aidp_service_module):
-        result = aidp_service_module._resolve_tenant_id("   ")
+    def test_whitespace_falls_back(self):
+        from ext_components.aidp.services import aidp_client
+
+        result = aidp_client._resolve_tenant_id("   ")
         assert result == "aidp"
 
     def test_non_string_uses_configured(self, aidp_service_module):
@@ -1853,12 +1875,6 @@ class TestUpdateAidpKbImpl:
 class TestDeleteAidpKbImpl:
     """Tests for delete_aidp_kb_impl (DELETE KB endpoint)."""
 
-    @pytest.fixture(autouse=True)
-    def binding_session(self, aidp_service_module):
-        context = aidp_service_module.get_db_session.return_value
-        context.__exit__.return_value = False
-        return context.__enter__.return_value
-
     @pytest.mark.parametrize(
         "server_url,api_key",
         [("", "token"), ("ftp://bad", "token"), ("http://ok", "")],
@@ -1870,7 +1886,7 @@ class TestDeleteAidpKbImpl:
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
-    def test_success(self, aidp_service_module, binding_session):
+    def test_success(self, aidp_service_module):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         _setup_mock_client(aidp_service_module, method="delete", response=mock_resp)
@@ -1879,12 +1895,6 @@ class TestDeleteAidpKbImpl:
             server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
         )
         assert result is True
-        aidp_service_module.remove_tool_knowledge_references.assert_called_once_with(
-            binding_session, kds_ids=["kb-1"]
-        )
-        aidp_service_module.remove_conversation_knowledge_bindings.assert_called_once_with(
-            binding_session, kds_ids=["kb-1"]
-        )
 
     @pytest.mark.parametrize("status_code", [401, 403])
     def test_auth_error(self, aidp_service_module, status_code):
@@ -1894,7 +1904,6 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
-        aidp_service_module.get_db_session.assert_not_called()
 
     def test_rate_limit_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(429, "DELETE"))
@@ -1903,7 +1912,6 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RATE_LIMIT
-        aidp_service_module.get_db_session.assert_not_called()
 
     def test_service_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(500, "DELETE"))
@@ -1912,7 +1920,6 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
-        aidp_service_module.get_db_session.assert_not_called()
 
     def test_connection_error(self, aidp_service_module):
         request = httpx.Request("DELETE", "http://127.0.0.1:30081")
@@ -1925,37 +1932,6 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
-        aidp_service_module.get_db_session.assert_not_called()
-
-    def test_already_absent_still_cleans_bindings(self, aidp_service_module, binding_session):
-        _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(404, "DELETE"))
-        assert aidp_service_module.delete_aidp_kb_impl("http://aidp.test", "test-key", "kb-1") is True
-        aidp_service_module.remove_tool_knowledge_references.assert_called_once_with(
-            binding_session, kds_ids=["kb-1"]
-        )
-        aidp_service_module.remove_conversation_knowledge_bindings.assert_called_once_with(
-            binding_session, kds_ids=["kb-1"]
-        )
-
-    @pytest.mark.parametrize("failed_step", ["tool", "conversation", "commit"])
-    def test_binding_failure_does_not_fail_deletion(self, aidp_service_module, caplog, failed_step):
-        response = MagicMock()
-        response.raise_for_status.return_value = None
-        _setup_mock_client(aidp_service_module, method="delete", response=response)
-        if failed_step == "commit":
-            aidp_service_module.get_db_session.return_value.__exit__.side_effect = RuntimeError("commit failed")
-        else:
-            cleanup = (aidp_service_module.remove_tool_knowledge_references if failed_step == "tool"
-                       else aidp_service_module.remove_conversation_knowledge_bindings)
-            cleanup.side_effect = RuntimeError("cleanup failed")
-        with caplog.at_level(logging.WARNING):
-            assert aidp_service_module.delete_aidp_kb_impl("http://aidp.test", "test-key", "kb-1") is True
-        assert any(
-            record.levelno == logging.WARNING
-            and "Failed to clean up bindings" in record.message
-            and "kb-1" in record.message
-            for record in caplog.records
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -2011,6 +1987,30 @@ class TestUploadAidpDocsImpl:
             files=[mock_file],
         )
         assert result == upload_response
+
+    def test_target_folder_uses_new_aidp_fields(self, aidp_service_module, mock_file, monkeypatch):
+        mock_resp = _make_success_response({"summary": {}, "success_list": [], "failed_list": []})
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+        monkeypatch.setattr(
+            aidp_service_module,
+            "_resolve_aidp_folder_id",
+            lambda *args, **kwargs: 42,
+        )
+
+        aidp_service_module.upload_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            files=[mock_file],
+            target_folder="/docs",
+            relative_paths=["sub"],
+        )
+
+        data = aidp_service_module.http_client_manager.get_sync_client.return_value.post.call_args.kwargs["data"]
+        assert data["target_folder_path"] == "/docs"
+        assert data["target_folder_id"] == 42
+        assert data["relative_paths"] == ["sub"]
+        assert "target_folder" not in data
 
     def test_file_with_no_content_type_uses_octet_stream(self, aidp_service_module, mock_file_no_ct):
         mock_resp = _make_success_response({"uploaded": 1})
@@ -2100,6 +2100,36 @@ class TestUploadAidpDocsImpl:
         assert exc_info.value.details == {
             "upstream_status": 500,
             "upstream_reason": "文件解析服务不可用",
+        }
+
+    def test_name_conflict_code_is_preserved_for_frontend_mapping(
+        self, aidp_service_module
+    ):
+        request = httpx.Request("POST", "http://127.0.0.1:30081/folders/0")
+        response = httpx.Response(
+            409,
+            request=request,
+            json={
+                "detail": {
+                    "code": 1089,
+                    "message": "folder name already exists",
+                }
+            },
+        )
+        error = httpx.HTTPStatusError(
+            "http 409",
+            request=request,
+            response=response,
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._raise_aidp_http_error(error, "create-folder:kb-1")
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        assert exc_info.value.details == {
+            "upstream_status": 409,
+            "upstream_reason": "folder name already exists",
+            "upstream_code": 1089,
         }
 
     def test_structured_file_error_returns_localized_failed_list(self, aidp_service_module, mock_file):

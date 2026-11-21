@@ -295,6 +295,8 @@ export interface AidpKnowledgeBaseItem {
   embedding_model?: string;
   /** Whether this AIDP knowledge base supports multimodal content. */
   is_multimodal?: boolean;
+  /** Sensitive word interception for files ingested after it is enabled. */
+  sensitive_intercept_enable?: number | null;
 }
 
 export interface AidpKnowledgeBaseListResponse {
@@ -635,55 +637,4 @@ export interface McpContainer {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
-}
-
-// ========== Prompt Service Interfaces ==========
-
-export interface OptimizePromptSectionParams {
-  agent_id: number;
-  task_description: string;
-  model_id: number;
-  section_type: "duty" | "constraint" | "few_shots";
-  section_title: string;
-  current_content: string;
-  feedback: string;
-  mode?: "general" | "insert" | "select";
-  start_pos?: number;
-  end_pos?: number;
-  tool_ids?: number[];
-  sub_agent_ids?: number[];
-  knowledge_base_display_names?: string[];
-}
-
-export interface OptimizePromptSectionResponse {
-  section_type: "duty" | "constraint" | "few_shots";
-  section_title: string;
-  original_content: string;
-  optimized_content: string;
-}
-
-export interface BadCaseItem {
-  question: string;
-  answer: string;
-  label?: string;
-  reason?: string;
-}
-
-export interface OptimizePromptBadCaseParams {
-  agent_id: number;
-  model_id: number;
-  current_content: string;
-  bad_cases: BadCaseItem[];
-  section_type: string;
-  section_title: string;
-  tool_ids?: number[];
-  sub_agent_ids?: number[];
-  knowledge_base_display_names?: string[];
-}
-
-export interface OptimizePromptBadCaseResponse {
-  section_type: string;
-  section_title: string;
-  original_content: string;
-  optimized_content: string;
 }

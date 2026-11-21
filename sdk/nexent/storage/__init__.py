@@ -1,19 +1,33 @@
-"""
-Storage module for Nexent SDK
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Lightweight storage contracts with lazy legacy object-storage exports."""
 
-Provides abstract storage interface and implementations for various storage backends.
-"""
+from importlib import import_module
 
-from .storage_client_base import StorageClient, StorageConfig
-from .storage_client_factory import create_storage_client_from_config
-from .minio_config import MinIOStorageConfig
-from .minio import MinIOStorageClient
 
-__all__ = [
-    "StorageClient",
-    "StorageConfig",
-    "MinIOStorageConfig",
-    "create_storage_client_from_config",
-    "MinIOStorageClient",
-]
+_EXPORTS = {
+    "StorageClient": ("storage_client_base", "StorageClient"),
+    "StorageConfig": ("storage_client_base", "StorageConfig"),
+    "MinIOStorageConfig": ("minio_config", "MinIOStorageConfig"),
+    "create_storage_client_from_config": ("storage_client_factory", "create_storage_client_from_config"),
+    "MinIOStorageClient": ("minio", "MinIOStorageClient"),
+    "StorageInterface": ("interfaces", "StorageInterface"),
+    "RecordStore": ("interfaces", "RecordStore"),
+    "ObjectStore": ("interfaces", "ObjectStore"),
+    "VectorStore": ("interfaces", "VectorStore"),
+    "KeyValueStore": ("interfaces", "KeyValueStore"),
+}
 
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module, symbol = _EXPORTS[name]
+    value = getattr(import_module(f".{module}", __name__), symbol)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_EXPORTS))

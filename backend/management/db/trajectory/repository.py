@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 # isort: split
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.conversation.models import ConversationRecord
 from management.db.identity.models import UserTenant
 from management.db.trajectory.models import TrajectoryExecution as Execution

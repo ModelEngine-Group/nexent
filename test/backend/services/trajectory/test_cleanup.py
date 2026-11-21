@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 import pytest
-from infrastructure.observability.trajectory_io import TrajectoryConflict
+from infrastructure.trace.trajectory_io import TrajectoryConflict
 from ops.services.trajectory.access import Actor
 from ops.services.trajectory.cleanup import cleanup
 from ops.services.trajectory.primitives import QueryError, ReferenceStore

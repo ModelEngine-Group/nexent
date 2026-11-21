@@ -7,6 +7,8 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "-3"
 data:
+  GATEWAY_AUTH_ENABLED: "true"
+  GATEWAY_SERVICE_URL: {{ .Values.config.services.gatewayUrl | quote }}
   TZ: {{ .Values.config.timezone | quote }}
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
@@ -22,6 +24,7 @@ data:
   CONFIG_SERVICE_URL: {{ .Values.config.services.configUrl | quote }}
   ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
+  MANAGEMENT_AGENTOS_URL: {{ .Values.config.services.managementAgentosUrl | quote }}
   NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
   MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
   DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}

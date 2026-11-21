@@ -19,6 +19,36 @@ def cleanup():
 
 pytestmark = [pytest.mark.case_id("JIUWEN-RESOURCES-D3-002"), pytest.mark.stage("D3")]
 
+
+@pytest.mark.parametrize("parent,child,protocol", [
+    ("jiuwen", "jiuwen", "native"), ("jiuwen", "jiuwen", "text"),
+    ("jiuwen", "smolagents", "native"), ("jiuwen", "smolagents", "text"),
+    ("smolagents", "jiuwen", "native"), ("smolagents", "jiuwen", "text"),
+    ("smolagents", "smolagents", "native"),
+])
+def test_only_root_clarifies_after_child_returns_missing_information(monkeypatch, parent, child, protocol):
+    from nexent.core.agents.prompt.clarification import child_information_policy
+
+    info, state, output, cores = asyncio.run(run_collaboration(
+        monkeypatch, parent, child, protocol, "JSONRPC", fault="missing_information"))
+    assert info.attempt_outcome == "completed", output[-2:]
+    assert ("delegate", child) in cores and ("parent", parent) in cores
+    assert len(state["parent"]) == 2 and len(state["child"]) == 1
+    assert not state["effects"] and not state["parent_effects"]
+    child_request = state["child"][0]
+    assert child_information_policy("en") in json.dumps(child_request)
+    assert "ask_user(" not in json.dumps(child_request)
+    assert all(tool.get("function", {}).get("name") != "ask_user" for tool in child_request.get("tools", []))
+    assert "MISSING_INPUT: birth date" in json.dumps(state["parent"][1])
+    forms = [event for event in output if event["type"] == "human_interaction"]
+    assert len(forms) == 1 and not forms[0].get("invocation_id")
+    form = forms[0]["content"]
+    form = json.loads(form) if isinstance(form, str) else form
+    assert form["questions"][0]["id"] == "birth"
+    assert not any(event["type"] == "error" for event in output)
+    assert sum(event["type"] == "subagent_start" for event in output) == 1
+    assert sum(event["type"] == "subagent_end" for event in output) == 1
+
 @pytest.mark.parametrize("parent,child,protocol,remote_protocol", [
     ("jiuwen", "jiuwen", "native", "JSONRPC"),
     ("jiuwen", "jiuwen", "text", "JSONRPC"),

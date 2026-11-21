@@ -9,11 +9,11 @@ import jwt
 import pytest
 
 from contracts.errors.exceptions import UnauthorizedError, TenantResourceLimitError
-from infrastructure.security.passwords import hash_password
+from management.utils.account_passwords import hash_password
 from management.services.permission.identity import registration
 from management.db.models import TenantInvitationCode
 from management.services.permission.identity import authentication as auth
-from gateway.authentication import auth as helpers
+from management.services.permission.identity import session as helpers
 
 
 @pytest.fixture

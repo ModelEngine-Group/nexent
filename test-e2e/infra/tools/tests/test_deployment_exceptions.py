@@ -205,6 +205,77 @@ def campaign_fixture(tmp_path):
     return repo, home, env_path, original, records, settings
 
 
+def test_daily_campaign_does_not_abort_all_groups_for_one_unavailable_fixture(tmp_path):
+    repo, home, _, _, records, settings = campaign_fixture(tmp_path)
+    settings.update(notify=False)
+    settings["hooks"]["build"] = [["offline-build"]]
+    groups = []
+
+    def execute(repo, home, selected, settings, *, directory, on_result=None):
+        groups.append(directory.name)
+        directory.mkdir(parents=True)
+        rows = [{"case_id": record["case_id"], "stage": record["stage"], "result":
+                 "BLOCKED" if record["case_id"] == "PW-KB-LOCAL-01" else "PASS"} for record in selected]
+        for row in rows:
+            on_result(dict(row))
+        finalize(directory, selected, rows)
+        return int(any(row["result"] == "BLOCKED" for row in rows))
+
+    with patch.object(modes, "fingerprint", return_value={"head": "fixture"}), \
+            patch.object(modes.ModeSwitch, "verify"), \
+            patch.object(modes.subprocess, "check_output", return_value=""), \
+            patch("report_ownership.enrich", side_effect=lambda repo, rows, head: (rows, [])), \
+            patch("static_assets.inventory", return_value=[{"asset_id": "missing", "path": "file.txt", "destination": "MISSING"}]):
+        assert modes.execute_campaign(repo, home, records, settings, daily=True, publish_latest=False,
+            execute_one=execute, all_records=records, hook=lambda *args: None,
+            machine_env=lambda *args: {"NEXENT_TEST_ASSETS_CONTAINER_HOST": "127.0.0.1"}) == 1
+    assert groups == ["local", "aidp", "modelengine"]
+    directory = next((home / "runs/repository-daily").iterdir())
+    summary = json.loads((directory / "summary.json").read_text())
+    assert summary["execution_complete"] and summary["counts"] == {"BLOCKED": 1, "PASS": 2}
+    assert json.loads((directory / "status.json").read_text())["local_restored_and_verified"]
+
+
+@pytest.mark.parametrize("marker_timing", ["before", "during"])
+def test_fault_marker_does_not_block_build_deploy_groups_or_local_completion(tmp_path, marker_timing):
+    repo, home, _, original_env, records, settings = campaign_fixture(tmp_path)
+    settings.update(notify=False)
+    settings["hooks"]["build"] = [["offline-build"]]
+    fault = home / "state/deployment-guard/pending.json"
+    content = {"record": {"pending": ["nexent-runtime"]}, "evidence": "original-fault"}
+    if marker_timing == "before":
+        save(fault, content)
+    groups, hooks = [], []
+
+    def execute(repo, home, selected, settings, *, directory, on_result=None):
+        groups.append(directory.name)
+        directory.mkdir(parents=True)
+        rows = [{"case_id": record["case_id"], "stage": record["stage"], "result": "PASS"} for record in selected]
+        for row in rows:
+            on_result(dict(row))
+        if marker_timing == "during" and directory.name == "local":
+            save(fault, content)
+        finalize(directory, selected, rows)
+        return 0
+
+    with patch.object(modes, "fingerprint", return_value={"head": "fixture"}), \
+            patch.object(modes.ModeSwitch, "verify"), \
+            patch.object(modes.subprocess, "check_output", return_value=""), \
+            patch("report_ownership.enrich", side_effect=lambda repo, rows, head: (rows, [])), \
+            patch("static_assets.inventory", return_value=[]):
+        assert modes.execute_campaign(repo, home, records, settings, daily=True, publish_latest=False,
+            execute_one=execute, all_records=records, hook=lambda name, *args: hooks.append(name),
+            machine_env=lambda *args: {"NEXENT_TEST_ASSETS_CONTAINER_HOST": "127.0.0.1"}) == 0
+    assert hooks[:3] == ["build", "deploy", "preflight"]
+    assert groups == ["local", "aidp", "modelengine"]
+    assert (repo / "deploy/env/.env").read_bytes() == original_env
+    assert json.loads(fault.read_text()) == content
+    assert not (home / modes.MARKER).exists()
+    directory = next((home / "runs/repository-daily").iterdir())
+    summary = json.loads((directory / "summary.json").read_text())
+    assert summary["execution_complete"] and summary["counts"] == {"PASS": 3}
+
+
 @pytest.mark.parametrize("failure", [None, "aidp", "restore-local"])
 def test_campaign_restores_on_failures_and_accounts_for_every_case(tmp_path, failure):
     repo, home, env_path, original, records, settings = campaign_fixture(tmp_path)

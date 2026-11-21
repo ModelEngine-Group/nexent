@@ -422,9 +422,9 @@ assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-runtime/templates/deplo
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend-image" "mcp deployment should include backend image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-env" "mcp deployment should include env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend:" "mcp deployment should not keep removed backend rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend-image" "northbound deployment should include backend image rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-env" "northbound deployment should include env rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-gateway-image" "northbound deployment should include gateway image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-env" "northbound deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web-image" "web deployment should include web image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-env" "web deployment should include env rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-data-process-image" "data-process deployment should include data-process image rollout annotation"
@@ -630,8 +630,8 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_contains "$RUNTIME_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
   assert_contains "$CONFIG_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker config service should mount external memory provider plugins"
   assert_contains "$RUNTIME_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker runtime service should mount external memory provider plugins"
-  assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-northbound:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
-  assert_not_contains "$(awk '/^  nexent-northbound:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
+  assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-gateway:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
+  assert_not_contains "$(awk '/^  nexent-gateway:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
   assert_contains "$WEB_COMPOSE_BLOCK" '${ROOT_DIR}/project-config:/mnt/nexent-data/project-config' "docker web should mount persistent project configuration"
   assert_contains "$WEB_COMPOSE_BLOCK" 'PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config' "docker web should read and write the persistent project configuration path"
@@ -1350,7 +1350,7 @@ assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should reset to disabl
 
 assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase" "selected deployment must not start retired auth services"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/secrets.yaml")" ".Values.secrets.jwtSecret" "JWT signing secret must be independent of optional components"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" "/opt/backend/account_admin.py bootstrap-su" "K8s bootstrap must use local accounts"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "python -m management.cli.account bootstrap-su" "K8s bootstrap must use local accounts"
 
 assert_not_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "bootstrap should not print plaintext credentials"
 assert_not_contains "$K8S_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "K8s bootstrap should not print plaintext credentials"
@@ -1400,15 +1400,26 @@ else
   assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
 fi
 assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
-assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
-for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-postgresql/templates/deployment.yaml")" '/docker-entrypoint-initdb.d/' "PostgreSQL must leave application SQL initialization to Management"
+for renderer in yaml_quote env_or_default render_yaml_literal_file sql_files_checksum render_infrastructure_runtime_values render_k8s_runtime_config_values; do
   eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
 done
 SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
-assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must not render application initialization SQL"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+render_k8s_runtime_config_values "$TMP_DIR/application-sql-values.yaml"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'init: |' "Management values must include baseline SQL"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'CREATE SCHEMA IF NOT EXISTS nexent;' "Management values must include the real baseline"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'migrations:' "Management values must include versioned SQL"
+original_sql_checksum="$(sql_files_checksum)"
+cp "$SQL_INIT_FILE" "$TMP_DIR/init-checksum.sql"
+printf '\n-- initialization checksum regression\n' >> "$TMP_DIR/init-checksum.sql"
+SQL_INIT_FILE="$TMP_DIR/init-checksum.sql"
+assert_not_eq "$original_sql_checksum" "$(sql_files_checksum)" "Management rollout checksum must include init.sql"
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
 
 export AUTH_HOOK_EXIT=17
 if deployment_upgrade_local_accounts docker; then

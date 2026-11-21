@@ -1,27 +1,31 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
 
+from backend.http.server.app_factory import create_app
+from runtime.agentos.memory import create_memory_store_router
+from runtime.agentos.middleware import AgentOSMiddleware
+from runtime.agentos.model import create_model_router
+from runtime.agentos.model_administration import create_model_administration_router
+from runtime.agentos.prepared_run import create_prepared_run_router
+from runtime.agentos.resume import create_run_lifecycle_router
+from runtime.model.service import ModelService
+from runtime.recovery import recover_streaming_runs, watch_executions
+from infrastructure.rdb.model_records import fail_detecting_models_on_startup, get_model_by_model_id
+from infrastructure.model_adapter import get_adapter_from_config
+from runtime.agentos.debug import stop_agentos_debug
+from runtime.agentos.ephemeral import create_ephemeral_run_router
+from runtime.agentos.evaluation import create_evaluation_router
+from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-from infrastructure.concurrency import runtime_thread_manager
-from management.api.automation.agent_automation import (
-    conversation_automation_router,
+from runtime.api.exception_handler import ExceptionHandlerMiddleware
+from infrastructure.system_configuration.runtime import (
+    start_system_configuration,
+    stop_system_configuration,
 )
-from management.api.automation.agent_automation import (
-    router as agent_automation_router,
-)
-from management.api.conversation.conversation_management import (
-    router as conversation_management_router,
-)
-from management.api.conversation.conversation_share import (
-    router as conversation_share_router,
-)
-from management.api.conversation.workbench_pins import router as workbench_pins_router
-from management.services.agent.run_state import runtime_state_service
-from management.utils.app_factory import create_app
-from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
@@ -29,21 +33,14 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from runtime.api.agent.execution import agent_runtime_router as agent_router
-from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
-from runtime.api.file.upload import (
-    file_management_runtime_router as file_management_router,
-)
-from runtime.api.skill.creation import skill_creator_router
-from runtime.api.voice.streaming import voice_runtime_router as voice_router
+from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
+from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 
 
-async def start_agent_automation_scheduler():
-    from management.recovery import recover_runtime_tasks
-    from management.services.automation.scheduler import agent_automation_scheduler
-    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
+async def recover_runtime_state():
+    from runtime.workspace_cleanup import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
         "control-io",
@@ -51,16 +48,9 @@ async def start_agent_automation_scheduler():
             task_name="recover-runtime-tasks",
             owner="runtime.api.application",
         ),
-        recover_runtime_tasks,
+        recover_streaming_runs,
     )
     cleanup_orphaned_agent_workspaces()
-    await agent_automation_scheduler.start()
-
-
-async def stop_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
-
-    await agent_automation_scheduler.stop()
 
 
 @asynccontextmanager
@@ -69,59 +59,88 @@ async def runtime_lifespan(_app):
         runtime_thread_manager.start()
     set_default_thread_manager(runtime_thread_manager)
     runtime_state_service.set_thread_manager(runtime_thread_manager)
-    from infrastructure.observability.bootstrap import local_trajectory_processor
+
+    async def run_configuration_io(fn):
+        return await runtime_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="system-configuration-refresh",
+                owner="infrastructure.system_configuration.runtime",
+            ),
+            fn,
+        )
+
+    from infrastructure.trace.bootstrap import local_trajectory_processor
 
     try:
+        configuration_runtime = await start_system_configuration(run_configuration_io)
+        if _app is not None:
+            _app.state.configuration_runtime = configuration_runtime
         if local_trajectory_processor is not None:
-            from infrastructure.observability.trajectory_runtime import (
-                conversation_deleted,
-            )
+            from infrastructure.trace.trajectory_runtime import conversation_deleted
 
             local_trajectory_processor.deleted_conversation_check = conversation_deleted
             local_trajectory_processor.start(
                 runtime_thread_manager,
                 ManagedThreadSpec(
                     task_name="trajectory-file-writer",
-                    owner="infrastructure.observability.trajectory_runtime",
+                    owner="infrastructure.trace.trajectory_runtime",
                     close_hook=local_trajectory_processor.request_stop,
                 ),
             )
-        await start_agent_automation_scheduler()
-        yield
+        await runtime_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
+            fail_detecting_models_on_startup,
+        )
+        await recover_runtime_state()
+        reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
+        try:
+            yield
+        finally:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+
         try:
-            await stop_agent_automation_scheduler()
-            from management.services.agent.execution import shutdown_agent_stream_tasks
-
-            pending = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
-            if pending:
-                logger.warning("Agent stream tasks exceeded shutdown grace pending=%s", pending)
-            from nexent.core.agents.sandbox.execution import SandboxPoolManager
-
-            sandbox_pool = SandboxPoolManager._instance
-            if sandbox_pool is not None:
-                sandbox_pool.shutdown(logger)
+            pending_stream_tasks = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
+            if pending_stream_tasks:
+                logger.warning(
+                    "Agent stream tasks exceeded shutdown grace pending=%s",
+                    pending_stream_tasks,
+                )
         finally:
             try:
-                if local_trajectory_processor is not None:
-                    local_trajectory_processor.request_stop()
-                    await runtime_thread_manager.run(
-                        "control-io",
-                        ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
-                        local_trajectory_processor.shutdown,
-                    )
+                from nexent.core.agents.sandbox.execution import SandboxPoolManager
+
+                sandbox_pool = SandboxPoolManager._instance
+                if sandbox_pool is not None:
+                    sandbox_pool.shutdown(logger)
             finally:
                 try:
-                    await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                    if local_trajectory_processor is not None:
+                        local_trajectory_processor.request_stop()
+                        await runtime_thread_manager.run(
+                            "control-io",
+                            ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
+                            local_trajectory_processor.shutdown,
+                        )
                 finally:
-                    clear_default_thread_manager(runtime_thread_manager)
+                    try:
+                        await stop_system_configuration()
+                    finally:
+                        try:
+                            await runtime_thread_manager.shutdown(timeout=max(0, shutdown_deadline - time.monotonic()))
+                        finally:
+                            clear_default_thread_manager(runtime_thread_manager)
 
 
 app = create_app(
     title="Nexent Runtime API",
     description="Runtime APIs",
     lifespan=runtime_lifespan,
+    gateway_identity_audience="runtime",
 )
 if hasattr(app, "state"):
     app.state.thread_manager = runtime_thread_manager
@@ -134,14 +153,13 @@ async def thread_capacity():
 
 
 app.add_middleware(ExceptionHandlerMiddleware)
+app.add_middleware(AgentOSMiddleware)
 
-app.include_router(agent_router)
-app.include_router(agent_evaluation_runtime_router)
-app.include_router(agent_automation_router)
-app.include_router(conversation_automation_router)
-app.include_router(workbench_pins_router)
-app.include_router(conversation_management_router)
-app.include_router(conversation_share_router)
-app.include_router(file_management_router)
+app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
+app.include_router(create_memory_store_router())
+app.include_router(create_model_administration_router())
+app.include_router(create_evaluation_router())
+app.include_router(create_run_lifecycle_router())
+app.include_router(create_prepared_run_router())
+app.include_router(create_ephemeral_run_router())
 app.include_router(voice_router)
-app.include_router(skill_creator_router)

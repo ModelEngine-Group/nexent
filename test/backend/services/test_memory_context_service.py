@@ -404,15 +404,16 @@ def service_no_pipeline(fake_retrieval_service):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestPrepareSearchEmbedding:
-    def test_returns_supplied_embedding_unchanged(self, monkeypatch):
+    async def test_returns_supplied_embedding_unchanged(self, monkeypatch):
         info = MagicMock(name="EmbeddingModelInfo")
         emb = [0.5, 0.6]
-        resolved_info, resolved_emb = memory_context_service._prepare_search_embedding(
+        resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="ignored",
             embedding=emb,
             embedding_model_info=info,
-            tenant_id="tn",
+            tenant_id="tn", user_id="u",
         )
         assert resolved_info is info
         assert resolved_emb is emb
@@ -423,28 +424,28 @@ class TestPrepareSearchEmbedding:
             MagicMock(return_value="should not be called"),
         )
 
-    def test_returns_none_none_when_query_is_empty(self, monkeypatch):
+    async def test_returns_none_none_when_query_is_empty(self, monkeypatch):
         resolve = MagicMock(return_value="should not be called")
-        compute = MagicMock(return_value="should not be called")
+        compute = AsyncMock(return_value="should not be called")
         monkeypatch.setattr(
             memory_context_service, "_resolve_tenant_embedding_model_info", resolve
         )
         monkeypatch.setattr(
-            memory_context_service, "_compute_content_embedding", compute
+            memory_context_service, "embed_memory_text", compute
         )
 
-        resolved_info, resolved_emb = memory_context_service._prepare_search_embedding(
+        resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="",
             embedding=None,
             embedding_model_info=None,
-            tenant_id="tn",
+            tenant_id="tn", user_id="u",
         )
         assert resolved_info is None
         assert resolved_emb is None
         resolve.assert_not_called()
         compute.assert_not_called()
 
-    def test_resolves_tenant_model_when_info_missing(self, monkeypatch):
+    async def test_resolves_tenant_model_when_info_missing(self, monkeypatch):
         info = MagicMock(name="EmbeddingModelInfo")
         monkeypatch.setattr(
             memory_context_service,
@@ -453,59 +454,59 @@ class TestPrepareSearchEmbedding:
         )
         monkeypatch.setattr(
             memory_context_service,
-            "_compute_content_embedding",
-            MagicMock(return_value=[0.1, 0.2, 0.3]),
+            "embed_memory_text",
+            AsyncMock(return_value=[0.1, 0.2, 0.3]),
         )
 
-        resolved_info, resolved_emb = memory_context_service._prepare_search_embedding(
+        resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="hello",
             embedding=None,
             embedding_model_info=None,
-            tenant_id="tn",
+            tenant_id="tn", user_id="u",
         )
         assert resolved_info is info
         assert resolved_emb == [0.1, 0.2, 0.3]
 
-    def test_returns_none_none_when_tenant_model_unresolved(self, monkeypatch):
+    async def test_returns_none_none_when_tenant_model_unresolved(self, monkeypatch):
         monkeypatch.setattr(
             memory_context_service,
             "_resolve_tenant_embedding_model_info",
             MagicMock(return_value=None),
         )
-        compute = MagicMock(return_value="should not be called")
-        monkeypatch.setattr(memory_context_service, "_compute_content_embedding", compute)
+        compute = AsyncMock(return_value="should not be called")
+        monkeypatch.setattr(memory_context_service, "embed_memory_text", compute)
 
-        resolved_info, resolved_emb = memory_context_service._prepare_search_embedding(
+        resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="hi",
             embedding=None,
             embedding_model_info=None,
-            tenant_id="tn",
+            tenant_id="tn", user_id="u",
         )
         assert resolved_info is None
         assert resolved_emb is None
         compute.assert_not_called()
 
-    def test_uses_supplied_model_info_when_no_tenant_lookup(self, monkeypatch):
+    async def test_uses_supplied_model_info_when_no_tenant_lookup(self, monkeypatch):
         info = MagicMock(name="EmbeddingModelInfo")
         resolve = MagicMock(return_value="should not be called")
-        compute = MagicMock(return_value=[0.4])
+        compute = AsyncMock(return_value=[0.4])
         monkeypatch.setattr(
             memory_context_service, "_resolve_tenant_embedding_model_info", resolve
         )
-        monkeypatch.setattr(memory_context_service, "_compute_content_embedding", compute)
+        monkeypatch.setattr(memory_context_service, "embed_memory_text", compute)
 
-        resolved_info, resolved_emb = memory_context_service._prepare_search_embedding(
+        resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="hi",
             embedding=None,
             embedding_model_info=info,
-            tenant_id="tn",
+            tenant_id="tn", user_id="u",
         )
         assert resolved_info is info
         assert resolved_emb == [0.4]
         resolve.assert_not_called()
-        compute.assert_called_once_with("hi", info)
+        compute.assert_awaited_once_with("hi", info, "u", "tn")
 
-    def test_logs_warning_when_embedding_computation_fails(self, monkeypatch):
+    async def test_logs_warning_when_embedding_computation_fails(self, monkeypatch):
         info = MagicMock(name="EmbeddingModelInfo")
         monkeypatch.setattr(
             memory_context_service,
@@ -514,15 +515,15 @@ class TestPrepareSearchEmbedding:
         )
         monkeypatch.setattr(
             memory_context_service,
-            "_compute_content_embedding",
-            MagicMock(return_value=None),
+            "embed_memory_text",
+            AsyncMock(return_value=None),
         )
 
-        resolved_info, resolved_emb = memory_context_service._prepare_search_embedding(
+        resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="hi",
             embedding=None,
             embedding_model_info=None,
-            tenant_id="tn",
+            tenant_id="tn", user_id="u",
         )
         assert resolved_info is info
         # ``computed`` was None, so ``resolved_emb`` is also None.
@@ -716,8 +717,8 @@ class TestBuildContextEmbedding:
         )
         monkeypatch.setattr(
             memory_context_service,
-            "_compute_content_embedding",
-            MagicMock(return_value=[0.7, 0.8, 0.9]),
+            "embed_memory_text",
+            AsyncMock(return_value=[0.7, 0.8, 0.9]),
         )
         await service.build_context(
             tenant_id="tn", user_id="u", query="hi", embedding=None

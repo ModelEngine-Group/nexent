@@ -4,7 +4,7 @@
 
 import json
 import pytest
-from infrastructure.runtime_output import RuntimeOutputState
+from management.services.conversation.runtime_output import RuntimeOutputState
 from management.services.agent.stream import finalize_buffered_unit_fragments, serialize_stream_unit_content, is_stream_unit_continuation
 
 
@@ -68,7 +68,7 @@ def test_plain_units_and_intentional_json_text_remain_unchanged():
 
 
 def test_native_human_form_roundtrips_without_wrapping_its_schema():
-    from infrastructure.runtime_output import project_runtime_history
+    from management.services.conversation.runtime_output import project_runtime_history
 
     form = {"schema_version": 1, "questions": [{"id": "birth", "type": "text", "title": "Birth date?"}]}
     event = {**terminal(), "type": "human_interaction", "content": json.dumps(form)}

@@ -19,8 +19,15 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  systemConfigurations: `${API_BASE_URL}/system_configurations`,
   trajectory: {
     records: `${API_BASE_URL}/trajectory/records`,
+    importArchive: `${API_BASE_URL}/trajectory/import`,
+    imports: `${API_BASE_URL}/trajectory/imports`,
+    savedImport: (id: string) =>
+      `${API_BASE_URL}/trajectory/imports/${encodeURIComponent(id)}`,
+    exportArchive: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/export`,
     conversation: (id: string) =>
       `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}`,
     snapshot: (id: string) =>
@@ -204,10 +211,6 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
     updateLabels: `${API_BASE_URL}/tool/labels`,
-  },
-  prompt: {
-    optimize: `${API_BASE_URL}/prompt/optimize`,
-    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
@@ -427,10 +430,11 @@ export const API_ENDPOINTS = {
     upload: `${API_BASE_URL}/file/upload`,
     process: `${API_BASE_URL}/file/process`,
     // Error info service
-    getErrorInfo: (indexName: string, pathOrUrl: string) =>
-      `${API_BASE_URL}/indices/${indexName}/documents/${encodeURIComponent(
-        pathOrUrl
-      )}/error-info`,
+    getErrorInfo: (indexName: string, pathOrUrl: string, fileId?: string) => {
+      const query = new URLSearchParams({ path_or_url: pathOrUrl });
+      if (fileId) query.set("file_id", fileId);
+      return `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/documents/error-info?${query}`;
+    },
     // Embedding model status and configuration
     embeddingModelStatus: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/embedding-model-status`,
@@ -474,6 +478,15 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
     kbFiles: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    /** One folder level: direct folders + server-paginated files. */
+    kbFolderTree: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders/tree`,
+    kbFolders: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders`,
+    kbFolderMove: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/folders/move`,
+    kbFileMove: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files/move`,
     kbUploadTasks: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
     retryKbUploadTasks: (id: string) =>
@@ -512,6 +525,11 @@ export const API_ENDPOINTS = {
     /** Retry summary generation for a non-empty file UUID list (EDIT). */
     retryKbFileSummaries: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/retry-summary`,
+    /** Shared AIDP sensitive word dictionary, fixed to the upstream `aidp` namespace. */
+    sensitiveWords: (kdsId: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words`,
+    sensitiveWord: (kdsId: string, id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words/${encodeURIComponent(id)}`,
   },
   config: {
     frontend: `${API_BASE_URL}/frontend-config`,
@@ -843,7 +861,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
-      if (params?.lang) queryParams.append("lang", (params as any).lang);
+      if (params?.lang) queryParams.append("lang", params.lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
@@ -992,7 +1010,11 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
-          errorDetails = errorDetail.details;
+          errorDetails =
+            errorDetail.details ??
+            (typeof errorDetail.field === "string"
+              ? { field: errorDetail.field }
+              : undefined);
         } else if (Array.isArray(errorData?.detail)) {
           errorMessage = "Validation failed";
           errorDetails = {

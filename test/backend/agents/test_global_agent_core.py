@@ -99,11 +99,11 @@ def test_jiuwen_rejects_artifact_tools_before_model_acquisition():
 @pytest.mark.parametrize("core", ["smolagents", "jiuwen"])
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_creator_configs_follow_global_policy_and_target_prompt_contract(monkeypatch, core, language):
-    from management.services.agent import creation
-    from management.services.skill.creation import create_nl2skill_agent_config
-    monkeypatch.setattr(core_policy, "NEXENT_AGENT_CORE", core)
+    from runtime.agentos import agent_creator_config as creation
+    from runtime.agentos import prepared_skill_creator
     monkeypatch.setattr(creation, "NEXENT_AGENT_CORE", core)
-    config = creation.create_nl2agent_agent_config(language)
+    monkeypatch.setattr(prepared_skill_creator, "NEXENT_AGENT_CORE", core)
+    config = creation.create_nl2agent_agent_config(language, [])
     assert config.agent_core == core and config.response_mode == "python_workflow"
     assert config.enable_protocol_repair_retry is (core == "smolagents")
     prompt = config.context_items[0].content["text"]
@@ -112,7 +112,7 @@ def test_creator_configs_follow_global_policy_and_target_prompt_contract(monkeyp
         assert "Core" in prompt
         assert "\\x3ccode>" not in prompt
         assert "Think-Code example" not in prompt and "思考-代码”示例" not in prompt
-    skill = create_nl2skill_agent_config("literal data", "model")
+    skill = prepared_skill_creator.create_nl2skill_agent_config("literal data", "model")
     assert skill.agent_core == core and skill.response_mode == "artifact"
     assert skill.tools == [] and skill.output_protocol == "final_envelope"
 

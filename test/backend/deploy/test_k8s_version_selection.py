@@ -5,12 +5,15 @@
 import os
 from pathlib import Path
 import subprocess
+import shutil
 
 import pytest
 import yaml
 
 
 REPO = Path(__file__).resolve().parents[3]
+GIT_BASH = Path("C:/Program Files/Git/bin/bash.exe")
+BASH = str(GIT_BASH) if os.name == "nt" and GIT_BASH.is_file() else shutil.which("bash")
 DEPLOY = REPO / "deploy/k8s/deploy.sh"
 CURRENT_VERSION = (REPO / "VERSION").read_text().strip()
 
@@ -28,7 +31,7 @@ printf 'app_version: %s\nshared_version: %s\npersistence_mode: %s\nstorage_class
     "$APP_VERSION" "$DEPLOYMENT_APP_VERSION" "$PERSISTENCE_MODE" "$STORAGE_CLASS_NAME"
 '''
     result = subprocess.run(
-        ["bash", "-c", script, "k8s-version-test", str(DEPLOY), str(options), *arguments],
+        [BASH, "-c", script, "k8s-version-test", str(DEPLOY), str(options), *arguments],
         env=environment,
         capture_output=True,
         text=True,
@@ -98,7 +101,7 @@ VERSION_CHOICE_SAVED="speed"
 persist_deploy_options
 '''
     result = subprocess.run(
-        ["bash", "-c", script, "k8s-persist-test", str(DEPLOY), str(options)],
+        [BASH, "-c", script, "k8s-persist-test", str(DEPLOY), str(options)],
         capture_output=True,
         text=True,
         check=False,

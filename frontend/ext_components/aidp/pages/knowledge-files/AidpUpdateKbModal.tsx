@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useEffect, useMemo, useRef } from "react";
@@ -82,6 +84,8 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
     form.setFieldsValue({
       name: knowledgeBase.kds_name,
       description: knowledgeBase.description || "",
+      sensitive_intercept_enable:
+        knowledgeBase.sensitive_intercept_enable === 1,
       ingroup_permission: isUser
         ? "PRIVATE"
         : knowledgeBase.ingroup_permission || "READ_ONLY",
@@ -100,15 +104,15 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
     submittingRef.current = true;
     setValidating(true);
     try {
-      const values = await form.validateFields();
+      const values = form.getFieldsValue();
 
       const name =
         mode === "metadata"
-          ? values.name.trim()
+          ? (values.name || "").trim()
           : knowledgeBase.kds_name.trim();
       const description =
         mode === "metadata"
-          ? values.description?.trim() || ""
+          ? (values.description || "").trim()
           : (knowledgeBase.description || "").trim();
       const nameChanged =
         mode === "metadata" && name !== knowledgeBase.kds_name.trim();
@@ -156,15 +160,52 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           .some(
             (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
           );
+      // The switch is a KB field, not a permission: only an explicit change
+      // is sent, so unrelated edits never overwrite the upstream value.
+      const nextSensitive = values.sensitive_intercept_enable === true;
+      const originalSensitive = knowledgeBase.sensitive_intercept_enable === 1;
+      const sensitiveChanged =
+        mode === "metadata" && nextSensitive !== originalSensitive;
+      const settingsChanged =
+        nameChanged || descriptionChanged || permissionChanged;
 
-      if (
-        !nameChanged &&
-        !descriptionChanged &&
-        !permissionChanged &&
-        !summaryChanged
-      ) {
+      if (!settingsChanged && !summaryChanged && !sensitiveChanged) {
         form.resetFields();
         onSuccess(knowledgeBase);
+        return;
+      }
+
+      // Validate only fields the user actually changed. Historical KB names
+      // may not match today's naming rule; an unrelated switch edit must not
+      // be blocked by re-validating the untouched name.
+      const fieldsToValidate: string[] = [];
+      if (mode === "metadata") {
+        if (nameChanged) fieldsToValidate.push("name");
+        if (descriptionChanged) fieldsToValidate.push("description");
+        if (sensitiveChanged)
+          fieldsToValidate.push("sensitive_intercept_enable");
+      }
+      if (permissionChanged)
+        fieldsToValidate.push("ingroup_permission", "group_ids");
+      if (fieldsToValidate.length) {
+        await form.validateFields(fieldsToValidate);
+      }
+
+      if (sensitiveChanged) {
+        // Send only the switch and refresh the detail afterwards; the AIDP
+        // update route treats omitted fields as unchanged.
+        await aidpKnowledgeService.updateKb(knowledgeBase.kds_id, {
+          sensitive_intercept_enable: nextSensitive ? 1 : 0,
+        });
+      }
+
+      if (!settingsChanged) {
+        message.success(t("aidpKnowledge.updateKbSuccess"));
+        form.resetFields();
+        onSuccess({
+          ...knowledgeBase,
+          sensitive_intercept_enable: nextSensitive ? 1 : 0,
+        });
         return;
       }
 
@@ -215,6 +256,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
               summary_preview: updated?.summary_preview ?? nextSummaryEnabled,
             }
           : {}),
+        sensitive_intercept_enable: nextSensitive ? 1 : 0,
         resource_status:
           result.metadata_status === "updated"
             ? "ACTIVE"
@@ -292,35 +334,49 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
         >
           {mode === "metadata" && <AidpKnowledgeBaseBasicFields t={t} />}
           {mode === "metadata" && (
-            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+            <>
+              <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+                <Form.Item
+                  name="summary_enable"
+                  label={t("aidpKnowledge.createSummaryEnable")}
+                  valuePropName="checked"
+                >
+                  <Switch aria-label={t("aidpKnowledge.createSummaryEnable")} />
+                </Form.Item>
+                <Form.Item
+                  name="summary_model"
+                  label={t("aidpKnowledge.createSummaryModel")}
+                  rules={[
+                    {
+                      required: summaryEnabled,
+                      message: t("aidpKnowledge.createSummaryModelRequired"),
+                    },
+                  ]}
+                >
+                  <Select
+                    showSearch
+                    allowClear
+                    disabled={!summaryEnabled}
+                    loading={modelsQuery.isLoading}
+                    options={llmModelOptions}
+                    placeholder={t("aidpKnowledge.createModelSearch")}
+                    optionFilterProp="label"
+                  />
+                </Form.Item>
+              </div>
               <Form.Item
-                name="summary_enable"
-                label={t("aidpKnowledge.createSummaryEnable")}
+                name="sensitive_intercept_enable"
+                label={t("aidpKnowledge.sensitiveIntercept")}
                 valuePropName="checked"
+                extra={
+                  <span className="text-xs text-gray-500">
+                    {t("aidpKnowledge.sensitiveInterceptHint")}
+                  </span>
+                }
               >
-                <Switch aria-label={t("aidpKnowledge.createSummaryEnable")} />
+                <Switch aria-label={t("aidpKnowledge.sensitiveIntercept")} />
               </Form.Item>
-              <Form.Item
-                name="summary_model"
-                label={t("aidpKnowledge.createSummaryModel")}
-                rules={[
-                  {
-                    required: summaryEnabled,
-                    message: t("aidpKnowledge.createSummaryModelRequired"),
-                  },
-                ]}
-              >
-                <Select
-                  showSearch
-                  allowClear
-                  disabled={!summaryEnabled}
-                  loading={modelsQuery.isLoading}
-                  options={llmModelOptions}
-                  placeholder={t("aidpKnowledge.createModelSearch")}
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-            </div>
+            </>
           )}
           {canConfigureGroupPermissions &&
             (groupsError || (!canReadGroups && !groupsLoading)) && (

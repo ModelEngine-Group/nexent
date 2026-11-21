@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from .base import ThreadManagerBase
 from .context import (
     clear_default_thread_manager,
     get_current_thread_manager,
@@ -52,6 +54,7 @@ __all__ = [
     "ManagerState",
     "ThreadCapacityExceeded",
     "ThreadManager",
+    "ThreadManagerBase",
     "ThreadMetricRecord",
     "ThreadManagerDraining",
     "ThreadManagerError",

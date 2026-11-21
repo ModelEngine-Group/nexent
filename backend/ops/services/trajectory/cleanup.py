@@ -4,12 +4,12 @@
 import time
 from datetime import timedelta
 
-from infrastructure.observability.trajectory_audit import cleanup_audit
-from infrastructure.observability.trajectory_io import (
+from infrastructure.trace.trajectory_audit import cleanup_audit
+from infrastructure.trace.trajectory_io import (
     TrajectoryConflict,
     TrajectoryCorrupt,
 )
-from infrastructure.observability.trajectory_store import parse_time, timestamp
+from infrastructure.trace.trajectory_store import parse_time, timestamp
 
 from .access import authorize
 from .archive import identity, storage_error

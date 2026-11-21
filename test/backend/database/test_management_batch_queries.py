@@ -11,7 +11,7 @@ from sqlalchemy.orm import registry, sessionmaker
 
 from management.db.agent import version
 from management.db.identity import group, invitation
-from management.db.model import repository as model
+from infrastructure.rdb import model_records as model
 from management.db.tool import repository as tool
 from management.services.agent import read
 

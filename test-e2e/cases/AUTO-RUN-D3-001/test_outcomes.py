@@ -19,10 +19,12 @@ from shared.factories.redis_target import deployed_redis_urls
 from management.api.automation import agent_automation as api
 from management.db.automation import repository as runs
 from management.db.models import ConversationMessage, ConversationMessageUnit
-from management.services.agent import execution, lifecycle, run, run_state
+from infrastructure.redis import run_state
+from management.services.agent import execution, lifecycle, run
 from management.services.automation import runner
 from management.services.automation.service import AgentAutomationFacade
 from nexent.core.concurrency import LanePolicy, ThreadManager
+from nexent.core.utils.observer import MessageObserver
 
 pytestmark = [pytest.mark.case_id("AUTO-RUN-D3-001"), pytest.mark.stage("D3")]
 cancel_poll = run._cancel_task_on_runtime_signal
@@ -31,7 +33,8 @@ stop_poll = execution._poll_runtime_cancel_signal
 
 @pytest_asyncio.fixture
 async def runtime(monkeypatch, run_store):
-    info = SimpleNamespace(agent_config=SimpleNamespace(pre_run_tool_events=()), cancellation_scope=None,
+    info = SimpleNamespace(agent_config=SimpleNamespace(pre_run_tool_events=()), observer=MessageObserver(),
+                           cancellation_scope=None,
                            stop_event=asyncio.Event(), attempt_outcome=None, human_interaction=None, thread_future=None)
     state = SimpleNamespace(info=info, mode="completed", entered=asyncio.Event(), preparations=0)
     manager = ThreadManager("automation-outcome-test", {"control-io": LanePolicy(

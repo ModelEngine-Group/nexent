@@ -63,7 +63,7 @@ from .retry import (
     classify_model_error,
     get_retry_after_seconds,
 )
-from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
+from .sampling import DEFAULT_TEMPERATURE, SAMPLING_FIELDS, validate_sampling_value, without_unset_sampling
 
 
 logger = logging.getLogger("openai_llm")
@@ -196,7 +196,7 @@ class OpenAIModel(OpenAIServerModel):
 
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
-    def __init__(self, observer: MessageObserver = MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
+    def __init__(self, observer: MessageObserver = MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=None,
                  ssl_verify=True, reasoning_effort: Optional[str] = None,
                  reasoning_budget_tokens: Optional[int] = None,
                  reasoning_capability: Optional[Dict[str, Any]] = None,
@@ -225,8 +225,8 @@ class OpenAIModel(OpenAIServerModel):
 
         Args:
             observer: MessageObserver instance for tracking model output
-            temperature: Sampling temperature (default: 1.0; None inherits this default)
-            top_p: Top-p sampling parameter (default: 1.0; None inherits this default)
+            temperature: Sampling temperature (None uses the service default)
+            top_p: Top-p sampling parameter (None uses the service default)
             reasoning_effort: Optional canonical reasoning effort level declared
                                by the selected model's capability profile.
             reasoning_capability: Optional catalog metadata describing how the
@@ -263,9 +263,8 @@ class OpenAIModel(OpenAIServerModel):
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
         self.observer = observer
-        sampling = resolve_sampling(temperature, top_p)
-        self.temperature = sampling["temperature"]
-        self.top_p = sampling["top_p"]
+        self.temperature = temperature
+        self.top_p = top_p
         self.explicit_sampling = tuple(explicit_sampling or ())
         self.reasoning_effort = reasoning_effort
         self.reasoning_budget_tokens = reasoning_budget_tokens
@@ -1179,6 +1178,11 @@ class OpenAIModel(OpenAIServerModel):
                 key: value for key, value in completion_kwargs["extra_body"].items()
                 if key not in self.explicit_sampling
             }
+        if completion_kwargs.get("extra_body"):
+            completion_kwargs["extra_body"] = without_unset_sampling(completion_kwargs["extra_body"])
+        extra_body = completion_kwargs.get("extra_body") or {}
+        for field in SAMPLING_FIELDS:
+            validate_sampling_value(field, extra_body.get(field, completion_kwargs.get(field)))
         snapshot = self._coerce_context_budget_snapshot(context_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(

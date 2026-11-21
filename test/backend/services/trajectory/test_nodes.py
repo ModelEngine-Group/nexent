@@ -2,7 +2,7 @@
 """Hierarchy and complete-subtree metric arithmetic, isolated from file I/O."""
 
 import pytest
-from infrastructure.observability.trajectory_io import TrajectoryCorrupt
+from infrastructure.trace.trajectory_io import TrajectoryCorrupt
 from ops.services.trajectory.nodes import build_nodes
 
 TRACE = "a" * 32
@@ -277,7 +277,7 @@ def test_duplicate_large_bodies_compare_full_content_not_preview(tmp_path):
     import json
     import os
 
-    from infrastructure.observability.trajectory_reader import JSONReader
+    from infrastructure.trace.trajectory_reader import JSONReader
 
     def parsed_requests(*records):
         path = tmp_path / "duplicate.otlp.jsonl"

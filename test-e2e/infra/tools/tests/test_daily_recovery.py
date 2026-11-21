@@ -43,8 +43,16 @@ def abandoned(tmp_path):
     return repo, home, batch, marker, switch
 
 
-def test_pending_failed_deployment_allows_launcher_sync_but_keeps_evidence(abandoned):
+@pytest.mark.parametrize("prior_journal", [None, "results.journal.jsonl", "checkpoints/results.jsonl"])
+def test_pending_failed_deployment_allows_launcher_sync_but_keeps_evidence(abandoned, prior_journal):
     repo, home, batch, marker, switch = abandoned
+    journal = batch / prior_journal if prior_journal else None
+    if journal is not None:
+        save(batch / "status.json", {"status": "INCOMPLETE", "stages": {"D5": "COMPLETE"}})
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text("".join(json.dumps({"case_id": "D5-" + outcome, "stage": "D5", "result": outcome}) + "\n"
+                                   for outcome in ("TIMEOUT", "CLEANUP_FAILED")), encoding="utf-8")
+    journal_before = journal.read_bytes() if journal else None
     before = marker.read_bytes()
     calls = []
     runtime = home / "runtime/test-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -68,6 +76,8 @@ def test_pending_failed_deployment_allows_launcher_sync_but_keeps_evidence(aband
         assert launcher.main(["--test-home", str(home), "--branch", "develop", "--execute"]) == 0
     assert calls == ["fetch-latest", "redeploy"]
     assert marker.read_bytes() == before
+    if journal is not None:
+        assert journal.read_bytes() == journal_before
 
 
 def test_restores_only_owned_local_config_and_retains_private_before_images(abandoned):
@@ -96,6 +106,79 @@ def test_restores_only_owned_local_config_and_retains_private_before_images(aban
     assert recovery.current_retry(home) is None
     with pytest.raises(RuntimeError, match="Pending"):
         modes.assert_recovered(home, allow_retry=True)
+
+
+@pytest.mark.parametrize("problem", ["backup", "active-owner"])
+def test_launcher_updates_code_before_recovery_blocks_execution(abandoned, problem):
+    repo, home, _, marker, switch = abandoned
+    if problem == "backup":
+        (switch.backup / "0").write_bytes(b"damaged backup")
+    else:
+        value = json.loads(marker.read_text())
+        value["owner_pid"] = os.getpid()
+        save(marker, value)
+    original = marker.read_bytes()
+    before = {path: path.read_bytes() if path.exists() else None for path in switch.paths}
+    calls = []
+    runtime = home / "runtime/test-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def synchronize(*args, **kwargs):
+        calls.append("sync")
+        return "repair-head"
+
+    def execute(repo, home, directory, *args):
+        calls.append("recovery")
+        with recovery.prepare_daily_retry(repo, home, directory):
+            pytest.fail("Unsafe environment reached execution")
+
+    with patch.object(launcher, "__file__", str(repo / "test-e2e/infra/scripts/daily-launch.py")), \
+            patch.object(launcher.sys, "executable", str(runtime)), \
+            patch.object(launcher, "sync_checkout", side_effect=synchronize), \
+            patch.object(launcher, "run_worker", side_effect=execute), patch.object(launcher, "notify_terminal"):
+        assert launcher.main(["--test-home", str(home), "--branch", "develop", "--execute"]) == 2
+    assert calls == ["sync", "recovery"]
+    assert marker.read_bytes() == original
+    assert {path: path.read_bytes() if path.exists() else None for path in switch.paths} == before
+    state = json.loads(next((home / "runs/daily-launch").glob("*/status.json")).read_text())
+    assert state["head"] == "repair-head" and state["status"] == "INCOMPLETE"
+
+
+def test_active_fault_operation_still_blocks_code_synchronization(abandoned):
+    repo, home, _, _, _ = abandoned
+    runtime = home / "runtime/test-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    with BatchLock(home / "state/deployment-guard/exclusive.lock"), \
+            patch.object(launcher, "__file__", str(repo / "test-e2e/infra/scripts/daily-launch.py")), \
+            patch.object(launcher.sys, "executable", str(runtime)), \
+            patch.object(launcher, "sync_checkout") as sync, patch.object(launcher, "run_worker") as execute, \
+            patch.object(launcher, "notify_terminal"):
+        assert launcher.main(["--test-home", str(home), "--branch", "develop", "--execute"]) == 3
+    sync.assert_not_called()
+    execute.assert_not_called()
+
+
+@pytest.mark.parametrize("already_prepared", [False, True])
+def test_fresh_worker_prepares_recovery_after_sync_and_supports_older_supervisors(abandoned, already_prepared):
+    repo, home, _, marker, switch = abandoned
+    launch = home / "runs/daily-launch/fresh-worker"
+    save(launch / "status.json", {"status": "PREPARING", "head": "new-head", "branch": "develop"})
+    env_path = switch.paths[0]
+    baseline = env_path.read_bytes()
+    env_path.write_bytes(baseline.replace(b"KNOWLEDGE=false", b"KNOWLEDGE=true"))
+    old_marker = marker.read_bytes()
+    spec = importlib.util.spec_from_file_location("recovery_fresh_worker", TOOLS.parent / "scripts/daily-worker.py")
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    with deployment_lock(repo):
+        if already_prepared:
+            with recovery.prepare_daily_retry(repo, home, launch):
+                pass
+        with patch.object(worker, "checked_revision"), patch.object(worker, "logged", return_value=1) as validate:
+            assert worker.execute_locked(repo, home, launch, "new-head") == 2
+        validate.assert_called_once()  # Recovery succeeded before the intentionally failed asset check.
+    assert env_path.read_bytes() == baseline and marker.read_bytes() == old_marker
+    receipt = json.loads((launch / "recovery.json").read_text())
+    assert receipt["status"] == "PREPARED_FOR_REDEPLOY"
+    assert b"KNOWLEDGE=true" in (Path(receipt["evidence_backup"]) / "0").read_bytes()
 
 
 @pytest.mark.parametrize("fault", ["checksum", "missing_file", "index", "outside_backup", "target", "duplicate_target",
@@ -142,12 +225,12 @@ def test_uncertain_recovery_never_writes_configuration_or_clears_marker(abandone
     with patch.object(Path, "is_symlink", lambda path: (path == switch.backup / "0" and fault == "symlink") or real_symlink(path)):
         with deployment_lock(repo), pytest.raises(RuntimeError):
             with recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/invalid"):
-                pytest.fail("unsafe recovery reached synchronization")
+                pytest.fail("unsafe recovery reached configuration restoration")
     assert marker.read_bytes() == marker_before
     assert {path: path.read_bytes() if path.exists() else None for path in switch.paths} == before
 
 
-def test_live_owner_and_d5_fault_journal_remain_hard_stops(abandoned):
+def test_live_deployment_owner_still_blocks_configuration_recovery(abandoned):
     repo, home, batch, marker, switch = abandoned
     value = json.loads(marker.read_text())
     value["owner_pid"] = os.getpid()
@@ -156,11 +239,21 @@ def test_live_owner_and_d5_fault_journal_remain_hard_stops(abandoned):
     with deployment_lock(repo), pytest.raises(RuntimeError, match="still active"):
         with recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/alive"):
             pass
-    save(home / recovery.FAULT_MARKER, {"record": {"pending": ["nexent-postgresql"]}})
-    with deployment_lock(repo), pytest.raises(RuntimeError, match="D5 fault"):
-        with recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/fault"):
-            pass
-    assert marker.exists() and (home / recovery.FAULT_MARKER).exists()
+    assert marker.exists()
+
+
+@pytest.mark.parametrize("mode_recovery", [False, True])
+@pytest.mark.parametrize("content", [b'{"record":{"pending":["nexent-postgresql"]}}', b'{unreadable old journal'])
+def test_old_fault_marker_does_not_gate_daily_recovery_or_get_deleted(abandoned, mode_recovery, content):
+    repo, home, _, marker, _ = abandoned
+    if not mode_recovery:
+        marker.unlink()
+    fault = home / "state/deployment-guard/pending.json"
+    fault.parent.mkdir(parents=True)
+    fault.write_bytes(content)
+    with deployment_lock(repo), recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/fault") as retry:
+        assert (retry is not None) == mode_recovery
+    assert fault.read_bytes() == content
 
 
 @pytest.mark.parametrize("outcome", ["TIMEOUT", "CLEANUP_FAILED"])

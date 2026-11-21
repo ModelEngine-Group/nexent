@@ -57,6 +57,8 @@ interface AidpKnowledgeDetailInformationProps {
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
+  /** Opens the metadata edit dialog, which owns the sensitive-word switch. */
+  onEditMetadata: () => void;
   /** Opens the permanent-disable confirmation for the knowledge graph. */
   onDisableGraph: () => void;
 }
@@ -75,6 +77,7 @@ const AidpKnowledgeDetailInformation = ({
   formatDateTime,
   onEditSetting,
   onEditPermissions,
+  onEditMetadata,
   onDisableGraph,
 }: AidpKnowledgeDetailInformationProps) => {
   const { t } = useTranslation();
@@ -181,6 +184,29 @@ const AidpKnowledgeDetailInformation = ({
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailSimilarity")}>
             {displayValue(detail.similarity)}
+          </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.detailSensitiveIntercept")}>
+            <Tag
+              color={
+                detail.sensitive_intercept_enable === 1 ? "green" : "default"
+              }
+            >
+              {detail.sensitive_intercept_enable === 1
+                ? t("common.enabled")
+                : t("common.disabled")}
+            </Tag>
+            {canEdit && (
+              <Tooltip title={t("aidpKnowledge.detailEditSensitiveIntercept")}>
+                <Button
+                  className="ml-2"
+                  type="text"
+                  size="small"
+                  aria-label={t("aidpKnowledge.detailEditSensitiveIntercept")}
+                  icon={<EditOutlined />}
+                  onClick={onEditMetadata}
+                />
+              </Tooltip>
+            )}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailVectorTopK")}>
             <span>{displayValue(detail.topk)}</span>

@@ -1,0 +1,476 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  display: flex;
+  width: min(700px, calc(100vw - 32px));
+  max-height: min(780px, 82vh);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e6ecea;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgb(20 40 42 / 14%);
+  color: #172126;
+  font-size: 13px;
+}
+
+.header {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding: 20px 20px 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.header.dragging {
+  cursor: grabbing;
+}
+
+.overview {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.stateRing {
+  display: grid;
+  width: 84px;
+  height: 84px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.stateRingInner {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.stateRingActive .stateRingInner {
+  color: #1677ff;
+}
+
+.stateRingSuccess .stateRingInner,
+.stateRingSuccess .ringSuccessIcon {
+  color: #12b76a;
+}
+
+.stateRingFailed .stateRingInner,
+.stateRingFailed .ringFailedIcon {
+  color: #b42318;
+}
+
+.ringPercent {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ringSuccessIcon,
+.ringFailedIcon {
+  font-size: 34px;
+}
+
+.heading {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.headline {
+  overflow: hidden;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerLinks {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.actionLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1677ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.actionLink:hover {
+  color: #0958d9;
+}
+
+.actionLink:disabled {
+  color: #98a2b3;
+  cursor: default;
+}
+
+.headerActions {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.stateBar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  margin-top: 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f2f4f7;
+}
+
+.stateSegment {
+  display: block;
+  height: 100%;
+  flex: none;
+  transition: width 180ms ease;
+}
+
+.segmentSuccess {
+  background: #12b76a;
+}
+
+.segmentFailed {
+  background: #b42318;
+}
+
+.segmentUploading {
+  background: #1677ff;
+}
+
+.segmentQueued {
+  background: #98a2b3;
+}
+
+.body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 0 20px 16px;
+}
+
+.warningBanner,
+.infoBanner {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.warningBanner {
+  background: #fff8d6;
+  color: #5c4a00;
+}
+
+.infoBanner {
+  background: #f5f7fa;
+  color: #344054;
+}
+
+.bannerClose {
+  display: grid;
+  flex: none;
+  margin-left: auto;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  place-items: center;
+}
+
+.bannerLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1677ff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bannerLink:hover {
+  text-decoration: underline;
+}
+
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  margin: 16px 0 6px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #f2f3f5;
+}
+
+.tab {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.tab:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.tabActive {
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(16 24 40 / 12%);
+  color: #1677ff;
+}
+
+.tabCount {
+  color: #98a2b3;
+  font-weight: 500;
+}
+
+.tabActive .tabCount {
+  color: #1677ff;
+}
+
+.fileList {
+  min-height: 160px;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.fileRow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.fileText {
+  min-width: 0;
+}
+
+.fileName {
+  overflow: hidden;
+  color: #101828;
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileError {
+  overflow: hidden;
+  margin-top: 3px;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.fileAction {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 44px;
+}
+
+.failureDotInline {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #b42318;
+}
+
+.rowRetry {
+  display: grid;
+  padding: 1px;
+  border: 0;
+  background: transparent;
+  color: #344054;
+  cursor: pointer;
+  font-size: 18px;
+  place-items: center;
+}
+
+.rowRetry:hover:not(:disabled) {
+  color: #1677ff;
+}
+
+.rowRetry:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #dbeafe;
+  border-top-color: #1677ff;
+  border-radius: 50%;
+  animation: upload-center-spin 0.8s linear infinite;
+}
+
+.successDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #12b76a;
+}
+
+.queuedDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #98a2b3;
+}
+
+.empty {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  color: #98a2b3;
+  font-size: 13px;
+}
+
+.ball {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #e6ecea;
+  border-radius: 50%;
+  box-shadow: 0 4px 16px rgb(20 40 42 / 16%);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.ball.dragging {
+  cursor: grabbing;
+}
+
+.ballInner {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #087c56;
+  font-size: 18px;
+}
+
+.failureDot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b42318;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+@keyframes upload-center-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .panel {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    max-height: 82vh;
+  }
+
+  .overview {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .stateRing {
+    width: 64px;
+    height: 64px;
+  }
+
+  .stateRingInner {
+    width: 54px;
+    height: 54px;
+  }
+
+  .headline {
+    font-size: 17px;
+  }
+
+  .ball {
+    right: 12px;
+    bottom: 12px;
+  }
+}

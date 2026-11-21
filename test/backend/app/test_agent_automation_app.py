@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 from management.api.automation import agent_automation as agent_automation_app
-from management.utils.app_factory import create_app
+from backend.http.server.app_factory import create_app
 from contracts.errors.exceptions import UnauthorizedError
 from contracts.errors.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationNotFoundError
 from contracts.automation import AutomationProposalPatchRequest, AutomationTaskPatchRequest
@@ -242,13 +242,13 @@ async def test_management_handlers_delegate_to_authenticated_facade(monkeypatch)
     monkeypatch.setattr(facade, "pause_task", MagicMock(return_value={"status": "PAUSED"}))
     monkeypatch.setattr(facade, "resume_task", MagicMock(return_value={"status": "ACTIVE"}))
     monkeypatch.setattr(facade, "run_task_now", AsyncMock(return_value={"run_id": 2}))
-    monkeypatch.setattr(facade, "delete_task", MagicMock(return_value=True))
+    monkeypatch.setattr(facade, "delete_task", AsyncMock(return_value=True))
     monkeypatch.setattr(
         facade,
         "list_runs",
         MagicMock(return_value={"items": [{"run_id": 2}], "total": 1, "page": 1, "page_size": 20}),
     )
-    monkeypatch.setattr(facade, "cancel_run", MagicMock(return_value={"status": "CANCELED"}))
+    monkeypatch.setattr(facade, "cancel_run", AsyncMock(return_value={"status": "CANCELED"}))
     monkeypatch.setattr(
         facade,
         "get_task_for_conversation",
@@ -408,9 +408,9 @@ async def test_management_handlers_map_domain_errors(monkeypatch):
         ("pause_task", MagicMock(side_effect=error), lambda: agent_automation_app.pause_task(1, "token")),
         ("resume_task", MagicMock(side_effect=error), lambda: agent_automation_app.resume_task(1, "token")),
         ("run_task_now", AsyncMock(side_effect=error), lambda: agent_automation_app.run_task_now(1, "token")),
-        ("delete_task", MagicMock(side_effect=error), lambda: agent_automation_app.delete_task(1, "token")),
+        ("delete_task", AsyncMock(side_effect=error), lambda: agent_automation_app.delete_task(1, "token")),
         ("list_runs", MagicMock(side_effect=error), lambda: agent_automation_app.list_runs(1, "token")),
-        ("cancel_run", MagicMock(side_effect=error), lambda: agent_automation_app.cancel_run(1, "token")),
+        ("cancel_run", AsyncMock(side_effect=error), lambda: agent_automation_app.cancel_run(1, "token")),
         ("delete_run", MagicMock(side_effect=error), lambda: agent_automation_app.delete_run(1, "token")),
     ]
 

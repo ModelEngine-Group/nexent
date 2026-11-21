@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, NoReturn
+from typing import Any, Dict, List
 from urllib.parse import quote, urljoin
 
 import httpx
@@ -18,97 +18,30 @@ from nexent.core.ext_components.aidp.retrieval_config import (
 )
 from nexent.utils.http_client_manager import http_client_manager
 
-from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.db.agent.repository import query_knowledge_binding_agents
-from management.db.client import get_db_session
-from management.db.conversation.repository import remove_conversation_knowledge_bindings
-from management.db.tool.repository import remove_tool_knowledge_references
+from ext_components.aidp.services.aidp_client import (
+    _AIDP_DOWNLOAD_TIMEOUT_SECONDS,
+    _AIDP_READ_TIMEOUT_SECONDS,
+    _build_list_query,
+    _extract_upstream_error,
+    _get_channels_path,
+    _get_doc_history_path,
+    _get_knowledge_files_path,
+    _get_list_path,
+    _get_ocr_annotate_path,
+    _normalize_upstream_error,
+    _raise_aidp_http_error,
+    _request_with_retry,
+    _resolve_aidp_folder_id,
+    _resolve_tenant_id,
+    _validate_params,
+)
 
 
 logger = logging.getLogger("aidp_service")
 
-_MAX_UPSTREAM_ERROR_REASON_LENGTH = 1000
-_UPSTREAM_ERROR_KEYS = (
-    "reason_zh",
-    "reason_en",
-    "details",
-    "message",
-    "detail",
-    "error",
-)
 
-
-def _normalize_upstream_error(value: Any) -> str | None:
-    """Extract a concise human-readable reason from an upstream error value."""
-    if isinstance(value, str):
-        normalized = " ".join(value.split())
-        return normalized or None
-    if isinstance(value, dict):
-        for key in _UPSTREAM_ERROR_KEYS:
-            reason = _normalize_upstream_error(value.get(key))
-            if reason:
-                return reason
-    if isinstance(value, list):
-        reasons = [
-            reason
-            for item in value
-            if (reason := _normalize_upstream_error(item))
-        ]
-        if reasons:
-            return "; ".join(reasons)
-    return None
-
-
-def _extract_upstream_error(response: httpx.Response) -> str | None:
-    """Read a bounded error reason from an AIDP HTTP response."""
-    try:
-        reason = _normalize_upstream_error(response.json())
-    except (TypeError, ValueError):
-        reason = None
-
-    if not reason:
-        content_type = response.headers.get("content-type", "").lower()
-        if "text/plain" in content_type:
-            reason = _normalize_upstream_error(response.text)
-
-    if not reason:
-        return None
-    return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
-
-
-def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
-    """Map an AIDP HTTP error to the common application exception format."""
-    response = error.response
-    upstream_reason = _extract_upstream_error(response)
-    logger.exception(
-        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
-        operation,
-        response.status_code,
-        upstream_reason or "unavailable",
-    )
-    details = {
-        "upstream_status": response.status_code,
-        "upstream_reason": upstream_reason,
-    }
-    error_code = {
-        401: ErrorCode.AIDP_AUTH_ERROR,
-        403: ErrorCode.AIDP_AUTH_ERROR,
-        429: ErrorCode.AIDP_RATE_LIMIT,
-    }.get(response.status_code, ErrorCode.AIDP_SERVICE_ERROR)
-    fallback_message = {
-        ErrorCode.AIDP_AUTH_ERROR: f"AIDP authentication failed: {str(error)}",
-        ErrorCode.AIDP_RATE_LIMIT: f"AIDP rate limit exceeded: {str(error)}",
-    }.get(
-        error_code,
-        f"AIDP API HTTP error {response.status_code}: {str(error)}",
-    )
-    raise AppException(
-        error_code,
-        upstream_reason or fallback_message,
-        details=details,
-    )
 
 
 def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
@@ -146,76 +79,28 @@ def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
         )
     return failures
 
-def _resolve_tenant_id(tenant_id: Any = None) -> str:
-    """Resolve a valid AIDP tenant identifier from explicit or configured input."""
-    configured_tenant = AIDP_TENANT_ID if isinstance(AIDP_TENANT_ID, str) else "aidp"
-    resolved_tenant = tenant_id if isinstance(tenant_id, str) else configured_tenant
-    return resolved_tenant.strip() or "aidp"
 
 
-def _get_list_path(tenant_id: str | None = None) -> str:
-    """Build the tenant-scoped knowledge-base API path."""
-    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/KnowledgeBases"
 
 
-def _get_channels_path(kds_id: str, tenant_id: str | None = None) -> str:
-    """Build the knowledge-base scoped ingestion-pipeline (channel) API path.
-
-    AIDP exposes the channel catalog per knowledge base
-    (``.../KnowledgeBases/{kds_id}/Channels``), mirroring the knowledge-file
-    endpoints. The channel carries the ``fs_id`` + source directory the history
-    request is addressed with, which is why the KB id is part of the path.
-    """
-    return (
-        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
-        f"/KnowledgeBases/{kds_id}/Channels"
-    )
 
 
-def _get_doc_history_path(kds_id: str, tenant_id: str | None = None) -> str:
-    """Build the knowledge-base scoped knowledge-file history API path.
-
-    Like the channel catalog, the history endpoint belongs to one knowledge base
-    (``.../KnowledgeBases/{kds_id}/KnowledgeFiles/History``); the body addresses
-    the request to a channel directory inside that knowledge base.
-    """
-    return (
-        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
-        f"/KnowledgeBases/{kds_id}/KnowledgeFiles/History"
-    )
 
 
-def _get_ocr_annotate_path(
-    kds_id: str, file_uuid: str, tenant_id: str | None = None
-) -> str:
-    """Build the knowledge-base scoped preview (OCR annotate) API path.
-
-    Unlike the file action endpoints (``Download``/``Remove``/``History``),
-    which address the file in the request body, the preview endpoint carries it
-    in the path (``.../KnowledgeBases/{kds_id}/OcrAnnotate/{file_uuid}``). AIDP
-    serves the original bytes for the formats it can render itself
-    (docx/xlsx/pptx/pdf/txt) and converts every other format to PDF, reporting
-    the served name in the ``X-File-Name`` response header.
-    """
-    return (
-        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
-        f"/KnowledgeBases/{kds_id}/OcrAnnotate/{file_uuid}"
-    )
 
 
-def _build_list_query(page: int, page_size: int, keyword: str | None = None) -> str:
-    """Build the query string for a knowledge-base list request.
 
-    AIDP applies ``keyword`` server-side (matching on the KB name), so the
-    value is forwarded verbatim. The parameter is omitted entirely when no
-    keyword is supplied, which keeps plain listing requests byte-identical to
-    the pre-search behaviour (same URL, so upstream caches still hit).
-    """
-    query = f"?page={page}&page_size={page_size}"
-    normalized_keyword = (keyword or "").strip()
-    if normalized_keyword:
-        query += f"&keyword={quote(normalized_keyword, safe='')}"
-    return query
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _timestamp_to_iso(value: Any) -> str | None:
@@ -335,16 +220,18 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+
+
 def _normalize_doc_status(value: Any) -> str | None:
     """Normalize an AIDP file status to its canonical upper-case token.
 
-    AIDP reports ``COMPLETED`` / ``PROCESSING`` / ``FAILED`` or the numeric
-    contract ``1``-``5`` (observed both as integers and numeric strings);
-    normalizing here means the frontend can compare against one form regardless
-    of upstream spelling. ``None`` is returned for missing/blank values so
-    callers can tell "no status reported" apart from a real status. Plain
-    integers map to their decimal string so a numeric status is kept instead of
-    being dropped; other non-string values are ignored.
+    AIDP's string status is the authority; numeric ``1``-``6`` values are kept
+    as a fallback for deployments that still return the previous contract.
+    Normalizing strings here means the frontend can compare against one form
+    regardless of upstream spelling. ``None`` is returned for missing/blank
+    values so callers can tell "no status reported" apart from a real status.
+    Plain integers map to their decimal string so a numeric status is kept
+    instead of being dropped; other non-string values are ignored.
     """
     if isinstance(value, bool):
         return None
@@ -421,103 +308,26 @@ def _warn_when_history_status_unreadable(items: List[Any], fs_id: str) -> None:
     )
 
 
-def _validate_params(server_url: str, api_key: str) -> str:
-    """Validate parameters and return normalized base URL."""
-    if not server_url or not isinstance(server_url, str):
-        raise AppException(
-            ErrorCode.AIDP_CONFIG_INVALID,
-            "AIDP server_url is required and must be a non-empty string",
-        )
-    if not server_url.startswith(("http://", "https://")):
-        raise AppException(
-            ErrorCode.AIDP_CONFIG_INVALID,
-            "AIDP server_url must start with http:// or https://",
-        )
-    if not api_key or not isinstance(api_key, str):
-        raise AppException(
-            ErrorCode.AIDP_CONFIG_INVALID,
-            "AIDP api_key is required and must be a non-empty string",
-        )
-    return server_url.rstrip("/")
 
 
-# ==================== Retry helpers ====================
-_AIDP_RETRY_MAX_ATTEMPTS = 3
-# Exponential backoff: 0.5s, 1s, 2s
-_AIDP_RETRY_BACKOFF_FACTOR = 0.5
-_AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
-_AIDP_READ_TIMEOUT_SECONDS = 30.0
-_AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
 
-def _request_with_retry(
-    request_fn: Callable[[], httpx.Response],
-    context: str,
-    max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
-) -> httpx.Response:
-    """Execute a sync httpx request with retries for transient failures.
-
-    Retries on:
-        * HTTP 408, 429, 500, 502, 503, and 504
-        * httpx.RequestError (connection refused, timeouts, DNS, etc.)
-
-    Exponential backoff: 0.5s, 1s, 2s. Respects Retry-After header on 429.
-
-    The last response (successful or final failure) is returned to the
-    caller so `response.raise_for_status()` can raise the existing AppException
-    flow. On a final RequestError, the exception propagates directly.
-    """
-    last_exception: Exception | None = None
-
-    for attempt in range(max_attempts):
-        try:
-            response = request_fn()
-            if 200 <= response.status_code < 300:
-                return response
-            if response.status_code not in _AIDP_RETRYABLE_STATUS_CODES:
-                return response
-            if attempt < max_attempts - 1:
-                wait_time = _compute_retry_wait(response, attempt)
-                logger.warning(
-                    "HTTP %d for %s, retrying in %ss (attempt %d/%d)",
-                    response.status_code, context, wait_time,
-                    attempt + 1, max_attempts,
-                )
-                time.sleep(wait_time)
-                continue
-            # Last attempt — return so callers can raise_for_status()
-            return response
-        except httpx.RequestError as e:
-            last_exception = e
-            if attempt < max_attempts - 1:
-                wait_time = _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
-                logger.warning(
-                    "AIDP request error for %s: [%s] %s, retrying in %ss (%d/%d)",
-                    context, type(e).__name__, e, wait_time,
-                    attempt + 1, max_attempts,
-                )
-                time.sleep(wait_time)
-            else:
-                break
-
-    # All retries exhausted on RequestError — let caller translate to AppException.
-    assert last_exception is not None
-    raise last_exception
 
 
-def _compute_retry_wait(response: httpx.Response, attempt: int) -> float:
-    """Determine backoff wait time for a retryable response.
 
-    Honors the standard ``Retry-After`` header (seconds) when present.
-    Falls back to exponential backoff: ``backoff_factor * 2^attempt``.
-    """
-    retry_after = response.headers.get("Retry-After")
-    if retry_after:
-        try:
-            return max(0.0, float(retry_after))
-        except (TypeError, ValueError):
-            pass
-    return _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def fetch_aidp_knowledge_bases_impl(
@@ -1287,11 +1097,6 @@ def update_aidp_kb_impl(
         )
 
 
-def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:
-    """Preview agents affected by deleting the selected knowledge bases."""
-    return {"agents": query_knowledge_binding_agents(kds_ids=kds_ids, tenant_id=tenant_id)}
-
-
 def delete_aidp_kb_impl(
     server_url: str,
     api_key: str,
@@ -1356,12 +1161,6 @@ def delete_aidp_kb_impl(
                 f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
             )
 
-    try:
-        with get_db_session() as session:
-            remove_tool_knowledge_references(session, kds_ids=[kds_id])
-            remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
-    except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
-        logger.warning("Failed to clean up bindings for deleted AIDP knowledge base '%s': %s", kds_id, exc)
     return True
 
 
@@ -1370,17 +1169,39 @@ def upload_aidp_docs_impl(
     api_key: str,
     kds_id: str,
     files: List[Any],
+    target_folder: str | None = None,
+    relative_paths: List[str] | None = None,
 ) -> Dict[str, Any]:
-    """Upload documents to a knowledge base via AIDP API."""
+    """Upload documents to a knowledge base via AIDP API.
+
+    ``target_folder`` is the public Nexent path. The new AIDP contract names
+    the multipart field ``target_folder_path`` and also accepts
+    ``target_folder_id``. ``relative_paths`` entries are directories, not file
+    paths; the proxy route converts the frontend's file-relative paths before
+    calling this function. Omitting relative_paths keeps the upload flat in the
+    target folder.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
         "Authorization": f"Bearer {api_key}",
     }
 
-    upload_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Upload"
+    upload_path = f"{_get_knowledge_files_path(kds_id)}/Upload"
     upload_url = urljoin(f"{normalized_url}/", upload_path)
     logger.info("Uploading documents to AIDP knowledge base at %s", upload_url)
+
+    form_data = None
+    if target_folder is not None:
+        target_folder_id = _resolve_aidp_folder_id(
+            server_url, api_key, kds_id, target_folder
+        )
+        form_data = {
+            "target_folder_path": target_folder,
+            "target_folder_id": target_folder_id,
+        }
+        if relative_paths:
+            form_data["relative_paths"] = relative_paths
 
     try:
         client = http_client_manager.get_sync_client(
@@ -1395,7 +1216,12 @@ def upload_aidp_docs_impl(
             ("files", (f.filename, f.file, f.content_type or "application/octet-stream"))
             for f in files
         ]
-        response = client.post(upload_url, headers=headers, files=file_tuples)
+        response = client.post(
+            upload_url,
+            headers=headers,
+            files=file_tuples,
+            data=form_data,
+        )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):

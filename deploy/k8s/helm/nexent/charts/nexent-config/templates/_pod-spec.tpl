@@ -18,7 +18,8 @@ containers:
     command:
       - /opt/nexent/scripts/start-backend.sh
       - python
-      - backend/config_service.py
+      - -m
+      - backend.http.config_service
     envFrom:
       - configMapRef:
           name: nexent-config
@@ -29,6 +30,8 @@ containers:
       - secretRef:
           name: nexent-secrets
     env:
+      - name: GATEWAY_AUTH_ENABLED
+        value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 6 }}
       - name: NEXENT_SQL_STARTUP_MODE
         value: "migrate"

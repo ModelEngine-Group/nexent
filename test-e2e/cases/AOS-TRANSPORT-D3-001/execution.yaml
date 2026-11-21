@@ -1,0 +1,161 @@
+schema_version: '1.0'
+case_id: AOS-TRANSPORT-D3-001
+timeout_seconds: 60
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_signed_agentos_transport
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-71:
+  - test_agentos_validation_transport_timeouts
+  AC-70:
+  - test_catalog_system_tools_over_signed_agentos
+  AC-69:
+  - test_knowledge_catalog_alias_over_signed_agentos
+  AC-68:
+  - test_analysis_catalog_alias_over_signed_agentos
+  AC-67:
+  - test_raw_model_profile_reaches_sdk_provider_over_signed_http
+  AC-66:
+  - test_local_catalog_name_over_signed_agentos
+  AC-65:
+  - test_background_without_automation_record_over_signed_agentos
+  AC-64:
+  - test_knowledge_legacy_top_k_over_signed_agentos
+  AC-63:
+  - test_raw_new_conversation_over_signed_agentos
+  - test_signed_agentos_transport
+  AC-62:
+  - test_background_management_handoff_over_signed_http
+  AC-61:
+  - test_raw_model_profile_reaches_sdk_provider_over_signed_http
+  AC-60:
+  - test_raw_scoped_preparation_over_signed_http
+  - test_signed_agentos_transport
+  AC-59:
+  - test_raw_northbound_preparation_over_signed_http
+  - test_signed_agentos_transport
+  AC-58:
+  - test_background_management_handoff_over_signed_http
+  AC-57:
+  - test_saved_user_compatibility_over_signed_http
+  - test_signed_agentos_transport
+  AC-56:
+  - test_signed_agentos_transport
+  AC-55:
+  - test_signed_agentos_transport
+  AC-54:
+  - test_signed_agentos_transport
+  AC-53:
+  - test_signed_agentos_transport
+  AC-52:
+  - test_signed_agentos_transport
+  AC-51:
+  - test_signed_agentos_transport
+  AC-50:
+  - test_signed_agentos_transport
+  AC-49:
+  - test_signed_agentos_transport
+  AC-48:
+  - test_signed_agentos_transport
+  AC-47:
+  - test_signed_agentos_transport
+  AC-46:
+  - test_signed_agentos_transport
+  AC-45:
+  - test_nl2agent_run_and_signed_draft_callback
+  AC-44:
+  - test_nl2skill_creation_over_signed_agentos
+  AC-43:
+  - test_signed_agentos_transport
+  AC-42:
+  - test_signed_agentos_transport
+  AC-41:
+  - test_signed_agentos_transport
+  AC-40:
+  - test_signed_agentos_transport
+  AC-39:
+  - test_signed_agentos_transport
+  AC-38:
+  - test_signed_agentos_transport
+  AC-37:
+  - test_signed_agentos_transport
+  AC-36:
+  - test_signed_agentos_transport
+  AC-35:
+  - test_signed_agentos_transport
+  AC-34:
+  - test_signed_agentos_transport
+  AC-33:
+  - test_signed_agentos_transport
+  AC-32:
+  - test_signed_agentos_transport
+  AC-31:
+  - test_signed_agentos_transport
+  AC-30:
+  - test_signed_agentos_transport
+  AC-29:
+  - test_signed_agentos_transport
+  AC-28:
+  - test_signed_agentos_transport
+  AC-27:
+  - test_signed_agentos_transport
+  AC-26:
+  - test_signed_agentos_transport
+  AC-25:
+  - test_signed_agentos_transport
+  AC-24:
+  - test_signed_agentos_transport
+  AC-23:
+  - test_signed_agentos_transport
+  AC-22:
+  - test_signed_agentos_transport
+  AC-21:
+  - test_signed_agentos_transport
+  AC-20:
+  - test_signed_agentos_transport
+  AC-19:
+  - test_signed_agentos_transport
+  AC-01:
+  - test_signed_agentos_transport
+  AC-02:
+  - test_signed_agentos_transport
+  AC-03:
+  - test_signed_agentos_transport
+  AC-04:
+  - test_signed_agentos_transport
+  AC-05:
+  - test_signed_agentos_transport
+  AC-06:
+  - test_signed_agentos_transport
+  AC-07:
+  - test_signed_agentos_transport
+  AC-08:
+  - test_signed_agentos_transport
+  AC-09:
+  - test_signed_agentos_transport
+  AC-10:
+  - test_signed_agentos_transport
+  AC-11:
+  - test_signed_agentos_transport
+  AC-12:
+  - test_signed_agentos_transport
+  AC-13:
+  - test_signed_agentos_transport
+  AC-14:
+  - test_signed_agentos_transport
+  AC-15:
+  - test_signed_agentos_transport
+  AC-16:
+  - test_signed_agentos_transport
+  AC-17:
+  - test_signed_agentos_transport
+  AC-18:
+  - test_signed_agentos_transport
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

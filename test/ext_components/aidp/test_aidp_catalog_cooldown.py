@@ -11,7 +11,7 @@ import pytest
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_access_service as service
-from ext_components.aidp.services import aidp_service
+from ext_components.aidp.services import aidp_client, aidp_service
 
 
 @pytest.fixture(autouse=True)
@@ -147,7 +147,9 @@ def test_real_count_retry_sequence_runs_once_during_cooldown(mocker, monkeypatch
     ]
     mocker.patch.object(aidp_service.http_client_manager, "get_sync_client", return_value=client)
     sleep = MagicMock()
-    monkeypatch.setattr(aidp_service, "time", SimpleNamespace(perf_counter=lambda: clock.now, sleep=sleep))
+    fake_time = SimpleNamespace(perf_counter=lambda: clock.now, sleep=sleep)
+    monkeypatch.setattr(aidp_service, "time", fake_time)
+    monkeypatch.setattr(aidp_client, "time", fake_time)
     for _ in range(3):
         with pytest.raises(AppException) as caught:
             resolve()

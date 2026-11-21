@@ -33,13 +33,8 @@ vi.mock(
   })
 );
 vi.mock(
-  "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpKnowledgeFiles",
-  () => ({
-    useAidpKnowledgeFiles: () => ({
-      data: { value: [], total_count: 0, has_more: false },
-      refetch: vi.fn(),
-    }),
-  })
+  "@/ext_components/aidp/pages/knowledge-files/components/AidpKnowledgeFilesPanel",
+  () => ({ default: () => null })
 );
 vi.mock("@/ext_components/aidp/features/file-import/AidpImportDrawer", () => ({
   default: () => null,

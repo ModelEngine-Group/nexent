@@ -10,9 +10,9 @@ from uuid import uuid4
 import pytest
 
 # isort: split
-import infrastructure.observability.trajectory_store as storage
-from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
-from infrastructure.observability.trajectory_store import (
+import infrastructure.trace.trajectory_store as storage
+from infrastructure.trace.trajectory_processor import LocalTrajectoryProcessor
+from infrastructure.trace.trajectory_store import (
     CaptureIdentity,
     TrajectoryFileStore,
 )
@@ -58,7 +58,7 @@ def test_deletion_removes_all_rounds_in_fixed_directory_and_preserves_canaries(p
 
 def test_busy_file_is_marked_and_retried_after_writer_releases(processor, monkeypatch):
     identity, writer = run(processor, active=True)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: 100)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: 100)
     try:
         processor.request_conversation_cleanup([1], "owner")
         processor._delete_conversation_files()
@@ -66,7 +66,7 @@ def test_busy_file_is_marked_and_retried_after_writer_releases(processor, monkey
         assert processor.store.manifest(identity)["runs"][0]["cleanup_reason"] == "conversation_deleted"
     finally:
         writer.close()
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: 102)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: 102)
     processor._delete_conversation_files()
     assert not writer.path.exists() and processor._deletions.empty()
 
@@ -81,13 +81,13 @@ def test_failed_unlink_remains_pending_and_retries(processor, monkeypatch):
         return unlink(path, **kwargs)
 
     monkeypatch.setattr(storage.os, "unlink", fail)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: 100)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: 100)
     processor.request_conversation_cleanup([1], "owner")
     processor._delete_conversation_files()
     assert writer.path.exists()
     assert processor.store.manifest(identity)["runs"][0]["file_deleted_at"] is None
     monkeypatch.setattr(storage.os, "unlink", unlink)
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: 102)
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: 102)
     processor._delete_conversation_files()
     assert not writer.path.exists()
 
@@ -126,7 +126,7 @@ def test_restart_scan_reclaims_deleted_conversation_with_retention_disabled(proc
 def test_early_worker_ticks_do_not_extend_retry_deadline(processor, monkeypatch):
     _, writer = run(processor, active=True)
     clock = [100.0]
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: clock[0])
     try:
         processor.request_conversation_cleanup([1], "owner")
         processor._delete_conversation_files()
@@ -145,7 +145,7 @@ def test_cleanup_continues_after_scan_budget(processor, monkeypatch):
     cleanup = processor.store.cleanup
     monkeypatch.setattr(processor.store, "cleanup", lambda *a, **kw: cleanup(*a, scan_limit=1, **kw))
     clock = [100.0]
-    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("infrastructure.trace.trajectory_processor.time.monotonic", lambda: clock[0])
     processor.request_conversation_cleanup([1], "owner")
     processor._delete_conversation_files()
     assert not first.path.exists() and second.path.exists()

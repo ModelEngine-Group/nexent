@@ -53,21 +53,21 @@ class TestConfigAppIntegration:
 
     def test_config_app_can_import_app_factory(self):
         """Test that we can import create_app from app_factory."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         app = create_app()
         assert isinstance(app, FastAPI)
         assert app.root_path == "/api"
 
     def test_config_app_title(self):
         """Test that create_app works with config app title."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         app = create_app(title="Nexent Config API", description="Configuration APIs")
         assert app.title == "Nexent Config API"
         assert app.description == "Configuration APIs"
 
     def test_config_app_default_cors_config(self):
         """Test that config app has correct CORS configuration."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         app = create_app()
 
         cors_middleware = None
@@ -106,11 +106,11 @@ class TestConfigAppRouterConfiguration:
 
                 return register
 
-        app_factory_module = types.ModuleType("management.utils.app_factory")
+        app_factory_module = types.ModuleType("backend.http.server.app_factory")
         app_factory_module.create_app = (
             lambda **kwargs: RecordingApp(kwargs.get("lifespan"))
         )
-        monkeypatch.setitem(sys.modules, "management.utils.app_factory", app_factory_module)
+        monkeypatch.setitem(sys.modules, "backend.http.server.app_factory", app_factory_module)
 
         api_key_router = APIRouter(prefix="/api-keys")
 
@@ -123,7 +123,17 @@ class TestConfigAppRouterConfiguration:
             return {}
 
         router_modules = {
+            "management.api.identity.gateway_identity": {"router": APIRouter()},
+            "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
+            "management.api.agent.conversation_run": {"router": APIRouter()},
+            "management.api.agent.creator": {"router": APIRouter()},
+            "management.api.skill.creation": {"skill_creator_router": APIRouter()},
+            "management.api.agent.nl2agent_callback": {"router": APIRouter()},
+            "management.api.agent.workbench_callback": {"router": APIRouter()},
+            "management.api.automation.agentos_callback": {"router": APIRouter()},
+            "management.api.memory.agentos_callback": {"router": APIRouter()},
+            "management.api.automation.agent_automation": {"router": APIRouter(), "conversation_automation_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
             "management.api.configuration.config_sync": {"router": APIRouter()},
@@ -134,6 +144,10 @@ class TestConfigAppRouterConfiguration:
             "management.api.knowledge_base.ragflow": {"router": APIRouter()},
             "management.api.file.file_management": {"file_management_config_router": APIRouter()},
             "management.api.file.image": {"router": APIRouter()},
+            "management.api.file.storage": {"router": APIRouter()},
+            "management.api.conversation.conversation_management": {"router": APIRouter()},
+            "management.api.conversation.conversation_share": {"router": APIRouter()},
+            "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
             "ops.api.access": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
@@ -145,7 +159,6 @@ class TestConfigAppRouterConfiguration:
             "management.api.configuration.tenant_config": {"router": APIRouter()},
             "management.api.tool.tool_config": {"router": APIRouter()},
             "management.api.identity.user_management": {"router": APIRouter()},
-            "management.api.voice.voice": {"voice_config_router": APIRouter()},
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
@@ -190,6 +203,7 @@ class TestConfigAppRouterConfiguration:
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
         const_module.ENABLE_AGENT_WORKBENCH = False
+        const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
         monkeypatch.setitem(sys.modules, "contracts.constants.environment", const_module)
         manager_state = types.SimpleNamespace(CREATED="created")
@@ -215,6 +229,7 @@ class TestConfigAppRouterConfiguration:
                 return {"service_name": "config", "active_count": 0}
 
         concurrency_module = types.ModuleType("nexent.core.concurrency")
+        concurrency_module.__dict__.update(vars(importlib.import_module("nexent.core.concurrency")))
         concurrency_module.ManagedTaskSpec = ManagedTaskSpec
         concurrency_module.ManagerState = manager_state
 
@@ -231,14 +246,29 @@ class TestConfigAppRouterConfiguration:
             sys.modules, "nexent.core.concurrency", concurrency_module
         )
         thread_lifecycle_module = types.ModuleType(
-            "infrastructure.concurrency"
+            "management.thread_management"
         )
         thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
         monkeypatch.setitem(
             sys.modules,
-            "infrastructure.concurrency",
+            "management.thread_management",
             thread_lifecycle_module,
         )
+        configuration_runtime = types.ModuleType("infrastructure.system_configuration.runtime")
+        configuration_runtime.start_system_configuration = AsyncMock()
+        configuration_runtime.stop_system_configuration = AsyncMock()
+        monkeypatch.setitem(
+            sys.modules, "infrastructure.system_configuration.runtime", configuration_runtime
+        )
+
+        runtime_state = MagicMock()
+        monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
+                            types.SimpleNamespace(runtime_state_service=runtime_state))
+        component_path = Path(backend_dir) / "management/api/northbound_application.py"
+        component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
+        component = importlib.util.module_from_spec(component_spec)
+        component_spec.loader.exec_module(component)
+        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
 
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
@@ -246,6 +276,7 @@ class TestConfigAppRouterConfiguration:
             "management.recovery"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
+        startup_recovery_module.recover_northbound_tasks = MagicMock()
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
             schedule_upload_cleanup
         )
@@ -280,13 +311,45 @@ class TestConfigAppRouterConfiguration:
             dreaming_scheduler_module,
         )
 
+        automation_scheduler = types.SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
+        automation_recover = MagicMock()
+        monkeypatch.setitem(sys.modules, "management.services.automation.scheduler", types.SimpleNamespace(
+            agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
+        ))
+
+        from contextlib import asynccontextmanager
+        prepared_events = []
+
+        @asynccontextmanager
+        async def prepared_lifespan():
+            prepared_events.append("start")
+            try:
+                yield
+            finally:
+                prepared_events.append("stop")
+
+        monkeypatch.setitem(sys.modules, "management.services.agent.prepared_turn", types.SimpleNamespace(
+            prepared_turn_lifespan=prepared_lifespan,
+        ))
+        shutdown_creators = AsyncMock()
+        monkeypatch.setitem(sys.modules, "management.services.conversation.creator_runtime", types.SimpleNamespace(
+            shutdown_creator_streams=shutdown_creators,
+        ))
+
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
-        assert all(router is not retired_router for router in config_app.app.included_routers)
+        assert all(
+            registered is not retired
+            for registered in config_app.app.included_routers
+            for retired in (retired_router,)
+        )
         assert api_key_router in config_app.app.included_routers
+        assert router_modules["management.api.file.storage"]["router"] in config_app.app.included_routers
+        for router in router_modules["management.api.northbound"].values():
+            assert router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",
             "/api-keys/refresh",
@@ -317,7 +380,9 @@ class TestConfigAppRouterConfiguration:
         ):
             asyncio.run(exercise_lifespan())
 
+        shutdown_creators.assert_awaited_once_with(timeout=1)
         assert config_app.app.lifespan is config_app.config_lifespan
+        assert prepared_events == ["start", "stop"]
         migration.migrate_legacy_outlets.assert_called_once_with()
         concurrency_module.run_blocking.assert_awaited_once_with(
             "model-outlet-upgrade", migration.migrate_legacy_outlets
@@ -326,14 +391,34 @@ class TestConfigAppRouterConfiguration:
         start_evaluation_maintenance.assert_called_once_with(
             config_app.config_thread_manager
         )
-        schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
+        assert [c.args[0] for c in schedule_upload_cleanup.await_args_list] == ["nexent-config", "nexent-northbound"]
+        startup_recovery_module.recover_northbound_tasks.assert_called_once_with()
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
+        automation_recover.assert_called_once_with()
+        automation_scheduler.start.assert_awaited_once_with()
+        automation_scheduler.stop.assert_awaited_once_with()
+        for router in router_modules["management.api.automation.agent_automation"].values():
+            assert router in config_app.app.included_routers
+        assert configuration_runtime.start_system_configuration.await_count == 1
+        configuration_runtime.stop_system_configuration.assert_awaited_once_with()
+
+        # A failure after Northbound recovery must still release Management ownership.
+        for target in ("recover_config_tasks_on_startup", "validate_external_service_configuration", "start_dreaming_scheduler"):
+            config_app.config_thread_manager.state = manager_state.CREATED
+            concurrency_module.clear_default_thread_manager.reset_mock()
+            runtime_state.set_thread_manager.reset_mock()
+            with patch.object(config_app, target, new=AsyncMock(side_effect=RuntimeError("startup failed"))):
+                with pytest.raises(RuntimeError, match="startup failed"):
+                    asyncio.run(exercise_lifespan())
+            assert config_app.config_thread_manager.state == "closed"
+            concurrency_module.clear_default_thread_manager.assert_called_once_with(config_app.config_thread_manager)
+            assert runtime_state.set_thread_manager.call_args.args == (None,)
 
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -357,7 +442,7 @@ class TestConfigAppRouterConfiguration:
 
     def test_router_path_prefixes(self):
         """Test router path prefix patterns."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -378,7 +463,7 @@ class TestConfigAppExceptionHandling:
 
     def test_http_exception_handler_config(self):
         """Test HTTPException handler configuration."""
-        from management.utils.app_factory import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
         from fastapi import HTTPException
 
         app = create_app()
@@ -396,7 +481,7 @@ class TestConfigAppExceptionHandling:
 
     def test_exception_handlers_registered(self):
         """Test that exception handlers are properly registered."""
-        from management.utils.app_factory import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
         from fastapi import HTTPException
 
         app = create_app()
@@ -413,26 +498,26 @@ class TestConfigAppMonitoring:
 
     def test_monitoring_can_be_enabled(self):
         """Test that monitoring can be enabled for config app."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app(enable_monitoring=True)
         assert isinstance(app, FastAPI)
 
     def test_monitoring_can_be_disabled(self):
         """Test that monitoring can be disabled for config app."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app(enable_monitoring=False)
         assert isinstance(app, FastAPI)
 
     def test_monitoring_import_failure_handled(self):
         """Test that monitoring import failure is handled gracefully."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from unittest.mock import patch
 
         # Test with monitoring enabled but module not available
-        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch.dict('sys.modules', {'infrastructure.trace.bootstrap': None}):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None
 
@@ -464,7 +549,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_middleware_stack_exists(self):
         """Test that middleware stack exists."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app()
         assert hasattr(app, 'user_middleware')
@@ -472,7 +557,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_cors_middleware_present(self):
         """Test that CORS middleware is present."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app()
 
@@ -486,7 +571,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_middleware_order(self):
         """Test middleware order is preserved."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app()
         middleware_count = len(app.user_middleware)
@@ -500,7 +585,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_path_parameters(self):
         """Test routes with path parameters."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -518,7 +603,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_query_parameters(self):
         """Test routes with query parameters."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -537,7 +622,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_post_body(self):
         """Test routes with POST body."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
         from pydantic import BaseModel
 
@@ -565,7 +650,7 @@ class TestConfigAppErrorResponses:
 
     def test_404_error_format(self):
         """Test 404 error response format."""
-        from management.utils.app_factory import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
 
         app = create_app()
         register_exception_handlers(app)
@@ -577,7 +662,7 @@ class TestConfigAppErrorResponses:
 
     def test_500_error_format(self):
         """Test 500 error response format."""
-        from management.utils.app_factory import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
 
         app = create_app()
         register_exception_handlers(app)
@@ -598,7 +683,7 @@ class TestConfigAppVersioning:
 
     def test_root_path_configuration(self):
         """Test root path configuration."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app(root_path="/api")
         assert app.root_path == "/api"
@@ -608,7 +693,7 @@ class TestConfigAppVersioning:
 
     def test_custom_root_path_with_routes(self):
         """Test custom root path with routes."""
-        from management.utils.app_factory import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app(root_path="/api")

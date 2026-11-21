@@ -30,6 +30,8 @@ export interface AidpKbDetail {
   summary_model?: string;
   /** Hidden mirror of summary_enable; explicit false means "not previewable". */
   summary_preview?: boolean;
+  /** Sensitive word interception for files ingested after it is enabled. */
+  sensitive_intercept_enable?: number | null;
   created_by?: string | null;
   creator_name?: string | null;
   creator_cas_username?: string | null;
@@ -56,12 +58,73 @@ export interface AidpDocumentItem {
   [key: string]: unknown;
 }
 
-export interface AidpDocumentListResponse {
-  value: AidpDocumentItem[];
-  total_count: number;
-  has_more: boolean;
-  /** False for search pagination, whose filtered global total is unavailable. */
-  total_reliable: boolean;
+/** One direct subfolder returned by the AIDP folder tree. */
+export interface AidpFolderItem {
+  folder_name: string;
+  /** New AIDP folder tree: numeric id used by every folder route. */
+  folder_id?: number;
+  /** New AIDP folder tree: whether this folder has direct child folders. */
+  has_child_folders?: boolean;
+  [key: string]: unknown;
+}
+
+/** A file row inside the AIDP folder tree. */
+export interface AidpFolderFileItem {
+  file_uuid?: string;
+  file_name?: string;
+  file_type?: string;
+  file_size?: number;
+  /** Folder/Files status: 1 ingested, 2 extracting, 3 failed, 4 graph failed, 5 removing, 6 remove failed. */
+  status?: string | number | null;
+  /** Actual creation/upload time; never fall back to update_time for the UI. */
+  created_at?: string | null;
+  first_upload_time?: number | string | null;
+  update_time?: number | string | null;
+  updated_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AidpFolderTreeFiles {
+  page: number;
+  page_size: number;
+  total: number;
+  value: AidpFolderFileItem[];
+}
+
+/** One level of the AIDP folder tree: direct folders + paginated files. */
+export interface AidpFolderTreeResponse {
+  folder_id?: number;
+  folder_path: string;
+  folders: AidpFolderItem[];
+  files: AidpFolderTreeFiles;
+}
+
+export interface AidpFolderOperationResult {
+  folder_path?: string;
+  [key: string]: unknown;
+}
+
+export interface AidpFileMoveItem {
+  file_uuid: string;
+  file_path?: string;
+  reason_zh?: string;
+  reason_en?: string;
+  message?: string;
+}
+
+export interface AidpFileMoveResponse {
+  summary: {
+    total: number;
+    success: number;
+    failed: number;
+  };
+  success_list: AidpFileMoveItem[];
+  failed_list: AidpFileMoveItem[];
+}
+
+export interface AidpFileRenameResponse {
+  file_path?: string;
+  [key: string]: unknown;
 }
 
 export interface AidpUploadTaskStats {
@@ -90,6 +153,12 @@ export interface AidpUploadSuccessItem {
   file_size: number;
   file_ino_no: string;
   first_upload_time: number;
+  /** New AIDP receipt: stable AIDP storage identity and final logical path. */
+  storage_name?: string;
+  file_path?: string;
+  folder_id?: number;
+  /** Directory relative to target_folder_path; empty for flat uploads. */
+  relative_path?: string;
 }
 
 export interface AidpUploadFailedItem {
@@ -97,6 +166,8 @@ export interface AidpUploadFailedItem {
   reason_zh: string;
   reason_en: string;
   code?: string | number;
+  file_uuid?: string;
+  relative_path?: string;
 }
 
 export interface AidpUploadResponse {
@@ -197,6 +268,8 @@ export interface AidpCreateKbPayload {
   caption_enable?: number;
   /** Chunking mode: 0 = smart splitting, 1 = legal clauses. */
   chunk_mode?: number;
+  /** Sensitive word interception for files ingested after it is enabled. */
+  sensitive_intercept_enable?: number;
   /** Whether knowledge graph extraction is enabled for this knowledge base. */
   is_exist_graph?: boolean;
   /**
@@ -249,6 +322,8 @@ export interface AidpUpdateKbPayload {
   caption_enable?: number;
   /** VLM model identifier; required when caption_enable is 1. */
   vlm_model?: string;
+  /** Sensitive word interception toggle; 1 enabled, 0 disabled. */
+  sensitive_intercept_enable?: number;
   /** Disable the knowledge graph; permanent, cannot be re-enabled. */
   is_exist_graph?: boolean;
   /** Partial structured graph configuration update; merged into the stored AIDP config. */

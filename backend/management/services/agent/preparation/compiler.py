@@ -2,17 +2,19 @@
 
 """Compile the current Nexent configuration from Management-owned resources."""
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
-    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
+from infrastructure.agent_tool_config import (
+    build_automation_proposal_tool, build_parallel_executor_tool_config, build_store_memory_tool,
+)
 from management.db.agent.repository import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
@@ -26,7 +28,6 @@ from management.services.agent.preparation.resources import (
     _get_external_a2a_agents,
 )
 from management.services.agent.preparation.tools import (
-    _build_parallel_executor_tool_config,
     _get_skill_script_tools,
     _inject_plan_tools,
     _normalize_tool_params_request,
@@ -93,8 +94,14 @@ async def create_agent_config(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    *,
+    portable_evaluation: bool = False,
+    authorized_knowledge_tools: dict | None = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
 ):
+    portable_options = {"portable_evaluation": True} if portable_evaluation else {}
+    if authorized_knowledge_tools is not None:
+        portable_options["authorized_knowledge_tools"] = authorized_knowledge_tools
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -147,6 +154,7 @@ async def create_agent_config(
             runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
+            **portable_options,
             runtime_model_records=runtime_model_records,
         )
         # Persisted Agent relations are rendered into the manager prompt by
@@ -185,6 +193,7 @@ async def create_agent_config(
             runtime_model_records=runtime_model_records,
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
+            **portable_options,
         )
         invocation_name = str(
             mount.get("invocation_name")
@@ -218,15 +227,17 @@ async def create_agent_config(
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
         language=language,
+        **portable_options,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
+    parallel_timeout = get_config_snapshot().get("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS")
 
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
     tool_list.append(
-        _build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
+        build_parallel_executor_tool_config(parallel_timeout)
     )
 
     if (
@@ -234,24 +245,27 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from management.services.automation.proposal import (
-            agent_loop_automation_tool_adapter,
-        )
-
-        tool_list.append(
-            agent_loop_automation_tool_adapter.build_tool_config(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                conversation_id=int(conversation_id),
-                agent_id=int(agent_id),
-                user_message=automation_user_message,
-                agent_version_no=version_no,
-                model_id=automation_model_id,
-                tool_params=normalized_tool_params.model_dump(mode="json"),
-                has_attachments=automation_has_attachments,
-                language=language,
+        if portable_evaluation:
+            tool_list.append(build_automation_proposal_tool())
+        else:
+            from management.services.automation.proposal import (
+                agent_loop_automation_tool_adapter,
             )
-        )
+
+            tool_list.append(
+                agent_loop_automation_tool_adapter.build_tool_config(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    conversation_id=int(conversation_id),
+                    agent_id=int(agent_id),
+                    user_message=automation_user_message,
+                    agent_version_no=version_no,
+                    model_id=automation_model_id,
+                    tool_params=normalized_tool_params.model_dump(mode="json"),
+                    has_attachments=automation_has_attachments,
+                    language=language,
+                )
+            )
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")
@@ -470,41 +484,7 @@ async def create_agent_config(
                     )
 
             if memory_service is not None:
-                store_tool_config = ToolConfig(
-                    class_name="StoreMemoryTool",
-                    name="store_memory",
-                    description=(
-                        "Store one model-selected and summarized short-term memory extracted only "
-                        "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to process-level observations made during intermediate "
-                        "action steps: user preferences, task goals, action plans and latest progress, "
-                        "or reflections on user feedback and errors. Do not store whole conversations, "
-                        "transient calculations, unverified guesses, duplicates, secrets, or information "
-                        "the user asks to forget. Call this tool only during intermediate action steps, "
-                        "not when generating the final answer."
-                    ),
-                    inputs=json.dumps(
-                        {
-                            "content": {
-                                "type": "string",
-                                "description": (
-                                    "One concise, reusable short-term memory entry already judged, "
-                                    "summarized, and deduplicated by the model"
-                                ),
-                                "description_zh": (
-                                    "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                                ),
-                            }
-                        },
-                        ensure_ascii=False,
-                    ),
-                    output_type="string",
-                    params={},
-                    source="local",
-                    usage=None,
-                    metadata=memory_metadata,
-                )
-                tool_list.append(store_tool_config)
+                tool_list.append(build_store_memory_tool(memory_metadata))
 
             if memory_context_service is not None:
                 fixed_search_tool = _create_fixed_search_memory_tool()

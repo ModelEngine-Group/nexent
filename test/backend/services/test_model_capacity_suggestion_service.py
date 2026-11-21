@@ -112,7 +112,8 @@ def test_suggest_capacity_catalog_fuzzy_unique_final_segment():
     assert result.canonical_model_name == "Pro/moonshotai/Kimi-K2.6"
 
 
-def test_suggest_capacity_rejects_ambiguous_providerless_model():
+def test_suggest_capacity_rejects_ambiguous_providerless_model(monkeypatch):
+    monkeypatch.setattr(suggestion_module, "_LITELLM_CACHE", {})
     result = suggest_capacity(
         model_name="qwen-plus",
         base_url="http://localhost:8000/v1",

@@ -32,14 +32,15 @@ acceptance_bindings:
   - UT-FE-AUTO-BA4BBC902BC06BE6 > permission-only update clears groups without submitting
     metadata
   AC-06:
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload preserves multipart, progress, partial errors
-    and successful file size
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload business-code failure stays on the file row
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload raw-text failure stays on the file row
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload upstream-reason failure stays on the file
-    row
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload message failure stays on the file row
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > queues files on import and shows per-file outcomes
+    in the upload center
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload business-code failure stays in the upload
+    center
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload raw-text failure stays in the upload center
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload upstream-reason failure stays in the upload
+    center
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > upload message failure stays in the upload center
   AC-07:
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > one selection applies duplicate, type and 20 MiB
-    boundaries without large allocations
-  - UT-FE-AUTO-BA4BBC902BC06BE6 > selection accepts only the first 50 files
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > validation failures stay in the upload center without
+    being sent
+  - UT-FE-AUTO-BA4BBC902BC06BE6 > selection over 50 files is split into batches

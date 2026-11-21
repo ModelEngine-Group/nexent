@@ -10,7 +10,7 @@ from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS
 from management.db.mcp.remote import get_mcp_records_by_tenant
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.tool.catalog import get_local_tools_classes
 from management.services.tool.common import (
@@ -410,7 +410,8 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 
 import jsonref
-from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
+from infrastructure.system_configuration.runtime import get_config_snapshot
+from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
 from contracts.errors.exceptions import MCPConnectionError
 from contracts.tool import ToolInfo, ToolSourceEnum
 from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url
@@ -457,14 +458,17 @@ async def get_tool_from_remote_mcp_server(
     tools_info = []
 
     try:
+        configuration = get_config_snapshot()
+        connection_timeout = configuration.get("MCP_REQUEST_TIMEOUT_SECONDS")
+        tool_timeout = configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS")
         transport = _create_mcp_transport(
             remote_mcp_server, authorization_token, custom_headers
         )
-        client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+        client = Client(transport=transport, timeout=tool_timeout)
         async with AsyncExitStack() as stack:
             await asyncio.wait_for(
                 stack.enter_async_context(client),
-                timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                timeout=connection_timeout,
             )
             # List available operations
             tools = await client.list_tools()

@@ -20,10 +20,20 @@ def model():
 
 
 def test_unset_sampling_is_omitted_and_explicit_zero_beats_custom_body(model):
-    create = MagicMock(); model.client.chat.completions.create = create
-    model._dispatch_chat_completion(messages=[], temperature=0, top_p=None, extra_body={'temperature': 1, 'custom': 7})
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    model._dispatch_chat_completion(messages=[], temperature=0, top_p=0.995, extra_body={'temperature': 1, 'custom': 7})
     sent = create.call_args.kwargs
-    assert sent['temperature'] == 0 and 'top_p' not in sent
+    assert sent['temperature'] == 0
+    assert sent['top_p'] == 0.995
+    assert sent['extra_body'] == {'custom': 7}
+
+    model._dispatch_chat_completion(
+        messages=[], temperature=None, top_p=None, extra_body={'temperature': None, 'top_p': None, 'custom': 7}
+    )
+    sent = create.call_args.kwargs
+    assert 'temperature' not in sent
+    assert 'top_p' not in sent
     assert sent['extra_body'] == {'custom': 7}
 
 
@@ -45,3 +55,21 @@ def test_legacy_inherited_sampling_keeps_existing_compatibility_retry(model):
     assert create.call_count==2
     assert 'temperature' not in create.call_args.kwargs and 'top_p' not in create.call_args.kwargs
     assert create.call_args.kwargs['stream'] is True
+
+
+@pytest.mark.parametrize("sampling", [{"top_p": 0}, {"extra_body": {"top_p": 0}}])
+def test_zero_top_p_never_reaches_provider(model, sampling):
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    with pytest.raises(ValueError, match="Top P must be greater than 0"):
+        model._dispatch_chat_completion(messages=[], **sampling)
+    create.assert_not_called()
+
+
+@pytest.mark.parametrize("temperature", [-0.01, 2.01, True])
+def test_invalid_temperature_never_reaches_provider(model, temperature):
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    with pytest.raises(ValueError, match="Temperature must be between 0 and 2"):
+        model._dispatch_chat_completion(messages=[], temperature=temperature)
+    create.assert_not_called()

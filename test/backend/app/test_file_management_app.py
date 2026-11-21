@@ -164,12 +164,12 @@ sys.modules["management.services.knowledge_base.service"] = vdb_service_stub
 setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 
-# Stub gateway.authentication.auth.get_current_user_id (the function actually used in the app)
+# Stub management.services.permission.identity.session.get_current_user_id (the function actually used in the app)
 utils_pkg = types.ModuleType("utils")
 utils_pkg.__path__ = [os.path.join(BACKEND_ROOT, "utils")]
 sys.modules.setdefault("utils", utils_pkg)
 
-auth_utils_stub = types.ModuleType("gateway.authentication.auth")
+auth_utils_stub = types.ModuleType("management.services.permission.identity.session")
 
 def _stub_get_current_user_id(authorization):
     """Stub for get_current_user_id - returns user_id and tenant_id tuple."""
@@ -179,7 +179,7 @@ def _stub_get_current_user_id(authorization):
     return ("user1", "tenant1")
 
 auth_utils_stub.get_current_user_id = _stub_get_current_user_id
-sys.modules["gateway.authentication.auth"] = auth_utils_stub
+sys.modules["management.services.permission.identity.session"] = auth_utils_stub
 setattr(utils_pkg, "auth_utils", auth_utils_stub)
 
 
@@ -243,8 +243,8 @@ file_management_app = __import__(
 )
 
 
-from runtime.api.file import upload as runtime_file
-from management.utils import file_http as file_http
+from management.api.file import storage as file_storage
+from management.api.file import http as file_http
 
 # --- Helpers ---
 
@@ -786,7 +786,7 @@ async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
     """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
     with pytest.raises(HTTPException) as exc_info:
-        await runtime_file.storage_upload_files(http_request=None,
+        await file_storage.storage_upload_files(http_request=None,
             files=[f1],
             folder="knowledge_base",
             authorization=MOCK_AUTH
@@ -804,10 +804,10 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
         captured_params["user_id"] = user_id
         return [{"success": True, "file_name": "private.txt"}]
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("private.txt")
-    result = await runtime_file.storage_upload_files(http_request=None,
+    result = await file_storage.storage_upload_files(http_request=None,
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -827,10 +827,10 @@ async def test_storage_upload_files_attachments_no_auth_uses_raw_folder(monkeypa
         captured_params["user_id"] = user_id
         return [{"success": True, "file_name": "test.txt"}]
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("test.txt")
-    result = await runtime_file.storage_upload_files(http_request=None,
+    result = await file_storage.storage_upload_files(http_request=None,
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH_NONE
@@ -849,10 +849,10 @@ async def test_storage_upload_files_counts(monkeypatch):
             {"success": False, "file_name": "b.txt", "error": "x"},
         ]
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
     f2 = make_upload_file("b.txt")
-    result = await runtime_file.storage_upload_files(http_request=None,
+    result = await file_storage.storage_upload_files(http_request=None,
         files=[f1, f2],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -869,11 +869,11 @@ async def test_storage_upload_files_internal_error(monkeypatch):
     async def fake_upload(files, folder, user_id=None):
         raise RuntimeError("MinIO connection failed")
 
-    monkeypatch.setattr(runtime_file, "upload_to_minio", fake_upload)
+    monkeypatch.setattr(file_storage, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
 
     with pytest.raises(Exception) as ei:
-        await runtime_file.storage_upload_files(http_request=None,
+        await file_storage.storage_upload_files(http_request=None,
             files=[f1],
             folder="attachments",
             authorization=MOCK_AUTH
@@ -1303,7 +1303,7 @@ def test_build_content_disposition_header_exception_handling(monkeypatch):
     def boom(_value: str, safe: str = "") -> str:
         raise RuntimeError("quote failure")
 
-    monkeypatch.setattr("management.utils.file_http.quote", boom)
+    monkeypatch.setattr("management.api.file.http.quote", boom)
 
     result = file_http.build_content_disposition_header("测试.pdf")
     assert 'attachment; filename=' in result
@@ -1337,7 +1337,7 @@ def test_build_content_disposition_header_inline_exception_handling(monkeypatch)
     def boom(_value: str, safe: str = "") -> str:
         raise RuntimeError("quote failure")
 
-    monkeypatch.setattr("management.utils.file_http.quote", boom)
+    monkeypatch.setattr("management.api.file.http.quote", boom)
 
     result = file_http.build_content_disposition_header("中文.pdf", inline=True)
     assert 'inline; filename=' in result
@@ -1849,7 +1849,7 @@ def test_build_datamate_url_from_parts_trailing_slash_branch(monkeypatch):
     def fake_urlparse(_url: str):
         return DummyParseResult()
 
-    monkeypatch.setattr("management.utils.file_http.urlparse", fake_urlparse)
+    monkeypatch.setattr("management.api.file.http.urlparse", fake_urlparse)
 
     result = file_http._build_datamate_url_from_parts(
         "http://placeholder",
@@ -2524,7 +2524,7 @@ class TestFileAuditEntries:
         from fastapi.testclient import TestClient
 
         app = FastAPI()
-        app.include_router(runtime_file.file_management_runtime_router)
+        app.include_router(file_storage.router)
         client = TestClient(app)
 
         with caplog.at_level(logging.INFO, logger="audit.security"):

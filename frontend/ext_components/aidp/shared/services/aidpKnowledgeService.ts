@@ -23,7 +23,6 @@ import { ErrorCode, isSessionExpired } from "@/const/errorCode";
 import { parseAidpUploadError } from "@/ext_components/aidp/shared/services/aidpUploadUtils";
 import type {
   AidpKbDetail,
-  AidpDocumentListResponse,
   AidpUploadResponse,
   AidpDocumentRemoveResponse,
   AidpUploadTaskListResponse,
@@ -32,6 +31,10 @@ import type {
   AidpSetPermissionPayload,
   AidpSaveSettingsResult,
   AidpUpdateKbPayload,
+  AidpFolderTreeResponse,
+  AidpFolderOperationResult,
+  AidpFileMoveResponse,
+  AidpFileRenameResponse,
 } from "../types/management";
 import type {
   AidpChunk,
@@ -158,11 +161,23 @@ class AidpKnowledgeService {
     id: string,
     files: File[],
     onProgress: (loaded: number, total: number) => void,
-    signal: AbortSignal
+    signal: AbortSignal,
+    options: {
+      targetFolder?: string;
+      relativePaths?: string[];
+    } = {}
   ): Promise<AidpUploadResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
     const formData = new FormData();
     for (const file of files) formData.append("files", file);
+    if (options.targetFolder !== undefined) {
+      formData.append("target_folder", options.targetFolder);
+      const relativePaths =
+        options.relativePaths ?? files.map((file) => file.name);
+      for (const relativePath of relativePaths) {
+        formData.append("relative_paths", relativePath);
+      }
+    }
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -308,20 +323,24 @@ class AidpKnowledgeService {
   }
 
   /**
-   * List only files AIDP confirms as ingested; upload history stays separate.
-   * Backed by the /files endpoint (not the legacy /documents view).
+   * Read one folder level: direct subfolders plus the current folder's
+   * server-side paginated files.
    */
-  async listIngestedFiles(
+  async getFolderTree(
     id: string,
+    folderPath: string,
     page: number = 1,
     pageSize: number = 10,
     keyword: string = "",
+    includeFiles: boolean = true,
     signal?: AbortSignal
-  ): Promise<AidpDocumentListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+  ): Promise<AidpFolderTreeResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFolderTree(id), {
+      folder_path: folderPath,
       page,
       page_size: pageSize,
-      keyword,
+      include_files: includeFiles ? "true" : "false",
+      keyword: keyword.trim() || undefined,
     });
     const response = await fetchWithErrorHandling(url, {
       method: "GET",
@@ -330,13 +349,150 @@ class AidpKnowledgeService {
     });
     const result = await response.json();
     return {
-      value: Array.isArray(result.value) ? result.value : [],
-      total_count:
-        typeof result.total_count === "number" ? result.total_count : 0,
-      has_more:
-        typeof result.has_more === "boolean" ? result.has_more : undefined,
-      total_reliable: result.total_reliable !== false,
+      folder_id:
+        typeof result.folder_id === "number" ? result.folder_id : undefined,
+      folder_path:
+        typeof result.folder_path === "string"
+          ? result.folder_path
+          : folderPath,
+      folders: Array.isArray(result.folders) ? result.folders : [],
+      files: {
+        page: Number(result.files?.page) || page,
+        page_size: Number(result.files?.page_size) || pageSize,
+        total: Number(result.files?.total) || 0,
+        value: Array.isArray(result.files?.value) ? result.files.value : [],
+      },
     };
+  }
+
+  async createFolder(
+    id: string,
+    parentFolder: string,
+    folderName: string
+  ): Promise<AidpFolderOperationResult> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolders(id), {}),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parent_folder: parentFolder,
+          folder_name: folderName,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  async renameFolder(
+    id: string,
+    parentFolder: string,
+    oldFolderName: string,
+    newFolderName: string
+  ): Promise<AidpFolderOperationResult> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolders(id), {}),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parent_folder: parentFolder,
+          old_folder_name: oldFolderName,
+          new_folder_name: newFolderName,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  /** Delete one folder. AIDP only allows deleting empty folders. */
+  async deleteFolder(id: string, folderPath: string): Promise<void> {
+    await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolders(id), {
+        folder_path: folderPath,
+      }),
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }
+    );
+  }
+
+  async moveFolder(
+    id: string,
+    parentFolder: string,
+    folderName: string,
+    targetFolder: string
+  ): Promise<AidpFolderOperationResult> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFolderMove(id), {}),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          parent_folder: parentFolder,
+          folder_name: folderName,
+          target_folder: targetFolder,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  /** Move files into a folder; AIDP reports per-file outcomes. */
+  async moveFiles(
+    id: string,
+    fileUuids: string[],
+    targetFolder: string
+  ): Promise<AidpFileMoveResponse> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFileMove(id), {}),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_uuids: fileUuids,
+          target_folder: targetFolder,
+        }),
+      }
+    );
+    return response.json();
+  }
+
+  async renameFile(
+    id: string,
+    fileUuid: string,
+    newFileName: string
+  ): Promise<AidpFileRenameResponse> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {}),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_uuid: fileUuid,
+          new_file_name: newFileName,
+        }),
+      }
+    );
+    if (response.status === 204) return {};
+    const text = await response.text();
+    return text ? (JSON.parse(text) as AidpFileRenameResponse) : {};
   }
 
   /**

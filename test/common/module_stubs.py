@@ -8,7 +8,7 @@ from types import ModuleType
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_PROJECT_IMPORT_ROOTS = tuple(_PROJECT_ROOT / name for name in ("backend", "sdk", "test"))
+_PROJECT_IMPORT_ROOTS = tuple(_PROJECT_ROOT / name for name in ("backend", "infrastructure", "sdk", "test"))
 
 
 def _project_path(value):
