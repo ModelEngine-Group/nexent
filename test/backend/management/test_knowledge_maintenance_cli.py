@@ -10,7 +10,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from contracts.knowledge_maintenance import SourceFinding, SourceInspectionPage
+from contracts.knowledge_maintenance import (
+    LegacyVectorFileLink,
+    LegacyVectorFinding,
+    LegacyVectorPage,
+    SourceFinding,
+    SourceInspectionPage,
+)
 from management.maintenance import knowledge as module
 from nexent.storage.errors import Conflict, DeadlineExceeded, Unavailable
 
@@ -46,6 +52,39 @@ async def test_jsonl_pages_use_managed_worker_and_finished_marker(cli):
     assert result['pending_checks'] and all(name != 'MainThread' for name in observed)
     assert s.inspector.page.call_args_list[1].kwargs['cursor'] == 'next'
     assert s.factory.call_args.kwargs['cancellation_scope'].cancelled
+
+
+async def test_verify_files_checks_each_link_once_and_keeps_unresolved_documents(cli, monkeypatch):
+    from management.services.knowledge_base import legacy_migration, legacy_vectors
+
+    s = cli
+    s.args.verify_files = True
+    link = LegacyVectorFileLink(status='matched', file_id='b'*32, via='file_id', source_generation=0,
+                                lifecycle_revision=8)
+
+    def scan(knowledge_id, actor, emit, *, resolve_files, page_size, context):
+        assert knowledge_id == 1 and resolve_files
+        assert actor.tenant_id == 'tenant' and actor.user_id == 'operator'
+        for serial, file_link in enumerate((link, link.model_copy(update={'via': 'source_address'}),
+                                           LegacyVectorFileLink(status='unresolved'))):
+            emit(LegacyVectorPage(knowledge_id=1, index_name='kb', tenant_id=actor.tenant_id,
+                actor_id=actor.user_id, knowledge_revision='a'*64, collection_revision='c'*64,
+                documents=[LegacyVectorFinding(document_id_hash=str(serial)*64, revision=f'{serial}:1', file_link=file_link)]))
+        return {'file_resolution_counts': {'matched': 2, 'unresolved': 1}}
+
+    publication = AsyncMock(return_value='published')
+    monkeypatch.setattr(legacy_vectors, 'LegacyVectorInspector', Mock(return_value=SimpleNamespace(scan=scan)))
+    monkeypatch.setattr(legacy_migration, 'LegacyMigrationService',
+                        Mock(return_value=SimpleNamespace(verify_rebuilt_file=publication)))
+    result = await module.inspect_vectors(s.args)
+    assert result['file_publication_counts'] == {'published': 1}
+    assert result['file_resolution_counts'] == {'matched': 2, 'unresolved': 1}
+    assert result['migration_ready'] is False
+    publication.assert_awaited_once()
+    assert publication.await_args.args[1] == link
+    receipt, = [line for text in s.args.output.read_text().splitlines() if
+                (line := json.loads(text))['kind'] == 'legacy_vector_file_publication']
+    assert receipt['legacy_documents'] == 2 and receipt['status'] == 'published'
 
 
 async def test_existing_report_is_not_overwritten_and_does_not_query_storage(cli):

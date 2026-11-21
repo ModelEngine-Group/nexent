@@ -110,7 +110,40 @@ async def inspect_sources(args):
 
 
 async def inspect_vectors(args):
-    return await _inspect(args, _scan_vectors, 'legacy_vector', VECTOR_PENDING_CHECKS)
+    scanner = _verify_vector_files if getattr(args, 'verify_files', False) else _scan_vectors
+    return await _inspect(args, scanner, 'legacy_vector', VECTOR_PENDING_CHECKS)
+
+
+async def _verify_vector_files(args, scope, context, emit):
+    from management.services.knowledge_base.legacy_migration import LegacyMigrationService
+    from management.services.knowledge_base.legacy_vectors import LegacyVectorInspector
+
+    actor = ServicePrincipal(args.user_id, args.tenant_id)
+    inspector = LegacyVectorInspector(cancellation_scope=scope)
+    service = LegacyMigrationService(cancellation_scope=scope)
+    matched, document_counts, receipts = {}, Counter(), Counter()
+
+    def record(page):
+        for document in page.documents:
+            link = document.file_link
+            if link is None or link.status != 'matched':
+                continue
+            previous = matched.setdefault(link.file_id, link)
+            if (previous.lifecycle_revision, previous.source_generation) != (link.lifecycle_revision, link.source_generation):
+                raise Conflict()
+            document_counts[link.file_id] += 1
+        emit({'kind': 'legacy_vector_page', **page.model_dump(mode='json')})
+
+    result = await run_blocking('legacy-vector-file-inventory', inspector.scan, args.knowledge_id, actor, record,
+        page_size=args.page_size, resolve_files=True, context=context, lane='control-io', owner=__name__)
+    for file_id, link in sorted(matched.items()):
+        context.remaining()
+        status = await service.verify_rebuilt_file(args.knowledge_id, link, actor, context=context)
+        receipts[status] += 1
+        emit({'kind': 'legacy_vector_file_publication', 'file_id': file_id, 'status': status,
+            'source_generation': link.source_generation, 'lifecycle_revision': link.lifecycle_revision,
+            'legacy_documents': document_counts[file_id]})
+    return {**result, 'file_publication_counts': dict(receipts)}
 
 
 def _scan_tasks(args, scope, context, emit):
@@ -180,6 +213,8 @@ def main(argv=None):
         if command == 'inspect-vectors':
             inspect.add_argument('--resolve-files', action='store_true',
                 help='Relate old vectors to exact Management lifecycle rows without opening sources')
+            inspect.add_argument('--verify-files', action='store_true',
+                help='Resolve files and verify current Runtime publication through AgentOS')
         if command == 'archive-tasks':
             inspect.add_argument('--legacy-quiesced', action='store_true', required=True,
                 help='Operator confirms old admission and workers are stopped and drained; export includes private contents')

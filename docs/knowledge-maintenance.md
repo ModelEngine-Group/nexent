@@ -279,6 +279,15 @@ reported file generation and lifecycle revision when preparing the migration
 plan. Resolve ambiguous or conflicting references before using them as
 evidence. The report does not open source objects or verify Runtime publication.
 
+Use `inspect-vectors --verify-files` to resolve references and then check the
+publication of each matched file. The scan checks each file once, even when
+several legacy documents refer to it. Run it as the operator who originally
+performed the rebuild. Files rebuilt by another operator are reported without
+borrowing that operator's identity. The report contains the number of old
+documents associated with each file and whether its current Runtime publication
+was verified. These checks cover the matched files. Standalone chunks,
+unresolved references and other cutover requirements need separate evidence.
+
 ## Private legacy task archive
 
 After stopping and draining old admission and workers, export one authorized KB:

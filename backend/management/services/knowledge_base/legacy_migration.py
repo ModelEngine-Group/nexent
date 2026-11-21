@@ -10,7 +10,7 @@ from contracts.agentos_knowledge import (
     KnowledgeSearchAuthorization,
 )
 from contracts.constants import environment
-from contracts.errors.exceptions import RuntimeServiceTimeoutError
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeUpstreamError
 from contracts.knowledge_ingestion import (
     KnowledgeIngestionIntent,
     LegacyIngestionSnapshot,
@@ -43,6 +43,7 @@ from nexent.storage.errors import (
     NotFound,
     ScopeDenied,
 )
+from pydantic import ValidationError
 
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
@@ -295,13 +296,42 @@ class LegacyMigrationService:
         self._plan(plan, actor, check_parser=False, mapping=mapping)
         async with _deadline(context):
             row, resource = await self._blocking(self._selected, plan.knowledge_id, plan.file_id, actor, context)
+            await self._verify_current_publication(plan, row, resource, actor, context)
+            return row
+
+    async def verify_rebuilt_file(self, knowledge_id, link, actor, *, context):
+        async with _deadline(context):
             try:
-                saved = KnowledgeIngestionIntent.model_validate(row["ingestion_request"])
-                lookup = KnowledgeJobInspection(**plan._reference(), job_id=row["forward_task_id"],
-                                                confirm_publication=True)
-            except ValidationError:
-                raise Conflict(operation_id=context.operation_id) from None
-            if (saved != plan or row["status"] != "COMPLETED" or row["stage"] != "COMPLETE"
+                row, resource = await self._blocking(self._selected, knowledge_id, link.file_id, actor, context)
+                if row["version"] != link.lifecycle_revision or row["source_generation"] != link.source_generation:
+                    raise Conflict(operation_id=context.operation_id)
+                if row["ingestion_request"] is None:
+                    return "not_rebuilt"
+                plan = KnowledgeIngestionIntent.model_validate(row["ingestion_request"])
+                if plan.legacy_snapshot is None:
+                    return "not_rebuilt"
+                if plan.user_id != actor.user_id:
+                    return "different_operator"
+                self._plan(plan, actor, check_parser=False, mapping=plan.legacy_snapshot.previous_file_id is not None)
+                if plan.knowledge_id != knowledge_id or plan.file_id != link.file_id:
+                    raise Conflict(operation_id=context.operation_id)
+                await self._verify_current_publication(plan, row, resource, actor, context)
+            except (Conflict, NotFound, ValidationError):
+                return "unverified"
+            except RuntimeUpstreamError as error:
+                if error.status_code != 404:
+                    raise
+                return "unverified"
+            return "published"
+
+    async def _verify_current_publication(self, plan, row, resource, actor, context):
+        try:
+            saved = KnowledgeIngestionIntent.model_validate(row["ingestion_request"])
+            lookup = KnowledgeJobInspection(**plan._reference(), job_id=row["forward_task_id"],
+                                            confirm_publication=True)
+        except ValidationError:
+            raise Conflict(operation_id=context.operation_id) from None
+        if (saved != plan or row["status"] != "COMPLETED" or row["stage"] != "COMPLETE"
                 or row["runtime_status"] != "completed" or row["deletion_request"] is not None
                 or row["source_generation"] != plan.file_version
                 or [row[f"source_{name}"] for name in ("space", "key", "revision", "sha256")] !=
@@ -310,17 +340,16 @@ class LegacyMigrationService:
                 or resource.embedding_model_id != plan.embedding_model.model_id
                 or type(row["total_chunks"]) is not int or row["total_chunks"] < 0
                 or row["processed_chunks"] != row["total_chunks"]):
-                raise Conflict(operation_id=context.operation_id)
-            state = await self.client.inspect_knowledge_file(lookup, actor.user_id, actor.tenant_id)
-            if (state.publication_confirmed is not True or state.status != "completed"
+            raise Conflict(operation_id=context.operation_id)
+        state = await self.client.inspect_knowledge_file(lookup, actor.user_id, actor.tenant_id)
+        if (state.publication_confirmed is not True or state.status != "completed"
                 or state.writer_ended is not True or state.reconcile_required is not False
                 or state.total_chunks != row["total_chunks"] or state.processed_chunks != row["processed_chunks"]
                 or any(getattr(state, name) != getattr(lookup, name)
                        for name in ("knowledge_id", "file_id", "file_version", "job_id"))):
-                raise Conflict(operation_id=context.operation_id)
-            if await self._blocking(self._selected, plan.knowledge_id, plan.file_id, actor, context) != (row, resource):
-                raise Conflict(operation_id=context.operation_id)
-            return row
+            raise Conflict(operation_id=context.operation_id)
+        if await self._blocking(self._selected, plan.knowledge_id, plan.file_id, actor, context) != (row, resource):
+            raise Conflict(operation_id=context.operation_id)
 
     async def admit(self, plan, actor, *, context, task_archive=None):
         self._plan(plan, actor)

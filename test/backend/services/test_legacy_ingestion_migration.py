@@ -13,7 +13,7 @@ from contracts.knowledge_ingestion import (
     KnowledgeIngestionIntent,
     canonical_legacy_file_id,
 )
-from contracts.knowledge_maintenance import SourceFinding, SourceInspectionPage
+from contracts.knowledge_maintenance import LegacyVectorFileLink, SourceFinding, SourceInspectionPage
 from management.services.knowledge_base.legacy_migration import LegacyMigrationService
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
@@ -156,7 +156,23 @@ async def test_publication_verification_needs_the_current_runtime_generation(mig
     lookup, user, tenant = s.client.inspect_knowledge_file.await_args.args
     assert lookup.confirm_publication and lookup.job_id == "e" * 32
     assert (user, tenant) == (s.actor.user_id, s.actor.tenant_id)
+    link = LegacyVectorFileLink(status="matched", file_id=plan.file_id, via="file_id",
+                                lifecycle_revision=before["version"], source_generation=plan.file_version)
+    observed = await m.service.verify_rebuilt_file(1, link, s.actor, context=context())
+    assert observed == ("published" if evidence == "current" else "unverified")
+    assert await m.service.verify_rebuilt_file(1, link.model_copy(update={"lifecycle_revision": before["version"] + 1}),
+                                               s.actor, context=context()) == "unverified"
+    assert s.client.inspect_knowledge_file.await_count == 2
     assert s.row() == before
+
+
+async def test_bulk_verification_reports_old_lifecycle_without_a_plan(migration):
+    m = migration
+    row = m.s.row()
+    link = LegacyVectorFileLink(status="matched", file_id=row["file_id"], lifecycle_revision=row["version"],
+                                source_generation=row["source_generation"])
+    assert await m.service.verify_rebuilt_file(1, link, m.s.actor, context=context()) == "not_rebuilt"
+    m.s.client.inspect_knowledge_file.assert_not_awaited()
 
 
 @pytest.fixture
