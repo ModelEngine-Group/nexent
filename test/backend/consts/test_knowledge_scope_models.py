@@ -118,10 +118,10 @@ def test_conversation_scope_rejects_wrong_version():
         ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 4})
 
 
-def test_conversation_scope_accepts_v3_metadata_filter():
+def test_conversation_scope_accepts_metadata_filter():
     scope = ConversationKnowledgeScopeRequest.parse_obj(
         {
-            "schema_version": 3,
+            "schema_version": 1,
             "aidp": {
                 "mode": "inherit",
                 "metadata_filter": {
@@ -136,7 +136,7 @@ def test_conversation_scope_accepts_v3_metadata_filter():
         }
     )
 
-    assert scope.schema_version == 3
+    assert scope.schema_version == 1
     assert scope.aidp.metadata_filter.enabled is True
     assert scope.aidp.metadata_filter.match == "any"
     assert [item.value for item in scope.aidp.metadata_filter.conditions] == [
@@ -145,22 +145,7 @@ def test_conversation_scope_accepts_v3_metadata_filter():
     ]
 
 
-def test_metadata_filter_requires_v3_and_rejects_disabled_mode():
-    with pytest.raises(ValidationError):
-        ConversationKnowledgeScopeRequest.parse_obj(
-            {
-                "schema_version": 2,
-                "aidp": {
-                    "mode": "inherit",
-                    "metadata_filter": {
-                        "enabled": True,
-                        "conditions": [
-                            {"operator": "contains", "value": "合同"}
-                        ],
-                    },
-                },
-            }
-        )
+def test_metadata_filter_rejects_disabled_or_empty_mode():
     with pytest.raises(ValidationError):
         AidpKnowledgeScopeRequest.parse_obj(
             {

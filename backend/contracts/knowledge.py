@@ -188,19 +188,11 @@ class AidpKnowledgeScopeRequest(BaseModel):
 class ConversationKnowledgeScopeRequest(BaseModel):
     """Persisted knowledge resource selection; retrieval parameters belong to tools."""
 
-    schema_version: Literal[1, 2, 3] = 1
+    schema_version: Literal[1] = 1
     local: LocalKnowledgeScopeRequest = Field(
         default_factory=LocalKnowledgeScopeRequest
     )
     aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
-
-    @model_validator(mode="after")
-    def validate_schema_version(self):
-        if self.schema_version < 3 and self.aidp.metadata_filter.enabled:
-            raise ValueError(
-                "AIDP metadata filter requires knowledge_scope schema_version 3"
-            )
-        return self
 
 
 class ConversationKnowledgeScopeUpdateRequest(BaseModel):

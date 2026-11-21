@@ -18,7 +18,7 @@ export interface AidpMetadataFilter {
 }
 
 export interface ConversationKnowledgeScope {
-  schema_version: 1 | 2 | 3;
+  schema_version: 1;
   local: {
     mode: KnowledgeScopeMode;
     knowledge_ids: string[];
@@ -86,7 +86,7 @@ export function withAidpMetadataFilter(
     : undefined;
   return {
     ...base,
-    schema_version: normalized ? 3 : (base.schema_version ?? 1),
+    schema_version: 1,
     local: { ...base.local },
     aidp: {
       mode: base.aidp.mode,
