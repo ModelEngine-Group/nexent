@@ -57,13 +57,6 @@ const jsonRequest = async <T>(
 };
 
 class AidpOntologyService {
-  /** Whether this deployment is wired to the local demo data source. */
-  getDemoMode(): Promise<{ demo: boolean }> {
-    return jsonRequest<{ demo: boolean }>(
-      API_ENDPOINTS.aidpMgmt.ontology.demoMode
-    );
-  }
-
   listDomains(
     page = 1,
     pageSize = 20,

@@ -28,7 +28,6 @@ import {
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import { ruleOperatorLabel } from "@/ext_components/aidp/shared/utils/aidpOntologyRule";
@@ -70,7 +69,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   const { message, modal } = App.useApp();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
-  const demo = useAidpOntologyDemoMode();
   const { user, isAuthzReady } = useAuthorizationContext();
   const canManage = !!user && MANAGER_ROLES.has(user.role) && isAuthzReady;
   const [page, setPage] = useState(1);
@@ -157,11 +155,9 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       const payload = { ...toPayload(detail), enabled };
       await aidpOntologyService.updateRule(domainId, rule.rule_id, payload);
       message.success(
-        demo
-          ? t("aidpKnowledge.ontologyRulesToggleDemo")
-          : enabled
-            ? t("aidpKnowledge.ontologyRulesEnabledDone")
-            : t("aidpKnowledge.ontologyRulesDisabledDone")
+        enabled
+          ? t("aidpKnowledge.ontologyRulesEnabledDone")
+          : t("aidpKnowledge.ontologyRulesDisabledDone")
       );
       refresh();
     } catch (error) {

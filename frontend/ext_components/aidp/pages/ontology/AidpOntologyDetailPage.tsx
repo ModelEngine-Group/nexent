@@ -34,15 +34,15 @@ import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/ai
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
-import AidpOntologyDomainDrawer from "./components/AidpOntologyDomainDrawer";
-import AidpOntologyEntityTab from "./components/AidpOntologyEntityTab";
-import AidpOntologyBindingsTab from "./components/AidpOntologyBindingsTab";
-import AidpOntologyMetadataTab from "./components/AidpOntologyMetadataTab";
-import AidpOntologyImportDrawer from "./components/AidpOntologyImportDrawer";
-import AidpOntologyExportModal from "./components/AidpOntologyExportModal";
-import AidpOntologyDeleteModal from "./components/AidpOntologyDeleteModal";
-import AidpOntologyRulesTab from "./components/AidpOntologyRulesTab";
-import AidpOntologyTasksTab from "./components/AidpOntologyTasksTab";
+import AidpOntologyDomainDrawer from "./components/common/AidpOntologyDomainDrawer";
+import AidpOntologyEntityTab from "./components/entity/AidpOntologyEntityTab";
+import AidpOntologyBindingsTab from "./components/binding/AidpOntologyBindingsTab";
+import AidpOntologyMetadataTab from "./components/metadata/AidpOntologyMetadataTab";
+import AidpOntologyImportDrawer from "./components/common/AidpOntologyImportDrawer";
+import AidpOntologyExportModal from "./components/common/AidpOntologyExportModal";
+import AidpOntologyDeleteModal from "./components/common/AidpOntologyDeleteModal";
+import AidpOntologyRulesTab from "./components/rule/AidpOntologyRulesTab";
+import AidpOntologyTasksTab from "./components/task/AidpOntologyTasksTab";
 import styles from "./AidpOntologyDetailPage.module.css";
 
 type DetailTab = "metadata" | "entities" | "rules" | "bindings" | "tasks";

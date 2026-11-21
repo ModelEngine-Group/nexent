@@ -55,9 +55,9 @@ import {
 } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
-import AidpOntologyDomainDrawer from "./components/AidpOntologyDomainDrawer";
-import AidpOntologyDeleteModal from "./components/AidpOntologyDeleteModal";
-import AidpOntologyGuide from "./components/AidpOntologyGuide";
+import AidpOntologyDomainDrawer from "./components/common/AidpOntologyDomainDrawer";
+import AidpOntologyDeleteModal from "./components/common/AidpOntologyDeleteModal";
+import AidpOntologyGuide from "./components/common/AidpOntologyGuide";
 import styles from "./AidpOntologyListPage.module.css";
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;

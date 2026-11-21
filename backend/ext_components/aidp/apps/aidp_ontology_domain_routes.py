@@ -13,7 +13,6 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
-from contracts.constants.environment import AIDP_MOCK_MODE
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.apps.aidp_mgmt_common import _auth, _credentials
 from ext_components.aidp.apps.aidp_ontology_common import (
@@ -61,15 +60,6 @@ from ext_components.aidp.services.aidp_ontology_metadata_service import (
 
 logger = logging.getLogger("aidp_ontology_domain_routes")
 aidp_ontology_domain_router = APIRouter()
-
-
-@aidp_ontology_domain_router.get("/demo-mode")
-async def get_ontology_demo_mode(request: Request) -> JSONResponse:
-    """Tell the browser whether this deployment uses the local demo data source."""
-    await _auth(request)
-    return JSONResponse(
-        status_code=HTTPStatus.OK, content={"demo": bool(AIDP_MOCK_MODE)}
-    )
 
 
 @aidp_ontology_domain_router.get("/domains")

@@ -6516,17 +6516,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/aidp-mgmt/ontology/demo-mode",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_ontology_app.py",
-      "route_id": "route-9bd3466bafdcc49a",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "GET",
       "path": "/api/aidp-mgmt/ontology/domains",
       "transport": "http",
       "target": "management",

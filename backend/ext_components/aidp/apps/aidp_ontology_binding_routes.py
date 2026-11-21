@@ -215,8 +215,8 @@ async def get_knowledge_base_binding(
     """Resolve a knowledge base's current ontology binding.
 
     AIDP exposes no by-KB query, so this scans every domain's binding list and
-    filters locally (bounded by the service). Real and demo modes share the
-    same path; a failed scan degrades to "no binding" rather than inventing one.
+    filters locally (bounded by the service); a failed scan degrades to "no
+    binding" rather than inventing one.
     """
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")

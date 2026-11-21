@@ -27,7 +27,6 @@ import {
 } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
@@ -70,7 +69,6 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   const { modal, message } = App.useApp();
   const scope = useAidpQueryScope();
   const queryClient = useQueryClient();
-  const demo = useAidpOntologyDemoMode();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<ReadonlyView>("metadata");
   const [search, setSearch] = useState("");
@@ -380,7 +378,7 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
     return <Skeleton active paragraph={{ rows: 4 }} />;
   }
 
-  if (bindingQuery.isError && demo) {
+  if (bindingQuery.isError) {
     return (
       <div className={styles.errorBlock} role="alert">
         {getAidpErrorMessage(

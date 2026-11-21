@@ -8,7 +8,6 @@ import { Button, Input, Popover, Table, type TableColumnsType } from "antd";
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyTask } from "@/ext_components/aidp/shared/types/ontology";
@@ -31,7 +30,7 @@ type TaskStatus =
   | "partial_success"
   | "terminated";
 
-interface DemoTaskRow {
+interface TaskRow {
   id: string;
   name: string;
   status: TaskStatus;
@@ -59,7 +58,7 @@ const TASK_STATUS_MAP: Record<string, TaskStatus> = {
 };
 
 /** Map one confirmed AIDP task row into the table row shape. */
-const toTaskRow = (task: AidpOntologyTask): DemoTaskRow => ({
+const toTaskRow = (task: AidpOntologyTask): TaskRow => ({
   id: task.task_id ?? "—",
   name: task.task_type ?? "—",
   status: TASK_STATUS_MAP[String(task.status ?? "").toLowerCase()] ?? "queued",
@@ -68,60 +67,6 @@ const toTaskRow = (task: AidpOntologyTask): DemoTaskRow => ({
   endTime: task.end_time ? formatAidpDateTime(task.end_time) : null,
   errorReason: task.error_message || undefined,
 });
-
-/**
- * Local mock task fixtures.
- *
- * AIDP does expose GET /KnowledgeBase/Tenants/{tenant}/Tasks (task_list
- * envelope), so real mode uses that API. These rows are only for the local mock
- * data source. AIDP tasks carry no ontology domain id, so the real list is
- * tenant-wide rather than scoped to this ontology.
- */
-const DEMO_TASKS: DemoTaskRow[] = [
-  {
-    id: "29303-3",
-    name: "同步实体",
-    status: "queued",
-    progress: 0,
-    startTime: "2023-01-12 15:30",
-    endTime: null,
-  },
-  {
-    id: "29303-4",
-    name: "新增元数据",
-    status: "success",
-    progress: 100,
-    startTime: "2023-01-12 15:30",
-    endTime: "2023-01-12 15:31",
-  },
-  {
-    id: "29303-5",
-    name: "更新元数据",
-    status: "running",
-    progress: 45,
-    startTime: "2023-01-12 15:30",
-    endTime: null,
-  },
-  {
-    id: "29303-6",
-    name: "新增元数据",
-    status: "failed",
-    progress: 50,
-    startTime: "2023-01-12 15:30",
-    endTime: "2023-01-12 15:31",
-    errorCode: "VEC101",
-    errorReason:
-      "额度耗尽：请求 VEC102 向量服务网络不通、连接超时、服务宕机；VEC103 Chunk 文本过长，超出模型输入 Token 上限；VEC104 批量分片数量超限，接口批量写入被限流。",
-  },
-  {
-    id: "29303-7",
-    name: "新增元数据",
-    status: "terminated",
-    progress: 50,
-    startTime: "2023-01-12 15:30",
-    endTime: "2023-01-12 15:31",
-  },
-];
 
 const localizedTaskType = (t: (key: string) => string, raw: string): string => {
   const key = `aidpKnowledge.ontologyTaskType.${raw}`;
@@ -140,7 +85,6 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
 
 const AidpOntologyTasksTab: React.FC = () => {
   const { t } = useTranslation();
-  const demo = useAidpOntologyDemoMode();
   const scope = useAidpQueryScope();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -149,14 +93,14 @@ const AidpOntologyTasksTab: React.FC = () => {
   const tasksQuery = useQuery({
     queryKey: [...scope.key, "ontology-tasks", page, pageSize],
     queryFn: () => aidpOntologyService.listTasks(page, pageSize),
-    enabled: scope.enabled && !demo,
+    enabled: scope.enabled,
     retry: false,
   });
 
-  const rows = useMemo(() => {
-    if (demo) return DEMO_TASKS;
-    return (tasksQuery.data?.value ?? []).map(toTaskRow);
-  }, [demo, tasksQuery.data?.value]);
+  const rows = useMemo(
+    () => (tasksQuery.data?.value ?? []).map(toTaskRow),
+    [tasksQuery.data?.value]
+  );
   const statusLabel = (status: TaskStatus) =>
     t(`aidpKnowledge.ontologyTaskStatus.${status}`);
 
@@ -173,13 +117,13 @@ const AidpOntologyTasksTab: React.FC = () => {
     );
   }, [rows, search, t]);
 
-  const columns: TableColumnsType<DemoTaskRow> = [
+  const columns: TableColumnsType<TaskRow> = [
     {
       title: t("aidpKnowledge.ontologyTaskColumnName"),
       dataIndex: "name",
       key: "name",
       width: 140,
-      render: (value: string) => (demo ? value : taskNameLabel(value)),
+      render: (value: string) => taskNameLabel(value),
     },
     {
       title: t("aidpKnowledge.ontologyTaskColumnId"),
@@ -319,24 +263,22 @@ const AidpOntologyTasksTab: React.FC = () => {
           <Button
             type="text"
             aria-label={t("aidpKnowledge.refresh")}
-            icon={<ReloadOutlined spin={!demo && tasksQuery.isFetching} />}
+            icon={<ReloadOutlined spin={tasksQuery.isFetching} />}
             onClick={() => void tasksQuery.refetch()}
           />
         </div>
       </div>
-      {!demo && (
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyTaskSortGap")}
-        </AidpOntologyGapNote>
-      )}
+      <AidpOntologyGapNote>
+        {t("aidpKnowledge.ontologyTaskSortGap")}
+      </AidpOntologyGapNote>
       <div className={tableStyles.tableArea} ref={tableContainer}>
-        <Table<DemoTaskRow>
+        <Table<TaskRow>
           rowKey="id"
           size="middle"
           className={tableStyles.table}
           columns={resizableColumns}
           dataSource={filteredRows}
-          loading={!demo && tasksQuery.isLoading}
+          loading={tasksQuery.isLoading}
           pagination={false}
           tableLayout="fixed"
           components={{ header: { cell: AidpResizableTitle } }}
@@ -350,14 +292,12 @@ const AidpOntologyTasksTab: React.FC = () => {
       </div>
       {rows.length > 0 && (
         <AidpPagination
-          currentPage={demo ? 1 : page}
-          pageSize={demo ? 10 : pageSize}
+          currentPage={page}
+          pageSize={pageSize}
           pageSizeOptions={[10, 20, 50, 100]}
-          total={
-            demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)
-          }
+          total={tasksQuery.data?.total_count ?? rows.length}
           totalReliable
-          hasMore={demo ? false : Boolean(tasksQuery.data?.has_more)}
+          hasMore={Boolean(tasksQuery.data?.has_more)}
           onPageChange={(nextPage) => setPage(nextPage)}
           onPageSizeChange={(nextSize) => {
             setPageSize(nextSize);

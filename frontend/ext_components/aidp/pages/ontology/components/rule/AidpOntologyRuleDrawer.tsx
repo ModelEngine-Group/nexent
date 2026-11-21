@@ -27,7 +27,6 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
@@ -231,7 +230,6 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const scope = useAidpQueryScope();
-  const demo = useAidpOntologyDemoMode();
   const [form] = Form.useForm<RuleFormValues>();
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -412,18 +410,10 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
       const payload = buildPayload(values);
       if (ruleId) {
         await aidpOntologyService.updateRule(domainId, ruleId, payload);
-        message.success(
-          demo
-            ? t("aidpKnowledge.ontologyRulesSavedDemo")
-            : t("aidpKnowledge.ontologyRulesSaved")
-        );
+        message.success(t("aidpKnowledge.ontologyRulesSaved"));
       } else {
         await aidpOntologyService.createRule(domainId, payload);
-        message.success(
-          demo
-            ? t("aidpKnowledge.ontologyRulesCreatedDemo")
-            : t("aidpKnowledge.ontologyRulesCreated")
-        );
+        message.success(t("aidpKnowledge.ontologyRulesCreated"));
       }
       onSaved();
     } catch (error) {

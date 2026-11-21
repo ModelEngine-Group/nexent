@@ -6,7 +6,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Database, FolderPlus, Link2, Workflow } from "lucide-react";
 
-import styles from "../../knowledge-list/AidpKnowledgeGuide.module.css";
+import styles from "../../../knowledge-list/AidpKnowledgeGuide.module.css";
 
 /**
  * Static tutorial shown above the ontology list.

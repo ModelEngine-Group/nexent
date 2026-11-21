@@ -535,7 +535,6 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/count`,
       rule: (domainId: string, ruleId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/${encodeURIComponent(ruleId)}`,
-      demoMode: `${API_BASE_URL}/aidp-mgmt/ontology/demo-mode`,
       export: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/export`,
       import: (domainId: string) =>
