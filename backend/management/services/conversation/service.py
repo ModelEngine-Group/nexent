@@ -668,11 +668,7 @@ def update_conversation_knowledge_scope_service(
                 "disabled": resolved.aidp_disabled,
                 "kds_ids": resolved.aidp_kds_ids,
                 "display_names": resolved.aidp_display_names,
-                "metadata_filter": (
-                    resolved.aidp_metadata_filter
-                    if isinstance(getattr(resolved, "aidp_metadata_filter", None), dict)
-                    else {"enabled": False}
-                ),
+                "metadata_filter": resolved.aidp_metadata_filter,
             },
         }
     elif knowledge_scope is not None:

@@ -100,7 +100,7 @@ class AidpMetadataFilterRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_conditions(self):
-        unique: List[AidpFileNameCondition] = []
+        unique = []
         seen = set()
         for condition in self.conditions:
             key = (condition.operator, condition.value)
@@ -108,15 +108,14 @@ class AidpMetadataFilterRequest(BaseModel):
                 continue
             seen.add(key)
             unique.append(condition)
-        self.conditions = unique
-        if self.enabled and not self.conditions:
-            raise ValueError(
-                "enabled AIDP metadata filter requires a file-name condition"
-            )
-        if not self.enabled and self.conditions:
-            raise ValueError(
-                "disabled AIDP metadata filter does not accept conditions"
-            )
+        if self.enabled:
+            if not unique:
+                raise ValueError(
+                    "enabled AIDP metadata filter requires a file-name condition"
+                )
+            self.conditions = unique
+        else:
+            self.conditions = []
         return self
 
 

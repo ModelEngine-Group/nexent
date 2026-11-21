@@ -69,8 +69,7 @@ const SEARCH_TIMEOUT_MS = 8000;
 const SEARCH_DISPLAY_LIMIT = 50;
 
 function searchableFileName(item: AidpDocumentItem): string {
-  const name = String(item.original_file_name || item.file_name || "").trim();
-  return name || String(item.file_uuid || "").trim();
+  return String(item.original_file_name || item.file_name || "").trim();
 }
 
 function FileConditionRow({
@@ -134,7 +133,7 @@ function FileConditionRow({
           SEARCH_TIMEOUT_MS
         );
         try {
-          const response = await aidpKnowledgeService.listIngestedFiles(
+          const items = await aidpKnowledgeService.listIngestedFiles(
             target.id,
             1,
             SEARCH_PAGE_SIZE,
@@ -147,7 +146,7 @@ function FileConditionRow({
           ) {
             return;
           }
-          response.value.forEach((item) => {
+          items.forEach((item) => {
             const name = searchableFileName(item);
             if (!name) return;
             const existing = aggregated.get(name);

@@ -7175,7 +7175,6 @@
   "chat.knowledgeScope.filterOperatorIs": "等于",
   "chat.knowledgeScope.filterOperatorStartsWith": "开头是",
   "chat.knowledgeScope.filterOperatorEndsWith": "结尾是",
-  "chat.knowledgeScope.scopeTitle": "知识库检索范围",
   "trajectory.export": "导出",
   "trajectory.import": "导入",
   "trajectory.exportFailed": "轨迹导出失败",

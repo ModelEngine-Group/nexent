@@ -188,7 +188,7 @@ class AidpSearchTool(Tool):
         metadata_filter: dict = Field(
             default_factory=dict,
             exclude=True,
-            description="Server-installed conversation metadata filter: {enabled, file_name: {operator, value}}",
+            description="Server-installed conversation metadata filter: {enabled, match, conditions}",
         ),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):
@@ -270,13 +270,13 @@ class AidpSearchTool(Tool):
         self,
         query: str,
         kds_list: List[str],
-        extra_payload: Optional[Dict[str, Any]] = None,
+        metadata_condition: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return build_payload(
             {key: getattr(self, key) for key in CONFIG_KEYS},
             query,
             kds_list,
-            extra_payload,
+            metadata_condition,
         )
 
     def _emit_running_prompt(self, query: str) -> None:
@@ -401,12 +401,12 @@ class AidpSearchTool(Tool):
         self,
         query: str,
         kds_list: List[str],
-        extra_payload: Optional[Dict[str, Any]] = None,
+        metadata_condition: Optional[Dict[str, Any]] = None,
     ):
         """Retrieve records through the shared transport and response boundary."""
         return post_retrieval(
             self._http_client, self._build_retrieve_url(), self.api_key,
-            self._build_retrieve_payload(query.strip(), kds_list, extra_payload),
+            self._build_retrieve_payload(query.strip(), kds_list, metadata_condition),
         )
 
     def _build_image_url(self, file_url: str) -> str:
@@ -576,7 +576,7 @@ class AidpSearchTool(Tool):
                 scope.scope_was_specified,
             )
 
-        request_filter = None
+        metadata_condition = None
         if self.metadata_filter.get("enabled"):
             if "graph_search" in active_channels(self.search_method):
                 # Graph retrieval does not consume metadata_condition. The
@@ -587,20 +587,13 @@ class AidpSearchTool(Tool):
                     "AIDP metadata filter ignored because graph retrieval is enabled"
                 )
             else:
-                try:
-                    request_filter = metadata_filter_rules.build_metadata_condition(
-                        self.metadata_filter
-                    )
-                except metadata_filter_rules.AidpMetadataFilterUnavailableError:
-                    logger.warning(
-                        "AIDP metadata filter cannot be represented as a request condition; "
-                        "no request was sent"
-                    )
-                    return metadata_filter_rules.FILTER_UNAVAILABLE_MESSAGE
+                metadata_condition = metadata_filter_rules.build_metadata_condition(
+                    self.metadata_filter
+                )
 
         self._emit_running_prompt(query)
 
-        records = self._execute_request(query, search_kds_list, request_filter)
+        records = self._execute_request(query, search_kds_list, metadata_condition)
 
         if not records:
             logger.info(

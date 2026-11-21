@@ -60,12 +60,6 @@ export function normalizeAidpMetadataFilter(
   };
 }
 
-export function getAidpMetadataFilter(
-  scope: ConversationKnowledgeScope | null | undefined
-): AidpMetadataFilter {
-  return normalizeAidpMetadataFilter(scope?.aidp.metadata_filter);
-}
-
 export function withAidpMetadataFilter(
   scope: ConversationKnowledgeScope | null | undefined,
   filter: AidpMetadataFilter | null | undefined
@@ -117,9 +111,6 @@ export interface KnowledgeCapabilities {
     aidp: {
       enabled: boolean;
       max_select: number;
-      metadata_filter_supported?: boolean;
-      metadata_filter_graph_supported?: boolean;
-      search_method?: string | null;
       graph_search_enabled?: boolean;
       default_summary: string;
       default_knowledge_ids: string[];

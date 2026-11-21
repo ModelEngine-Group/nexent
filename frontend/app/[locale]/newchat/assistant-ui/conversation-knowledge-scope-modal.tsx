@@ -68,8 +68,7 @@ const copyScope = (
 ): ConversationKnowledgeScope => {
   const scope = JSON.parse(
     JSON.stringify({
-      schema_version:
-        (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).schema_version ?? 1,
+      schema_version: 1,
       local: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).local,
       aidp: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).aidp,
     })
@@ -513,10 +512,6 @@ export const ConversationKnowledgeScopeModal: FC<
   const handleConfirm = async () => {
     if (!configuredSource || loading || saving || resourceError) return;
     const draftFilter = draft.aidp.metadata_filter;
-    const graphSearchEnabled = Boolean(
-      capabilities?.sources.aidp.graph_search_enabled ||
-      capabilities?.sources.aidp.search_method?.includes("graph_search")
-    );
     if (
       configuredSource === "aidp" &&
       !graphSearchEnabled &&
@@ -959,10 +954,7 @@ export const ConversationKnowledgeScopeModal: FC<
   const drawerSelection = source ? getSourceSelection(source) : null;
   const draftFilter = draft.aidp.metadata_filter;
   const aidpCapabilities = capabilities?.sources.aidp;
-  const graphSearchEnabled = Boolean(
-    aidpCapabilities?.graph_search_enabled ||
-    aidpCapabilities?.search_method?.includes("graph_search")
-  );
+  const graphSearchEnabled = Boolean(aidpCapabilities?.graph_search_enabled);
   const filterAvailable = source === "aidp" && !graphSearchEnabled;
   const filterIncomplete = Boolean(
     filterAvailable &&
@@ -997,7 +989,7 @@ export const ConversationKnowledgeScopeModal: FC<
   const scopeDrawer = (
     <WorkbenchResourceDrawer
       open={open}
-      title={t("chat.knowledgeScope.scopeTitle")}
+      title={t("chat.knowledgeScope.title")}
       onCancel={onCancel}
       onConfirm={() => {
         if (!disabled) void handleConfirm();
@@ -1105,7 +1097,7 @@ export const ConversationKnowledgeScopeModal: FC<
         <ResourcePickerPresentation
           presentation={presentation}
           disabled={disabled}
-          title={t("chat.knowledgeScope.scopeTitle")}
+          title={t("chat.knowledgeScope.title")}
           open={open}
           onCancel={onCancel}
           onOk={() => {

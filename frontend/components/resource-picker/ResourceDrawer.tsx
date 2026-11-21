@@ -512,8 +512,6 @@ export interface ResourceDrawerProps {
   children: ReactNode;
   /** Fixed controls above the scrollable resource content. */
   controlsContent?: ReactNode;
-  /** Fixed content above the search row, e.g. a mode switch. */
-  headerContent?: ReactNode;
   /** Fixed content between the pagination row and the footer, e.g. advanced filter. */
   filterContent?: ReactNode;
   contentClassName?: string;
@@ -578,7 +576,6 @@ export function ResourceDrawer({
   selectedTrailing,
   children,
   controlsContent,
-  headerContent,
   filterContent,
   contentClassName,
   paginationContent,
@@ -642,11 +639,6 @@ export function ResourceDrawer({
         disabled={disabled || confirmLoading}
         className="m-0 flex min-h-0 min-w-0 flex-1 flex-col gap-4 border-0 p-0"
       >
-        {headerContent !== undefined && (
-          <div data-picker-part="header-extra" className="shrink-0">
-            {headerContent}
-          </div>
-        )}
         {searchContent !== undefined ? (
           searchContent
         ) : searchPlaceholder !== undefined ? (

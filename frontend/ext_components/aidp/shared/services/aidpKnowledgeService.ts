@@ -35,7 +35,7 @@ import type {
   AidpFolderOperationResult,
   AidpFileMoveResponse,
   AidpFileRenameResponse,
-  AidpIngestedFileListResponse,
+  AidpDocumentItem,
 } from "../types/management";
 
 function buildUrl(
@@ -495,7 +495,7 @@ class AidpKnowledgeService {
     pageSize: number = 10,
     keyword: string = "",
     signal?: AbortSignal
-  ): Promise<AidpIngestedFileListResponse> {
+  ): Promise<AidpDocumentItem[]> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
       page,
       page_size: pageSize,
@@ -507,14 +507,7 @@ class AidpKnowledgeService {
       signal,
     });
     const result = await response.json();
-    return {
-      value: Array.isArray(result.value) ? result.value : [],
-      total_count:
-        typeof result.total_count === "number" ? result.total_count : 0,
-      has_more:
-        typeof result.has_more === "boolean" ? result.has_more : undefined,
-      total_reliable: result.total_reliable !== false,
-    };
+    return Array.isArray(result.value) ? result.value : [];
   }
 
   /**

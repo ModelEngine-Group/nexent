@@ -7178,7 +7178,6 @@
   "chat.knowledgeScope.filterOperatorIs": "equals",
   "chat.knowledgeScope.filterOperatorStartsWith": "starts with",
   "chat.knowledgeScope.filterOperatorEndsWith": "ends with",
-  "chat.knowledgeScope.scopeTitle": "Knowledge base retrieval scope",
   "trajectory.export": "Export",
   "trajectory.import": "Import",
   "trajectory.exportFailed": "Failed to export trajectory",

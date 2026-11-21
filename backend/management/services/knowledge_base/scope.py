@@ -279,11 +279,6 @@ def get_agent_knowledge_capabilities(
         "aidp": {
             "enabled": aidp_enabled,
             "max_select": AIDP_MAX_SELECT,
-            "metadata_filter_supported": True,
-            "metadata_filter_graph_supported": False,
-            "search_method": (
-                aidp_search_methods[0] if aidp_search_methods else None
-            ),
             "graph_search_enabled": any(
                 "graph_search" in active_channels(method)
                 for method in aidp_search_methods
@@ -451,7 +446,7 @@ def resolve_knowledge_scope(
     scope_overrides: Dict[str, Dict[str, Dict[str, Any]]] = {}
     effective_local_indices: List[str] = []
     effective_aidp_ids: List[str] = []
-    aidp_tool_kds: Dict[tuple[str, str], List[str]] = {}
+    aidp_tool_names: List[tuple[str, str]] = []
     local_capable = False
     aidp_capable = False
 
@@ -492,7 +487,10 @@ def resolve_knowledge_scope(
                     kds_ids = list(aidp_ids)
                 else:
                     kds_ids = []
-                aidp_tool_kds[(agent_name, identifier)] = list(kds_ids)
+                scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
+                    AIDP_RANGE_PARAM
+                ] = kds_ids
+                aidp_tool_names.append((agent_name, identifier))
                 effective_aidp_ids.extend(kds_ids)
 
     if scope.local.mode == "override" and not local_capable:
@@ -511,14 +509,9 @@ def resolve_knowledge_scope(
     effective_local_indices = list(dict.fromkeys(effective_local_indices))
     effective_aidp_ids = list(dict.fromkeys(effective_aidp_ids))
 
-    for (agent_name, identifier), kds_ids in aidp_tool_kds.items():
-        scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
-            AIDP_RANGE_PARAM
-        ] = kds_ids
-
     aidp_metadata_filter: Dict[str, Any] = {"enabled": False}
     requested_filter = scope.aidp.metadata_filter
-    if requested_filter.enabled and requested_filter.conditions:
+    if requested_filter.enabled:
         aidp_metadata_filter = {
             "enabled": True,
             "match": requested_filter.match,
@@ -529,7 +522,7 @@ def resolve_knowledge_scope(
         }
         # The filter applies to every AIDP tool of the run; the tool itself
         # decides the effective kds_list, so no per-tool filtering is needed.
-        for agent_name, identifier in aidp_tool_kds:
+        for agent_name, identifier in aidp_tool_names:
             scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
                 AIDP_METADATA_FILTER_PARAM
             ] = aidp_metadata_filter
@@ -667,10 +660,6 @@ def resolve_executable_knowledge_scope(
                     name: value for name, value in metadata.get("kds_name_to_id_map", {}).items()
                     if value in allowed
                 }
-                if AIDP_METADATA_FILTER_PARAM in params:
-                    metadata[AIDP_METADATA_FILTER_PARAM] = params[
-                        AIDP_METADATA_FILTER_PARAM
-                    ]
             tool.metadata = metadata
     return compiled, resolved
 
