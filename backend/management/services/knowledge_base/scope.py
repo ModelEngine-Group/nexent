@@ -732,16 +732,6 @@ def build_runtime_knowledge_resources(
     resolved: ResolvedKnowledgeScope,
 ) -> dict[str, Any]:
     """Project the authorized scope to bounded, display-only SDK inputs."""
-    metadata_filter = (
-        resolved.aidp_metadata_filter
-        if isinstance(getattr(resolved, "aidp_metadata_filter", None), dict)
-        else {"enabled": False}
-    )
-    file_name = (
-        metadata_filter.get("file_name")
-        if isinstance(metadata_filter.get("file_name"), dict)
-        else {}
-    )
     return {
         "local_capable": resolved.local_capable,
         "aidp_capable": resolved.aidp_capable,
@@ -749,13 +739,4 @@ def build_runtime_knowledge_resources(
         "aidp_disabled": resolved.aidp_disabled,
         "local_display_names": _bounded_resource_names(resolved.local_display_names, LOCAL_MAX_SELECT),
         "aidp_display_names": _bounded_resource_names(resolved.aidp_display_names, AIDP_MAX_SELECT),
-        "aidp_metadata_filter": {
-            "enabled": bool(metadata_filter.get("enabled")),
-            "file_name": {
-                "operator": _sanitize_resource_name(
-                    file_name.get("operator") or "contains"
-                ),
-                "value": _sanitize_resource_name(file_name.get("value") or ""),
-            },
-        },
     }

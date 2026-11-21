@@ -154,7 +154,9 @@ def test_metadata_filter_requires_v3_and_rejects_disabled_mode():
                     "mode": "inherit",
                     "metadata_filter": {
                         "enabled": True,
-                        "file_name": {"operator": "contains", "value": "合同"},
+                        "conditions": [
+                            {"operator": "contains", "value": "合同"}
+                        ],
                     },
                 },
             }
@@ -165,7 +167,9 @@ def test_metadata_filter_requires_v3_and_rejects_disabled_mode():
                 "mode": "disabled",
                 "metadata_filter": {
                     "enabled": True,
-                    "file_name": {"operator": "contains", "value": "合同"},
+                    "conditions": [
+                        {"operator": "contains", "value": "合同"}
+                    ],
                 },
             }
         )

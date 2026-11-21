@@ -222,15 +222,9 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     if not out.get("original_file_name"):
         name = str(out.get("file_name") or "").strip()
         file_type = str(out.get("file_type") or "").strip().lstrip(".")
-        if (
-            name
-            and file_type
-            and file_type.isascii()
-            and file_type.isalnum()
-            and len(file_type) <= 10
-            and not name.lower().endswith(f".{file_type.lower()}")
-        ):
-            name = f"{name}.{file_type}"
+        suffix = f".{file_type}" if file_type.isalnum() and len(file_type) <= 10 else ""
+        if name and suffix and not name.lower().endswith(suffix.lower()):
+            name = f"{name}{suffix}"
         if name:
             out["original_file_name"] = name
     return out

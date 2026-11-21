@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 
 if TYPE_CHECKING:
@@ -72,20 +72,14 @@ class AidpFileNameCondition(BaseModel):
     """One conversation-scoped file-name condition for AIDP retrieval."""
 
     operator: AidpMetadataFilterOperator = "contains"
-    value: str = Field(min_length=1, max_length=AIDP_FILTER_VALUE_MAX_LENGTH)
-
-    @field_validator("value")
-    @classmethod
-    def normalize_value(cls, value: str) -> str:
-        item = str(value).strip()
-        if not item:
-            raise ValueError("AIDP file-name filter value must be non-empty")
-        if len(item) > AIDP_FILTER_VALUE_MAX_LENGTH:
-            raise ValueError(
-                "AIDP file-name filter value must be at most "
-                f"{AIDP_FILTER_VALUE_MAX_LENGTH} characters"
-            )
-        return item
+    value: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=AIDP_FILTER_VALUE_MAX_LENGTH,
+        ),
+    ]
 
 
 AIDP_FILTER_CONDITIONS_MAX = 20
@@ -96,8 +90,7 @@ class AidpMetadataFilterRequest(BaseModel):
     """Conversation-scoped advanced filter inside the effective AIDP range.
 
     The UI exposes one or more file-name conditions with a single match policy
-    (all/any). ``file_name`` is accepted only as a legacy input shape and is
-    folded into ``conditions`` before persistence.
+    (all/any).
     """
 
     enabled: bool = False
@@ -105,14 +98,9 @@ class AidpMetadataFilterRequest(BaseModel):
     conditions: List[AidpFileNameCondition] = Field(
         default_factory=list, max_length=AIDP_FILTER_CONDITIONS_MAX
     )
-    file_name: Optional[AidpFileNameCondition] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def validate_conditions(self):
-        if self.file_name is not None:
-            if not self.conditions:
-                self.conditions = [self.file_name]
-            self.file_name = None
         unique: List[AidpFileNameCondition] = []
         seen = set()
         for condition in self.conditions:

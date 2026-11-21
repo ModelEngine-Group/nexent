@@ -52,11 +52,7 @@ def _file_name_condition(value: Any) -> Dict[str, str]:
 
 
 def normalize_metadata_filter(value: Any) -> Dict[str, Any]:
-    """Return a validated ``{enabled, match, conditions}`` filter.
-
-    The legacy single ``file_name`` shape is folded into ``conditions`` so
-    conversations saved before multi-condition support keep working.
-    """
+    """Return a validated ``{enabled, match, conditions}`` filter."""
     if value is None or value == "":
         return {"enabled": False}
     if isinstance(value, str):
@@ -78,10 +74,6 @@ def normalize_metadata_filter(value: Any) -> Dict[str, Any]:
             condition = _file_name_condition(item)
             if condition:
                 conditions.append(condition)
-    elif value.get("file_name") is not None:
-        condition = _file_name_condition(value["file_name"])
-        if condition:
-            conditions.append(condition)
     if len(conditions) > FILTER_CONDITIONS_MAX:
         raise ValueError(
             f"metadata_filter supports at most {FILTER_CONDITIONS_MAX} conditions"

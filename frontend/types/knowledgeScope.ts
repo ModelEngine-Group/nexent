@@ -15,8 +15,6 @@ export interface AidpMetadataFilter {
   enabled: boolean;
   match: AidpMetadataFilterMatch;
   conditions: AidpFileNameCondition[];
-  /** Legacy single-condition shape accepted from old conversations. */
-  file_name?: AidpFileNameCondition;
 }
 
 export interface ConversationKnowledgeScope {
@@ -44,11 +42,7 @@ export function normalizeAidpMetadataFilter(
   if (!filter?.enabled) {
     return EMPTY_AIDP_METADATA_FILTER;
   }
-  const raw = Array.isArray(filter.conditions)
-    ? filter.conditions
-    : filter.file_name
-      ? [filter.file_name]
-      : [];
+  const raw = Array.isArray(filter.conditions) ? filter.conditions : [];
   const seen = new Set<string>();
   const conditions: AidpFileNameCondition[] = [];
   raw.forEach((condition) => {

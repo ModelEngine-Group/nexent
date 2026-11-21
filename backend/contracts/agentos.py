@@ -451,8 +451,6 @@ class ScopedSharedAidpOptions(RunSpecModel):
     graph_score_threshold: float | None = Field(default=None, ge=0, le=1)
     graph_reranking_enable: bool | None = None
     query_expansion_enable: bool | None = None
-    ontology_enhance_enable: bool | None = None
-    rule_enable: bool | None = None
 
     @field_validator("search_method")
     @classmethod

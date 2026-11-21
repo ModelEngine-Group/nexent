@@ -3361,7 +3361,6 @@ def get_historical_context(
             ).first()
             if current is None:
                 return None
-            boundary_message_index = current.message_index
             before_message_index = current.message_index
         else:
             owned = session.scalar(select(ConversationRecord.conversation_id).where(
@@ -3370,7 +3369,6 @@ def get_historical_context(
             ))
             if owned is None:
                 return None
-            boundary_message_index = before_message_index
 
         candidates = session.execute(
             select(
@@ -3537,7 +3535,7 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
-                "current_user_message_index": boundary_message_index}
+                "current_user_message_index": current.message_index}
 
 
 def _remove_scope_references(
