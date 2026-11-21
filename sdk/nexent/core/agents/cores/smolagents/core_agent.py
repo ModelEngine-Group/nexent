@@ -1989,10 +1989,20 @@ Additional Args:
             if callable(bind):
                 bind(self._delegation.record_dispatch)
         if getattr(self, "_execution_history", None) is not None:
-            self._execution_owner = uuid.uuid4().hex
+            owner = uuid.uuid4().hex
+            context_runtime = getattr(self, "context_runtime", None)
+            context_manager = getattr(context_runtime, "context_manager", None)
+            if context_manager is not None:
+                from nexent.core.agents.context.action_history import register_authorized_sources
+                # Validate the current authorized snapshot before publishing the new owner.
+                items = register_authorized_sources(context_runtime.items, self._execution_history, owner)
+                context_runtime.items = items
+                context_manager.config.execution_history = self._execution_history
+                context_manager.config.execution_owner = owner
+            self._execution_owner = owner
             reader = self.tools.get("read_execution_output")
             if reader is not None:
-                reader.owner = self._execution_owner
+                reader.owner = owner
         max_steps = max_steps or self.max_steps
         # Append current time before the workspace path in the user task rather than the
         # system prompt. This keeps the system prefix stable so prompt/KV caches
