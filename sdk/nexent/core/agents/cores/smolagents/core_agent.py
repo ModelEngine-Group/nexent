@@ -1483,7 +1483,8 @@ Additional Args:
             additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
         if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
             additional_args["_defer_attempt_commit"] = True
-            # Empty-stop recovery has its own one-retry bound; protocol repair stays unchanged.
+        if use_result_stops and getattr(self.model, "supports_runtime_stop_recovery", False) is True:
+            additional_args["_retry_without_runtime_stop"] = True
 
         repair_messages = getattr(self, "_protocol_repair_messages", [])
         # Code actions retain their accepted raw stream; final envelopes keep
@@ -1585,7 +1586,7 @@ Additional Args:
             diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
             finish_reason = diagnostics.get("finish_reason")
         parser_input = model_output
-        if use_result_stops:
+        if use_result_stops and getattr(chat_message, "runtime_stop_omitted", False) is not True:
             parser_input = restore_stopped_code_closer(model_output, finish_reason)
         self._validate_delegation_output(parser_input)
 

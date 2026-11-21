@@ -41,6 +41,9 @@ class ModelServiceError(Exception):
         super().__init__(error.category)
 
 
+RETRY_UNCOMMITTED_WITHOUT_STOP = "retry_uncommitted_without_stop"
+
+
 @dataclass(frozen=True)
 class ModelRequestRetryPolicy:
     max_attempts: int = 3
@@ -74,6 +77,7 @@ class _Call:
     rebuild_pending: bool = False
     empty_response_retries: int = 0
     speculative_empty_retry: bool = False
+    runtime_stop_omitted_attempt: int | None = None
     capture: object = None
 
     def check(self):
@@ -94,13 +98,19 @@ class _Call:
         return configured if self.deadline is None else min(configured, self.deadline - time.monotonic())
 
     def wire_request(self):
+        profile, source = self.profile, self.prepared
+        omit_runtime_stop = self.attempt == self.runtime_stop_omitted_attempt
+        if omit_runtime_stop:
+            parameters = {key: value for key, value in profile.parameter_values.items() if key != "stop"}
+            profile = profile.model_copy(update={"parameter_values": parameters})
+            source = self.adapter.prepare_http_request(self.request, profile)
         self.monitoring.add_span_event("model_attempt_begin", {
             "request_id": self.request.request_id, "attempt": self.attempt,
         })
         prepared = replace(
-            self.prepared,
-            headers=dict(self.prepared.headers),
-            json_body=json.loads(self.prepared.body_bytes),
+            source,
+            headers=dict(source.headers),
+            json_body=json.loads(source.body_bytes),
             timeout_seconds=self.timeout(),
         )
         tracker = self.capture.begin(
@@ -110,7 +120,7 @@ class _Call:
                 "bindings": self.profile.bindings.model_dump(mode="json"),
                 "outlet_id": self.profile.outlet_id,
                 "config_revision": self.profile.config_revision,
-                "parameter_values": self.profile.parameter_values,
+                "parameter_values": profile.parameter_values,
                 "capabilities": self.profile.capabilities.model_dump(mode="json"),
             },
             provider=self.profile.identity.provider_id,
@@ -118,6 +128,10 @@ class _Call:
         if tracker is not None:
             self.token_tracker = tracker
             self.first_token_received = False
+        if omit_runtime_stop:
+            self.monitoring.add_span_event("model_runtime_stop_compatibility_retry", {
+                "request_id": self.request.request_id, "attempt": self.attempt, "reason": "reasoning_only_stop",
+            })
         return prepared
 
     def event(self, event):
@@ -138,7 +152,11 @@ class _Call:
             self.observe_completion(event.message)
         self.sequence += 1
         self.visible |= event.type in {"text_delta", "reasoning_delta", "tool_call_delta", "message_completed"}
-        return event.model_copy(update={"sequence": self.sequence, "attempt": self.attempt})
+        return event.model_copy(update={
+            "sequence": self.sequence, "attempt": self.attempt,
+            "runtime_stop_omitted": event.type == "message_completed"
+            and self.attempt == self.runtime_stop_omitted_attempt,
+        })
 
     def observe_completion(self, message):
         usage = message.usage
@@ -569,12 +587,20 @@ class ModelService:
         ):
             return
         retryable = (
-            policy in {"retry", "retry_uncommitted"}
+            policy in {"retry", "retry_uncommitted", RETRY_UNCOMMITTED_WITHOUT_STOP}
             and message.finish_reason == "stop" and call.empty_response_retries < 1
         )
         if retryable:
             call.empty_response_retries += 1
-            call.speculative_empty_retry = policy == "retry_uncommitted"
+            call.speculative_empty_retry = policy in {"retry_uncommitted", RETRY_UNCOMMITTED_WITHOUT_STOP}
+            if (
+                policy == RETRY_UNCOMMITTED_WITHOUT_STOP
+                and call.profile.parameter_values.get("stop")
+                and all(part.get("type") == "text" for part in message.content_parts)
+                and any(part.get("type") == "text" and part.get("text", "").strip()
+                        for part in message.reasoning_parts)
+            ):
+                call.runtime_stop_omitted_attempt = call.attempt + 1
         raise ModelServiceError(ModelError(
             category="MODEL_EMPTY_RESPONSE", scope="protocol",
             retryable=retryable,
@@ -585,7 +611,7 @@ class ModelService:
 
     @staticmethod
     def _validate_empty_policy(policy):
-        if policy not in ("accept", "fail", "retry", "retry_uncommitted"):
+        if policy not in ("accept", "fail", "retry", "retry_uncommitted", RETRY_UNCOMMITTED_WITHOUT_STOP):
             raise ValueError("Unknown empty response policy")
 
     def _events(self, call, empty_response_policy):

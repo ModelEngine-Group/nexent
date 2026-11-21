@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: RSR-004-20261120
+  change_type: bugfix
+  bug_id: RSR-004-20261120
+  title: Recover reasoning-only stops for strict CodeAgent
+  description: Reuse the bounded empty response retry for the runtime-generated stop list.
+  observed_behavior: A reasoning-only completion with finish reason stop repeats the same request and can fail again.
+  expected_behavior: The existing retry omits runtime-generated stops when there is no explicit stop configuration. The recovered response remains subject to strict protocol validation.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing empty retries did not test runtime stop provenance, request equality, or strict parsing after a stopless retry.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CMSR-005, CHAT-TRAJECTORY]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [CMSR-D3-001, CHAT-TRAJECTORY-REAL-MODEL-D3-001]
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve the physical request except for runtime stops on one eligible empty attempt and correlate it to the trace event.
+    - Keep configured stops and refusal, truncation, and native tool paths intact.
+    - Reject fabricated results and missing delimiters after a stopless retry before dispatching code.
+    reason: The real Legacy and OpenAI adapter path with controlled stream outcomes proves the request and retry contract. Deployed real-model behavior requires coordinated D3 proof.
+    test_selectors:
+    - test/sdk/core/model_service/test_runtime_stop_recovery.py
+    - test/sdk/core/agents/test_core_agent.py
+  notes: SPEC 09 Runtime Stability Repairs 20261120, RSR-004. Existing formal Cases remain regression coverage. The targeted GLM run and Phoenix must prove the new behavior before any full campaign.

@@ -94,6 +94,13 @@ _RUNTIME_RECORD_RE = re.compile(
     r"</?(?:(?:completed_action_history|completed_action|code_exec_result|summaried_result|output_ref)\b|result>)",
     re.IGNORECASE,
 )
+# The context renderer starts each call record with its ID and function metadata.
+_RUNTIME_ACTION_RECORD_RE = re.compile(
+    r"""^[ \t]*Executed action:[ \t]*\r?\n\s*\[\s*\{\s*["']id["']\s*:\s*"""
+    r"""(?:"[^"\r\n]*"|'[^'\r\n]*')\s*,\s*"""
+    r"""(?:["']type["']\s*:\s*["']function["']\s*,\s*)?["']function["']\s*:\s*\{""",
+    re.IGNORECASE | re.MULTILINE,
+)
 _CODE_MARKER_RE = re.compile(r"</?code>", re.IGNORECASE)
 _PROTOCOL_MARKER_RE = re.compile(r"</?(?:code|final_answer)>|```<run>", re.IGNORECASE)
 _MARKDOWN_RE = re.compile(
@@ -294,6 +301,7 @@ def is_raw_final_answer_candidate(output: Any) -> bool:
         and not _PROTOCOL_MARKER_RE.search(text)
         and not _MODEL_CONTROL_TOKEN_RE.search(text)
         and not _RUNTIME_RECORD_RE.search(text)
+        and not has_unquoted_match(text, _RUNTIME_ACTION_RECORD_RE)
         and not re.search(r"</?(?:think|tool_call|code_exec_result|summaried_result|output_ref)\b", text, re.I)
     )
 
@@ -318,7 +326,8 @@ def _classify_code_action(
                for token in _MODEL_CONTROL_TOKEN_RE.finditer(remaining[:prefix_end])):
             _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
         if any(not _position_in_spans(token.start(), examples)
-               for token in _RUNTIME_RECORD_RE.finditer(remaining[:prefix_end])):
+               for pattern in (_RUNTIME_RECORD_RE, _RUNTIME_ACTION_RECORD_RE)
+               for token in pattern.finditer(remaining, 0, prefix_end)):
             _raise_protocol_error(ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT, protocol, logger)
         if marker is None:
             break
