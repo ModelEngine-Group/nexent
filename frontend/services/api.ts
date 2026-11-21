@@ -473,6 +473,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbBatchRead: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/batch-read`,
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
@@ -525,6 +526,40 @@ export const API_ENDPOINTS = {
     /** Retry summary generation for a non-empty file UUID list (EDIT). */
     retryKbFileSummaries: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/retry-summary`,
+    ontology: {
+      domains: `${API_BASE_URL}/aidp-mgmt/ontology/domains`,
+      domain: (id: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(id)}`,
+      entities: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities`,
+      entity: (domainId: string, entityId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/entities/${encodeURIComponent(entityId)}`,
+      bindings: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings`,
+      allBindings: `${API_BASE_URL}/aidp-mgmt/ontology/bindings`,
+      // AIDP has no BindingId: a row is addressed by (domain_id, kds_id).
+      unbind: (domainId: string, kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/bindings/${encodeURIComponent(kdsId)}`,
+      bindingByKb: (kdsId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/knowledge-bases/${encodeURIComponent(kdsId)}/binding`,
+      tasks: `${API_BASE_URL}/aidp-mgmt/ontology/tasks`,
+      metadataFields: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields`,
+      metadataField: (domainId: string, fieldRef: string | number) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/${encodeURIComponent(fieldRef)}`,
+      metadataBatchUnbind: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/batch-unbind`,
+      rules: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules`,
+      ruleCount: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/count`,
+      rule: (domainId: string, ruleId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules/${encodeURIComponent(ruleId)}`,
+      export: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/export`,
+      import: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/import`,
+    },
     /** Shared AIDP sensitive word dictionary, fixed to the upstream `aidp` namespace. */
     sensitiveWords: (kdsId: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(kdsId)}/sensitive-words`,

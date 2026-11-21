@@ -415,16 +415,30 @@ class SkillDerivedLocalToolBinding(LocalToolBinding):
     tool_id: PositiveInt
 
 
+class ScopedSharedAidpFileNameCondition(RunSpecModel):
+    operator: Literal["contains", "is", "starts_with", "ends_with"] = "contains"
+    value: str = Field(min_length=1, max_length=256)
+
+
+class ScopedSharedAidpMetadataFilter(RunSpecModel):
+    enabled: bool = False
+    match: Literal["all", "any"] = "all"
+    conditions: list[ScopedSharedAidpFileNameCondition] = Field(
+        default_factory=list, max_length=20
+    )
+
+
 class ScopedSharedAidpOptions(RunSpecModel):
+    """Scope plus the catalog tool's own parameters, passed through unchanged.
+
+    The AIDP tool catalog owns its retrieval parameters; the scoped contract
+    only owns the knowledge scope and the conversation filter.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
     kds_list: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(max_length=10)
-    search_method: Literal["hybrid_search", "vector_search", "full_text_search", "graph_search"] | None = None
-    reranking_enable: bool | None = None
-    reranking_mode: Literal["performance", "high_accuracy", "jargon_coverage"] | None = None
-    rewrite_enable: bool | None = None
-    related_search_enable: bool | None = None
-    score_threshold: float | None = Field(default=None, ge=0, le=1)
-    top_k: int | None = Field(default=None, ge=1, le=100)
-    multi_modal: bool | None = None
+    metadata_filter: ScopedSharedAidpMetadataFilter | None = None
 
     @model_serializer(mode="wrap")
     def serialize_explicit_options(self, handler):
@@ -584,6 +598,7 @@ class PreparedHistoryTurn(RunSpecModel):
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    execution_records: list[dict[str, JsonValue]] = Field(default_factory=list)
 
 
 class PreparedConversationHistory(RunSpecModel):

@@ -218,6 +218,14 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(raw)
     out["created_at"] = _timestamp_or_iso(_first_reported(raw, _CREATED_AT_KEYS))
     out["updated_at"] = _timestamp_or_iso(_first_reported(raw, _UPDATED_AT_KEYS))
+    # AIDP lists ``file_name`` without the extension and reports the extension
+    # in ``file_type``; retrieval filters on the extension-bearing
+    # ``original_file_name``. Keep the upstream field when it is present.
+    if not out.get("original_file_name"):
+        name = str(out.get("file_name") or "").strip()
+        file_type = str(out.get("file_type") or "").strip()
+        if name:
+            out["original_file_name"] = f"{name}.{file_type}" if file_type else name
     return out
 
 

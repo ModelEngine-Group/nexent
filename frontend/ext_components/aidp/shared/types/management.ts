@@ -41,6 +41,8 @@ export interface AidpDocumentItem {
   file_uuid: string;
   file_ino_no: string;
   file_name: string;
+  /** ``file_name`` plus ``file_type`` when the upstream list omits the suffix. */
+  original_file_name?: string;
   file_size?: number;
   file_type?: string;
   created_at?: string;

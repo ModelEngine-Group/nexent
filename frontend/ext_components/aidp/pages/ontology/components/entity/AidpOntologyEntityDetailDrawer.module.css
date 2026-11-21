@@ -1,0 +1,40 @@
+.muted {
+  color: #8c8c8c;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.propertyTable {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.propertyTableHeader,
+.propertyTableRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) 92px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.propertyTableHeader {
+  color: #595959;
+}
+
+.propertyTableRow {
+  color: #191919;
+}
+
+.propertyTableRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

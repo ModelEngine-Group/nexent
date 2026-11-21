@@ -1,0 +1,16 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.label {
+  margin-bottom: 4px;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.muted {
+  color: #8c8c8c;
+}

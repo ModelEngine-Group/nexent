@@ -34,7 +34,13 @@ import type {
   KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
-import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
+import {
+  DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE,
+  EMPTY_AIDP_METADATA_FILTER,
+  normalizeAidpMetadataFilter,
+  withAidpMetadataFilter,
+} from "@/types/knowledgeScope";
+import { AdvancedMetadataFilter } from "./advanced-metadata-filter";
 import { ResourceCard } from "@/features/workbench";
 import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSelectionList";
 import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
@@ -59,14 +65,21 @@ interface ConversationKnowledgeScopeModalProps {
 
 const copyScope = (
   value: ConversationKnowledgeScope | null
-): ConversationKnowledgeScope =>
-  JSON.parse(
+): ConversationKnowledgeScope => {
+  const scope = JSON.parse(
     JSON.stringify({
       schema_version: 1,
       local: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).local,
       aidp: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).aidp,
     })
   ) as ConversationKnowledgeScope;
+  if (scope.aidp.metadata_filter) {
+    scope.aidp.metadata_filter = normalizeAidpMetadataFilter(
+      scope.aidp.metadata_filter
+    );
+  }
+  return scope;
+};
 
 const normalizeScopeForSource = (
   value: ConversationKnowledgeScope | null,
@@ -77,32 +90,29 @@ const normalizeScopeForSource = (
   if (scope.local.mode === "disabled" && scope.aidp.mode === "disabled") {
     return scope;
   }
-  if (source === "local" && scope.local.mode === "inherit") {
-    return {
-      schema_version: 1,
-      local: { mode: "inherit", knowledge_ids: [] },
-      aidp: { mode: "disabled", kds_ids: [] },
-    };
+  if (source === "local") {
+    if (scope.local.mode === "override") {
+      return { ...scope, aidp: { mode: "disabled", kds_ids: [] } };
+    }
+    if (scope.local.mode === "inherit") {
+      return {
+        schema_version: 1,
+        local: { mode: "inherit", knowledge_ids: [] },
+        aidp: { mode: "disabled", kds_ids: [] },
+      };
+    }
   }
-  if (source === "aidp" && scope.aidp.mode === "inherit") {
-    return {
-      ...scope,
-      schema_version: 1,
-      local: { mode: "disabled", knowledge_ids: [] },
-      aidp: { mode: "inherit", kds_ids: [] },
-    };
-  }
-  if (source === "local" && scope.local.mode === "override") {
-    return {
-      ...scope,
-      aidp: { mode: "disabled", kds_ids: [] },
-    };
-  }
-  if (source === "aidp" && scope.aidp.mode === "override") {
-    return {
-      ...scope,
-      local: { mode: "disabled", knowledge_ids: [] },
-    };
+  if (source === "aidp") {
+    if (scope.aidp.mode === "override") {
+      return { ...scope, local: { mode: "disabled", knowledge_ids: [] } };
+    }
+    if (scope.aidp.mode === "inherit") {
+      return {
+        ...scope,
+        local: { mode: "disabled", knowledge_ids: [] },
+        aidp: { mode: "inherit", kds_ids: [] },
+      };
+    }
   }
   return {
     schema_version: 1,
@@ -316,6 +326,9 @@ export const ConversationKnowledgeScopeModal: FC<
                   aidp: {
                     mode: "override",
                     kds_ids: visibleSelected.map(String),
+                    ...(normalized.aidp.metadata_filter
+                      ? { metadata_filter: normalized.aidp.metadata_filter }
+                      : {}),
                   },
                 }
               : normalized
@@ -372,19 +385,25 @@ export const ConversationKnowledgeScopeModal: FC<
   const updateSelectedValues = (source: "local" | "aidp", values: string[]) => {
     setSelectionTouched(true);
     setRestoreDefaultClicked(false);
-    setDraft((current) =>
-      source === "local"
-        ? {
-            ...current,
-            local: { mode: "override", knowledge_ids: values },
-            aidp: { mode: "disabled", kds_ids: [] },
-          }
-        : {
-            ...current,
-            local: { mode: "disabled", knowledge_ids: [] },
-            aidp: { mode: "override", kds_ids: values },
-          }
-    );
+    setDraft((current) => {
+      const filter = current.aidp.metadata_filter;
+      if (source === "local") {
+        return {
+          ...current,
+          local: { mode: "override", knowledge_ids: values },
+          aidp: { mode: "disabled", kds_ids: [] },
+        };
+      }
+      return {
+        ...current,
+        local: { mode: "disabled", knowledge_ids: [] },
+        aidp: {
+          mode: "override",
+          kds_ids: values,
+          ...(filter ? { metadata_filter: filter } : {}),
+        },
+      };
+    });
   };
 
   const sameSelection = (left: string[], right: string[]) => {
@@ -395,20 +414,48 @@ export const ConversationKnowledgeScopeModal: FC<
       left.every((id) => rightIds.has(id))
     );
   };
-
   const buildScopeForSelection = (
     source: "local" | "aidp",
     selectedIds: string[]
   ): ConversationKnowledgeScope => {
-    if (selectedIds.length === 0) {
-      return {
-        schema_version: 1,
-        local: { mode: "disabled", knowledge_ids: [] },
-        aidp: { mode: "disabled", kds_ids: [] },
-      };
-    }
-    if (sameSelection(selectedIds, defaultSelectedIds)) {
-      return source === "local"
+    const base: ConversationKnowledgeScope =
+      selectedIds.length === 0
+        ? {
+            schema_version: 1,
+            local: { mode: "disabled", knowledge_ids: [] },
+            aidp: { mode: "disabled", kds_ids: [] },
+          }
+        : sameSelection(selectedIds, defaultSelectedIds)
+          ? source === "local"
+            ? {
+                schema_version: 1,
+                local: { mode: "inherit", knowledge_ids: [] },
+                aidp: { mode: "disabled", kds_ids: [] },
+              }
+            : {
+                schema_version: 1,
+                local: { mode: "disabled", knowledge_ids: [] },
+                aidp: { mode: "inherit", kds_ids: [] },
+              }
+          : source === "local"
+            ? {
+                schema_version: 1,
+                local: { mode: "override", knowledge_ids: selectedIds },
+                aidp: { mode: "disabled", kds_ids: [] },
+              }
+            : {
+                schema_version: 1,
+                local: { mode: "disabled", knowledge_ids: [] },
+                aidp: { mode: "override", kds_ids: selectedIds },
+              };
+    return withAidpMetadataFilter(base, draft.aidp.metadata_filter);
+  };
+
+  const buildInheritScope = (
+    source: "local" | "aidp"
+  ): ConversationKnowledgeScope => {
+    const base: ConversationKnowledgeScope =
+      source === "local"
         ? {
             schema_version: 1,
             local: { mode: "inherit", knowledge_ids: [] },
@@ -419,34 +466,8 @@ export const ConversationKnowledgeScopeModal: FC<
             local: { mode: "disabled", knowledge_ids: [] },
             aidp: { mode: "inherit", kds_ids: [] },
           };
-    }
-    return source === "local"
-      ? {
-          schema_version: 1,
-          local: { mode: "override", knowledge_ids: selectedIds },
-          aidp: { mode: "disabled", kds_ids: [] },
-        }
-      : {
-          schema_version: 1,
-          local: { mode: "disabled", knowledge_ids: [] },
-          aidp: { mode: "override", kds_ids: selectedIds },
-        };
+    return withAidpMetadataFilter(base, draft.aidp.metadata_filter);
   };
-
-  const buildInheritScope = (
-    source: "local" | "aidp"
-  ): ConversationKnowledgeScope =>
-    source === "local"
-      ? {
-          schema_version: 1,
-          local: { mode: "inherit", knowledge_ids: [] },
-          aidp: { mode: "disabled", kds_ids: [] },
-        }
-      : {
-          schema_version: 1,
-          local: { mode: "disabled", knowledge_ids: [] },
-          aidp: { mode: "inherit", kds_ids: [] },
-        };
 
   const toggleKnowledgeBase = (source: "local" | "aidp", id: string) => {
     const currentValues =
@@ -490,6 +511,20 @@ export const ConversationKnowledgeScopeModal: FC<
 
   const handleConfirm = async () => {
     if (!configuredSource || loading || saving || resourceError) return;
+    const draftFilter = draft.aidp.metadata_filter;
+    if (
+      configuredSource === "aidp" &&
+      !graphSearchEnabled &&
+      draftFilter?.enabled &&
+      (draftFilter.conditions.length === 0 ||
+        draftFilter.conditions.some((condition) => !condition.value.trim()))
+    ) {
+      message.warning(t("chat.knowledgeScope.advancedFilterNeedsValue"));
+      return;
+    }
+    const aidpNamesById = new Map(
+      aidpOptions.map((option) => [String(option.value), String(option.label)])
+    );
     const selectedIds =
       configuredSource === "local"
         ? draft.local.knowledge_ids
@@ -501,6 +536,7 @@ export const ConversationKnowledgeScopeModal: FC<
       sameSelection(selectedIds, initialSelectedIds)
     ) {
       nextScope = normalizeScopeForSource(value, configuredSource);
+      nextScope = withAidpMetadataFilter(nextScope, draftFilter);
     }
     if (restoreDefaultClicked) {
       nextScope = buildInheritScope(configuredSource);
@@ -508,9 +544,6 @@ export const ConversationKnowledgeScopeModal: FC<
     if (!validateLocalEmbeddingModels()) return;
     const localNamesById = new Map(
       localOptions.map((option) => [String(option.value), String(option.label)])
-    );
-    const aidpNamesById = new Map(
-      aidpOptions.map((option) => [String(option.value), String(option.label)])
     );
     const preview: KnowledgeScopeEffectivePreview = {
       local: {
@@ -534,6 +567,7 @@ export const ConversationKnowledgeScopeModal: FC<
           nextScope.aidp.mode === "override"
             ? nextScope.aidp.kds_ids.map((id) => aidpNamesById.get(id) ?? id)
             : [],
+        metadata_filter: nextScope.aidp.metadata_filter,
       },
     };
     setSaving(true);
@@ -918,6 +952,40 @@ export const ConversationKnowledgeScopeModal: FC<
     </div>
   );
   const drawerSelection = source ? getSourceSelection(source) : null;
+  const draftFilter = draft.aidp.metadata_filter;
+  const aidpCapabilities = capabilities?.sources.aidp;
+  const graphSearchEnabled = Boolean(aidpCapabilities?.graph_search_enabled);
+  const filterAvailable = source === "aidp" && !graphSearchEnabled;
+  const filterIncomplete = Boolean(
+    filterAvailable &&
+    draftFilter?.enabled &&
+    (draftFilter.conditions.length === 0 ||
+      draftFilter.conditions.some((condition) => !condition.value.trim()))
+  );
+  const aidpLabelById = new Map(
+    aidpOptions.map((option) => [String(option.value), String(option.label)])
+  );
+  const filterSearchTargets = Array.from(
+    new Set(
+      (draft.aidp.mode === "override"
+        ? draft.aidp.kds_ids
+        : (aidpCapabilities?.default_knowledge_ids ?? [])
+      ).map(String)
+    )
+  ).map((id) => ({ id, name: aidpLabelById.get(id) ?? id }));
+  const filterContent = filterAvailable ? (
+    <AdvancedMetadataFilter
+      value={draftFilter ?? EMPTY_AIDP_METADATA_FILTER}
+      targets={filterSearchTargets}
+      disabled={disabled || saving}
+      onChange={(nextFilter) =>
+        setDraft((current) => ({
+          ...current,
+          aidp: { ...current.aidp, metadata_filter: nextFilter },
+        }))
+      }
+    />
+  ) : undefined;
   const scopeDrawer = (
     <WorkbenchResourceDrawer
       open={open}
@@ -932,7 +1000,8 @@ export const ConversationKnowledgeScopeModal: FC<
         loading ||
         resourceError ||
         !source ||
-        (!!tags.predicates.length && tags.loading)
+        (!!tags.predicates.length && tags.loading) ||
+        filterIncomplete
       }
       picker={{
         keyword: search,
@@ -1005,6 +1074,7 @@ export const ConversationKnowledgeScopeModal: FC<
               )}
             </>
           ) : undefined,
+        filterContent,
       }}
       listContent={
         <Spin spinning={loading || !isDeploymentReady}>
@@ -1041,7 +1111,8 @@ export const ConversationKnowledgeScopeModal: FC<
               loading ||
               resourceError ||
               !configuredSource ||
-              (!!tags.predicates.length && tags.loading),
+              (!!tags.predicates.length && tags.loading) ||
+              filterIncomplete,
           }}
           width={920}
           centered
@@ -1057,27 +1128,32 @@ export const ConversationKnowledgeScopeModal: FC<
         >
           {knowledgeWarnings}
           <Spin spinning={loading || !isDeploymentReady}>
-            {configuredSource ? (
-              <div className="space-y-3 py-2">
-                <ResourceTagFilter
-                  filter={tags}
-                  onChange={() => setPage(1)}
-                  showFilter={false}
-                  search={
-                    <Input.Search
-                      aria-label={t("workbench.controls.searchKnowledgeLabel")}
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder={t("workbench.controls.searchKnowledge")}
-                      allowClear
-                    />
-                  }
-                />
-                {renderSource(configuredSource, "all")}
-              </div>
-            ) : (
-              <Empty description={t("chat.knowledgeScope.noTool")} />
-            )}
+            <div className="space-y-3 py-2">
+              {configuredSource ? (
+                <>
+                  <ResourceTagFilter
+                    filter={tags}
+                    onChange={() => setPage(1)}
+                    showFilter={false}
+                    search={
+                      <Input.Search
+                        aria-label={t(
+                          "workbench.controls.searchKnowledgeLabel"
+                        )}
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        placeholder={t("workbench.controls.searchKnowledge")}
+                        allowClear
+                      />
+                    }
+                  />
+                  {renderSource(configuredSource, "all")}
+                  {configuredSource === "aidp" && filterContent}
+                </>
+              ) : (
+                <Empty description={t("chat.knowledgeScope.noTool")} />
+              )}
+            </div>
           </Spin>
         </ResourcePickerPresentation>
       )}

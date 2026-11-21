@@ -10,7 +10,12 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
-from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
+from nexent.core.ext_components.aidp.retrieval_config import (
+    CONFIG_KEYS,
+    active_channels,
+    normalize_method,
+    prepare_config,
+)
 
 from management.services.agent.preparation.tools import _get_agent_tool_overrides
 from management.services.agent.resource_resolver import _resolve_runtime_tool_records
@@ -27,6 +32,7 @@ LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"
 AIDP_TOOL_CLASS = AIDP_SEARCH_TOOL_CLASS
 LOCAL_RANGE_PARAM = "index_names"
 AIDP_RANGE_PARAM = "kds_list"
+AIDP_METADATA_FILTER_PARAM = "metadata_filter"
 LOCAL_MAX_SELECT = 50
 AIDP_MAX_SELECT = 10
 RESOURCE_NAME_MAX_LENGTH = 100
@@ -72,6 +78,13 @@ def _tool_default(tool: Dict[str, Any], param_name: str) -> List[str]:
         if param.get("name") == param_name:
             return _parse_list(param.get("default"))
     return []
+
+
+def _tool_scalar_default(tool: Dict[str, Any], param_name: str) -> Any:
+    for param in tool.get("params") or []:
+        if param.get("name") == param_name:
+            return param.get("default")
+    return None
 
 
 def _tool_identifier(tool: Dict[str, Any]) -> str:
@@ -214,6 +227,14 @@ def get_agent_knowledge_capabilities(
         if tool.get("class_name") == AIDP_TOOL_CLASS
         for kds_id in _tool_default(tool, AIDP_RANGE_PARAM)
     ))
+    aidp_search_methods = [
+        normalize_method(
+            str(_tool_scalar_default(tool, "search_method") or "hybrid_search")
+        )
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == AIDP_TOOL_CLASS
+    ]
     if user_id:
         local_default_indices = ElasticSearchService.filter_accessible_indices(
             local_default_indices,
@@ -258,6 +279,10 @@ def get_agent_knowledge_capabilities(
         "aidp": {
             "enabled": aidp_enabled,
             "max_select": AIDP_MAX_SELECT,
+            "graph_search_enabled": any(
+                "graph_search" in active_channels(method)
+                for method in aidp_search_methods
+            ),
             "default_summary": "Follow each agent's default configuration",
             "default_knowledge_ids": aidp_default_ids,
             "default_range_values": aidp_default_ids,
@@ -421,6 +446,7 @@ def resolve_knowledge_scope(
     scope_overrides: Dict[str, Dict[str, Dict[str, Any]]] = {}
     effective_local_indices: List[str] = []
     effective_aidp_ids: List[str] = []
+    aidp_tool_names: List[tuple[str, str]] = []
     local_capable = False
     aidp_capable = False
 
@@ -464,6 +490,7 @@ def resolve_knowledge_scope(
                 scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
                     AIDP_RANGE_PARAM
                 ] = kds_ids
+                aidp_tool_names.append((agent_name, identifier))
                 effective_aidp_ids.extend(kds_ids)
 
     if scope.local.mode == "override" and not local_capable:
@@ -481,6 +508,25 @@ def resolve_knowledge_scope(
 
     effective_local_indices = list(dict.fromkeys(effective_local_indices))
     effective_aidp_ids = list(dict.fromkeys(effective_aidp_ids))
+
+    aidp_metadata_filter: Dict[str, Any] = {"enabled": False}
+    requested_filter = scope.aidp.metadata_filter
+    if requested_filter.enabled:
+        aidp_metadata_filter = {
+            "enabled": True,
+            "match": requested_filter.match,
+            "conditions": [
+                {"operator": condition.operator, "value": condition.value}
+                for condition in requested_filter.conditions
+            ],
+        }
+        # The filter applies to every AIDP tool of the run; the tool itself
+        # decides the effective kds_list, so no per-tool filtering is needed.
+        for agent_name, identifier in aidp_tool_names:
+            scope_overrides.setdefault(agent_name, {}).setdefault(identifier, {})[
+                AIDP_METADATA_FILTER_PARAM
+            ] = aidp_metadata_filter
+
     local_by_index = {record["index_name"]: record for record in local_records}
     if scope.local.mode == "override":
         effective_local_ids = [
@@ -526,6 +572,7 @@ def resolve_knowledge_scope(
         local_display_names=local_display_names,
         aidp_kds_ids=effective_aidp_ids,
         aidp_display_names=aidp_display_names,
+        aidp_metadata_filter=aidp_metadata_filter,
         local_disabled=scope.local.mode == "disabled" or (
             scope.local.mode == "override" and not effective_local_indices
         ),

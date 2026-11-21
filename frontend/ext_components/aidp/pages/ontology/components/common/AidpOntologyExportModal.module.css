@@ -1,0 +1,43 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.target {
+  color: #595959;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.kindSelect {
+  width: 160px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.footer :global(.ant-btn) {
+  height: 32px;
+}
+
+.error {
+  color: #e02128;
+  font-size: 14px;
+  line-height: 22px;
+}

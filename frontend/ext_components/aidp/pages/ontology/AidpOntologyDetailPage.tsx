@@ -1,0 +1,391 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Alert,
+  Breadcrumb,
+  Button,
+  ConfigProvider,
+  Dropdown,
+  Skeleton,
+  Tabs,
+} from "antd";
+import {
+  ApartmentOutlined,
+  ClockCircleOutlined,
+  DatabaseOutlined,
+  EditOutlined,
+  EllipsisOutlined,
+  FileTextOutlined,
+  LinkOutlined,
+  TeamOutlined,
+} from "@ant-design/icons";
+
+import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
+import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
+import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
+import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
+import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
+import AidpOntologyDomainDrawer from "./components/common/AidpOntologyDomainDrawer";
+import AidpOntologyEntityTab from "./components/entity/AidpOntologyEntityTab";
+import AidpOntologyBindingsTab from "./components/binding/AidpOntologyBindingsTab";
+import AidpOntologyMetadataTab from "./components/metadata/AidpOntologyMetadataTab";
+import AidpOntologyImportDrawer from "./components/common/AidpOntologyImportDrawer";
+import AidpOntologyExportModal from "./components/common/AidpOntologyExportModal";
+import AidpOntologyDeleteModal from "./components/common/AidpOntologyDeleteModal";
+import AidpOntologyRulesTab from "./components/rule/AidpOntologyRulesTab";
+import AidpOntologyTasksTab from "./components/task/AidpOntologyTasksTab";
+import styles from "./AidpOntologyDetailPage.module.css";
+
+type DetailTab = "metadata" | "entities" | "rules" | "bindings" | "tasks";
+
+type DetailCreateAction = "entity" | "metadata";
+
+interface AidpOntologyDetailPageProps {
+  domainId: string;
+  createAction?: DetailCreateAction;
+}
+
+const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
+  domainId,
+  createAction,
+}) => {
+  const { t } = useTranslation();
+  const params = useParams();
+  const router = useRouter();
+  const locale = (params?.locale as string) || "zh";
+  const queryClient = useQueryClient();
+  const scope = useAidpQueryScope();
+  const [activeTab, setActiveTab] = useState<DetailTab>(
+    createAction === "metadata" ? "metadata" : "entities"
+  );
+  const [pendingCreate, setPendingCreate] = useState<DetailCreateAction | null>(
+    createAction ?? null
+  );
+  const [editOpen, setEditOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const queryKey = useMemo(
+    () => [...scope.key, "ontology-domain", domainId],
+    [domainId, scope.key]
+  );
+  const query = useQuery({
+    queryKey,
+    queryFn: () => aidpOntologyService.getDomain(domainId),
+    enabled: scope.enabled && !!domainId,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const ruleCountQuery = useQuery({
+    queryKey: [...scope.key, "ontology-rule-count", domainId],
+    queryFn: () => aidpOntologyService.countRules(domainId),
+    enabled: scope.enabled && !!domainId,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const refreshDetail = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey });
+  }, [queryClient, queryKey]);
+
+  const refreshEntities = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: [...scope.key, "ontology-entities", domainId],
+    });
+    refreshDetail();
+  }, [domainId, queryClient, refreshDetail, scope.key]);
+
+  const refreshBindings = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: [...scope.key, "ontology-bindings", domainId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: [...scope.key, "ontology-entities", domainId],
+    });
+    refreshDetail();
+  }, [domainId, queryClient, refreshDetail, scope.key]);
+
+  const domain: AidpOntologyDomain | undefined = query.data;
+
+  useEffect(() => {
+    // Wait for the domain payload: the tab body (and therefore the target
+    // drawer) is not mounted until the query resolves, so clearing the intent
+    // any earlier would lose the quick action.
+    if (!pendingCreate || !domain) return;
+    const timer = window.setTimeout(() => setPendingCreate(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [domain, pendingCreate]);
+
+  const errorMessage = query.error
+    ? getAidpErrorMessage(
+        query.error,
+        t,
+        t("aidpKnowledge.ontologyDetailLoadFailed")
+      )
+    : undefined;
+
+  return (
+    <ConfigProvider theme={aidpKnowledgeVisualTheme}>
+      <div
+        className={`${typography.page} ${styles.page} flex h-full min-h-0 w-full flex-col overflow-y-auto`}
+      >
+        {query.isLoading && <Skeleton active paragraph={{ rows: 2 }} />}
+        {query.isError && (
+          <Alert
+            type="error"
+            showIcon
+            className={styles.errorAlert}
+            title={errorMessage}
+            action={
+              <Button size="small" onClick={() => void query.refetch()}>
+                {t("aidpKnowledge.retry")}
+              </Button>
+            }
+          />
+        )}
+        {domain && (
+          <>
+            <Breadcrumb
+              items={[
+                {
+                  title: (
+                    <Link
+                      href={`/${locale}/knowledges/ontology`}
+                      className={typography.breadcrumbLink}
+                    >
+                      {t("aidpKnowledge.ontologyTitle")}
+                    </Link>
+                  ),
+                },
+                {
+                  title: (
+                    <span className={typography.pageTitle}>
+                      {t("aidpKnowledge.ontologyDetailBreadcrumb")}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+            <header className={styles.hero}>
+              <div className={styles.heroTop}>
+                <span className={styles.heroIcon} aria-hidden="true">
+                  <ApartmentOutlined />
+                </span>
+                <div className={styles.heroText}>
+                  <div className={styles.titleRow}>
+                    <h1 className={typography.pageTitle}>{domain.name}</h1>
+                    <Button
+                      type="text"
+                      size="small"
+                      className={styles.titleEdit}
+                      aria-label={t("aidpKnowledge.ontologyEdit")}
+                      icon={<EditOutlined />}
+                      onClick={() => setEditOpen(true)}
+                    />
+                  </div>
+                  <div className={styles.descriptionRow}>
+                    <p className={styles.description}>
+                      {domain.description || "—"}
+                    </p>
+                  </div>
+                </div>
+                <div className={styles.heroActions}>
+                  <Button onClick={() => setDeleteOpen(true)}>
+                    {t("aidpKnowledge.ontologyDelete")}
+                  </Button>
+                  <Dropdown
+                    trigger={["click"]}
+                    menu={{
+                      items: [
+                        {
+                          key: "import",
+                          label: t("aidpKnowledge.ontologyImportJson"),
+                          onClick: () => setImportOpen(true),
+                        },
+                        {
+                          key: "export",
+                          label: t("aidpKnowledge.ontologyExportJson"),
+                          onClick: () => setExportOpen(true),
+                        },
+                      ],
+                    }}
+                  >
+                    <Button
+                      aria-label={t("aidpKnowledge.ontologyMoreActions")}
+                      icon={<EllipsisOutlined />}
+                    />
+                  </Dropdown>
+                </div>
+              </div>
+              <div className={styles.overviewStats}>
+                <div className={styles.statItem}>
+                  <DatabaseOutlined className={styles.statIcon} />
+                  <span className={styles.statText}>
+                    <span className={styles.statLabel}>
+                      {t("aidpKnowledge.ontologyDomainColumnMetadataCount")}
+                    </span>
+                    <span className={styles.statValue}>
+                      {domain.metadata_count ?? "—"}
+                    </span>
+                  </span>
+                </div>
+                <div className={styles.statItem}>
+                  <TeamOutlined className={styles.statIcon} />
+                  <span className={styles.statText}>
+                    <span className={styles.statLabel}>
+                      {t("aidpKnowledge.ontologyDomainColumnEntityCount")}
+                    </span>
+                    <span className={styles.statValue}>
+                      {domain.entity_count ?? "—"}
+                    </span>
+                  </span>
+                </div>
+                <div className={styles.statItem}>
+                  <FileTextOutlined className={styles.statIcon} />
+                  <span className={styles.statText}>
+                    <span className={styles.statLabel}>
+                      {t("aidpKnowledge.ontologyTabRules")}
+                    </span>
+                    <span className={styles.statValue}>
+                      {ruleCountQuery.data?.count ?? "—"}
+                    </span>
+                  </span>
+                </div>
+                <div className={styles.statItem}>
+                  <LinkOutlined className={styles.statIcon} />
+                  <span className={styles.statText}>
+                    <span className={styles.statLabel}>
+                      {t("aidpKnowledge.ontologyTabBindings")}
+                    </span>
+                    <span className={styles.statValue}>
+                      {domain.bound_kb_count ?? "—"}
+                    </span>
+                  </span>
+                </div>
+                <div className={styles.statItem}>
+                  <ClockCircleOutlined className={styles.statIcon} />
+                  <span className={styles.statText}>
+                    <span className={styles.statLabel}>
+                      {t("aidpKnowledge.ontologyDomainColumnUpdateTime")}
+                    </span>
+                    <span className={styles.statValue}>
+                      {formatAidpDateTime(domain.update_time)}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </header>
+
+            <Tabs
+              className={styles.tabs}
+              activeKey={activeTab}
+              onChange={(key) => setActiveTab(key as DetailTab)}
+              items={[
+                {
+                  key: "entities",
+                  label: t("aidpKnowledge.ontologyTabEntities"),
+                },
+                {
+                  key: "metadata",
+                  label: t("aidpKnowledge.ontologyTabMetadata"),
+                },
+                {
+                  key: "rules",
+                  label: t("aidpKnowledge.ontologyTabRules"),
+                },
+                {
+                  key: "bindings",
+                  label: t("aidpKnowledge.ontologyTabBindings"),
+                },
+                {
+                  key: "tasks",
+                  label: t("aidpKnowledge.ontologyTabAsyncTasks"),
+                },
+              ]}
+            />
+
+            <section className={styles.contentPanel}>
+              {activeTab === "entities" && (
+                <AidpOntologyEntityTab
+                  domainId={domainId}
+                  autoOpenCreate={pendingCreate === "entity"}
+                />
+              )}
+              {activeTab === "metadata" && (
+                <AidpOntologyMetadataTab
+                  domainId={domainId}
+                  autoOpenCreate={pendingCreate === "metadata"}
+                />
+              )}
+              {activeTab === "rules" && (
+                <AidpOntologyRulesTab domainId={domainId} />
+              )}
+              {activeTab === "bindings" && (
+                <AidpOntologyBindingsTab
+                  domainId={domainId}
+                  boundKbCount={domain.bound_kb_count}
+                  onChanged={refreshBindings}
+                />
+              )}
+              {activeTab === "tasks" && <AidpOntologyTasksTab />}
+            </section>
+          </>
+        )}
+
+        {domain && (
+          <AidpOntologyDomainDrawer
+            open={editOpen}
+            domain={domain}
+            onClose={() => setEditOpen(false)}
+            onSaved={() => {
+              setEditOpen(false);
+              refreshDetail();
+              void queryClient.invalidateQueries({
+                queryKey: [...scope.key, "ontology-domains"],
+              });
+            }}
+          />
+        )}
+        <AidpOntologyImportDrawer
+          open={importOpen}
+          domainId={domainId}
+          domainName={domain?.name ?? ""}
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            refreshEntities();
+          }}
+        />
+        <AidpOntologyExportModal
+          open={exportOpen}
+          domainId={domainId}
+          domainName={domain?.name ?? ""}
+          onClose={() => setExportOpen(false)}
+        />
+        <AidpOntologyDeleteModal
+          open={deleteOpen}
+          domain={domain ?? null}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => {
+            setDeleteOpen(false);
+            void queryClient.invalidateQueries({
+              queryKey: [...scope.key, "ontology-domains"],
+            });
+            router.push(`/${locale}/knowledges/ontology`);
+          }}
+        />
+      </div>
+    </ConfigProvider>
+  );
+};
+
+export default AidpOntologyDetailPage;

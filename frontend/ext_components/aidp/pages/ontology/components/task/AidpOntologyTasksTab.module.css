@@ -1,0 +1,65 @@
+.statusCell {
+  min-width: 0;
+}
+
+.statusLine {
+  display: grid;
+  grid-template-columns: 6px 48px minmax(60px, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.statusLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.progressTrack {
+  display: block;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #f0f0f0;
+}
+
+.progressBar {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.progressValue {
+  color: #595959;
+  text-align: right;
+}
+
+.failureDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  color: #595959;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.failureLabel {
+  margin-right: 8px;
+  color: #8c8c8c;
+}
+
+.muted {
+  color: #8c8c8c;
+}

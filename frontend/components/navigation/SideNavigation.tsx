@@ -19,6 +19,7 @@ import {
   BookOpen,
   Blocks,
   Bot,
+  Boxes,
   Building2,
   CalendarClock,
   Code,
@@ -130,6 +131,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: "/agent-dev",
   },
   {
+    path: "/knowledges/ontology",
+    Icon: Boxes,
+    labelKey: "sidebar.ontology",
+    order: 5.5,
+    parentKey: "/agent-dev",
+  },
+  {
     path: "/agents",
     Icon: Bot,
     labelKey: "sidebar.agentConfig",
@@ -211,10 +219,17 @@ const ROUTE_PREFETCH_DELAY_MS = 50;
 function isRouteAccessible(
   route: RouteConfig,
   accessibleRoutes: string[],
-  enableAgentWorkbench: boolean
+  enableAgentWorkbench: boolean,
+  enableAidpKnowledge: boolean
 ) {
   if (route.path === "/workbench" && !enableAgentWorkbench) {
     return false;
+  }
+
+  // The ontology entry is an AIDP-mode child of the knowledge configuration
+  // permission. It must not appear in the local knowledge-base deployment.
+  if (route.path === "/knowledges/ontology") {
+    return enableAidpKnowledge && accessibleRoutes.includes("/knowledges");
   }
 
   return accessibleRoutes.includes(route.path);
@@ -234,7 +249,12 @@ export function SideNavigation({
   const { t } = useTranslation("common");
   const { accessibleRoutes, user } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
+  const {
+    isSpeedMode,
+    enableAgentWorkbench,
+    enableAidpKnowledge,
+    hideHomePage,
+  } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
   const params = useParams<{ locale: string }>();
@@ -357,9 +377,20 @@ export function SideNavigation({
         !route.isSection &&
         (route.path !== "/observability" || hasRole(user, "OPS", "SU")) &&
         !(route.path === "/" && hideHomePage) &&
-        isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
+        isRouteAccessible(
+          route,
+          accessibleRoutes,
+          enableAgentWorkbench,
+          enableAidpKnowledge
+        )
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage, user]);
+  }, [
+    accessibleRoutes,
+    enableAgentWorkbench,
+    enableAidpKnowledge,
+    hideHomePage,
+    user,
+  ]);
 
   const getRouteNavigationPath = (route: RouteConfig) => {
     const routePath = route.navigationPath || route.path;

@@ -20,6 +20,7 @@ import {
   ConfigProvider,
   Form,
   Space,
+  Steps,
 } from "antd";
 
 import type { AidpGraphConfig } from "@/ext_components/aidp/shared/types/management";
@@ -47,6 +48,8 @@ import {
 } from "@/ext_components/aidp/shared/utils/aidpChunking";
 
 import AidpCreateKbSections from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections";
+import AidpCreateOntologyStep from "@/ext_components/aidp/pages/knowledge-create/AidpCreateOntologyStep";
+import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import styles from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections.module.css";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import { aidpKnowledgeTypographyTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
@@ -97,6 +100,8 @@ const AidpCreateKbPage: React.FC = () => {
   const [form] = Form.useForm();
   const [validating, setValidating] = useState(false);
   const [invalidFields, setInvalidFields] = useState<string[]>([]);
+  const [step, setStep] = useState(0);
+  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const createMutation = useCreateAidpKnowledgeBase();
   const loading = validating || createMutation.isPending;
   /** Guards against a second create while one submission is in flight. */
@@ -234,12 +239,36 @@ const AidpCreateKbPage: React.FC = () => {
     router.push(`/${locale}/knowledges/detail?kb=${encodeURIComponent(kbId)}`);
   };
 
+  const goNext = async () => {
+    if (step === 0) {
+      try {
+        await form.validateFields(["name", "description"]);
+      } catch (error) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "errorFields" in error
+        ) {
+          const field = (error as { errorFields: { name: string[] }[] })
+            .errorFields[0];
+          if (field) form.scrollToField(field.name, { focus: true });
+        }
+        return;
+      }
+    }
+    setStep((previous) => Math.min(previous + 1, 1));
+  };
+
   const handleSubmit = async () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setValidating(true);
     try {
       const values = await form.validateFields();
+      if (!values.name?.trim() || !values.description?.trim()) {
+        setStep(0);
+        return;
+      }
       const permission = isUser
         ? "PRIVATE"
         : values.ingroup_permission || "READ_ONLY";
@@ -305,6 +334,13 @@ const AidpCreateKbPage: React.FC = () => {
 
       message.success(t("aidpKnowledge.createKbSuccess"));
       const createdId = String(created.kds_id || "");
+      if (createdId && selectedDomainId) {
+        try {
+          await aidpOntologyService.createBinding(selectedDomainId, createdId);
+        } catch {
+          message.warning(t("aidpKnowledge.createBindingFailed"), 8);
+        }
+      }
       if (createdId) openCreatedKb(createdId);
     } catch (error) {
       if (
@@ -365,6 +401,14 @@ const AidpCreateKbPage: React.FC = () => {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+        <Steps
+          className="mb-5"
+          current={step}
+          items={[
+            { title: t("aidpKnowledge.createStepConfig") },
+            { title: t("aidpKnowledge.createStepOntology") },
+          ]}
+        />
         {(modelsQuery.isError || (graphEnabled && templateQuery.isError)) && (
           <Alert
             type="error"
@@ -407,24 +451,32 @@ const AidpCreateKbPage: React.FC = () => {
             title={t("aidpKnowledge.createEmbeddingUnavailable")}
           />
         )}
-        <AidpCreateKbSections
-          form={form}
-          invalidFields={invalidFields}
-          groupsLoading={groupsLoading}
-          groupsUnavailable={!!groupsError || !canReadGroups}
-          t={t}
-          canConfigureGroupPermissions={canConfigureGroupPermissions}
-          groupOptions={groupOptions}
-          ingroupPermission={ingroupPermission}
-          llmModelOptions={llmModelOptions}
-          llmModelsLoading={modelsQuery.isLoading}
-          vlmModelOptions={vlmModelOptions}
-          vlmModelsLoading={modelsQuery.isLoading}
-          embeddingModelOptions={embeddingModelOptions}
-          embeddingModelsLoading={modelsQuery.isLoading}
-          graphTemplate={templateQuery.data}
-          onRestorePrompt={restoreDefaultPrompt}
-        />
+        {step === 0 && (
+          <AidpCreateKbSections
+            form={form}
+            invalidFields={invalidFields}
+            groupsLoading={groupsLoading}
+            groupsUnavailable={!!groupsError || !canReadGroups}
+            t={t}
+            canConfigureGroupPermissions={canConfigureGroupPermissions}
+            groupOptions={groupOptions}
+            ingroupPermission={ingroupPermission}
+            llmModelOptions={llmModelOptions}
+            llmModelsLoading={modelsQuery.isLoading}
+            vlmModelOptions={vlmModelOptions}
+            vlmModelsLoading={modelsQuery.isLoading}
+            embeddingModelOptions={embeddingModelOptions}
+            embeddingModelsLoading={modelsQuery.isLoading}
+            graphTemplate={templateQuery.data}
+            onRestorePrompt={restoreDefaultPrompt}
+          />
+        )}
+        {step === 1 && (
+          <AidpCreateOntologyStep
+            selectedDomainId={selectedDomainId}
+            onSelect={setSelectedDomainId}
+          />
+        )}
       </div>
 
       <footer className={styles.createFooter}>
@@ -433,6 +485,19 @@ const AidpCreateKbPage: React.FC = () => {
           <Button onClick={goBackToList} disabled={loading}>
             {t("common.cancel")}
           </Button>
+          {step > 0 && (
+            <Button
+              disabled={loading}
+              onClick={() => setStep((previous) => Math.max(previous - 1, 0))}
+            >
+              {t("aidpKnowledge.createPrevious")}
+            </Button>
+          )}
+          {step < 1 && (
+            <Button disabled={loading} onClick={() => void goNext()}>
+              {t("aidpKnowledge.createNext")}
+            </Button>
+          )}
           <Button
             type="primary"
             loading={loading}

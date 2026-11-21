@@ -49,6 +49,7 @@ AIDP_RUNTIME_PARAMS = frozenset(
         "observer",
         "allowed_kds_set",
         "kds_name_to_id_map",
+        "metadata_filter",
     }
 )
 

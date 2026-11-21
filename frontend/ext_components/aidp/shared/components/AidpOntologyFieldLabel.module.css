@@ -1,0 +1,16 @@
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.required {
+  color: #e02128;
+  line-height: 1;
+}
+
+.helpIcon {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
+}
