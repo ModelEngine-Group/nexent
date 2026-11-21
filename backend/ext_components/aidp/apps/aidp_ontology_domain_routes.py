@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Ontology domain, entity and relation routes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -66,7 +67,9 @@ aidp_ontology_domain_router = APIRouter()
 async def get_ontology_demo_mode(request: Request) -> JSONResponse:
     """Tell the browser whether this deployment uses the local demo data source."""
     await _auth(request)
-    return JSONResponse(status_code=HTTPStatus.OK, content={"demo": bool(AIDP_MOCK_MODE)})
+    return JSONResponse(
+        status_code=HTTPStatus.OK, content={"demo": bool(AIDP_MOCK_MODE)}
+    )
 
 
 @aidp_ontology_domain_router.get("/domains")
@@ -123,8 +126,7 @@ async def list_ontology_domains(
 
         counts = await asyncio.gather(*(load_count(item) for item in domains))
         envelope["value"] = [
-            _domain_summary(item, count)
-            for item, count in zip(domains, counts)
+            _domain_summary(item, count) for item, count in zip(domains, counts)
         ]
     else:
         envelope["value"] = []
@@ -192,7 +194,9 @@ async def get_ontology_domain(
             )
             return _optional_count(envelope.get("total_count"))
         except AppException as error:
-            logger.warning("AIDP metadata count unavailable for %s: %s", domain_id, error)
+            logger.warning(
+                "AIDP metadata count unavailable for %s: %s", domain_id, error
+            )
             return None
 
     result, count, entity_count, metadata_count = await asyncio.gather(
@@ -238,7 +242,9 @@ async def update_ontology_domain(
         owner="config",
     )
     count = await _binding_count(domain_id)
-    return JSONResponse(status_code=HTTPStatus.OK, content=_domain_summary(result, count))
+    return JSONResponse(
+        status_code=HTTPStatus.OK, content=_domain_summary(result, count)
+    )
 
 
 @aidp_ontology_domain_router.delete("/domains/{domain_id}")
@@ -339,8 +345,7 @@ async def create_ontology_entity(
             owner="config",
         )
         type_ids = {
-            str(item.get("entity_id") or item.get("id"))
-            for item in types["value"]
+            str(item.get("entity_id") or item.get("id")) for item in types["value"]
         }
         type_names = {str(item.get("api_name")) for item in types["value"]}
         if body.type_id not in type_ids and body.type_id not in type_names:
@@ -428,7 +433,12 @@ async def get_ontology_entity(
     row = dict(result)
     row["entity_id"] = entity_id
     enriched = await _enrich_entity_rows(
-        server_url, api_key, domain_id, [row], "entity"
+        server_url,
+        api_key,
+        domain_id,
+        [row],
+        "entity",
+        detail_by_id={str(entity_id): result},
     )
     return JSONResponse(
         status_code=HTTPStatus.OK,
@@ -612,4 +622,3 @@ async def delete_ontology_relation(
         owner="config",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
-

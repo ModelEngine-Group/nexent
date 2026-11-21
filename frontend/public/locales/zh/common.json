@@ -2061,6 +2061,7 @@
   "aidpKnowledge.ontologyEntityDescriptionPlaceholder": "请输入描述",
   "aidpKnowledge.ontologyEntityDescriptionTooLong": "描述不能超过 {{max}} 个字符",
   "aidpKnowledge.ontologyEntityDetailDemoGap": "AIDP 没有按实体返回关联 Chunk 数；上下位/同义关系按实际返回展示，缺失显示「—」。详情一跳邻域是否包含入边尚未确认，下位回显可能不完整。",
+  "aidpKnowledge.ontologyEntityDetailIncomplete": "实体详情未完整加载，本次保存只更新名称、描述和关系，不会修改扩展属性或主属性。请刷新后重试属性编辑。",
   "aidpKnowledge.ontologyEntityDetailRealGap": "AIDP 没有按实体返回关联 Chunk 数；上下位/同义关系按实际返回展示，缺失显示「—」。详情一跳邻域是否包含入边尚未确认，下位回显可能不完整。",
   "aidpKnowledge.ontologyEntityDetailTitle": "实体详情",
   "aidpKnowledge.ontologyEntityDisplayName": "显示名称",

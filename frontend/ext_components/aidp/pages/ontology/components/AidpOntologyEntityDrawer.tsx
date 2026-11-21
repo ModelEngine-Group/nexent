@@ -379,6 +379,12 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
     const primary = (values.primary_properties ?? []).filter((name) =>
       properties.some((property) => property.api_name === name)
     );
+    const detailsLoaded = entity?.detail_loaded !== false;
+    const initialPrimary = (entity?.primary_properties ?? [])
+      .map((name) => String(name))
+      .sort();
+    const primaryChanged =
+      JSON.stringify([...primary].sort()) !== JSON.stringify(initialPrimary);
 
     setSaving(true);
     setErrorMessage(null);
@@ -390,11 +396,16 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         const childIdsChanged =
           JSON.stringify([...childIds].sort()) !==
           JSON.stringify(initialChildIds);
+        if (!detailsLoaded) {
+          message.warning(t("aidpKnowledge.ontologyEntityDetailIncomplete"));
+        }
         await aidpOntologyService.updateEntity(domainId, entity.entity_id, {
           display_name: displayNameValue,
           description: values.description?.trim() ?? "",
-          properties,
-          primary_properties: primary,
+          ...(detailsLoaded ? { properties } : {}),
+          ...(detailsLoaded && primaryChanged
+            ? { primary_properties: primary }
+            : {}),
           // Only send relation fields that actually changed so a plain edit
           // does not trigger an extra Relations read/write round trip.
           ...(parentIdsChanged ? { parent_entities: parentIds } : {}),

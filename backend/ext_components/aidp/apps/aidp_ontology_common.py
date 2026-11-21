@@ -2,6 +2,7 @@
 
 
 """Projection, enrichment and binding helpers shared by ontology routes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -86,7 +87,9 @@ def _enrich_bindings_sync(
 ) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
     for row in rows:
-        record = aidp_permission_db.get_permission_by_kb_id(row["kds_id"], tenant_id) or {}
+        record = (
+            aidp_permission_db.get_permission_by_kb_id(row["kds_id"], tenant_id) or {}
+        )
         kds_name = record.get("kds_name")
         if not kds_name:
             # A binding can outlive the local permission row (for example a
@@ -129,7 +132,9 @@ async def _binding_count(domain_id: str) -> int | None:
         )
         return len(rows)
     except AppException as error:
-        logger.warning("AIDP binding count unavailable for domain %s: %s", domain_id, error)
+        logger.warning(
+            "AIDP binding count unavailable for domain %s: %s", domain_id, error
+        )
         return None
 
 
@@ -207,11 +212,12 @@ def _entity_summary(
         "type_id": item.get("type_id"),
         "properties": item.get("properties") or [],
         "primary_properties": item.get("primary_properties") or [],
+        "detail_loaded": item.get("detail_loaded")
+        if isinstance(item.get("detail_loaded"), bool)
+        else None,
         "parent_entities": item.get("parent_entities") or [],
         "synonym_entities": item.get("synonym_entities") or [],
-        "child_entities": item.get("child_entities")
-        or item.get("children")
-        or [],
+        "child_entities": item.get("child_entities") or item.get("children") or [],
         "chunk_count": item.get("chunk_count")
         if isinstance(item.get("chunk_count"), int)
         else None,
@@ -269,11 +275,15 @@ async def _enrich_entity_rows(
     domain_id: str,
     rows: list[dict[str, Any]],
     kind: str | None,
+    *,
+    detail_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Attach parents/children (Relations) and synonyms (detail property).
+    """Attach relations and the detail fields the list does not carry.
 
-    The entity list does not carry relations; the detail does not carry ids.
-    This merges both confirmed contracts into what the table renders.
+    The entity list omits relations, properties and audit fields, so each row
+    needs one detail call for synonyms and properties. The detail endpoint also
+    needs its relations enriched, so a single-row detail caller can pass its
+    already-fetched detail through ``detail_by_id`` to avoid a duplicate call.
     """
     if not rows:
         return rows
@@ -295,14 +305,17 @@ async def _enrich_entity_rows(
     parents, children = _relation_maps(relations.get("value") or [])
     semaphore = asyncio.Semaphore(5)
 
-    async def load_synonyms(row: dict[str, Any]) -> list[str]:
+    async def load_detail(row: dict[str, Any]) -> dict[str, Any] | None:
         entity_id = row.get("entity_id") or row.get("id")
         if entity_id is None:
-            return []
+            return None
+        override = (detail_by_id or {}).get(str(entity_id))
+        if override is not None:
+            return override
         async with semaphore:
             try:
                 detail = await run_blocking(
-                    "aidp-ontology-entity-detail-synonyms",
+                    "aidp-ontology-entity-detail",
                     get_ontology_entity_impl,
                     server_url,
                     api_key,
@@ -312,19 +325,41 @@ async def _enrich_entity_rows(
                     owner="config",
                 )
             except AppException:
-                return []
-        return _synonym_values(detail)
+                return None
+        # A business error may still be a dict; only accept a real entity row.
+        if not isinstance(detail, dict) or not (
+            detail.get("api_name") is not None or "properties" in detail
+        ):
+            return None
+        return detail
 
-    synonyms = await asyncio.gather(*(load_synonyms(row) for row in rows))
+    details = await asyncio.gather(*(load_detail(row) for row in rows))
     enriched: list[dict[str, Any]] = []
-    for row, synonym_values in zip(rows, synonyms):
+    for row, detail in zip(rows, details):
         entity_id = row.get("entity_id") or row.get("id")
         row = dict(row)
         row["parent_entities"] = parents.get(str(entity_id), [])
         row["child_entities"] = children.get(str(entity_id), [])
-        row["synonym_entities"] = [
-            {"api_name": value, "display_name": value} for value in synonym_values
-        ]
+        row["detail_loaded"] = detail is not None and isinstance(
+            detail.get("properties"), list
+        )
+        if detail is None:
+            row["synonym_entities"] = []
+        else:
+            if isinstance(detail.get("properties"), list):
+                row["properties"] = detail["properties"]
+            for field in (
+                "primary_properties",
+                "update_time",
+                "type_id",
+                "create_time",
+            ):
+                if detail.get(field) is not None:
+                    row[field] = detail[field]
+            row["synonym_entities"] = [
+                {"api_name": value, "display_name": value}
+                for value in _synonym_values(detail)
+            ]
         enriched.append(row)
     return enriched
 
@@ -370,7 +405,9 @@ async def _reconcile_entity_relations(
         if str(obj.get("entity_id")) == str(entity_id):
             current_children[str(subject.get("entity_id"))] = relation
 
-    async def create_link(subject_id: str, subject_kind: str, object_id: str, object_kind: str) -> None:
+    async def create_link(
+        subject_id: str, subject_kind: str, object_id: str, object_kind: str
+    ) -> None:
         await run_blocking(
             "aidp-ontology-relation-create",
             create_ontology_relation_impl,
@@ -440,7 +477,9 @@ def _rule_summary(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _find_metadata_field(fields: list[dict[str, Any]], field_ref: str) -> dict[str, Any] | None:
+def _find_metadata_field(
+    fields: list[dict[str, Any]], field_ref: str
+) -> dict[str, Any] | None:
     for item in fields:
         if str(item.get("id")) == str(field_ref):
             return item
@@ -463,4 +502,3 @@ async def _load_metadata_fields(domain_id: str) -> list[dict[str, Any]]:
         owner="config",
     )
     return envelope["value"]
-

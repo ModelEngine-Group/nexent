@@ -56,6 +56,8 @@ export interface AidpOntologyEntity {
   extended_properties?: Array<{ key: string; value: string }>;
   /** Count of knowledge bases bound to the owning ontology domain. */
   bound_kb_count: number | null;
+  /** False when the per-row detail call failed and properties are unknown. */
+  detail_loaded?: boolean | null;
   /** Create-only: child relations failed after the entity itself was created. */
   relation_error?: string | null;
 }

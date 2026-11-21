@@ -2061,6 +2061,7 @@
   "aidpKnowledge.ontologyEntityDescriptionPlaceholder": "Enter a description",
   "aidpKnowledge.ontologyEntityDescriptionTooLong": "The description must not exceed {{max}} characters",
   "aidpKnowledge.ontologyEntityDetailDemoGap": "AIDP does not return a linked chunk count per entity. Relations are rendered as returned; missing values show an em dash. Whether the one-hop neighbourhood includes inbound edges is unconfirmed, so child relations may be incomplete.",
+  "aidpKnowledge.ontologyEntityDetailIncomplete": "The entity detail did not load completely. This save only updates the name, description and relations; extended and primary properties are left unchanged. Refresh and try editing them again.",
   "aidpKnowledge.ontologyEntityDetailRealGap": "AIDP does not return a linked chunk count per entity. Relations are rendered as returned; missing values show an em dash. Whether the one-hop neighbourhood includes inbound edges is unconfirmed, so child relations may be incomplete.",
   "aidpKnowledge.ontologyEntityDetailTitle": "Entity detail",
   "aidpKnowledge.ontologyEntityDisplayName": "Display name",

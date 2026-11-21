@@ -50,6 +50,9 @@ const AidpOntologyEntityDetailDrawer: React.FC<
   AidpOntologyEntityDetailDrawerProps
 > = ({ open, entity, onClose, onEdit, onDelete }) => {
   const { t } = useTranslation();
+  const properties = (entity?.properties ?? []).filter(
+    (property) => property.api_name !== "synonym"
+  );
 
   const renderRelations = (values: unknown[] | undefined) => {
     if (!values || values.length === 0) {
@@ -140,11 +143,11 @@ const AidpOntologyEntityDetailDrawer: React.FC<
               key: "properties",
               label: t("aidpKnowledge.ontologyEntityExtended"),
               children:
-                (entity.properties ?? []).length === 0 ? (
+                properties.length === 0 ? (
                   "—"
                 ) : (
                   <div className={styles.propertyTags}>
-                    {(entity.properties ?? []).map((property, index) => (
+                    {properties.map((property, index) => (
                       <Tag key={`${property.api_name}-${index}`}>
                         {property.display_name || property.api_name}:{" "}
                         {property.value || "—"}
