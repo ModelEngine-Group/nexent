@@ -3,7 +3,7 @@
 
 Directly invoke each async endpoint function with the FastAPI
 ``Query/Header/Body`` defaults replaced by explicit values, patching the
-13 ``management.services.evaluation.evaluators`` impls and ``gateway.authentication.auth`` identity
+13 ``management.services.evaluation.evaluators`` impls and ``management.services.permission.identity.session`` identity
 resolution.  The heavy ``management.services.evaluation.evaluators`` module is stubbed at
 ``sys.modules`` level (idempotent ``_register_package`` registration) so the
 app module can be loaded with ``spec_from_file_location`` without pulling in
@@ -17,7 +17,7 @@ import json
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import UploadFile
@@ -104,9 +104,9 @@ def _install_stubs():
     _ev_mod = mk_mod("management.services.evaluation.evaluators", **{n: MagicMock(name=n) for n in _IMPL_NAMES})
     _svc_pkg.evaluator_service = _ev_mod
 
-    # ---- gateway.authentication.auth ------------------------------------------------
+    # ---- management.services.permission.identity.session ------------------------------------------------
     _utils_pkg = _register_package("utils")
-    _au_mod = mk_mod("gateway.authentication.auth", get_current_user_id=MagicMock(name="get_current_user_id"))
+    _au_mod = mk_mod("management.services.permission.identity.session", get_current_user_id=MagicMock(name="get_current_user_id"))
     _utils_pkg.auth_utils = _au_mod
     return _ErrorCode, _AppException, _UnauthorizedError
 
@@ -124,13 +124,14 @@ def bundle():
             sys.path.insert(0, extra)
 
     impls = {n: MagicMock(name=n) for n in _IMPL_NAMES}
+    impls["generate_evaluator_by_llm_impl"] = AsyncMock(name="generate_evaluator_by_llm_impl")
     auth = MagicMock(name="get_current_user_id")
     auth.return_value = ("u1", "t1")
 
     _svc_mod = sys.modules["management.services.evaluation.evaluators"]
     for n, m in impls.items():
         setattr(_svc_mod, n, m)
-    _au_mod = sys.modules["gateway.authentication.auth"]
+    _au_mod = sys.modules["management.services.permission.identity.session"]
     _au_mod.get_current_user_id = auth
 
     if MODULE_UNDER_TEST in sys.modules:
@@ -527,7 +528,7 @@ class TestGenerate:
         assert resp.status_code == 200
         assert _resp_json(resp)["data"] == {"evaluator_id": 5}
         bundle.impls["generate_evaluator_by_llm_impl"].assert_called_once_with(
-            description="d", tenant_id="t1", model_id=3, agent_id=9, language="zh"
+            description="d", user_id="u1", tenant_id="t1", model_id=3, agent_id=9, language="zh"
         )
 
     async def test_internal_error(self, bundle):

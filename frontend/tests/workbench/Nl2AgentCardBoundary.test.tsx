@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 
@@ -50,11 +52,11 @@ it("renders an NL2Agent wrapper card inside the Workbench flow provider", async 
   expect(append).toHaveBeenCalledWith(
     expect.objectContaining({
       runConfig: {
-        custom: {
+        custom: expect.objectContaining({
           onNl2AgentState: "callback",
           runtimeMode: "nl2agent",
           agentId: 42,
-        },
+        }),
       },
       metadata: {
         custom: {

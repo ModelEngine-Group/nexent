@@ -6,6 +6,11 @@ import types
 from unittest.mock import MagicMock, call
 
 import pytest
+# Load concrete model classes before replacing the SQL expression constructors.
+import sqlalchemy.exc  # noqa: F401
+
+import infrastructure.rdb.agent_execution  # noqa: F401
+from infrastructure.rdb.conversation_state import fail_streaming_assistant_messages
 
 
 from test.common.module_stubs import capture_module_stubs
@@ -101,19 +106,21 @@ sa_mod.update = _create_update_mock()
 sys.modules["sqlalchemy"] = sa_mod
 
 
-# Stub management.db.client
-client_mod = types.ModuleType("management.db.client")
+# Stub infrastructure.rdb.client
+client_mod = types.ModuleType("infrastructure.rdb.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.as_dict = MagicMock(name="as_dict")
 client_mod.db_client = MagicMock(name="db_client")
-sys.modules["management.db.client"] = client_mod
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 # Stub db_models with attributes referenced by the module
@@ -197,6 +204,7 @@ db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
+db_models_mod.UserTenant = MagicMock(name="UserTenant")
 
 sys.modules["management.db.models"] = db_models_mod
 sys.modules["management.db.models"] = db_models_mod
@@ -225,11 +233,20 @@ sys.modules["management.utils.audit_fields"] = utils_mod
 sys.modules["management.utils.audit_fields"] = utils_mod
 
 
+# Isolate the explicit membership lookup from unrelated account persistence.
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+
 # Import module under test after stubbing
 
 from contracts.errors.exceptions import HistorySummaryPersistenceError
-from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, fail_streaming_assistant_messages, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
+
+
+def _system_config_snapshot(**changes):
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    return system_config_snapshot(**changes)
 
 
 def test_fail_streaming_assistant_messages_returns_runtime_identities(
@@ -248,7 +265,7 @@ def test_fail_streaming_assistant_messages_returns_runtime_identities(
     ]
     query.update.return_value = 2
     session.query.return_value = query
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda: ctx)
 
     rows = fail_streaming_assistant_messages()
 
@@ -270,7 +287,7 @@ def test_fail_streaming_assistant_messages_returns_empty_without_rows(
     query.with_for_update.return_value = query
     query.all.return_value = []
     session.query.return_value = query
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.get_db_session", lambda: ctx)
 
     assert fail_streaming_assistant_messages() == []
     query.update.assert_not_called()
@@ -514,7 +531,7 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
     ok = delete_conversation(999)
 
     assert ok is False
-    assert session.execute.call_count == 5
+    assert session.execute.call_count == 1
 
 
 # =============================================================================
@@ -774,7 +791,8 @@ def test_create_conversation_rejects_user_history_limit(monkeypatch, mock_sessio
     session, ctx = mock_session_ctx
     session.scalar.return_value = 1
     monkeypatch.setattr(
-        "management.db.conversation.repository.MAX_CONVERSATIONS_PER_USER", 1
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATIONS_PER_USER=1),
     )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
@@ -970,7 +988,10 @@ def test_create_conversation_message_rejects_turn_limit(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.conversation.repository.MAX_CONVERSATION_TURNS", 1)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        lambda: _system_config_snapshot(MAX_CONVERSATION_TURNS=1),
+    )
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(AppException) as exc_info:
@@ -3643,8 +3664,14 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
                         message_content="new answer", minio_files=None, status="completed"),
     ]
+    records_result = MagicMock()
+    records_result.all.return_value = []
+    # Reply-annotation units for the historical user messages (none here).
+    annotations_result = MagicMock()
+    annotations_result.all.return_value = []
     session.execute.side_effect = [
-        current_result, candidates_result, boundary_result, messages_result]
+        current_result, candidates_result, boundary_result, messages_result,
+        annotations_result, records_result]
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")
@@ -3741,3 +3768,35 @@ _install_module_stubs = capture_module_stubs(_modules_before_stubs)
 @pytest.fixture(autouse=True)
 def _isolated_imports(monkeypatch):
     _install_module_stubs(monkeypatch)
+    monkeypatch.setattr(
+        "management.db.conversation.repository.get_config_snapshot",
+        _system_config_snapshot,
+    )
+
+
+@pytest.fixture(autouse=True)
+def isolated_trajectory_projection(monkeypatch):
+    """Keep the new persistence collaborator outside this legacy SQL-double unit."""
+    projection = types.SimpleNamespace(seed_conversation=MagicMock(), delete_summaries=MagicMock())
+    monkeypatch.setitem(sys.modules, "management.db.trajectory.repository", projection)
+    return projection
+
+
+def test_delete_trajectory_participates_in_the_conversation_transaction(monkeypatch, mock_session_ctx, isolated_trajectory_projection):
+    session, ctx = mock_session_ctx
+    session.execute.return_value.rowcount = 1
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    assert delete_conversation(123, "owner")
+    isolated_trajectory_projection.delete_summaries.assert_called_once_with(session, [123], "owner")
+    session.commit.assert_not_called()
+
+
+def test_trajectory_delete_failure_aborts_the_owned_transaction(monkeypatch, mock_session_ctx, isolated_trajectory_projection):
+    session, ctx = mock_session_ctx
+    session.execute.return_value.rowcount = 1
+    isolated_trajectory_projection.delete_summaries.side_effect = RuntimeError("projection unavailable")
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    with pytest.raises(RuntimeError, match="projection unavailable"):
+        delete_conversation(123, "owner")
+    assert ctx.__exit__.call_args.args[0] is RuntimeError
+    session.commit.assert_not_called()

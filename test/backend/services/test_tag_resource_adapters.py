@@ -987,7 +987,7 @@ def test_aidp_permission_and_marketplace_error_paths(monkeypatch):
         raise AidpKbNotFoundError("kb", "tenant-a")
 
     monkeypatch.setattr(
-        "ext_components.aidp.services.aidp_permission_service.require_permission",
+        "management.services.tag.resources.require_permission",
         raise_not_found,
     )
     with pytest.raises(ValueError, match="unavailable"):
@@ -1009,7 +1009,7 @@ def test_aidp_permission_and_marketplace_error_paths(monkeypatch):
         raise AidpKbPermissionDeniedError("kb", "user-1", "EDIT")
 
     monkeypatch.setattr(
-        "ext_components.aidp.services.aidp_permission_service.require_permission",
+        "management.services.tag.resources.require_permission",
         raise_permission_denied,
     )
     with pytest.raises(PermissionError, match="read-only"):
@@ -1107,11 +1107,11 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
 
     # aidp provider
     monkeypatch.setattr(
-        "contracts.constants.environment.AIDP_SERVER_URL",
+        "management.services.tag.resources.AIDP_SERVER_URL",
         "http://aidp",
     )
     monkeypatch.setattr(
-        "contracts.constants.environment.AIDP_API_KEY",
+        "management.services.tag.resources.AIDP_API_KEY",
         "key",
     )
     aidp_list = MagicMock(
@@ -1121,12 +1121,12 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
         }
     )
     monkeypatch.setattr(
-        "ext_components.aidp.services.aidp_service.list_aidp_docs_impl",
+        "management.services.tag.resources.list_aidp_docs_impl",
         aidp_list,
     )
     aidp_kb = {"kb_id": "kb", "tenant_id": "t"}
     monkeypatch.setattr(
-        "ext_components.aidp.database.aidp_permission_db.get_permission_by_kb_id",
+        "management.services.tag.resources.get_permission_by_kb_id",
         lambda kb_id=None, tenant_id=None: aidp_kb,
     )
     assert _get_provider_knowledge_base(provider="aidp", knowledge_base_id="kb", tenant_id="t") == aidp_kb
@@ -1147,7 +1147,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
         return Perm()
 
     monkeypatch.setattr(
-        "ext_components.aidp.services.aidp_permission_service.require_permission",
+        "management.services.tag.resources.require_permission",
         fake_require_permission,
     )
     assert (

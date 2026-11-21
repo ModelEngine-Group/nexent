@@ -32,7 +32,7 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("management.db.client.MinioClient",
+patch("infrastructure.object_storage.client.MinioClient",
       return_value=minio_client_mock).start()
 
 
@@ -57,6 +57,34 @@ class TestQueryModelMetrics:
 
         assert "model_type" not in sql_text.lower().split("where")[
             1].split("group")[0]
+
+    @patch("management.api.monitoring.monitoring.get_monitoring_db_session")
+    def test_sql_groups_by_display_name(self, mock_session_fn):
+        """Configs sharing a model_name must stay in separate rows.
+
+        A tenant may register several configs with the same model_name but
+        different display names. Grouping only by model_name merges them, so
+        the resource list shows identical statistics for both rows.
+        """
+        from management.api.monitoring.monitoring import _query_model_metrics_from_db
+
+        mock_session = MagicMock()
+        mock_session_fn.return_value.__enter__ = MagicMock(
+            return_value=mock_session)
+        mock_session_fn.return_value.__exit__ = MagicMock(return_value=None)
+        mock_session.execute.return_value.fetchall.return_value = []
+
+        _query_model_metrics_from_db("24h", tenant_id="t-1")
+
+        sql_text = str(mock_session.execute.call_args[0][0])
+        sql_lower = sql_text.lower()
+
+        assert (
+            "coalesce(m.display_name, split_part(m.model_name, '/', -1), "
+            "'unknown') as display_name" in sql_lower
+        )
+        group_clause = sql_lower.split("group by")[1]
+        assert "coalesce(m.display_name" in group_clause
 
     @patch("management.api.monitoring.monitoring.get_monitoring_db_session")
     def test_return_format(self, mock_session_fn):
@@ -96,7 +124,7 @@ class TestListModelsEndpoint:
     @pytest.fixture
     def client(self, mocker):
         mocker.patch("boto3.client")
-        mocker.patch("management.db.client.MinioClient")
+        mocker.patch("infrastructure.object_storage.client.MinioClient")
 
         import types
 

@@ -20,7 +20,7 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.utils.app_factory import create_app, register_exception_handlers
+from backend.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -515,8 +515,8 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', None):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -532,7 +532,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -551,8 +551,8 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': mock_module}):
-            with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.app_factory.monitoring_manager', mock_module.monitoring_manager):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available
@@ -695,7 +695,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('management.utils.app_factory.logger') as mock_logger:
+        with patch('backend.http.server.exception_handlers.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -848,29 +848,17 @@ class TestAidpExceptionHandlers:
 
 
 class TestAidpImportErrorBranch:
-    """Test class for ImportError fallback when AIDP is unavailable (lines 174-176)."""
+    """Optional provider availability is resolved when the shared module loads."""
 
     def test_register_skips_aidp_handlers_on_import_error(self):
-        """Test that register_exception_handlers works when AIDP module is absent."""
+        """Skip provider handlers when its module-level import is unavailable."""
         from unittest.mock import patch
+        from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 
-        app = FastAPI()
-
-        # Force an ImportError for the AIDP import by intercepting the built-in import
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
-
-        def patched_import(name, *args, **kwargs):
-            if "aidp_exceptions" in name:
-                raise ImportError(f"Simulated absence of {name}")
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=patched_import):
-            # re-register on a fresh app so the ImportError path runs
+        with patch("backend.http.server.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
             fresh_app = FastAPI()
             register_exception_handlers(fresh_app)
 
-        # Verify AIDP exception classes are NOT in the handler map
-        from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
         assert AidpKbNotFoundError not in fresh_app.exception_handlers
 
 

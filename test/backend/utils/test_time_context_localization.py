@@ -44,10 +44,10 @@ def time_context(monkeypatch):
     for name, values in {
         "contracts.agent": {"AgentRunContext": object},
         "nexent.core.agents.context": {"ContextItemInput": object},
-        "nexent.core.agents.context_input": {"ContextInput": object},
+        "nexent.core.agents.contracts.context": {"ContextInput": object, "ContextItemInput": object},
         "nexent.monitor": {"AgentRunMetadata": object},
         "management.services.configuration.user.memory": {"build_memory_context": lambda *args, **kwargs: None},
-        "infrastructure.observability.bootstrap": {"monitoring_manager": object()},
+        "infrastructure.trace.bootstrap": {"monitoring_manager": object()},
         "management.services.monitor.identity": {"resolve_monitoring_user_email": lambda *args: None},
     }.items():
         dependency = types.ModuleType(name)

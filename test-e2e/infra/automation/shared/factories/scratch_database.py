@@ -101,7 +101,7 @@ def isolated_product_database():
     """
     from sqlalchemy import create_engine,text
     from sqlalchemy.orm import sessionmaker
-    from management.db import client as product
+    from infrastructure.rdb import client as product
     from shared.postgres import postgres_url
     with _product_connection_lock, isolated_schema_database() as name:
         engine=create_engine(postgres_url(),pool_pre_ping=True)

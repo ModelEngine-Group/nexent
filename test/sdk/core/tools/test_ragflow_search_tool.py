@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import sys
 import types
@@ -37,6 +39,7 @@ _mock_sdk_nexent_core_tools = types.ModuleType("sdk.nexent.core.tools")
 _mock_sdk_nexent_core_utils = types.ModuleType("sdk.nexent.core.utils")
 _mock_sdk_nexent_utils = types.ModuleType("sdk.nexent.utils")
 _mock_nexent = types.ModuleType("nexent")
+_mock_nexent_core = types.ModuleType("nexent.core")
 _mock_nexent_utils = types.ModuleType("nexent.utils")
 
 # Set __path__ so Python treats these as namespace packages and can locate
@@ -48,6 +51,10 @@ _mock_sdk_nexent_core.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
 _mock_sdk_nexent_core_tools.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")]
 _mock_sdk_nexent_core_utils.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "utils")]
 _mock_sdk_nexent_utils.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "utils")]
+# Observer imports real Agent identity contracts through the canonical namespace.
+_mock_nexent.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
+_mock_nexent_core.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
+_mock_nexent_utils.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "utils")]
 
 # -- http_client_manager stubs (both nexent.utils and sdk.nexent.utils) --------
 _mock_nexent_utils_http = types.ModuleType("nexent.utils.http_client_manager")
@@ -68,6 +75,7 @@ _MODULE_MOCKS = {
     "sdk.nexent.utils": _mock_sdk_nexent_utils,
     "sdk.nexent.utils.http_client_manager": _mock_sdk_nexent_utils_http,
     "nexent": _mock_nexent,
+    "nexent.core": _mock_nexent_core,
     "nexent.utils": _mock_nexent_utils,
     "nexent.utils.http_client_manager": _mock_nexent_utils_http,
 }

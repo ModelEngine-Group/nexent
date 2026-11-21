@@ -4,7 +4,7 @@
 
 import pytest
 
-from nexent.core.agents import sandbox
+from nexent.core.agents.sandbox import execution as sandbox
 
 
 @pytest.mark.parametrize("name", ["agent-one", "class", "_nexent_json", "x = injected()"])
@@ -19,7 +19,7 @@ def test_proxy_guard_rejects_invalid_names_before_bootstrap(name):
 
 
 def test_external_wrapper_keeps_original_display_name():
-    from nexent.core.agents.a2a_agent_proxy import A2AAgentInfo, ExternalA2AAgentWrapper
+    from nexent.core.agents.resources.a2a import A2AAgentInfo, ExternalA2AAgentWrapper
 
     wrapper = ExternalA2AAgentWrapper(A2AAgentInfo(agent_id="7", name="agent-one", url="https://unused.invalid"))
     assert wrapper.name == "a2a_agent_7"

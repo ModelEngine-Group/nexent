@@ -21,7 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Pagination } from "antd";
 import { cn } from "@/lib/utils";
 import { getCitationKey } from "@/lib/citationDisplay";
 import {
@@ -302,7 +302,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           aria-label={t("chat.sources.pagination")}
           className="flex shrink-0 justify-center border-t border-slate-200 px-3 py-3"
         >
-          <StandardPaginator
+          <Pagination
             size="small"
             current={currentPage}
             pageSize={20}

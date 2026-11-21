@@ -6,8 +6,8 @@ from threading import Event
 from types import SimpleNamespace
 
 from nexent.core.agent_names import resolve_external_agent_configs
-from nexent.core.agents import nexent_agent
-from nexent.core.agents.agent_model import AgentConfig, ExternalA2AAgentConfig
+from nexent.core.agents.cores.smolagents import agent as nexent_agent
+from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig
 from nexent.core.agents.context.models import ContextItemInput, ContextItemType
 from nexent.core.utils.observer import MessageObserver
 
@@ -34,6 +34,7 @@ def test_factory_aliases_match_context_and_observer_without_mutating_config(mock
     wrappers = core.call_args.kwargs["managed_agents"]
     context = core.call_args.kwargs["context_runtime"].items
     assert [wrapper.name for wrapper in wrappers] == [item.invocation_name for item in expected]
+    assert [item.invocation_name for item in core.return_value._delegation_collaborators] == [item.invocation_name for item in expected]
     assert [wrapper._agent_name for wrapper in wrappers] == [item.name for item in original]
     assert [item.content["name"] for item in context] == [item.invocation_name for item in expected]
     assert [item.content["display_name"] for item in context] == [item.name for item in original]

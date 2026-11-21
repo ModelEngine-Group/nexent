@@ -7,7 +7,7 @@ import unicodedata
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
 from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
 
@@ -568,6 +568,7 @@ def resolve_knowledge_scope(
         local_capable=local_capable,
         aidp_capable=aidp_capable,
         warnings=warnings,
+        managed_tool_overrides=scope_overrides,
     )
 
 
@@ -583,7 +584,7 @@ def resolve_executable_knowledge_scope(
     System roots need no persisted Agent ID. Resource authorization remains in
     the existing scope resolver; this adapter never queries Agent repositories.
     """
-    from infrastructure.serialization.containers import clone_runtime_config
+    from management.services.agent.runtime_config import clone_runtime_config
 
     compiled = clone_runtime_config(root)
     nodes: Dict[str, AgentConfig] = {}

@@ -10,10 +10,6 @@ from contracts.errors.exceptions import AppException
 from contracts.agent import AgentRequest
 from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
 
-try:
-    from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
-except ModuleNotFoundError:
-    JiuwenSDKAdapter = None
 import ast
 import asyncio
 import json
@@ -26,17 +22,15 @@ from datetime import datetime
 from math import isfinite
 from statistics import mean
 
-from adapters.exception import JiuwenSDKUnavailableError
 from contracts.constants.constants import MAX_CONCURRENT_RUNS, MAX_EVALUATORS_PER_RUN, MAX_TOTAL_RUNS, MAX_TURNS_PER_SESSION
 from contracts.constants.constants import MAX_FAILURE_EXAMPLES
 from management.db.evaluation.runs import count_active_runs, count_total_runs, create_agent_evaluation, create_agent_evaluation_cases, get_agent_evaluation, get_evaluation_case_scores, hard_delete_agent_evaluation, list_agent_evaluation_cases, list_agent_evaluations_by_agent, update_agent_evaluation_analysis_report, update_agent_evaluation_case_result, update_agent_evaluation_status
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from infrastructure.concurrency import config_thread_manager, runtime_thread_manager
-from management.services.agent.service import prepare_agent_run
+from management.thread_management import config_thread_manager
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,
     _EVENT_LABELS,
@@ -48,7 +42,6 @@ from management.services.evaluation.common import (
     logger,
 )
 from management.services.evaluation.sets import resolve_latest_published_version_no
-from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_analysis_report,
@@ -57,8 +50,7 @@ from nexent.core.agents.prompt.evaluation import (
     render_analysis_stats,
     render_evaluation_section,
 )
-from runtime.adapters.nexent.runner import agent_run
-from nexent.core.agents.sandbox import _scan_shell_calls
+from nexent.core.agents.sandbox.execution import _scan_shell_calls
 from nexent.core.concurrency import ManagedTaskSpec
 
 
@@ -286,11 +278,12 @@ async def trial_run_evaluator_impl(
             ev = get_evaluator(eid, tenant_id)
             if ev and ev.get("status") == "PUBLISHED":
                 evaluators[eid] = ev
+    if not evaluators:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_EVALUATOR_REQUIRED,
+            "At least one published evaluator is required for a trial run.",
+        )
     judge_system_prompt = compose_auxiliary_prompt(language, "evaluation_judge").system
-
-    if JiuwenSDKAdapter is None:
-        raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable")
-    adapter = JiuwenSDKAdapter(model_id=judge_model_id, tenant_id=tenant_id)
 
     answer_text, _runtime_events, score, reason = await _evaluate_query(
         tenant_id=tenant_id,
@@ -299,12 +292,17 @@ async def trial_run_evaluator_impl(
         agent_version_no=agent_version_no,
         query=query,
         judge_model_id=judge_model_id,
-        adapter=adapter,
         evaluators=evaluators,
         judge_system_prompt=judge_system_prompt,
         language=language,
     )
     return {"query": query, "answer": answer_text, "scores": score, "reasons": reason}
+
+
+
+def run_evaluation_trial_in_worker(**kwargs):
+    """Run trial preparation, remote execution and scoring off the API event loop."""
+    return asyncio.run(trial_run_evaluator_impl(**kwargs))
 
 
 from management.services.evaluation.analysis import (

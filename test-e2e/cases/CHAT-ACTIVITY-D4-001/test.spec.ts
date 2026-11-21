@@ -25,7 +25,12 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
   let state!: Awaited<ReturnType<typeof prepareWorkbench>>;
   let originalUrl = "";
   let origin = 0;
-  let pollObserved = false;
+  let foregroundObserved = false;
+  let listReads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/conversation/list")
+      listReads++;
+  });
   const draft = page.getByRole("textbox", { name: "对话输入", exact: true });
   let draftNode: Awaited<ReturnType<typeof draft.elementHandle>> = null;
   await contract.precondition(
@@ -51,7 +56,14 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
     automated.last_activity_time = Date.now();
     histories.pop();
     histories.unshift(automated);
-    // No reload, navigation or focus event: the visible-page poll must discover it.
+    // An idle page must not discover external changes until a foreground event.
+    const idleReads = listReads;
+    await page.waitForTimeout(60_000);
+    expect(listReads).toBe(idleReads);
+    await expect(
+      page.getByText(automated.conversation_title, { exact: true }),
+    ).toHaveCount(0);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(
       page.getByText(automated.conversation_title, { exact: true }),
     ).toBeVisible({ timeout: 15_000 });
@@ -71,40 +83,96 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
     await expect(draft).toHaveValue(
       "Keep this draft while automation updates another history",
     );
-    pollObserved = true;
+    foregroundObserved = true;
   });
   await contract.step(contract.expectedIds("steps")[1], async () => {
     const control = histories.find((item) => item.conversation_id === 100)!;
     control.last_activity_time = Date.now() + 1_000;
     histories.splice(histories.indexOf(control), 1);
     histories.unshift(control);
-    await page.evaluate(() => {
-      window.dispatchEvent(new Event("focus"));
-      window.dispatchEvent(new Event("online"));
-    });
-    await expect
-      .poll(async () => {
-        const controlPosition = await page
-          .getByText(control.conversation_title, { exact: true })
-          .boundingBox();
-        const oldPosition = await page
-          .getByText(automated.conversation_title, { exact: true })
-          .boundingBox();
-        return Boolean(
-          controlPosition && oldPosition && controlPosition.y < oldPosition.y,
-        );
-      })
-      .toBe(true);
-    await expect(
-      page.getByText(automated.conversation_title, { exact: true }),
-    ).toHaveCount(1);
-    await expect(draft).toHaveValue(
-      "Keep this draft while automation updates another history",
+    const row = await page
+      .getByText(automated.conversation_title, { exact: true })
+      .elementHandle();
+    const scroll = await row!.evaluateHandle((node) =>
+      node.closest('[data-sidebar="content"]'),
     );
+    await scroll.evaluate((node) => {
+      if (node instanceof HTMLElement) node.scrollTop = 80;
+    });
+    const beforeScroll = await scroll.evaluate((node) =>
+      node instanceof HTMLElement ? node.scrollTop : -1,
+    );
+    expect(beforeScroll).toBeGreaterThan(0);
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let arrived!: () => void;
+    const started = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const beforeReads = listReads;
+    const routePattern = "**/api/conversation/list?**";
+    await page.route(routePattern, async (route) => {
+      arrived();
+      await hold;
+      await route.fallback();
+    });
+    try {
+      await page.evaluate(() => {
+        window.dispatchEvent(new Event("focus"));
+        window.dispatchEvent(new Event("online"));
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await started;
+      await expect(
+        page.locator('[data-slot="aui_thread-list-skeleton"]'),
+      ).toHaveCount(0);
+      await expect(
+        page.getByText(automated.conversation_title, { exact: true }),
+      ).toBeVisible();
+      expect(await row!.evaluate((node) => node.isConnected)).toBe(true);
+      expect(
+        await scroll.evaluate((node) =>
+          node instanceof HTMLElement ? node.scrollTop : -1,
+        ),
+      ).toBe(beforeScroll);
+      expect(listReads).toBe(beforeReads + 1);
+      release();
+      await expect
+        .poll(async () => {
+          const controlPosition = await page
+            .getByText(control.conversation_title, { exact: true })
+            .boundingBox();
+          const oldPosition = await page
+            .getByText(automated.conversation_title, { exact: true })
+            .boundingBox();
+          return Boolean(
+            controlPosition && oldPosition && controlPosition.y < oldPosition.y,
+          );
+        })
+        .toBe(true);
+      await expect(
+        page.getByText(automated.conversation_title, { exact: true }),
+      ).toHaveCount(1);
+      expect(await row!.evaluate((node) => node.isConnected)).toBe(true);
+      expect(
+        await scroll.evaluate((node) =>
+          node instanceof HTMLElement ? node.scrollTop : -1,
+        ),
+        "completed metadata reorder retains scroll offset",
+      ).toBe(beforeScroll);
+      await expect(draft).toHaveValue(
+        "Keep this draft while automation updates another history",
+      );
+    } finally {
+      release();
+      await page.unroute(routePattern);
+    }
   });
   for (const id of contract.expectedIds("assertions").slice(0, 2)) {
     await contract.assertion(id, async () => {
-      expect(pollObserved).toBe(true);
+      expect(foregroundObserved).toBe(true);
       expect(page.url()).toBe(originalUrl);
       expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
       expect(await draftNode!.evaluate((node) => node.isConnected)).toBe(true);
@@ -126,9 +194,17 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
   const firstTitle = "First persisted Workbench history";
   let runs = 0;
   await contract.step(contract.expectedIds("steps")[2], async () => {
-    await page.route("**/api/conversation/generate_title", (route) =>
-      route.fulfill({ json: { code: 0, data: firstTitle } }),
-    );
+    let releaseTitle!: () => void;
+    const titleReady = new Promise<void>((resolve) => {
+      releaseTitle = resolve;
+    });
+    await page.route("**/api/conversation/generate_title", async (route) => {
+      await titleReady;
+      histories.find(
+        (item) => item.conversation_id === 1303,
+      )!.conversation_title = firstTitle;
+      await route.fulfill({ json: { code: 0, data: firstTitle } });
+    });
     await page.route("**/api/conversation/1303", (route) =>
       route.fulfill({
         json: {
@@ -158,7 +234,7 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
       expect(request.conversation_id).toBeUndefined();
       histories.unshift({
         conversation_id: 1303,
-        conversation_title: firstTitle,
+        conversation_title: "New conversation",
         create_time: Date.now(),
         update_time: Date.now(),
         last_activity_time: Date.now(),
@@ -172,6 +248,9 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
     await draft.fill(firstQuestion);
     await draft.press("Enter");
     await expect(page.getByText(firstAnswer, { exact: true })).toBeVisible();
+    // Release the asynchronous title only after the reply is already visible.
+    await page.waitForTimeout(200);
+    releaseTitle();
     await expect(
       page.getByText(firstTitle, { exact: true }).first(),
     ).toBeVisible({ timeout: 15_000 });

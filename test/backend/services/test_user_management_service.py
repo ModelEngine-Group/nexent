@@ -11,7 +11,7 @@ from management.services.permission.identity.authentication import (
     format_role_permissions, create_token, list_tokens_by_user, delete_token,
 )
 
-from gateway.authentication.auth import get_session_by_authorization
+from management.services.permission.identity.session import get_session_by_authorization
 
 class TestGetProviderUsername(unittest.TestCase):
     """Test provider username lookup for linked OAuth accounts."""
@@ -89,7 +89,7 @@ class TestVerifyInviteCode(unittest.IsolatedAsyncioTestCase):
 class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
     """Test get_session_by_authorization"""
 
-    @patch('gateway.authentication.auth.validate_token')
+    @patch('management.services.permission.identity.session.validate_token')
     async def test_get_session_success(self, mock_validate_token):
         """Test successful session retrieval"""
         mock_user = MagicMock()
@@ -109,7 +109,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(result, expected)
 
-    @patch('gateway.authentication.auth.validate_token')
+    @patch('management.services.permission.identity.session.validate_token')
     async def test_get_session_default_role(self, mock_validate_token):
         """Test session retrieval with default role"""
         mock_user = MagicMock()
@@ -122,7 +122,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["user"]["role"], "user")
 
-    @patch('gateway.authentication.auth.validate_token')
+    @patch('management.services.permission.identity.session.validate_token')
     async def test_get_session_invalid_token(self, mock_validate_token):
         """Test session retrieval with invalid token"""
         mock_validate_token.return_value = (False, None)
@@ -250,8 +250,8 @@ class TestFormatRolePermissions(unittest.TestCase):
 class TestCreateToken(unittest.IsolatedAsyncioTestCase):
     """Tests for create_token function in user_management_service."""
 
-    @patch('management.db.identity.token.soft_delete_tokens_by_user')
-    @patch('management.db.client.get_db_session')
+    @patch('management.services.permission.identity.authentication.soft_delete_tokens_by_user')
+    @patch('management.services.permission.identity.authentication.get_db_session')
     @patch('management.services.permission.identity.authentication.create_token_record')
     @patch('management.services.permission.identity.authentication.generate_access_key')
     def test_create_token_success(

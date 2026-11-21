@@ -3,17 +3,17 @@
 Group management API endpoints
 """
 
-from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
-from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 import logging
+from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
-from http import HTTPStatus
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 
 from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
 from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from management.services.permission.identity.session import authenticate, get_current_user_id
+from management.utils.managed_read import managed_read
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.groups import (
     create_group, get_group_info, update_group, delete_group,
@@ -22,7 +22,9 @@ from management.services.permission.identity.groups import (
     get_groups_by_tenant, update_group_members
 )
 from management.services.permission.identity.tenants import get_tenant_info
-from gateway.authentication.auth import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
+from permissions.models import CurrentUser
+from permissions.tenant_scope import resolve_tenant_scope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])
@@ -116,8 +118,10 @@ async def get_group_endpoint(group_id: int) -> JSONResponse:
 
 
 @router.post("/list")
-async def get_groups_endpoint(
+@managed_read
+def get_groups_endpoint(
     request: GroupListRequest,
+    current_user: CurrentUser = Depends(authenticate),
 ) -> JSONResponse:
     """
     Search groups for a specific tenant with pagination
@@ -129,9 +133,9 @@ async def get_groups_endpoint(
     Returns:
         JSONResponse: List of groups for the tenant (paginated or all)
     """
+    resolve_tenant_scope(current_user, request.tenant_id)
     try:
-        # Validate tenant exists
-        get_tenant_info(request.tenant_id)
+        get_tenant_info(request.tenant_id, initialize_name=False)
         # Get groups under given tenant with pagination and sorting
         group_kwargs = {
             "tenant_id": request.tenant_id,
@@ -379,7 +383,10 @@ async def remove_user_from_group_endpoint(
 
 
 @router.get("/{group_id}/members")
-async def get_group_users_endpoint(group_id: int) -> JSONResponse:
+async def get_group_users_endpoint(
+    group_id: int,
+    current_user: CurrentUser = Depends(authenticate),
+) -> JSONResponse:
     """
     Get all users in a group
 
@@ -390,9 +397,9 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
     Returns:
         JSONResponse: List of group users
     """
+    authorized_tenant = resolve_tenant_scope(current_user, allow_all_tenants=True)
     try:
-        # Get group users
-        users = get_group_users(group_id)
+        users = get_group_users(group_id, tenant_id=authorized_tenant) if authorized_tenant else get_group_users(group_id)
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Group users retrieved successfully", "data": users}

@@ -35,6 +35,9 @@ const AidpKnowledgeDetailPage: React.FC = () => {
   const locale = (params?.locale as string) || "zh";
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const kbId = searchParams?.get("kb") || null;
+  const tabParam = searchParams?.get("tab");
+  const initialTab =
+    tabParam === "tasks" || tabParam === "information" ? tabParam : "files";
   const { updateKnowledgeBase, fetchKnowledgeBase } = useAidpKnowledgeCache();
   const deleteMutation = useDeleteAidpKnowledgeBase();
   const { handleError } = useErrorHandler();
@@ -154,12 +157,13 @@ const AidpKnowledgeDetailPage: React.FC = () => {
     <div className="flex h-full w-full min-w-0 flex-col">
       <div className="mt-4 min-h-0 flex-1 overflow-hidden">
         <AidpKnowledgeFilesPage
-          key={kb.kds_id}
+          key={`${kb.kds_id}:${initialTab}`}
           knowledgeBase={kb}
           onBack={handleBack}
           onDelete={handleDelete}
           onUpdated={handleUpdated}
           pollingPaused={deleteConfirmOpen}
+          initialTab={initialTab}
         />
       </div>
     </div>

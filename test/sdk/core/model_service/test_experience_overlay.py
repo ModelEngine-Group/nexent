@@ -97,7 +97,7 @@ def test_defaults_are_layered_before_permitted_user_values(layer, expected):
     assert before.parameter_rules.declarations[0]["source"]["ref"] == "fixture"
 
 
-def test_model_experience_is_applied_after_exact_upstream_facts():
+def test_exact_upstream_fact_overrides_model_experience():
     rule = {
         "capability_overrides": [
             {
@@ -109,8 +109,8 @@ def test_model_experience_is_applied_after_exact_upstream_facts():
         ]
     }
     policy = resolve(definitions(model=rule))
-    assert policy.capabilities["context"]["output_limit"] == 8000
-    assert policy.overrides[0]["original_value"] == 12000
+    assert policy.capabilities["context"]["output_limit"] == 12000
+    assert policy.overrides[0]["original_value"] == 16000
     assert policy.overrides[0]["source"] == "rules/model.toml"
     assert policy.capabilities["context"]["combined_window"] == 200000
 
@@ -124,5 +124,6 @@ def test_effective_fixed_value_and_range_still_reject_user_changes():
     assert resolve(catalog).parameter_values["temperature"] == 0.6
     with pytest.raises(ParameterValidationError, match="FIXED_PARAMETER"):
         resolve(catalog, {"temperature": 0.9})
+    range_limited = parameter(0.2, schema={"type": "number", "minimum": 0, "maximum": 1.5})
     with pytest.raises(ParameterValidationError, match="PARAMETER_VALUE_INVALID"):
-        resolve(definitions(model={"parameters": [parameter(0.2)]}), {"temperature": 3})
+        resolve(definitions(model={"parameters": [range_limited]}), {"temperature": 1.8})

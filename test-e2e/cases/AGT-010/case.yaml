@@ -8,7 +8,7 @@ case:
   title: section optimize：无效范围、外部 Provider 故障与超时、恢复后不自动保存
   type: AGENT-IT
   priority: P1
-  status: active
+  status: retired
   automation: automated
   objective: 使用实际有效的负例验证范围拒绝；通过受控 Provider 验证异常与超时不会部分保存，恢复真实模型后功能仍可用。
   preconditions:

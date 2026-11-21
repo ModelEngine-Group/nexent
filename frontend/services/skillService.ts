@@ -168,9 +168,13 @@ export const processSkillStream = async (
  * @param tenantId - Optional tenant ID for super admin to query a specific tenant's skills.
  */
 export async function fetchSkillsList(
-  tenantId?: string | null
+  tenantId?: string | null,
+  view: import("@/types/skill").SkillListView = "full"
 ): Promise<SkillListItem[]> {
-  const res = await fetchSkills(tenantId);
+  const res =
+    view === "full"
+      ? await fetchSkills(tenantId)
+      : await fetchSkills(tenantId, view);
   if (!res.success) {
     throw new Error(res.message || "Failed to fetch skills");
   }

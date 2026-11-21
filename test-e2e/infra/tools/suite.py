@@ -40,10 +40,11 @@ from validate_execution import inspect
 STAGES = [f"D{i}" for i in range(1, 6)]
 
 
-def static_requirements(repo, records, *, daily):
+def static_requirements(repo, records, *, daily, catalog=None):
     """Daily checks the full catalog; targeted runs check declared/direct references."""
     if daily:
         return None
+    catalog = static_entries() if catalog is None else catalog
     selected = set()
     for record in records:
         if not record.get("execution") or record.get("status") != "active":
@@ -51,16 +52,33 @@ def static_requirements(repo, records, *, daily):
         selected.update(record["execution"].get("required_assets") or [])
         case_path = repo / "test-e2e/cases" / record["case_id"] / "case.yaml"
         text = case_path.read_text(encoding="utf-8") if case_path.is_file() else ""
-        primary = record["execution"]["implementations"][0]
-        text += (repo / primary["file"]).read_text(encoding="utf-8")
-        for item in static_entries():
+        implementations = record["execution"].get("implementations", [])
+        if implementations:
+            text += (repo / implementations[0]["file"]).read_text(encoding="utf-8")
+        for item in catalog:
             category = item["path"].split("/", 1)[0]
             if (item["asset_id"] in text or f"assets/{item['path']}" in text or
                     f"assets/{category}/" in text):
                 selected.add(item["asset_id"])
-    catalog_ids = {item["asset_id"] for item in static_entries()}
-    catalog_paths = {item["path"] for item in static_entries()}
+    catalog_ids = {item["asset_id"] for item in catalog}
+    catalog_paths = {item["path"] for item in catalog}
     return {value for value in selected if value in catalog_ids or value in catalog_paths}
+
+
+def static_blocks(repo, records, rows):
+    """Retain unavailable fixtures as per-Case prerequisites, never as PASS."""
+    unavailable = [row for row in rows if row["destination"] != "READY"]
+    if not unavailable:
+        return {}
+    catalog = static_entries()
+    blocked = {}
+    for record in records:
+        required = static_requirements(repo, [record], daily=False, catalog=catalog)
+        problems = [f"Static asset {row['asset_id']} ({row['path']}): {row['destination']}"
+                    for row in unavailable if required & {row["asset_id"], row["path"]}]
+        if problems:
+            blocked[record["case_id"]] = problems
+    return blocked
 
 
 def config(repo, home):
@@ -76,7 +94,7 @@ def config(repo, home):
 
 
 def selection(repo, args, *, daily=False, worker=False):
-    issues, registry = inspect(repo)
+    issues, registry = inspect(repo, case_ids=set(args.case or []) if worker else None)
     if issues and not (daily or worker):
         raise ValueError(f"Invalid test assets: {len(issues)} binding issues")
     records = registry["cases"]
@@ -108,13 +126,17 @@ def selection(repo, args, *, daily=False, worker=False):
     return sorted(result, key=lambda record: (record["stage"], record["case_id"]))
 
 
-def doctor(repo, home, records, *, live=False):
-    problems = static_config_problems(home, records, repo=repo)
+def doctor(repo, home, records, *, live=False, common_only=False):
+    problems = static_config_problems(home, records, repo=repo, common_only=common_only)
     expected_runtime = (home / "runtime/test-venv").resolve()
     if Path(sys.prefix).resolve() != expected_runtime or not test_python(home).is_file():
         problems.append("Run this suite with the dedicated <test-home>/runtime/test-venv Python")
     if sys.version_info[:2] != (3, 11):
         problems.append("Product runtime requires Python 3.11")
+    if common_only:
+        if live and not problems:
+            problems.extend(live_service_problems(home))
+        return sorted(set(problems))
     for project in ("backend", "sdk"):
         data = tomllib.loads((repo / project / "pyproject.toml").read_text(encoding="utf-8"))
         for declaration in data["project"]["dependencies"]:
@@ -129,24 +151,50 @@ def doctor(repo, home, records, *, live=False):
             except importlib.metadata.PackageNotFoundError:
                 problems.append(f"missing {project} dependency: {req.name}")
     frameworks = {record["execution"]["implementations"][0]["framework"] for record in records if record["execution"]}
+    problems.extend(node_runtime_problems(repo, home, frameworks))
+    if live and not problems:
+        problems.extend(live_service_problems(home))
+    return sorted(set(problems))
+
+
+def node_runtime_problems(repo, home, frameworks, *, environment=None):
+    """Check one selected Node toolchain once, without installing dependencies."""
+    problems = []
     if frameworks & {"vitest", "playwright", "custom"}:
         node = shutil.which("node")
         if not node:
             problems.append("Node.js >=22 is required")
         else:
-            version = subprocess.check_output([node, "--version"], text=True).strip()
-            if int(version.lstrip("v").split(".")[0]) < 22:
-                problems.append("Node.js >=22 is required")
+            try:
+                version = subprocess.check_output([node, "--version"], text=True, timeout=10).strip()
+                if int(version.lstrip("v").split(".")[0]) < 22:
+                    problems.append("Node.js >=22 is required")
+            except (OSError, ValueError, subprocess.SubprocessError):
+                problems.append("Cannot verify Node.js >=22")
+        if problems:
+            return problems
     for framework, relative in (
         ("vitest", "d1/frontend/node_modules/vitest/vitest.mjs"),
         ("playwright", "d4/node_modules/playwright/cli.js"),
     ):
         if framework in frameworks and not (repo / "test-e2e/infra/automation" / relative).is_file():
             problems.append(f"missing locked {framework} toolchain")
-    problems.extend(node_toolchain_problems(repo, home, frameworks))
-    if live and not problems:
-        problems.extend(live_service_problems(home))
+    problems.extend(node_toolchain_problems(repo, home, frameworks, environment=environment))
     return sorted(set(problems))
+
+
+def runtime_blocks(repo, home, records, *, environment=None):
+    """Isolate known toolchain failures; opaque custom scripts check their own dependencies."""
+    blocked = {}
+    for framework in ("vitest", "playwright"):
+        selected = [record for record in records if record.get("status") == "active"
+                    and any(item.get("framework") == framework
+                            for item in (record.get("execution") or {}).get("implementations", []))]
+        if selected:
+            problems = node_runtime_problems(repo, home, {framework}, environment=environment)
+            for record in selected if problems else []:
+                blocked.setdefault(record["case_id"], []).extend(problems)
+    return blocked
 
 
 
@@ -208,7 +256,7 @@ def worker(repo, home, record, directory, settings):
     # Keep all descendants in the worker group so the controller can terminate it.
     run_logged = partial(logged, new_session=False)
     automation = repo / "test-e2e/infra/automation"
-    env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
+    env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
     bind_result_directory(env, directory)
     if (home / "runtime/playwright-browsers").is_dir():
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(home / "runtime/playwright-browsers")
@@ -278,7 +326,9 @@ def worker(repo, home, record, directory, settings):
                     raise ValueError("Invalid prepared D4 environment")
                 key, value = parts[0].split("=", 1)
                 env[key] = value
-        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory)
+        # The controller owns this worker's whole process group and Case deadline.
+        # Keep its commands in that group so outer cancellation also reclaims children.
+        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory, enforce_timeout=False)
         status_path = directory / "status.json"
         if status_path.is_file():
             test_details = json.loads(status_path.read_text(encoding="utf-8"))
@@ -328,9 +378,14 @@ def worker(repo, home, record, directory, settings):
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 
-def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
+def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, on_batch_created=None):
     from deployment_exceptions import assert_recovered, catalog, execute_campaign, groups
-    assert_recovered(home)
+    assert_recovered(home, allow_retry=daily)
+    if daily:
+        from daily_recovery import current_retry
+        retry = current_retry(home)
+    else:
+        retry = None
     validation = None
     if daily:
         from validation_policy import evaluate
@@ -351,17 +406,22 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
         return execute_campaign(repo, home, records, settings, daily=daily, publish_latest=publish_latest,
                                 execute_one=partial(_execute, validation_report=validation) if daily else _execute,
                                 all_records=all_records, hook=execute_hooks,
-                                machine_env=machine_environment, validation_report=validation)
+                                machine_env=machine_environment, validation_report=validation,
+                                on_batch_created=on_batch_created)
+    if retry is not None:
+        raise RuntimeError("Pending Daily recovery requires an enabled deployment campaign")
     return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest,
-                    validation_report=validation)
+                    validation_report=validation, on_batch_created=on_batch_created)
 
 
 def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None,
-             on_result=None, validation_report=None):
+             on_result=None, validation_report=None, on_batch_created=None):
     directory = directory or home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
         directory.chmod(0o700)
+    if on_batch_created is not None:
+        on_batch_created(directory)
     required_static = static_requirements(repo, records, daily=daily)
     provenance = {**fingerprint(repo), "config_sha256": config_fingerprint(home),
                   "batch_mode": "daily" if daily else "run", "full_static_assets": daily,
@@ -388,12 +448,12 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     state = {"status": "RUNNING", "started_at": now(), "stages": {f"D{i}": "PENDING" for i in range(7)}}
     save(directory / "status.json", state)
     print(f"Local batch: {directory}", flush=True)
+    from suite_notify import notification_environment
+    env = notification_environment(home)
     try:
         env = machine_environment(home, repo)
         if validation_report is not None and not validation_report.get("ready"):
             raise RuntimeError("Global or unclassified asset validation failure")
-        if (home / "state/deployment-guard/pending.json").exists():
-            raise RuntimeError("Pending deployment recovery exists; recover the owned environment before running")
         state["stages"]["D0"] = "RUNNING"
         save(directory / "status.json", state)
         validation = 0 if validation_report is not None else logged(
@@ -402,10 +462,9 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
         if validation:
             raise RuntimeError("Formal asset validation failed")
         static_rows = static_inventory(home, selected=required_static)
+        blocked_assets = static_blocks(repo, records, static_rows)
         save(directory / "d0/static-assets.json", {"scope": "full" if daily else "selected",
-                                                   "assets": static_rows})
-        if any(row["destination"] != "READY" for row in static_rows):
-            raise RuntimeError("Static assets are missing or differ from the catalog; inspect d0/static-assets.json")
+                                                   "assets": static_rows, "blocked_cases": blocked_assets})
         if daily:
             if any(not settings["hooks"].get(name) for name in ("build", "deploy", "preflight")):
                 raise RuntimeError("Daily build/deploy/preflight hooks must be explicitly configured")
@@ -415,6 +474,10 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
             for name in ("build", "deploy", "preflight"):
                 execute_hooks(name, settings, repo, home, directory, env)
         state["stages"]["D0"] = "COMPLETE"
+        blocked_runtime = runtime_blocks(repo, home, records, environment=env)
+        for case_id, problems in blocked_assets.items():
+            blocked_runtime.setdefault(case_id, []).extend(problems)
+        save(directory / "d0/runtime-preflight.json", {"blocked_cases": blocked_runtime})
         for stage in STAGES:
             state["stages"][stage] = "RUNNING"
             save(directory / "status.json", state)
@@ -439,6 +502,11 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                         save(directory / "cases" / case_id / "receipt.json", {
                             "case_id": case_id, "stage": record["stage"], "result": row["result"],
                             "cleanup_exit_code": 0, "reused_from": row["reused_from"]})
+                elif case_id in blocked_runtime:
+                    row = {"case_id": case_id, "stage": stage, "result": "BLOCKED",
+                           "reason": "; ".join(blocked_runtime[case_id]),
+                           "acceptance_status": "INCOMPLETE", "evidence": [f"cases/{case_id}/receipt.json"]}
+                    save(directory / "cases" / case_id / "receipt.json", row)
                 elif record["status"] != "active" or not record["execution"]:
                     result = {"retired": "RETIRED", "skipped_by_policy": "SKIPPED_BY_POLICY"}.get(record["status"], "BLOCKED")
                     row = {"case_id": case_id, "stage": stage, "result": result, "reason": record["status"], "evidence": []}
@@ -474,10 +542,6 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                       (" (reused)" if reused else ""), flush=True)
                 if on_result is not None:
                     on_result(dict(row))
-                if (home / "state/deployment-guard/pending.json").exists() or (
-                    stage == "D5" and row["result"] in {"TIMEOUT", "CLEANUP_FAILED"}
-                ):
-                    raise RuntimeError("Environment recovery needs verification before continuing")
             state["stages"][stage] = "COMPLETE"
         current = fingerprint(repo)
         if any(current.get(key) != provenance.get(key) for key in
@@ -489,7 +553,7 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     except Exception as exc:
         error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
-        summary = finalize(directory, report_records, rows, error)
+        summary = finalize(directory, report_records, rows, error, environment=env)
         for stage, status in state["stages"].items():
             if status in {"PENDING", "RUNNING"}:
                 state["stages"][stage] = "NOT_EXECUTED" if status == "PENDING" else "INTERRUPTED"
@@ -509,11 +573,11 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
             except OSError:
                 print("Publication failed; could not save local publication receipt", flush=True)
         try:
-            render_report(directory, report_records, rows, summary, sharing=sharing)
+            render_report(directory, report_records, rows, summary, sharing=sharing, environment=env)
         except OSError:
             # Keep the previously finalized report and continue the existing notification path.
             print("Could not refresh publication status in the finalized report", flush=True)
-    if daily and settings.get("notify") and summary["execution_complete"]:
+    if daily and settings.get("notify"):
         from suite_notify import send_report
         send_report(directory, env)
     return 0 if summary["status"] == "PASSED" else 1
@@ -529,6 +593,7 @@ def main(argv=None):
     parser.add_argument("--change")
     parser.add_argument("--execute", action="store_true", help="Actually run tests or install dependencies")
     parser.add_argument("--live", action="store_true", help="Doctor: probe configured local HTTP services")
+    parser.add_argument("--full", action="store_true", help="Doctor: include optional Case dependencies in diagnostics")
     parser.add_argument("--batch-dir", type=Path, help="Existing local batch directory for resume")
     args = parser.parse_args(argv)
     repo, home = repository_root(), args.test_home.resolve()
@@ -554,12 +619,12 @@ def main(argv=None):
                                       "reused": len(resume["rows"]), "remaining": len(records) - len(resume["rows"])},
                                      ensure_ascii=False, indent=2))
                     return 0
-                problems = doctor(repo, home, records)
+                problems = doctor(repo, home, records, common_only=True)
                 if problems:
                     print(json.dumps({"ready": False, "problems": problems}, ensure_ascii=False, indent=2))
                     return 2
                 return execute(repo, home, records, settings, resume=resume)
-        records = selection(repo, args, daily=args.mode == "daily", worker=args.mode == "worker")
+        records = selection(repo, args, daily=args.mode in {"daily", "doctor"}, worker=args.mode == "worker")
         if args.mode == "worker":
             if not args.batch_dir or len(records) != 1:
                 parser.error("Worker requires one Case and a batch directory")
@@ -569,7 +634,7 @@ def main(argv=None):
             settings = json.loads((directory / "pipeline.json").read_text(encoding="utf-8"))
             return worker(repo, home, records[0], directory / "cases" / records[0]["case_id"], settings)
         if args.mode == "doctor":
-            problems = doctor(repo, home, records, live=args.live)
+            problems = doctor(repo, home, records, live=args.live, common_only=not args.full)
             print(json.dumps({"ready": not problems, "problems": problems}, ensure_ascii=False, indent=2))
             return 2 if problems else 0
         if args.mode == "plan" or not args.execute:
@@ -586,7 +651,7 @@ def main(argv=None):
             return 0
         if args.mode == "daily" and (args.case or args.stage or args.feature or args.change):
             parser.error("Daily must use the full registry; select cases with run")
-        problems = doctor(repo, home, records)
+        problems = doctor(repo, home, records, common_only=True)
         if problems:
             print(json.dumps({"ready": False, "problems": problems}, ensure_ascii=False, indent=2))
             return 2

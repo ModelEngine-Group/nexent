@@ -1,0 +1,637 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Management account/session business and verified-principal adapters."""
+
+import hashlib
+import hmac
+import logging
+import time
+import uuid
+from datetime import datetime, timedelta
+from http import HTTPStatus
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
+
+import jwt
+from gateway.security import token_codec
+from fastapi import Depends, Header, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from contracts.authentication import (
+    AuthenticatedIdentity,
+    CredentialKind,
+    NorthboundContext,
+    PendingOAuthIdentity,
+)
+from contracts.constants.constants import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    LANGUAGE,
+    MOCK_JWT_SECRET_KEY,
+    OAUTH_PENDING_PURPOSE,
+)
+from contracts.constants.environment import (
+    DEBUG_JWT_EXPIRE_SECONDS,
+    JWT_EXPIRY_SECONDS,
+    JWT_ISSUER,
+    JWT_SECRET,
+)
+from contracts.errors.exceptions import (
+    LimitExceededError,
+    OAuthLinkError,
+    OAuthProviderError,
+    TokenExpiredError,
+    UnauthorizedError,
+)
+from contracts.roles import (
+    has_any_role,
+    normalize_roles,
+    primary_role,
+    roles_from_record,
+)
+from gateway.downstream.internal_tokens import (
+    INTERNAL_RUNTIME_JWT_AUDIENCE,
+    INTERNAL_RUNTIME_JWT_ISSUER,
+    INTERNAL_RUNTIME_JWT_SCOPE,
+    INTERNAL_RUNTIME_JWT_TTL_SECONDS,
+    generate_internal_runtime_jwt,
+)
+from management.services.permission.identity.signatures import (
+    TIMESTAMP_VALIDITY_WINDOW,
+    calculate_hmac_signature,
+    validate_timestamp,
+)
+from management.db.identity.cas_session import is_cas_session_active
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.utils.request_context import get_user_language
+from permissions.models import CurrentUser
+
+# Module logger
+logger = logging.getLogger(__name__)
+
+
+def _gateway_identity(kind="session"):
+    from gateway.downstream.identity import IdentityError, enabled, trusted_identity
+
+    try:
+        identity = trusted_identity(kind)
+        if identity is None and enabled():
+            raise TokenExpiredError("Verified Gateway identity is required")
+        return identity
+    except IdentityError as exc:
+        raise TokenExpiredError("Invalid identity credential policy") from exc
+
+
+def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
+    """
+    Resolve the effective tenant_id from a user_tenant_t record.
+
+    ASSET_OWNER users may have an empty legacy tenant_id; map them to the
+    virtual ASSET_OWNER tenant. When the stored tenant_id is empty (e.g. the
+    legacy suadmin bootstrap left tenant_id='' for 64 days in production),
+    fall back to the first active tenant in the database so every downstream
+    API (monitoring, model list, agent list, ...) still sees real data.
+    """
+    tenant_id = user_tenant.get("tenant_id")
+    if tenant_id:
+        return tenant_id
+
+    user_role = roles_from_record(user_tenant)
+    if has_any_role(user_role, {ASSET_OWNER_ROLE}):
+        return ASSET_OWNER_TENANT_ID
+
+    # Runtime guard for historical empty-string/null tenant_id rows.
+    # Prefer the first active tenant over DEFAULT_TENANT_ID (the literal
+    # string "tenant_id") so scoped queries return real data instead of zero.
+    first_active = _lookup_first_active_tenant()
+    if first_active:
+        logger.warning(
+            "user_tenant record for user_id=%s has empty tenant_id; "
+            "falling back to first active tenant %s to preserve scoped queries",
+            user_tenant.get("user_id"), first_active,
+        )
+        return first_active
+
+    return DEFAULT_TENANT_ID
+
+
+def _lookup_first_active_tenant() -> Optional[str]:
+    """Return the tenant_id of the first active tenant in DB, or None.
+
+    Filters out sentinel values (empty string, DEFAULT_TENANT_ID,
+    ASSET_OWNER_TENANT_ID) so historical placeholder rows inserted by
+    bootstrap scripts never masquerade as real tenants. Mirror the
+    guard used by management.db.configuration.tenant._count_real_tenants.
+    """
+    try:
+        from contracts.constants.constants import (
+            ASSET_OWNER_TENANT_ID as _AO,
+            DEFAULT_TENANT_ID as _DF,
+            TENANT_ID as _TK,
+        )
+        from infrastructure.rdb.client import get_db_session as _gds
+        from management.db.models import TenantConfig
+        from sqlalchemy import select as _sel
+
+        with _gds() as session:
+            return (
+                session.execute(
+                    _sel(TenantConfig.tenant_id)
+                    .where(
+                        TenantConfig.config_key == _TK,
+                        TenantConfig.delete_flag == "N",
+                        TenantConfig.tenant_id.isnot(None),
+                        TenantConfig.tenant_id != "",
+                        TenantConfig.tenant_id.notin_(
+                            (_DF, _AO),
+                        ),
+                    )
+                    .limit(1)
+                )
+                .scalar_one_or_none()
+            )
+    except Exception:
+        return None
+
+
+def get_jwt_expiry_seconds(token: str) -> int:
+    """
+    Get expiration time from JWT token (seconds)
+
+    Args:
+        token: JWT token string
+
+    Returns:
+        int: Token validity period (seconds), returns configured default if parsing fails
+    """
+    try:
+        # Ensure token is pure JWT, remove possible Bearer prefix
+        jwt_token = extract_bearer_token(token)
+
+        # If debug expiration time is set, return directly for quick debugging
+        if DEBUG_JWT_EXPIRE_SECONDS > 0:
+            return DEBUG_JWT_EXPIRE_SECONDS
+
+        # Decode JWT token with signature verification. Expiration validation is
+        # disabled intentionally because callers need the original exp/iat span.
+        decoded = _decode_jwt_token_for_expiry(jwt_token)
+
+        # Extract expiration time and issued time from JWT claims
+        exp = int(decoded["exp"])
+        iat = int(decoded["iat"])
+
+        # Calculate validity period (seconds)
+        expiry_seconds = exp - iat
+        if expiry_seconds <= 0:
+            raise ValueError("JWT exp must be greater than iat")
+
+        return expiry_seconds
+    except Exception as e:
+        logging.warning(f"Failed to get expiration time from token: {str(e)}")
+        return JWT_EXPIRY_SECONDS
+
+
+def calculate_expires_at(token: Optional[str] = None) -> int:
+    """
+    Calculate session expiration time (consistent with the signed JWT expiration time)
+
+    Args:
+        token: Optional JWT token to get actual expiration time
+
+    Returns:
+        int: Expiration time timestamp
+    """
+
+    expiry_seconds = get_jwt_expiry_seconds(token) if token else JWT_EXPIRY_SECONDS
+    return int((datetime.now() + timedelta(seconds=expiry_seconds)).timestamp())
+
+
+def _decode_jwt_token_for_expiry(token: str) -> dict:
+    """
+    Decode JWT claims for session timing after verifying the token signature.
+
+    Expiration validation is intentionally disabled so callers can compute the
+    original token lifetime even when the token is already expired.
+    """
+    if not JWT_SECRET:
+        raise TokenExpiredError("JWT verification is not configured")
+
+    return token_codec.decode_lifetime(token, key=JWT_SECRET)
+
+
+def require_active_account(user_id: str) -> dict:
+    """Reject deleted identities before any business authorization."""
+    from management.db.identity.account import get_account
+
+    account = get_account(user_id)
+    if not account or account["delete_flag"] != "N":
+        raise TokenExpiredError("Account is unavailable")
+    return account
+
+
+def _decode_jwt_token(authorization: str) -> dict:
+    """
+    Extract user ID from JWT token after verifying signature and expiration.
+
+    Args:
+        authorization: Authorization header value
+
+    Raises:
+        UnauthorizedError: If token is invalid, expired, or signature verification fails
+    """
+    if not JWT_SECRET:
+        logging.error(
+            "JWT_SECRET is not configured; cannot verify JWT"
+        )
+        raise TokenExpiredError("JWT verification is not configured")
+
+    try:
+        # Format authorization header
+        token = extract_bearer_token(authorization)
+
+        claims = token_codec.decode_session(token, key=JWT_SECRET, issuer=JWT_ISSUER)
+        account = require_active_account(claims["sub"])
+        if claims.get("ver") != account["token_version"]:
+            raise TokenExpiredError("Credentials have changed; please log in again")
+        audience = claims.get("aud")
+        audiences = audience if isinstance(audience, list) else [audience]
+        if (
+            claims.get("iss") == INTERNAL_RUNTIME_JWT_ISSUER
+            or INTERNAL_RUNTIME_JWT_AUDIENCE in audiences
+            or claims.get("scope") == INTERNAL_RUNTIME_JWT_SCOPE
+            or claims.get("purpose") == OAUTH_PENDING_PURPOSE
+        ):
+            raise TokenExpiredError("Invalid session credential policy")
+        return claims
+    except jwt.ExpiredSignatureError:
+        logging.warning("Token expired")
+        raise TokenExpiredError("Token has expired")
+    except jwt.InvalidSignatureError:
+        logging.warning("JWT signature verification failed")
+        raise TokenExpiredError("Invalid or expired authentication token")
+    except jwt.InvalidTokenError as e:
+        logging.warning(f"Invalid JWT: {e}")
+        raise TokenExpiredError("Invalid or expired authentication token")
+    except UnauthorizedError:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to decode token: {str(e)}")
+        raise TokenExpiredError("Invalid or expired authentication token")
+
+
+def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
+    """
+    Extract user ID from JWT token after verifying signature and expiration.
+    """
+    decoded = _decode_jwt_token(authorization)
+    return decoded.get("sub")
+
+
+def extract_session_id_from_authorization(
+    authorization: Optional[str],
+) -> Optional[str]:
+    """Extract the sid claim without enforcing token validity, for idempotent logout."""
+    if not authorization:
+        return None
+    try:
+        token = extract_bearer_token(authorization)
+        return token_codec.logout_session_id(token)
+    except Exception:
+        return None
+
+
+def ensure_cas_session_active_from_authorization(authorization: Optional[str]) -> None:
+    """Reject CAS-issued JWTs whose server-side session is expired or revoked."""
+    session_id = extract_session_id_from_authorization(authorization)
+    if not session_id:
+        return
+
+
+    if not is_cas_session_active(str(session_id)):
+        raise TokenExpiredError("CAS session has expired or been revoked")
+
+
+def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str]:
+    """
+    Get current user ID and tenant ID from authorization token
+
+    Args:
+        authorization: Authorization header value
+
+    Returns:
+        tuple[str, str]: (user_id, tenant_id)
+    """
+    identity = _gateway_identity()
+    if identity is not None:
+        tenant_id = identity["tenant_id"]
+        if tenant_id in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}:
+            # Gateway filled a sentinel because the SU/ASSET_OWNER row in
+            # user_tenant_t has no real tenant_id yet. Management can
+            # resolve it now that we have a full DB connection.
+            record = get_user_tenant_by_user_id(identity["user_id"])
+            if record and record.get("tenant_id") not in (None, ""):
+                tenant_id = record["tenant_id"]
+            elif record:
+                tenant_id = resolve_tenant_id_from_user_tenant_record(record)
+        return identity["user_id"], tenant_id
+
+    # In normal mode, missing auth header means unauthorized - return 401, not default user
+    if authorization is None or (
+        isinstance(authorization, str) and not authorization.strip()
+    ):
+        raise TokenExpiredError("No authorization header provided")
+
+    try:
+        decoded = _decode_jwt_token(authorization)
+        user_id = decoded.get("sub")
+        if not user_id:
+            raise TokenExpiredError("Invalid or expired authentication token")
+
+        ensure_cas_session_active_from_authorization(authorization)
+
+        user_tenant_record = get_user_tenant_by_user_id(user_id)
+        if not user_tenant_record:
+            raise TokenExpiredError("No active tenant relationship")
+        if not roles_from_record(user_tenant_record):
+            raise TokenExpiredError("No active roles for this account")
+        if user_tenant_record and user_tenant_record.get("tenant_id"):
+            tenant_id = user_tenant_record["tenant_id"]
+            logging.debug(f"Found tenant ID for user {user_id}: {tenant_id}")
+        else:
+            if not user_tenant_record:
+                raise TokenExpiredError("No active tenant relationship")
+            tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant_record)
+
+        return user_id, tenant_id
+
+    except UnauthorizedError:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get user ID and tenant ID: {str(e)}")
+        raise TokenExpiredError("Invalid or expired authentication token")
+
+
+def get_current_user_context(
+    authorization: Optional[str] = None,
+) -> tuple[str, str, tuple[str, ...]]:
+    """Consume verified Gateway roles or resolve membership in the disabled adapter."""
+    identity = _gateway_identity()
+    if identity is not None:
+        try:
+            roles = roles_from_record(identity)
+        except ValueError as exc:
+            raise TokenExpiredError("User roles are unavailable") from exc
+        if not roles:
+            raise TokenExpiredError("User role not found")
+        tenant_id = identity["tenant_id"]
+        if tenant_id in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}:
+            # Gateway sentinel — resolve against the real user_tenant row.
+            record = get_user_tenant_by_user_id(identity["user_id"])
+            if record and record.get("tenant_id") not in (None, ""):
+                tenant_id = record["tenant_id"]
+            elif record:
+                tenant_id = resolve_tenant_id_from_user_tenant_record(record)
+        return identity["user_id"], tenant_id, roles
+    user_id, tenant_id = get_current_user_id(authorization)
+
+
+    user_tenant_record = get_user_tenant_by_user_id(user_id)
+    if not user_tenant_record:
+        raise TokenExpiredError("User tenant relationship not found")
+
+    try:
+        user_role = roles_from_record(user_tenant_record)
+    except ValueError as exc:
+        raise TokenExpiredError("User roles are unavailable") from exc
+    if not user_role:
+        raise TokenExpiredError("User role not found")
+
+    current_tenant = resolve_tenant_id_from_user_tenant_record(user_tenant_record)
+    return user_id, current_tenant, user_role
+
+
+# ---------------------------------------------------------------------------
+# Simple JWT helpers for tests and tooling
+# ---------------------------------------------------------------------------
+
+
+def generate_test_jwt(user_id: str, expires_in: Optional[int] = None) -> str:
+    if expires_in is None:
+        expires_in = JWT_EXPIRY_SECONDS
+    """
+    Generate a simple unsigned JWT for testing purposes (HS256 with dummy secret)
+    """
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "iat": now,
+        "exp": now + expires_in,
+        "iss": JWT_ISSUER,
+        "aud": "authenticated",
+        "ver": 0,
+    }
+    # Use a fixed test secret to avoid external dependencies in tests
+    return token_codec.encode_token(payload, key=MOCK_JWT_SECRET_KEY)
+
+
+def generate_session_jwt(
+    user_id: str, expires_in: Optional[int] = None, session_id: str = None
+) -> str:
+    """Generate a signed JWT compatible with the existing auth verification flow."""
+    if expires_in is None:
+        expires_in = JWT_EXPIRY_SECONDS
+
+    if not JWT_SECRET:
+        raise TokenExpiredError("JWT signing is not configured")
+    account = require_active_account(user_id)
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "ver": account["token_version"],
+        "role": "authenticated",
+        "aud": "authenticated",
+        "iat": now,
+        "exp": now + expires_in,
+        "iss": JWT_ISSUER,
+    }
+    if session_id:
+        payload["sid"] = session_id
+    return token_codec.encode_token(payload, key=JWT_SECRET)
+
+
+def get_current_user_info(
+    authorization: Optional[str] = None, request: Request = None
+) -> tuple[str, str, str]:
+    """
+    Get current user information, including user ID, tenant ID, and language preference
+
+    Args:
+        authorization: Authorization header value
+        request: FastAPI request object
+
+    Returns:
+        tuple[str, str, str]: (User ID, Tenant ID, Language code)
+    """
+    user_id, tenant_id = get_current_user_id(authorization)
+    identity = _gateway_identity()
+    language = identity.get("language", "zh") if identity else get_user_language(request)
+    return user_id, tenant_id, language
+
+
+def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
+    """Apply gateway identity policy and return the existing user response shape."""
+    from types import SimpleNamespace
+
+    try:
+        identity = _gateway_identity()
+        if identity is not None:
+            return True, SimpleNamespace(id=identity["user_id"], email=identity.get("email", ""),
+                                         user_metadata={"role": identity.get("role", ""), "roles": list(roles_from_record(identity))})
+        user_id, _ = get_current_user_id(token)
+        account = require_active_account(user_id)
+        membership = get_user_tenant_by_user_id(user_id)
+        return True, SimpleNamespace(
+            id=user_id, email=account["email"], user_metadata={"role": membership["user_role"]}
+        )
+    except UnauthorizedError:
+        return False, None
+
+
+async def get_session_by_authorization(authorization):
+    # Extract clean token from authorization header
+    clean_token = extract_bearer_token(authorization)
+
+    # Use the unified token validation function
+    is_valid, user = validate_token(clean_token)
+    if is_valid and user:
+        user_role = "user"  # Default role
+        if user.user_metadata and "role" in user.user_metadata:
+            user_role = user.user_metadata["role"]
+        return {"user": {"id": user.id, "email": user.email, "role": user_role}}
+    else:
+        # Use domain-specific exception for invalid/expired token
+        raise UnauthorizedError("Session is invalid or expired")
+
+
+def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
+    """Compatibility tuple over the shared gateway identity contract."""
+    principal = authenticate_identity(authorization)
+    return principal.user_id, principal.tenant_id
+
+
+def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Translate the shared bearer syntax failure into the backend domain error."""
+    from gateway.downstream.identity import IdentityError, bearer_token
+
+    try:
+        return bearer_token(authorization)
+    except IdentityError as exc:
+        raise TokenExpiredError("Invalid authorization header") from exc
+
+
+def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
+    """Compatibility export of the common service-token verifier."""
+    from gateway.downstream.internal_tokens import verify_internal_runtime_jwt as verify
+
+    return verify(authorization, secret=JWT_SECRET)
+
+
+def parse_pending_oauth_token(pending_token: str) -> PendingOAuthIdentity:
+    if not pending_token:
+        raise OAuthLinkError("OAuth account completion session is missing")
+    if not JWT_SECRET:
+        raise OAuthProviderError("JWT verification is not configured")
+
+    try:
+        payload = token_codec.decode_pending(pending_token, key=JWT_SECRET)
+    except jwt.ExpiredSignatureError as exc:
+        raise OAuthLinkError("OAuth account completion session has expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise OAuthLinkError("OAuth account completion session is invalid") from exc
+
+    if payload.get("purpose") != OAUTH_PENDING_PURPOSE:
+        raise OAuthLinkError("OAuth account completion session is invalid")
+    if not payload.get("provider") or not payload.get("provider_user_id"):
+        raise OAuthLinkError("OAuth account completion session is incomplete")
+
+    return {
+        "provider": str(payload.get("provider", "")),
+        "provider_user_id": str(payload.get("provider_user_id", "")),
+        "provider_email": str(payload.get("provider_email", "")),
+        "provider_username": str(payload.get("provider_username", "")),
+    }
+
+
+def parse_state(state: str) -> Dict[str, str]:
+    parts = state.split(":", 2)
+    if len(parts) >= 2:
+        return {
+            "provider": parts[0],
+            "token": parts[1],
+            "link_user_id": parts[2] if len(parts) > 2 else "",
+        }
+    return {"provider": state, "token": "", "link_user_id": ""}
+
+
+def authenticate_identity(
+    authorization: Optional[str],
+    kind: CredentialKind = CredentialKind.SESSION,
+    request=None,
+    *,
+    require_role: bool = False,
+) -> AuthenticatedIdentity:
+    """Use the route's policy; never infer a policy from unverified claims."""
+
+    kind = CredentialKind(kind)
+    identity = _gateway_identity(kind.value)
+    if identity is not None:
+        roles = roles_from_record(identity)
+        if require_role and not roles:
+            raise TokenExpiredError("User role not found")
+        return AuthenticatedIdentity(
+            identity["user_id"], identity["tenant_id"],
+            role=primary_role(roles) if roles else "", roles=roles,
+            language=identity.get("language", "zh"), token_id=identity.get("token_id"), kind=kind,
+        )
+
+    if kind == CredentialKind.SESSION:
+        if require_role:
+            user_id, tenant_id, role = get_current_user_context(authorization)
+        else:
+            user_id, tenant_id = _resolve_session_user(authorization)
+            role = ()
+        return AuthenticatedIdentity(
+            user_id,
+            tenant_id,
+            role=primary_role(role) if role else "",
+            roles=normalize_roles(role, allow_empty=True),
+            language=get_user_language(request),
+            kind=kind,
+        )
+    if kind == CredentialKind.API_KEY:
+        from management.services.permission.identity.northbound import authenticate_api_key
+
+        return authenticate_api_key(authorization, request)
+    if kind == CredentialKind.INTERNAL:
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+        return AuthenticatedIdentity(user_id, tenant_id, kind=kind)
+    raise ValueError("Unsupported authentication policy")
+
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+def authenticate(
+    authorization: Optional[str] = Header(None),
+    _credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> CurrentUser:
+    """Resolve the bearer token into a CurrentUser."""
+    header_token = authorization
+    if not header_token and _credentials:
+        header_token = _credentials.credentials
+    if not header_token and _gateway_identity() is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    principal = authenticate_identity(header_token, require_role=True)
+    return CurrentUser(
+        user_id=principal.user_id, tenant_id=principal.tenant_id, role=principal.role, roles=principal.roles
+    )

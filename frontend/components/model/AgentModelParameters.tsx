@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Form, Modal, Spin } from "antd";
+import { Alert, Form, Modal, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import { getModelOutlet } from "@/services/modelProfileService";
 import {
@@ -21,7 +21,8 @@ import type {
   ModelOutletResponse,
   ThinkingDegreeMode,
 } from "@/types/modelProfile";
-import { StandardButton } from "@/components/common/StandardButton";
+
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { ModelParameterField } from "./ModelParameterField";
 
 interface Props {
@@ -100,10 +101,12 @@ function Editor({
     });
   };
   const effective = { ...defaults, ...parameters };
+  const samplingValid = samplingComplete(parameters, rules);
   return (
     <Form
       layout="vertical"
       onFinish={() => {
+        if (!samplingValid) return;
         const next = edited
           ? withAgentParameterValues(value, parameters)
           : { ...value };
@@ -154,6 +157,7 @@ function Editor({
           reasoningSupported={
             outlet.profile.capabilities.reasoning?.status === "supported"
           }
+          canDisable={outlet.profile.capabilities.reasoning?.can_disable}
           rules={rules}
           values={parameters}
           defaults={defaults}
@@ -177,18 +181,22 @@ function Editor({
       )}
       {!disabled &&
         thinkingKeys.some((key) => Object.hasOwn(parameters, key)) && (
-          <StandardButton
+          <Button
             onClick={() => {
               setThinkingMode(undefined);
               change({}, thinkingKeys);
             }}
           >
             {t("modelProfile.useOutletDefault")}
-          </StandardButton>
+          </Button>
         )}
-      <StandardButton variant="primary" htmlType="submit" disabled={disabled}>
+      <Button
+        type="primary"
+        htmlType="submit"
+        disabled={disabled || !samplingValid}
+      >
         {t("common.confirm")}
-      </StandardButton>
+      </Button>
     </Form>
   );
 }

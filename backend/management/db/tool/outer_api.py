@@ -8,8 +8,8 @@ Stores one record per MCP service instead of per tool.
 import logging
 from typing import Dict, List, Optional, Any
 
-from management.db.client import get_db_session
-from management.utils.orm import filter_property, as_dict
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.orm import filter_property, as_dict
 from management.db.models import OuterApiService
 
 

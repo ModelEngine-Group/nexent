@@ -2,17 +2,19 @@
 
 """Compile the current Nexent configuration from Management-owned resources."""
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
-    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
-from contracts.constants.constants import LANGUAGE
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
+from infrastructure.agent_tool_config import (
+    build_automation_proposal_tool, build_parallel_executor_tool_config, build_store_memory_tool,
+)
 from management.db.agent.repository import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
@@ -20,12 +22,12 @@ from management.db.agent.repository import (
 )
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.context import build_context_inputs
+from management.services.agent.core_policy import apply_agent_core_policy
 from management.services.agent.preparation.resources import (
     _build_effective_knowledge_base_summary,
     _get_external_a2a_agents,
 )
 from management.services.agent.preparation.tools import (
-    _build_parallel_executor_tool_config,
     _get_skill_script_tools,
     _inject_plan_tools,
     _normalize_tool_params_request,
@@ -43,13 +45,13 @@ from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
 from management.services.model.resolver import is_model_available
-from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
     _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     _resolve_context_budget,
     _resolve_input_budget,
 )
-from nexent.core.agents.agent_model import (
+from management.services.model.run_controls import select_configured_model_id
+from nexent.core.agents.contracts.config import (
     AgentConfig,
     AgentVerificationConfig,
     ToolConfig,
@@ -59,10 +61,11 @@ from nexent.core.agents.context import (
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.concurrency import run_blocking
 from nexent.memory import models as memory_models
+from nexent.monitor.phase_capture import trace_phase
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -91,8 +94,14 @@ async def create_agent_config(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    *,
+    portable_evaluation: bool = False,
+    authorized_knowledge_tools: dict | None = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
 ):
+    portable_options = {"portable_evaluation": True} if portable_evaluation else {}
+    if authorized_knowledge_tools is not None:
+        portable_options["authorized_knowledge_tools"] = authorized_knowledge_tools
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -145,6 +154,7 @@ async def create_agent_config(
             runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
+            **portable_options,
             runtime_model_records=runtime_model_records,
         )
         # Persisted Agent relations are rendered into the manager prompt by
@@ -183,6 +193,7 @@ async def create_agent_config(
             runtime_model_records=runtime_model_records,
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
+            **portable_options,
         )
         invocation_name = str(
             mount.get("invocation_name")
@@ -216,15 +227,17 @@ async def create_agent_config(
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
         language=language,
+        **portable_options,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
+    parallel_timeout = get_config_snapshot().get("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS")
 
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
     tool_list.append(
-        _build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
+        build_parallel_executor_tool_config(parallel_timeout)
     )
 
     if (
@@ -232,24 +245,27 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from management.services.automation.proposal import (
-            agent_loop_automation_tool_adapter,
-        )
-
-        tool_list.append(
-            agent_loop_automation_tool_adapter.build_tool_config(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                conversation_id=int(conversation_id),
-                agent_id=int(agent_id),
-                user_message=automation_user_message,
-                agent_version_no=version_no,
-                model_id=automation_model_id,
-                tool_params=normalized_tool_params.model_dump(mode="json"),
-                has_attachments=automation_has_attachments,
-                language=language,
+        if portable_evaluation:
+            tool_list.append(build_automation_proposal_tool())
+        else:
+            from management.services.automation.proposal import (
+                agent_loop_automation_tool_adapter,
             )
-        )
+
+            tool_list.append(
+                agent_loop_automation_tool_adapter.build_tool_config(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    conversation_id=int(conversation_id),
+                    agent_id=int(agent_id),
+                    user_message=automation_user_message,
+                    agent_version_no=version_no,
+                    model_id=automation_model_id,
+                    tool_params=normalized_tool_params.model_dump(mode="json"),
+                    has_attachments=automation_has_attachments,
+                    language=language,
+                )
+            )
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")
@@ -271,6 +287,12 @@ async def create_agent_config(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_id, skip_query=not allow_memory_search
     )
+    memory_phase_attributes = {
+        "agent.id": str(agent_id), "agent.name": agent_info.get("name", ""),
+    }
+    display_name = agent_info.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        memory_phase_attributes["agent.display_name"] = display_name.strip()
 
     # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
@@ -308,13 +330,18 @@ async def create_agent_config(
                     build_memory_service_for_agent,
                 )
 
-                memory_service = build_memory_service_for_agent(
-                    tenant_id=memory_context.tenant_id,
-                    user_id=memory_context.user_id,
-                    agent_id=str(memory_context.agent_id or ""),
-                )
-                if memory_service is None:
-                    raise RuntimeError("MemoryService builder returned no service")
+                with trace_phase(
+                    "memory.initialize", input_value={"service": "memory"},
+                    attributes=memory_phase_attributes,
+                ) as phase:
+                    memory_service = build_memory_service_for_agent(
+                        tenant_id=memory_context.tenant_id,
+                        user_id=memory_context.user_id,
+                        agent_id=str(memory_context.agent_id or ""),
+                    )
+                    if memory_service is None:
+                        raise RuntimeError("MemoryService builder returned no service")
+                    phase.set_output({"service": "memory", "ready": True})
                 memory_metadata["memory_service"] = memory_service
             except Exception as exc:
                 logger.warning(
@@ -332,11 +359,16 @@ async def create_agent_config(
                     get_memory_context_service,
                 )
 
-                memory_context_service = get_memory_context_service()
-                if memory_context_service is None:
-                    raise RuntimeError(
-                        "MemoryContextService provider returned no service"
-                    )
+                with trace_phase(
+                    "memory.initialize", input_value={"service": "context"},
+                    attributes=memory_phase_attributes,
+                ) as phase:
+                    memory_context_service = get_memory_context_service()
+                    if memory_context_service is None:
+                        raise RuntimeError(
+                            "MemoryContextService provider returned no service"
+                        )
+                    phase.set_output({"service": "context", "ready": True})
                 memory_metadata["memory_context_service"] = memory_context_service
             except Exception as exc:
                 logger.warning(
@@ -376,13 +408,18 @@ async def create_agent_config(
                                 top_k=top_k,
                             )
 
-                            ext_search_results = (
-                                await provider_service.search_all_enabled(
-                                    tenant_id=str(memory_context.tenant_id or ""),
-                                    request=search_request,
-                                    limit=top_k,
+                            with trace_phase(
+                                "memory.external_search", input_value={"query": last_user_query or "", "top_k": top_k},
+                                attributes=memory_phase_attributes,
+                            ) as phase:
+                                ext_search_results = (
+                                    await provider_service.search_all_enabled(
+                                        tenant_id=str(memory_context.tenant_id or ""),
+                                        request=search_request,
+                                        limit=top_k,
+                                    )
                                 )
-                            )
+                                phase.set_output(ext_search_results)
 
                             if ext_search_results:
                                 external_results = [
@@ -413,24 +450,29 @@ async def create_agent_config(
                             type(exc).__name__,
                         )
 
-                    long_term_search_context = (
-                        await memory_context_service.build_context(
-                            tenant_id=str(memory_context.tenant_id or ""),
-                            user_id=str(memory_context.user_id or ""),
-                            agent_id=str(memory_context.agent_id or "") or None,
-                            conversation_id=(
-                                str(conversation_id)
-                                if conversation_id is not None
-                                else None
-                            ),
-                            query=None,
-                            layers=["tenant", "user"],
-                            external_results=external_results,
+                    with trace_phase(
+                        "memory.load_context", input_value={"layers": ["tenant", "user"]},
+                        attributes=memory_phase_attributes,
+                    ) as phase:
+                        long_term_search_context = (
+                            await memory_context_service.build_context(
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                user_id=str(memory_context.user_id or ""),
+                                agent_id=str(memory_context.agent_id or "") or None,
+                                conversation_id=(
+                                    str(conversation_id)
+                                    if conversation_id is not None
+                                    else None
+                                ),
+                                query=None,
+                                layers=["tenant", "user"],
+                                external_results=external_results,
+                            )
                         )
-                    )
-                    long_term_memory_items = _build_long_term_memory_items(
-                        long_term_search_context
-                    )
+                        long_term_memory_items = _build_long_term_memory_items(
+                            long_term_search_context
+                        )
+                        phase.set_output(long_term_memory_items)
                 except Exception as exc:
                     logger.warning(
                         "event=long_term_memory_load_failed tenant_id=%s user_id=%s "
@@ -442,41 +484,7 @@ async def create_agent_config(
                     )
 
             if memory_service is not None:
-                store_tool_config = ToolConfig(
-                    class_name="StoreMemoryTool",
-                    name="store_memory",
-                    description=(
-                        "Store one model-selected and summarized short-term memory extracted only "
-                        "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to process-level observations made during intermediate "
-                        "action steps: user preferences, task goals, action plans and latest progress, "
-                        "or reflections on user feedback and errors. Do not store whole conversations, "
-                        "transient calculations, unverified guesses, duplicates, secrets, or information "
-                        "the user asks to forget. Call this tool only during intermediate action steps, "
-                        "not when generating the final answer."
-                    ),
-                    inputs=json.dumps(
-                        {
-                            "content": {
-                                "type": "string",
-                                "description": (
-                                    "One concise, reusable short-term memory entry already judged, "
-                                    "summarized, and deduplicated by the model"
-                                ),
-                                "description_zh": (
-                                    "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                                ),
-                            }
-                        },
-                        ensure_ascii=False,
-                    ),
-                    output_type="string",
-                    params={},
-                    source="local",
-                    usage=None,
-                    metadata=memory_metadata,
-                )
-                tool_list.append(store_tool_config)
+                tool_list.append(build_store_memory_tool(memory_metadata))
 
             if memory_context_service is not None:
                 fixed_search_tool = _create_fixed_search_memory_tool()
@@ -489,14 +497,19 @@ async def create_agent_config(
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
                 fixed_search_tool.external_results = external_results
-                fixed_search_result = await run_blocking(
-                    "memory-presearch",
-                    fixed_search_tool.forward,
-                    last_user_query or "",
-                    5,
-                    lane="model-tool-io",
-                    owner="runtime",
-                )
+                with trace_phase(
+                    "memory.presearch", input_value={"query": last_user_query or "", "top_k": 5},
+                    attributes=memory_phase_attributes,
+                ) as phase:
+                    fixed_search_result = await run_blocking(
+                        "memory-presearch",
+                        fixed_search_tool.forward,
+                        last_user_query or "",
+                        5,
+                        lane="model-tool-io",
+                        owner="runtime",
+                    )
+                    phase.set_output(fixed_search_result)
             else:
                 fixed_search_result = (
                     "Memory search unavailable: retrieval pipeline is not configured. "
@@ -682,17 +695,9 @@ async def create_agent_config(
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
-    policy_layers = PolicyLayers.model_validate(
-        {
-            "platform": {
-                "processing_mode": "adaptive_compact"
-                if enable_context_manager
-                else "passthrough"
-            },
-            "tenant": tenant_config_manager.get_context_policy(tenant_id),
-            "agent": agent_info.get("context_policy"),
-            "request": request_context_policy,
-        }
+    policy_layers = build_agent_context_policy(
+        enable_context_manager, tenant_config_manager.get_context_policy(tenant_id),
+        agent_info.get("context_policy"), request_context_policy,
     )
     effective_context_policy = resolve_policy(policy_layers)
     effective_processing_mode = getattr(
@@ -752,7 +757,7 @@ async def create_agent_config(
     agent_config.runtime_ref = f"agent:{agent_id}:v{int(version_no)}"
     agent_config.display_name = agent_info.get("display_name") or agent_config.name
     agent_config.origin = "PERSISTED"
-    return agent_config
+    return apply_agent_core_policy(agent_config)
 
 
 def _select_agent_model_id(
@@ -825,3 +830,12 @@ def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
                 )
             break
     return result
+
+
+def build_agent_context_policy(enable_context_manager, tenant_policy=None, agent_policy=None, request_policy=None):
+    """Apply the saved CM switch at Agent precedence, retaining explicit request overrides."""
+    mode = "adaptive_compact" if enable_context_manager else "passthrough"
+    return PolicyLayers.model_validate({
+        "platform": {"processing_mode": mode}, "tenant": tenant_policy,
+        "agent": {**(agent_policy or {}), "processing_mode": mode}, "request": request_policy,
+    })

@@ -60,7 +60,7 @@ def valid_url(value: object) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.hostname) and not parsed.username and not parsed.password
 
 
-def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> list[str]:
+def static_config_problems(home: Path, records: list[dict], *, repo: Path, common_only=False) -> list[str]:
     config = home / "config"
     daily, problems = env_file(config / "daily.env")
     _, errors = env_file(config / "secrets.env")
@@ -79,6 +79,8 @@ def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> li
         if (config / "secrets.env").stat().st_mode & 0o077:
             problems.append("secrets.env must not be readable by group or others")
 
+    if common_only:
+        return sorted(set(problems))
     online = [record for record in records if record["stage"] != "D1" and record["status"] == "active"]
     for record in online:
         execution = record.get("execution")

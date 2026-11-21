@@ -84,6 +84,17 @@ def _install_recording_session(monkeypatch, result):
     return session
 
 
+def test_background_runtime_lookup_keeps_conversation_tenant_and_user_scope(monkeypatch):
+    expected = {"run_id": 5, "runtime_run_id": "a" * 32}
+    session = _install_recording_session(monkeypatch, _RecordingResult(payload=expected))
+    assert agent_automation_db.get_run_by_runtime_id("a" * 32, "tenant", "actor", conversation_id=42) == expected
+    query = session.calls[0][0]
+    assert query.compile().params == {
+        "runtime_run_id_1": "a" * 32, "tenant_id_1": "tenant", "user_id_1": "actor",
+        "conversation_id_1": 42, "delete_flag_1": "N",
+    }
+
+
 def test_list_tasks_filters_by_owner_status_and_literal_title_search(monkeypatch):
     class ListSession(_FakeSession):
         def execute(self, statement, params=None):
@@ -423,9 +434,9 @@ def test_run_crud_helpers_cover_lifecycle_and_owner_filters(monkeypatch):
     assert agent_automation_db.get_run(3, "tenant", "user") == payload
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") == payload
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["CANCELED"]) == payload
-    assert agent_automation_db.cancel_runs_by_conversation(9, "user", "deleted") == 1
+    assert agent_automation_db.cancel_runs_by_conversation(9, "user", "tenant", "deleted") == 1
     assert agent_automation_db.list_runs(1, "tenant", "user", limit=1) == [payload]
-    assert agent_automation_db.has_active_run_for_conversation(9) is True
+    assert agent_automation_db.has_active_run_for_conversation(9, "user", "tenant") is True
 
 
 def test_list_runs_paginated_counts_and_applies_offset(monkeypatch):
@@ -503,5 +514,5 @@ def test_optional_database_rows_return_empty_values(monkeypatch):
     assert agent_automation_db.get_run(3, "tenant", "user") is None
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") is None
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["FAILED"]) is None
-    assert agent_automation_db.has_active_run_for_conversation(9) is False
+    assert agent_automation_db.has_active_run_for_conversation(9, "user", "tenant") is False
     assert agent_automation_db.renew_task_lock(1, "scheduler-a", 30) is False

@@ -89,6 +89,7 @@ class ReasoningCapabilities(ProfileContract):
 
     status: SupportStatus = "unknown"
     controls: list[ReasoningControl] | None = None
+    can_disable: bool | None = None
     response_paths: list[NonBlankString] = Field(default_factory=list)
 
     @model_validator(mode="after")

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression coverage for the managed sandbox host-tool bridge."""
 
 import importlib.util
@@ -12,7 +14,7 @@ from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadMana
 from nexent.core.concurrency.helpers import get_fallback_thread_manager
 
 
-_SANDBOX_PATH = Path(__file__).resolve().parents[4] / "sdk" / "nexent" / "core" / "agents" / "sandbox.py"
+_SANDBOX_PATH = Path(__file__).resolve().parents[4] / "sdk" / "nexent" / "core" / "agents" / "sandbox" / "execution.py"
 _SPEC = importlib.util.spec_from_file_location("sandbox_bridge_lifecycle_under_test", _SANDBOX_PATH)
 sandbox_module = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = sandbox_module

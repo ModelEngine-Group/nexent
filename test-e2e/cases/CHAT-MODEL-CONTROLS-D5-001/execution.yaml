@@ -6,7 +6,7 @@ implementations:
   selector: test_su_ac_03
 acceptance_bindings:
   AC-01: [test_su_ac_03_upgrade_is_exact_and_idempotent]
-  AC-02: [test_su_ac_03_upgrade_is_exact_and_idempotent, test_su_ac_03_missing_model_identity_fails_without_discarding_settings]
+  AC-02: [test_su_ac_03_upgrade_is_exact_and_idempotent, test_su_ac_03_missing_model_identity_discards_only_model_preferences, test_su_ac_03_selected_model_identity_retains_explicit_parameters]
 timeout_seconds: 120
 preparation:
   families: []

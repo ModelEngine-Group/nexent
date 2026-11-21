@@ -29,7 +29,6 @@ def load(name, relative):
     return module
 
 
-section = load('section_negative_repair', 'test-e2e/cases/AGT-010/test.py')
 memory_case = load('external_memory_repair', 'test-e2e/cases/AGT-071/test.py')
 revision = load('revision_history_repair', 'test-e2e/cases/AGT-AUTO-6A6BC7594487E771/test.py')
 server_module = load('external_memory_server_repair', 'test-e2e/infra/mock-services/memory-provider/server.py')
@@ -37,33 +36,6 @@ server_module = load('external_memory_server_repair', 'test-e2e/infra/mock-servi
 
 def response(status, body, path='/fixture'):
     return httpx.Response(status, json=body, request=httpx.Request('POST', 'http://fixture' + path))
-
-
-def test_insert_negative_invalidates_consumed_argument():
-    content = 'Answer questions.'
-    ranges = section.invalid_ranges(content)
-    for bounds in ranges:
-        if bounds['mode'] == 'insert':
-            assert bounds['start_pos'] < 0 or bounds['start_pos'] > len(content)
-        else:
-            assert bounds['start_pos'] >= bounds['end_pos']
-    assert any(bounds['start_pos'] == -1 for bounds in ranges)
-
-
-@pytest.mark.parametrize('status,body,after', [
-    (200, {'data': {'optimized_content': 'valid result'}}, {'prompt': 'original'}),
-    (400, {}, {'prompt': 'original'}),
-    (422, {'detail': 'invalid bounds'}, {'prompt': 'changed'}),
-    (500, {'message': 'unexpected'}, {'prompt': 'original'}),
-])
-def test_section_rejection_cannot_pass_false_success_or_partial_write(status, body, after):
-    with pytest.raises(AssertionError):
-        section.assert_rejected(response(status, body), {'prompt': 'original'}, after)
-
-
-def test_valid_section_rejection_preserves_draft():
-    before = {'prompt': 'original'}
-    section.assert_rejected(response(422, {'detail': 'invalid bounds'}), before, dict(before))
 
 
 @pytest.mark.asyncio

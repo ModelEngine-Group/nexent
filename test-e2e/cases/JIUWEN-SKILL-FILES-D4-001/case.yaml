@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-SKILL-FILES-D4-001
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-SAVED-SKILLS-20261021
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-001
+  title: Saved docx Skill assistant native file generation and history
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove saved Skills authorization and actual native sandbox docx generation
+    with configured real models.
+  preconditions:
+  - Authorized saved file generation assistant with enabled docx Skill, configured
+    Qwen and DeepSeek outlets, deployed runtime/Web and Docker sandbox; source identity
+    in local config.
+  test_data:
+    profile: real_smoke
+    locale: zh
+    viewport:
+      width: 1440
+      height: 1000
+  steps:
+  - order: 1
+    action: Clone source agent and explicitly copy its authorized enabled Skill bindings
+      and configuration; publish Jiuwen.
+    expected: Equivalent prompts, tools, selected outlets and docx authorization are
+      verified; source is unchanged.
+  - order: 2
+    action: For each saved target model, select it in the owned configuration and
+      publish; request a simple docx in the browser, then follow up without tools.
+    expected: Actual read_skill_md and controlled Python create and upload a downloadable
+      docx containing a fresh marker; no guessed Skill downloads or run errors. Follow-up
+      recalls the marker without resource execution.
+  - order: 3
+    action: Reload each completed conversation from its persisted history and verify
+      original messages.
+    expected: One common rendered final per turn, correct file links and marker; no
+      internal envelopes, duplicate answers or run request on history load.
+  expected_results:
+  - Both saved real outlets complete Skill-guided native docx generation; downloaded
+    word/document.xml contains the fresh marker.
+  - Multi-turn follow-up and restored history retain facts without replay, clean output
+    and common Nexent rendering.
+  - Fixture cleanup removes only owned agents/conversations/artifacts; original saved
+    configuration, bindings and source conversation remain unchanged.
+  forbidden_side_effects:
+  - No invented or repeated Skill S3 downloads, permission widening, alternate host
+    shell, injected model/tool results, fabricated success or runtime Core override.
+  - No source mutation, leaked credentials, tool replay or run request on history
+    load; no dedicated Jiuwen renderer or internal protocol/history text.
+  actor: Authorized Agent development user
+  journey:
+  - Clone saved Skill assistant, generate a docx with both real models, follow up
+    and reload history.
+  final_business_result:
+  - Actual downloadable document and correct shared browser/history rendering with
+    enabled docx Skill.
+  failure_evidence:
+  - Fixed browser assertions, sanitized tool names and terminal summaries, downloaded
+    document content check and source/owned history hashes.
+  acceptance:
+  - id: AC-01
+    description: Saved Skills and actual native documents on real model outlets.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: No replay, clean common history and isolated fixture cleanup.
+    steps:
+    - 3
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 2

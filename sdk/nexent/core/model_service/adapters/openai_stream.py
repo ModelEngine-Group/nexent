@@ -57,6 +57,18 @@ class OpenAIStreamDecoder:
             **payload,
         )
 
+    def _update_usage(self, raw):
+        # Each frame reports a cumulative snapshot, not an increment.
+        _usage(raw, self._profile.capabilities.usage.semantics_id)
+        merged = dict(self._usage_raw or {})
+        for key, value in raw.items():
+            if value is None:
+                continue
+            if key in {"prompt_tokens_details", "completion_tokens_details"}:
+                value = {**merged.get(key, {}), **{k: v for k, v in value.items() if v is not None}}
+            merged[key] = value
+        self._usage_raw = merged
+
     def _complete(self):
         if self._finish is None:
             self._fail("MODEL_RESPONSE_INCOMPLETE")
@@ -96,7 +108,9 @@ class OpenAIStreamDecoder:
             }
         )
         self._closed = True
-        return [self._event("message_completed", message=complete, finish_reason=complete.finish_reason)]
+        # Emit one final snapshot so legacy consumers cannot sum cumulative frames.
+        events = [self._event("usage", usage=complete.usage)] if self._usage_raw is not None else []
+        return events + [self._event("message_completed", message=complete, finish_reason=complete.finish_reason)]
 
     def push(self, frame: SSEEvent) -> list[ModelEvent]:
         if self._closed:
@@ -127,12 +141,7 @@ class OpenAIStreamDecoder:
                     self._identity[key] = value
             events = []
             if body.get("usage") is not None:
-                usage = _usage(body["usage"], self._profile.capabilities.usage.semantics_id)
-                if self._usage_raw is not None and self._usage_raw != body["usage"]:
-                    self._fail("MODEL_USAGE_CONFLICT")
-                if self._usage_raw is None:
-                    self._usage_raw = body["usage"]
-                    events.append(self._event("usage", usage=usage))
+                self._update_usage(body["usage"])
             choices = body["choices"]
             if not choices:
                 if body.get("usage") is None:
@@ -216,8 +225,11 @@ class OpenAIStreamDecoder:
         state = self._calls[index]
         if "type" in raw and raw["type"] != "function":
             self._fail("MODEL_TOOL_CALL_INVALID")
-        if raw.get("id") is not None:
-            value = raw["id"]
+        value = raw.get("id")
+        # Some providers repeat an empty placeholder after establishing the call identity.
+        if value == "" and state["id"] is not None:
+            value = None
+        if value is not None:
             if not isinstance(value, str) or not value.strip() or state["id"] is not None and state["id"] != value:
                 self._fail("MODEL_STREAM_IDENTITY_CONFLICT")
             state["id"] = value

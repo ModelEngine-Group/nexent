@@ -2,4 +2,4 @@
 services:
   auth:
     environment:
-      GOTRUE_SITE_URL: ${SITE_URL:-http://nexent:3000}
+      GOTRUE_SITE_URL: ${SITE_URL}

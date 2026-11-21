@@ -351,7 +351,7 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
       group_ids: [],
     });
   });
-  it("upload preserves multipart, progress, partial errors and successful file size", async () => {
+  it("queues files on import and shows per-file outcomes in the upload center", async () => {
     const closes: number[] = [];
     mount(
       <AidpImportDrawer
@@ -365,6 +365,9 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
       new File(["a".repeat(1024)], "good.txt"),
       new File(["b"], "bad.txt"),
     ]);
+    fireEvent.click(
+      screen.getByRole("button", { name: t("aidpKnowledge.importAction") }),
+    );
     await waitFor(() => expect(UploadTransport.sent).toHaveLength(1));
     const xhr = UploadTransport.sent[0];
     expect(
@@ -372,22 +375,8 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
     ).toEqual(["good.txt", "bad.txt"]);
     expect(xhr.headers).not.toHaveProperty("Content-Type");
     expect(xhr.headers).not.toHaveProperty("api_key");
-    expect(
-      screen.getByRole("button", { name: t("common.confirm") }),
-    ).toBeDisabled();
-    await act(async () => xhr.progress(50, 100));
-    const rings = screen.getAllByLabelText("50%");
-    expect(rings[0].querySelector("circle:last-child")).toHaveAttribute(
-      "fill",
-      "none",
-    );
-    expect(
-      Number(
-        rings[0]
-          .querySelector("circle:last-child")!
-          .getAttribute("stroke-dashoffset"),
-      ),
-    ).toBeCloseTo(Math.PI * 6.5);
+    expect(closes).toHaveLength(1);
+
     await act(async () =>
       xhr.complete({
         summary: { total: 2, success: 1, failed: 1 },
@@ -396,13 +385,38 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
       }),
     );
     await screen.findByText("Per-file rejected");
-    expect(screen.getByText(/^1K/)).toHaveTextContent(
-      t("aidpKnowledge.importUploadComplete"),
+    expect(
+      screen.getAllByText(t("uploadCenter.statusUploadFailed")).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(t("uploadCenter.statusSuccess")).length,
+    ).toBeGreaterThan(0);
+    const retry = screen.getByRole("button", { name: /重试上传失败/ });
+    fireEvent.click(retry);
+    await waitFor(() => expect(UploadTransport.sent).toHaveLength(2));
+    expect(
+      UploadTransport.sent[1].body
+        .getAll("files")
+        .map((value) => (value as File).name),
+    ).toEqual(["bad.txt"]);
+    await act(async () =>
+      UploadTransport.sent[1].complete({
+        summary: { total: 1, success: 1, failed: 0 },
+        success_list: [{ file_name: "bad.txt" }],
+        failed_list: [],
+      }),
     );
-    expect(screen.queryByLabelText("50%")).toBeNull();
-    expect(closes).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: t("common.confirm") }));
-    expect(closes).toHaveLength(1);
+    await waitFor(() =>
+      expect(
+        screen.queryByText(t("uploadCenter.statusUploadFailed")),
+      ).toBeNull(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: t("uploadCenter.close") }),
+    );
+    expect(
+      screen.queryByRole("region", { name: t("uploadCenter.title") }),
+    ).toBeNull();
   });
   it.each([
     [
@@ -425,20 +439,24 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
       "File service failed",
     ],
   ])(
-    "upload %s failure stays on the file row",
+    "upload %s failure stays in the upload center",
     async (_kind, response, expected) => {
       importFiles();
       await chooseFiles([new File(["x"], "failed.txt")]);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: t("aidpKnowledge.importAction"),
+        }),
+      );
       await waitFor(() => expect(UploadTransport.sent).toHaveLength(1));
       await act(async () => UploadTransport.sent[0].complete(response, 500));
-      const error = await screen.findByText(t(expected));
-      expect(error.closest('[aria-live="polite"]')).toBeTruthy();
+      await screen.findByText(t(expected));
       expect(
-        screen.getByRole("button", { name: t("common.confirm") }),
+        screen.getByRole("button", { name: /重试上传失败/ }),
       ).toBeEnabled();
     },
   );
-  it("one selection applies duplicate, type and 20 MiB boundaries without large allocations", async () => {
+  it("validation failures stay in the upload center without being sent", async () => {
     importFiles();
     const sized = (name: string, size: number) =>
       Object.defineProperty(new File(["x"], name), "size", { value: size });
@@ -454,30 +472,42 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
       ...oversized,
       new File(["x"], "invalid.exe"),
     ]);
+    fireEvent.click(
+      screen.getByRole("button", { name: t("aidpKnowledge.importAction") }),
+    );
     await waitFor(() => expect(UploadTransport.sent).toHaveLength(1));
     expect(
       UploadTransport.sent[0].body
         .getAll("files")
         .map((value) => (value as File).name),
     ).toEqual(valid.map((value) => value.name));
-    expect(screen.getAllByText(/20 MB/).length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText(/large\.json 超过 20 MB/)).toBeInTheDocument();
     expect(
-      screen.getByText(t("aidpKnowledge.invalidFileType", { count: 1 })),
+      screen.getByText(/不支持的文件类型：invalid\.exe/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(t("aidpKnowledge.uploadHintSize")),
-    ).toHaveTextContent(/json.*md.*html/);
   });
-  it("selection accepts only the first 50 files", async () => {
+  it("selection over 50 files is split into batches", async () => {
     importFiles();
-    await chooseFiles(
-      Array.from(
-        { length: 51 },
-        (_, index) => new File(["x"], `file-${index}.txt`),
-      ),
+    const files = Array.from(
+      { length: 51 },
+      (_, index) => new File(["x"], `file-${index}.txt`),
+    );
+    await chooseFiles(files);
+    fireEvent.click(
+      screen.getByRole("button", { name: t("aidpKnowledge.importAction") }),
     );
     await waitFor(() => expect(UploadTransport.sent).toHaveLength(1));
     expect(UploadTransport.sent[0].body.getAll("files")).toHaveLength(50);
-    expect(screen.queryByText("file-50.txt")).toBeNull();
+    await act(async () =>
+      UploadTransport.sent[0].complete({
+        summary: { total: 50, success: 50, failed: 0 },
+        success_list: files
+          .slice(0, 50)
+          .map((file) => ({ file_name: file.name })),
+        failed_list: [],
+      }),
+    );
+    await waitFor(() => expect(UploadTransport.sent).toHaveLength(2));
+    expect(UploadTransport.sent[1].body.getAll("files")).toHaveLength(1);
   });
 });

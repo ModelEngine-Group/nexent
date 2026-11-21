@@ -144,8 +144,8 @@ it("S-01 saves unchecked batch models without waiting for the probe and closes",
   expect(
     api.createModelOutlet.mock.calls.every(
       ([body]) =>
-        body.parameter_values.temperature === 0.7 &&
-        body.parameter_values.top_p === 1
+        !Object.hasOwn(body.parameter_values, "temperature") &&
+        !Object.hasOwn(body.parameter_values, "top_p")
     )
   ).toBe(true);
 }, 30000);

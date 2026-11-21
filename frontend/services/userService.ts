@@ -9,6 +9,7 @@ export interface User {
   username: string;
   cas_username?: string | null;
   role: string;
+  roles?: string[];
   group_names?: string[];
   email?: string;
   tenant_id?: string;
@@ -17,7 +18,8 @@ export interface User {
 }
 
 export interface UpdateUserRequest {
-  role: string;
+  roles?: string[];
+  role?: string;
 }
 
 export interface UserListResponse {
@@ -146,4 +148,19 @@ export async function deleteUser(userId: string): Promise<void> {
     }
     throw new ApiError(500, "Failed to delete user");
   }
+}
+
+export interface AssignableRoles {
+  grantable_roles: string[];
+  revocable_roles: string[];
+  locked_roles: string[];
+  reasons: Record<string, string>;
+}
+export async function getAssignableRoles(
+  userId: string
+): Promise<AssignableRoles> {
+  const response = await fetchWithAuth(
+    API_ENDPOINTS.users.assignableRoles(userId)
+  );
+  return (await response.json()).data;
 }
