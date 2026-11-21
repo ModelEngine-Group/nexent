@@ -114,6 +114,7 @@ interface AidpKnowledgeInformationTabProps {
   canConfigureGroupPermissions: boolean;
   detailFetching: boolean;
   onEditPermissions: () => void;
+  onEditMetadata: () => void;
   onRefreshDetail: () => Promise<unknown>;
 }
 
@@ -131,6 +132,7 @@ const AidpKnowledgeInformationTab: React.FC<
   canConfigureGroupPermissions,
   detailFetching,
   onEditPermissions,
+  onEditMetadata,
   onRefreshDetail,
 }) => {
   const { t } = useTranslation();
@@ -458,6 +460,7 @@ const AidpKnowledgeInformationTab: React.FC<
           vlmModelLabel={vlmModelLabel}
           formatDateTime={formatDetailDateTime}
           onEditPermissions={onEditPermissions}
+          onEditMetadata={onEditMetadata}
           onEditSetting={setSettingModal}
           onDisableGraph={disableGraph}
         />

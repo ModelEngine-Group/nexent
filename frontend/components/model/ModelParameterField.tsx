@@ -3,10 +3,11 @@
 "use client";
 
 import { RotateCcw } from "lucide-react";
-import { Form, Input, InputNumber, Select, Switch } from "antd";
+import { Form, Input, InputNumber, Select, Switch, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardButton } from "@/components/common/StandardButton";
+
+import { SamplingInput } from "./SamplingInput";
+import { isSamplingField, validSampling } from "@/lib/modelSamplingParameters";
 import type { ModelParameterRule } from "@/types/modelProfile";
 
 interface ModelParameterFieldProps {
@@ -40,6 +41,11 @@ export function ModelParameterField({
   const value = Object.hasOwn(values, rule.key)
     ? values[rule.key]
     : fallbackValues[rule.key];
+  const samplingField = isSamplingField(rule.key) ? rule.key : undefined;
+  const optionalSampling =
+    scope === "outlet" &&
+    samplingField !== undefined &&
+    !rule.required;
   const disabled =
     !rule.editable || !rule.allowed_scopes.includes(scope) || pending;
   const options = rule.schema.enum;
@@ -50,12 +56,28 @@ export function ModelParameterField({
       <Select
         className={
           inModelSelector
-            ? "!w-auto min-w-0 [&.ant-select-disabled]:!bg-transparent"
+            ? "!w-auto min-w-28 max-w-full [&.ant-select-disabled]:!bg-transparent"
             : undefined
         }
         variant={inModelSelector ? "borderless" : "outlined"}
+        placeholder={
+          inModelSelector
+            ? t("modelProfile.thinkingModeOption.default")
+            : undefined
+        }
+        popupMatchSelectWidth={inModelSelector ? false : undefined}
         styles={
-          inModelSelector ? { popup: { root: { zIndex: 1200 } } } : undefined
+          inModelSelector
+            ? {
+                popup: {
+                  root: {
+                    zIndex: 1200,
+                    minWidth: 112,
+                    maxWidth: "calc(100vw - 24px)",
+                  },
+                },
+              }
+            : undefined
         }
         getPopupContainer={(trigger) =>
           inModelSelector ? document.body : trigger.parentElement!
@@ -66,18 +88,52 @@ export function ModelParameterField({
             : undefined
         }
         aria-label={label ?? rule.key}
+        allowClear={samplingField !== undefined && !rule.required}
+        status={
+          samplingField !== undefined && !validSampling(samplingField, value, rule.schema)
+            ? "error"
+            : undefined
+        }
         value={value === undefined ? undefined : JSON.stringify(value)}
         disabled={disabled}
-        options={options.map((option) => ({
-          value: JSON.stringify(option),
-          label:
-            rule.key === "reasoning_effort"
-              ? t(`modelProfile.thinkingLevel.${String(option)}`, {
-                  defaultValue: String(option),
-                })
-              : String(option),
-        }))}
-        onChange={(selected) => onChange(rule.key, JSON.parse(selected))}
+        options={options
+          .filter(
+            (option) =>
+              samplingField === undefined ||
+              (option != null && validSampling(samplingField, option, rule.schema))
+          )
+          .map((option) => ({
+            value: JSON.stringify(option),
+            label:
+              rule.key === "reasoning_effort"
+                ? t(`modelProfile.thinkingLevel.${String(option)}`, {
+                    defaultValue: String(option),
+                  })
+                : String(option),
+          }))}
+        onChange={(selected) => {
+          if (selected !== undefined) onChange(rule.key, JSON.parse(selected));
+          else if (optionalSampling) onChange(rule.key, null);
+          else onReset(rule.key);
+        }}
+      />
+    );
+  else if (samplingField !== undefined)
+    control = (
+      <SamplingInput
+        field={samplingField}
+        label={label ?? rule.key}
+        value={scope === "outlet" ? value : values[rule.key]}
+        inherited={
+          scope === "conversation" ? fallbackValues[rule.key] : undefined
+        }
+        schema={rule.schema}
+        disabled={disabled}
+        showAllowedRange={scope === "outlet"}
+        onChange={(next) => {
+          if (next !== null || optionalSampling) onChange(rule.key, next);
+          else onReset(rule.key);
+        }}
       />
     );
   else if (types.includes("boolean"))
@@ -95,6 +151,11 @@ export function ModelParameterField({
         className="!w-full"
         aria-label={label ?? rule.key}
         value={typeof value === "number" ? value : null}
+        placeholder={
+          inModelSelector && rule.key === "reasoning_budget_tokens"
+            ? t("modelProfile.thinkingModeOption.default")
+            : undefined
+        }
         disabled={disabled}
         min={
           typeof rule.schema.minimum === "number"
@@ -110,7 +171,8 @@ export function ModelParameterField({
           types.includes("integer") && !types.includes("number") ? 0 : undefined
         }
         onChange={(next) => {
-          if (next !== null || types.includes("null")) onChange(rule.key, next);
+          if (next !== null || types.includes("null"))
+            onChange(rule.key, next);
           else onReset(rule.key);
         }}
       />
@@ -139,7 +201,7 @@ export function ModelParameterField({
     );
   else
     control = (
-      <StandardInput
+      <Input
         aria-label={label ?? rule.key}
         value={
           typeof value === "string"
@@ -165,7 +227,7 @@ export function ModelParameterField({
       <div
         className={
           inModelSelector
-            ? "flex min-h-8 items-center justify-end gap-2 [&>.ant-switch]:shrink-0"
+            ? "flex min-h-8 min-w-0 items-center gap-2 [&>.ant-select]:shrink-0 [&>.ant-switch]:shrink-0"
             : "flex min-h-8 items-center gap-2 [&>.ant-select]:w-full [&>.ant-switch]:shrink-0"
         }
       >
@@ -174,7 +236,7 @@ export function ModelParameterField({
           Object.hasOwn(values, rule.key) &&
           !disabled &&
           !(scope === "outlet" && rule.required) && (
-            <StandardButton
+            <Button
               className="!w-8 !shrink-0 !px-0"
               aria-label={resetLabel ?? t("modelProfile.reset")}
               title={resetLabel ?? t("modelProfile.reset")}

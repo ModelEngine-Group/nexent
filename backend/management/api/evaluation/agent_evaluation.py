@@ -6,11 +6,15 @@ from http import HTTPStatus
 from typing import Any
 
 from fastapi import APIRouter, Body, Header, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, TypeAdapter, ValidationError
 
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, UnauthorizedError
+from contracts.errors.exceptions import (
+    AppException,
+    RuntimeUpstreamError,
+    UnauthorizedError,
+)
 
 # AppException is caught by global middleware (maps ErrorCode to HTTP status)
 from management.db.evaluation.runs import update_annotation_schema_ids
@@ -24,8 +28,9 @@ from management.services.evaluation.runs import (
     list_agent_evaluations_by_agent_impl,
 )
 from management.services.evaluation.reporting.report import generate_agent_evaluation_report_impl
-from management.services.agent.runtime_client import forward_agent_evaluation_trial_run
-from gateway.authentication.auth import get_current_user_id, get_current_user_info
+from management.services.evaluation.runs import run_evaluation_trial_in_worker
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
+from nexent.core.concurrency import run_blocking
 
 
 logger = logging.getLogger("agent_evaluation_app")
@@ -392,9 +397,14 @@ async def analyze_agent_evaluation_api(
     UI can render a friendly "wait or refresh" tooltip.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        data = generate_analysis_report_impl(
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = await run_blocking(
+            "agent-evaluation-analysis",
+            generate_analysis_report_impl,
+            lane="model-tool-io",
+            owner="management",
             agent_evaluation_id=agent_evaluation_id,
+            user_id=user_id,
             tenant_id=tenant_id,
             force=force,
         )
@@ -525,7 +535,11 @@ async def trial_run_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = await forward_agent_evaluation_trial_run(
+        result = await run_blocking(
+            "agent-evaluation-trial",
+            run_evaluation_trial_in_worker,
+            lane="evaluation",
+            owner="management",
             agent_id=payload.agent_id,
             agent_version_no=payload.agent_version_no,
             query=payload.query,
@@ -552,6 +566,14 @@ async def trial_run_api(
 
     except UnauthorizedError:
         raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
+    except RuntimeUpstreamError as exc:
+        # Preserve the runtime's structured error (code/message/status) instead
+        # of collapsing a validation failure into a generic 500.
+        return Response(
+            content=exc.content,
+            status_code=exc.status_code,
+            media_type="application/json",
+        )
     except Exception as exc:
         logger.exception(
             "trial_run_api ERROR: tenant=%s user=%s agent_id=%s version=%s "
@@ -593,7 +615,7 @@ def _safe_extract_language(request: Request | None) -> str:
     if request is None:
         return "zh"
     try:
-        from gateway.authentication.auth import parse_language_from_request
+        from management.services.permission.identity.session import parse_language_from_request
 
         return str(parse_language_from_request(request) or "zh")
     except Exception:

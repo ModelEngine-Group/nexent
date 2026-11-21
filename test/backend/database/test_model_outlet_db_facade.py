@@ -29,13 +29,12 @@ def test_model_management_entry_delegates_without_legacy_filter(
     client.as_dict, client.db_client = MagicMock(), MagicMock()
     delegated = MagicMock(return_value=42)
     monkeypatch.setattr(db, name, delegated)
-    monkeypatch.setitem(sys.modules, "management.db.model.outlets", db)
+    monkeypatch.setitem(sys.modules, "infrastructure.rdb.outlets", db)
     facade = load(
-        "management.db.model._outlet_facade_unit",
-        "backend/management/db/model/repository.py",
+        "infrastructure.rdb._outlet_facade_unit",
+        "infrastructure/rdb/model_records.py",
         monkeypatch,
     )
     assert getattr(facade, name)("profile-or-id", tenant_id="tenant-one") == 42
     delegated.assert_called_once_with("profile-or-id", tenant_id="tenant-one")
     legacy_filter.assert_not_called()
-

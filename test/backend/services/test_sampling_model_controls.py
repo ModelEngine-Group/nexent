@@ -16,9 +16,15 @@ def test_su_ac_05_sampling_presence_bounds_zero_and_explicit_null(field, maximum
     data = profile.model_dump()
     next(rule for rule in data["parameter_rules"] if rule["key"] == field)["schema"].update(minimum=0, maximum=maximum)
     profile = type(profile).model_validate(data)
-    for value in [0, 0.7, maximum, None]:
+    valid_values = [0, 0.7, maximum] if field == "temperature" else [0.005, 0.995, maximum]
+    for value in valid_values:
         assert merge_model_preferences(profile, {field: value}).parameter_values[field] == value
-    for invalid in [-0.1, maximum + 0.1, True, "0.7", float("nan"), float("inf")]:
+    cleared = merge_model_preferences(profile, {field: None}).parameter_values
+    assert cleared == profile.parameter_values
+    invalid_values = [-0.1, maximum + 0.1, True, "0.7", float("nan"), float("inf")]
+    if field == "top_p":
+        invalid_values.append(0)
+    for invalid in invalid_values:
         with pytest.raises(ModelOutletValidationError):
             merge_model_preferences(profile, {field: invalid})
 

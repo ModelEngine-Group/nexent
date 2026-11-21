@@ -15,8 +15,8 @@ from fastapi import FastAPI
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpKbPermissionDeniedError
-from gateway.api import northbound
-from gateway.authentication import northbound_auth
+from management.api import northbound
+from management.services.permission.identity import northbound as northbound_auth
 from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchTool
 
 CASE_ID = "AIDP-FILE-IDENTITY-D5-001"
@@ -102,14 +102,14 @@ def configured(*, upstream=None, permission_calls=None, upstream_calls=None):
     ), patch.object(
         northbound_auth, "log_token_usage"
     ), patch.object(
-        northbound, "AIDP_SERVER_URL", "https://aidp.internal"
+        northbound, "_AIDP_FILE_SERVER_URL", "https://aidp.internal"
     ), patch.object(
-        northbound, "AIDP_API_KEY", "aidp-secret"
+        northbound, "_AIDP_FILE_API_KEY", "aidp-secret"
     ), patch.object(
-        northbound, "require_permission", side_effect=require_permission
+        northbound, "_require_aidp_permission", side_effect=require_permission
     ), patch.object(
         northbound,
-        "stream_aidp_doc_impl",
+        "_stream_aidp_doc",
         new=upstream or default_upstream,
     ):
         yield

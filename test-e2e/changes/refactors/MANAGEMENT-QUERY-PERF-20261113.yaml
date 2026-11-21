@@ -1,0 +1,64 @@
+schema_version: '1.0'
+change:
+  change_id: MANAGEMENT-QUERY-PERF-20261113
+  change_type: refactor
+  title: Batch management reads while preserving HTTP and business contracts
+  description: Reduce repeated SQL and ES calls and synchronous event-loop blocking;
+    demand-load Agent versions.
+  affected_features:
+    existing:
+    - F-019
+    - F-022
+    - F-025
+    - F-033
+    - F-066
+    - V5-PW-RESOURCE-02
+    - V5-PW-RESOURCE-04
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-028
+    - API-033
+    - API-039
+    - API-067
+    - API-068
+    - PW-RESOURCE-02
+    - PW-RESOURCE-04
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Existing API/browser contracts remain unchanged. Add deterministic
+    traditional UT for batch equivalence and bounded query counts; retain deployed
+    regression Cases.
+  notes: 'SPEC: ../nexent-doc/docs/Developing/management-api-query-performance/. Existing
+    formal assertions are retained; script PASS is not certified acceptance completeness.
+    No new D1 duplicates isolated unit assertions. Responsibility remains with the
+    existing Feature ownership map. Reused D2/D4 Cases retain their preparation and
+    cleanup declarations; no formal acceptance contract or binding is changed. Component
+    tests cover resource Agent demand-loading; PW-RESOURCE-04 owns the real resource-tab
+    journey, PW-RESOURCE-02 owns groups/invitations. Bounded Management read rejection
+    uses a distinct retryable 429 without executing the handler; default success/business-error
+    contracts remain unchanged.'
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve Agent visibility, availability, version fallback, fields and ordering
+      with batched reads
+    - Preserve group counts, invitation usage, model pagination and embedding configuration
+      semantics
+    - Preserve ES per-index statistics/errors and quota cache TTL/refresh/invalidation
+      under concurrency
+    - Keep synchronous I/O off the event loop and load version histories on demand
+    reason: Existing per-helper mocks do not prove value equivalence, bounded query
+      counts or concurrent cache behavior.
+    test_selectors:
+    - test/backend/database/test_management_batch_queries.py
+    - test/backend/services/test_management_batch_reads.py
+    - test/backend/services/test_management_list_contracts.py
+    - test/backend/services/test_quota_cache_concurrency.py
+    - test/backend/services/test_embedding_status_batch.py
+    - test/backend/app/test_managed_read.py
+    - test/sdk/vector_database/test_elasticsearch_batch_details.py

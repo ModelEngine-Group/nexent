@@ -4,6 +4,8 @@
 
 from copy import deepcopy
 
+import pytest
+
 from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
 from nexent.core.model_service.registry import model_service_references
 from management.services.model.outlet_projection import project_saved_outlet
@@ -26,7 +28,7 @@ def test_projection_preserves_stored_format_and_exports_admin_review_information
     assert "api_key" not in view
 
 
-def test_confirmed_revision_and_later_configuration_change_have_different_review_states():
+def test_migration_confirmation_survives_later_configuration_revisions():
     profile = build(row())
     data = profile.model_dump()
     data["provenance"]["provider_metadata"]["migration"]["reviewed_revision"] = 1
@@ -34,7 +36,7 @@ def test_confirmed_revision_and_later_configuration_change_have_different_review
     stored = encode_resolved_model_profile(profile, registered_references=model_service_references())
     assert project_saved_outlet(stored)["migration_review_required"] is False
     stored["config_revision"] = 2
-    assert project_saved_outlet(stored)["migration_review_required"] is True
+    assert project_saved_outlet(stored)["migration_review_required"] is False
 
 
 def test_failed_or_invalid_rows_report_diagnostic_without_legacy_guessing():
@@ -43,3 +45,12 @@ def test_failed_or_invalid_rows_report_diagnostic_without_legacy_guessing():
     assert project_saved_outlet({"profile_schema_version": 1})["migration_diagnostic"] == {
         "category": "PROFILE_STORAGE_INVALID"}
     assert project_saved_outlet({"model_type": "llm"}) is None
+
+
+@pytest.mark.parametrize("reviewed", [None, False, True, 0, -1, "1"])
+def test_invalid_or_missing_confirmation_remains_pending(reviewed):
+    profile = build(row())
+    data = profile.model_dump()
+    data["provenance"]["provider_metadata"]["migration"]["reviewed_revision"] = reviewed
+    stored = encode_resolved_model_profile(profile.__class__.model_validate(data), registered_references=model_service_references())
+    assert project_saved_outlet(stored)["migration_review_required"] is True

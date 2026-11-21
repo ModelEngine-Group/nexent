@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-UNARCHIVED-FILTER-20261117
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-UNARCHIVED-FILTER-20261117
+  title: 未归档状态短语及筛选补齐
+  description: 列表将归档等待状态显示为未归档，并允许通过状态筛选查询。
+  observed_behavior: 列表显示尚未归档的长提示，筛选菜单没有对应选项，records参数校验也拒绝unarchived。
+  expected_behavior: 中英文显示简短状态，筛选提交unarchived并由PG按最新执行状态过滤；未知状态仍拒绝，归档与终态同步规则保持。
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: 现有状态筛选回归覆盖已取消，未覆盖未归档菜单、请求白名单和状态转交。
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-QUERY-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 列表显示未归档并可选择对应筛选，提交status=unarchived。
+    - records两种视图接受unarchived，拼错或未知值仍拒绝，SQL状态条件使用参数绑定。
+    reason: 前端组件和Python合同/查询UT证明局部分支；复用D2验证真实HTTP参数到PG查询边界，无新增D1。
+    test_selectors:
+    - frontend/tests/component/trajectoryDisplay.test.tsx
+    - test/backend/services/trajectory/test_contracts_and_cache.py
+    - test/backend/services/trajectory/test_summary_projection.py
+  notes: 基线824348864，保留当前未提交改动。SPEC主设计状态展示与筛选一致规则，runtime责任域。
+    D2沿用自包含TestClient、受管线程和临时文件fixture及finally清理，无新增共享准备资源；真实PG和完整验收延续用户暂缓安排。

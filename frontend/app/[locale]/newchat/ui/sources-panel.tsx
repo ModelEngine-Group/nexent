@@ -21,7 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Pagination } from "antd";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { extractFilenameFromContentDisposition } from "@/lib/downloadFilename";
 import { cn } from "@/lib/utils";
@@ -325,7 +325,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           aria-label={t("chat.sources.pagination")}
           className="flex shrink-0 justify-center border-t border-slate-200 px-3 py-3"
         >
-          <StandardPaginator
+          <Pagination
             size="small"
             current={currentPage}
             pageSize={20}

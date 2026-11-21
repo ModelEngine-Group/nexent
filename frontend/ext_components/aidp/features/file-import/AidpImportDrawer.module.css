@@ -28,74 +28,73 @@
   flex-direction: column;
 }
 
-.dropzone {
-  min-height: 160px;
+.importIntro {
   flex: none;
+  margin-bottom: 16px;
+  color: #8c8c8c;
+  font-size: 14px;
+  line-height: 22px;
 }
 
-.dropzone :global(.ant-upload.ant-upload-drag) {
-  min-height: 160px;
-  height: auto;
-  border: 1px dashed #c9c9c9;
-  border-radius: 4px;
-  background: #fff;
-  transition: border-color 0.2s ease;
+.targetSection {
+  flex: none;
+  margin-bottom: 16px;
 }
 
-.dropzone :global(.ant-upload.ant-upload-drag:hover) {
-  border-color: #1677ff;
-}
-
-.dropzone :global(.ant-upload-btn) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 160px;
-  padding: 12px 20px !important;
-}
-
-.dropzone :global(.ant-upload-drag-container) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.dropzoneContent {
-  width: 100%;
-  color: #595959;
-  text-align: center;
-}
-
-.dropzoneIcon {
-  margin-bottom: 8px;
-  color: #1677ff;
-  font-size: 24px;
-}
-
-.dropzoneTitle {
+.targetLabel {
+  display: block;
+  margin-bottom: 6px;
   color: #1f1f1f;
   font-size: 14px;
   line-height: 22px;
 }
 
-.dropzoneNotes {
-  margin-top: 4px;
+.required {
+  margin-right: 4px;
+  color: #e02128;
+}
+
+.targetRow {
+  display: flex;
+  gap: 8px;
+}
+
+.targetRow :global(.ant-input) {
+  flex: 1;
+}
+
+.uploadSection {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.selectButton {
+  align-self: flex-start;
+  margin-bottom: 8px;
+}
+
+.dropArea {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.dropAreaActive {
+  background: #f5faff;
+}
+
+.formatsHint {
+  flex: none;
+  margin-bottom: 8px;
   color: #8c8c8c;
   font-size: 12px;
   line-height: 18px;
-}
-
-.dropzoneDescription {
-  margin-top: 4px;
-  color: #777;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.formats {
-  max-width: 100%;
   overflow-wrap: anywhere;
-  white-space: normal;
 }
 
 .fileList {
@@ -103,7 +102,6 @@
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
-  margin-top: 12px;
   padding: 1px;
 }
 
@@ -121,37 +119,9 @@
   background: #fff;
 }
 
-.dashedRow {
-  border-style: dashed;
-  border-color: #c9c9c9;
-}
-
-.successRow {
+.selectionRow {
   border-style: solid;
-  border-color: #191919;
-}
-
-.fileIcon {
-  position: relative;
-  display: flex;
-  width: 32px;
-  height: 32px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 5px;
-  background: #6b7280;
-  color: #fff;
-  font-size: 19px;
-}
-
-.progressRing {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  overflow: visible;
-  filter: drop-shadow(0 0 1px rgb(0 0 0 / 35%));
-  transform: translate(-50%, -50%);
+  border-color: #e5e7eb;
 }
 
 .fileText {
@@ -179,10 +149,6 @@
   line-height: 20px;
 }
 
-.fileError {
-  color: #e02128;
-}
-
 .deleteButton {
   width: 28px;
   height: 28px;
@@ -196,15 +162,6 @@
   justify-content: center;
   color: #8c8c8c;
   font-size: 14px;
-}
-
-.fileCount {
-  flex: none;
-  padding-top: 8px;
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 18px;
-  text-align: right;
 }
 
 .footer,
@@ -242,23 +199,6 @@
   .drawer :global(.ant-drawer-header) {
     padding-right: 16px;
     padding-left: 16px;
-  }
-
-  .drawerBody {
-    min-height: 0;
-  }
-
-  .dropzone {
-    min-height: 160px;
-  }
-
-  .dropzoneNotes {
-    font-size: 11px;
-  }
-
-  .dropzoneDescription {
-    font-size: 12px;
-    line-height: 18px;
   }
 
   .drawer :global(.ant-drawer-body) {

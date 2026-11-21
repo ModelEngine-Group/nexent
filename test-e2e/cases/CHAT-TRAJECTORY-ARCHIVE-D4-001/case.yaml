@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ARCHIVE-D4-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  - CHAT-TRAJECTORY-SAVED-IMPORT-20261118
+  business_rule_ids:
+  - TRJ-RULE-010
+  - TRJ-RULE-011
+  - TRJ-RULE-012
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-import-export/proposal.md
+    acceptance_criteria:
+    - AC-IE-001
+    - AC-IE-002
+    - AC-IE-003
+    - AC-IE-006
+    - AC-IE-007
+    - AC-IE-008
+  title: 详情右上角导出并从导入列表右上角导入，刷新后可从导入列表重新打开
+  objective: 详情右上角导出并从导入列表右上角导入，刷新后可从导入列表重新打开
+  preconditions:
+  - 产品接口和当前Case固定脚本可执行；受控身份/目录边界使用Case独占夹具，轨迹写入、HTTP路由、受管线程和原格式解析使用真实实现。
+  - 使用本Case独占的来源轨迹、身份、服务和浏览器上下文，登记资源所有权并验证清理；沿用runtime责任域。
+  test_data:
+    profile: mock
+    corpus:
+    - 超过一页的多轮轨迹与长Unicode正文
+    - 缺失/partial/expired/unarchived轮次
+    - 同一文件重复选择和同Trace ID不同文件
+  steps:
+  - order: 1
+    action: 管理员打开具体会话轨迹，只加载首段，点击详情右上角导出。
+    expected: 直接下载ZIP，不弹范围确认或导出计划；准备中防重复点击，失败可原位重试，原列表筛选保持。
+  - order: 2
+    action: 回到轨迹列表，进入导入列表，点击右上角导入并选择ZIP。
+    expected: 解析成功直接打开临时轨迹详情，无目标租户选择；新保存接口完成后保留ZIP，释放解析临时文件，不需要配置来源Agent。
+  - order: 3
+    action: 逐轮查看树/时间线、父导航、类型筛选和搜索，滚动长正文并复制；选择同一文件重试及切换不同文件。
+    expected: 查看功能保持，尾部Unicode及复制值完整，缺失状态不隐藏；同文件可重选，旧数据和迟到请求不覆盖新视图，统计和原列表不增加记录。
+  - order: 4
+    action: 分别关闭临时详情、刷新页面、路由离开再返回、浏览器后退恢复、退出登录重登。
+    expected: 浏览器内容清空，新保存记录可从独立导入列表重新打开，旧临时接口仍需重传；原服务轨迹仍可使用，本Case浏览器/解析请求/URL资源释放。
+  expected_results:
+  - 直接下载ZIP，不弹范围确认或导出计划；准备中防重复点击，失败可原位重试，原列表筛选保持。
+  - 解析成功直接打开临时轨迹详情，无目标租户选择；新保存接口完成后保留ZIP，释放解析临时文件，不需要配置来源Agent。
+  - 查看功能保持，尾部Unicode及复制值完整，缺失状态不隐藏；同文件可重选，旧数据和迟到请求不覆盖新视图，统计和原列表不增加记录。
+  - 浏览器内容清空，新保存记录可从独立导入列表重新打开，旧临时接口仍需重传；原服务轨迹仍可使用，本Case浏览器/解析请求/URL资源释放。
+  forbidden_side_effects:
+  - 旧临时接口不得新增持久记录；新POST /trajectory/imports仅保存本地导入者记录，不得新增源业务数据库记录或业务用量，不得请求来源资源或调用模型工具。
+  - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
+  actor: 可观测中心授权OPS/SU管理员，另有普通身份拒绝变体。
+  journey:
+  - 详情导出→导入列表上传保存→原查看器→刷新/离开→可从导入列表重开。
+  final_business_result:
+  - 详情导出和列表上传复用原查看器；页面生命周期结束释放浏览器内容，显式保存记录由独立列表恢复。
+  failure_evidence:
+  - 固定Playwright断言、下载hash、网络/浏览器存储检查和脱敏trace，不能以截图替代交互。
+  acceptance:
+  - id: AC-01
+    description: 直接下载ZIP，不弹范围确认或导出计划；准备中防重复点击，失败可原位重试，原列表筛选保持。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 解析成功直接打开临时轨迹详情，无目标租户选择；新保存接口完成后保留ZIP，释放解析临时文件，不需要配置来源Agent。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 查看功能保持，尾部Unicode及复制值完整，缺失状态不隐藏；同文件可重选，旧数据和迟到请求不覆盖新视图，统计和原列表不增加记录。
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-04
+    description: 浏览器内容清空，新保存记录可从独立导入列表重新打开，旧临时接口仍需重传；原服务轨迹仍可使用，本Case浏览器/解析请求/URL资源释放。
+    steps:
+    - 4
+    expected_results:
+    - 4

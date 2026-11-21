@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-SECTION-ENTRY-20261111
+  change_type: bugfix
+  bug_id: AUTH-SECTION-ENTRY-20261111
+  title: Skip section-only routes when selecting the default entry
+  description: Prevent the homepage redirect from treating navigation groups as routable pages.
+  observed_behavior: SU login redirects to /resource-space, which has no page and returns 404.
+  expected_behavior: Default entry skips resource-space and agent-dev groups, selects the first accessible actual page, and retains Home when no actual page is granted.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing default-entry tests cover management and conversation routes but do not place section-only routes before actual pages.
+  feature_contract_changed: false
+  affected_features:
+    existing: [NAV-MENU-VISIBILITY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/homepageRedirect.test.tsx
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    behaviors:
+    - Skip resource-space and agent-dev when selecting the first authorized page.
+    - Retain Home when only section-only routes are available.
+    - Preserve Workbench and Newchat priority, guest entry, authorization recovery, and empty-route behavior.
+    reason: Homepage default-entry selection is frontend component behavior; existing recovery tests provide adjacent regression coverage and no new formal Case is required.
+  notes: Reuses the default-entry contract from AUTH-DEFAULT-ENTRY-20261019 and the existing homepageRedirect/authorizationRecovery suites. No route, permission grant, or formal Case contract changes.

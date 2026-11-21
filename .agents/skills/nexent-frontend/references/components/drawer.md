@@ -147,8 +147,10 @@ Button container Tailwind CSS:
 flex h-8 w-full shrink-0 flex-nowrap items-center justify-end gap-4
 ```
 
-Use the reusable component:
+Use the native component with the central theme:
 
 ```tsx
-import { StandardDrawer } from "@/components/common/StandardDrawer";
+import { Drawer } from "antd";
 ```
+
+The unused StandardDrawer was removed. Use native Drawer for current needs; introduce shared composition only when a real caller needs a common interaction contract.

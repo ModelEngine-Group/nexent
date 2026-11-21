@@ -9,6 +9,8 @@ Provides three-tier quota management:
 - KB tier: Per-KB soft quotas (advisory, warnings only)
 """
 
+from contextlib import contextmanager
+
 import logging
 import threading
 import time
@@ -20,7 +22,7 @@ from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, get_private_knowledge_info_by_creator, get_private_knowledge_info_by_tenant_id, update_knowledge_record
 from management.db.configuration.tenant import delete_config_by_tenant_config_id, get_configs_by_tenant_id_and_keys, get_single_config_info, insert_config, update_config_by_tenant_config_id
 from management.db.identity.user_tenant import get_user_email_map
-from infrastructure.formatting import bytes_to_readable
+from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.storage import (
     get_committed_bytes_by_kb,
     get_committed_source_bytes_by_paths,
@@ -64,7 +66,46 @@ DEFAULT_CRITICAL_THRESHOLD = 95
 
 # In-memory cache for usage data
 _usage_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_usage_refresh_locks = {}
+_usage_cache_state_lock = threading.RLock()
+_usage_cache_generation = 0
 _UNSET = object()
+
+
+@contextmanager
+def usage_refresh_guard(tenant_id: str):
+    """Coalesce refreshes per tenant without retaining idle lock objects."""
+    with _usage_cache_state_lock:
+        entry = _usage_refresh_locks.setdefault(tenant_id, [threading.RLock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            with _usage_cache_state_lock:
+                generation = _usage_cache_generation
+            yield generation
+    finally:
+        with _usage_cache_state_lock:
+            entry[1] -= 1
+            if entry[1] == 0:
+                del _usage_refresh_locks[tenant_id]
+
+
+def store_usage_cache(tenant_id, timestamp, usage, generation):
+    """Do not publish a refresh invalidated while external I/O was in flight."""
+    with _usage_cache_state_lock:
+        if generation == _usage_cache_generation:
+            _usage_cache[tenant_id] = (timestamp, dict(usage))
+
+
+def invalidate_usage_cache(tenant_id=None):
+    """Invalidate cached values and prevent stale in-flight refresh publication."""
+    global _usage_cache_generation
+    with _usage_cache_state_lock:
+        _usage_cache_generation += 1
+        if tenant_id is None:
+            _usage_cache.clear()
+        else:
+            _usage_cache.pop(tenant_id, None)
 
 # Config helpers use independent database sessions, so serialize allocation
 # validation and writes within a config-service process.

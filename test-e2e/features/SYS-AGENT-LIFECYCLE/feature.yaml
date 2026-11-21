@@ -34,6 +34,8 @@ feature:
     description: Configuration-page creator histories and counts are scoped to authenticated
       owner, current-tenant target and public executor; opening history resumes its
       ID and new conversation keeps the target without pre-creating or copying messages.
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-006
+    description: Creator cards terminate a turn gracefully without cancelling queued output. Persisted creator runs survive subscriber departure and reconnect to the owned generation. Latest unanswered cards retain isolated drafts and editability across re-entry; submitted cards remain readonly, and following turns preserve structured questions and answers. Concurrent starts and stale stop requests cannot replace a newer execution.
   required_test_stages:
   - D5
   source:

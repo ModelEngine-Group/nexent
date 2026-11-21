@@ -4,46 +4,22 @@
 
 from typing import Any, Dict, Optional
 
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
 from contracts.errors.exceptions import ForbiddenError
+from infrastructure.workbench_skill_execution import _to_group_id_set as _to_group_id_set, can_view_skill as can_view_skill
+from contracts.constants.constants import (
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_EDIT,
+    PERMISSION_PRIVATE,
+    PERMISSION_READ,
+)
+from contracts.errors.exceptions import ForbiddenError
+from contracts.roles import has_any_role, roles_from_record
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.utils.serialization import convert_list_to_string
 
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
-
-
-def _to_group_id_set(group_ids: Any) -> set[int]:
-    if isinstance(group_ids, str):
-        return {
-            int(group_id.strip())
-            for group_id in group_ids.split(",")
-            if group_id.strip().isdigit()
-        }
-    if isinstance(group_ids, list):
-        return {
-            int(group_id) for group_id in group_ids if str(group_id).strip().isdigit()
-        }
-    return set()
-
-
-def can_view_skill(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-    user_group_ids: set[int],
-) -> bool:
-    """Return whether a skill is available to the current user."""
-    if skill.get("source") == "official":
-        return True
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return True
-    if str(skill.get("created_by")) == str(user_id):
-        return True
-    if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
-        return False
-    return bool(user_group_ids.intersection(_to_group_id_set(skill.get("group_ids"))))
 
 
 def resolve_skill_permission(
@@ -54,7 +30,7 @@ def resolve_skill_permission(
     user_group_ids: set[int],
 ) -> str:
     """Resolve whether the current user can edit or only use a visible skill."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
+    if has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES):
         return PERMISSION_EDIT
     if str(skill.get("created_by")) == str(user_id):
         return PERMISSION_EDIT
@@ -88,7 +64,7 @@ def _get_user_role(user_id: Optional[str]) -> str:
     user_tenant = get_user_tenant_by_user_id(user_id)
     if not user_tenant:
         return "USER"
-    return str(user_tenant.get("user_role") or "USER")
+    return roles_from_record(user_tenant)
 
 
 def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
@@ -110,7 +86,7 @@ def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
 def _can_manage_skill_access(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
     if not user_id:
         return False
-    return _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES or str(
+    return has_any_role(_get_user_role(user_id), CAN_EDIT_ALL_USER_ROLES) or str(
         skill.get("created_by")
     ) == str(user_id)
 

@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: WB-SESSION-RECOVERY-D2-001
+preparation:
+  families: []
+notes: Self-contained ASGI client owns isolated provider gates and in-memory storage; finally releases producers and restores all patched boundaries. No live service or shared test assets are used.
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_creator_http_reconnect_ownership_and_retry
+acceptance_bindings:
+  AC-01: [test_creator_http_reconnect_ownership_and_retry]
+  AC-02: [test_creator_http_reconnect_ownership_and_retry]
+  AC-03: [test_creator_http_reconnect_ownership_and_retry]

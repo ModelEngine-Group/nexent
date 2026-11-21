@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import type { Locator } from "playwright/test";
+import type { Locator, Route } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { appPath } from "../../infra/automation/d4/runner/runtime-config";
@@ -161,7 +161,29 @@ journey("PW-EVAL-RUN-01", async (context) => {
         runScore = Number(last.score_overall);
         expect(runScore).toBe(1);
         await expect(ownedRow()).toContainText("已完成", { timeout: 30000 });
-        return `run ${runId} reached COMPLETED and scored 1 against the fixed marker`;
+
+        const publishedList = "**/api/agent/published_list*";
+        const omitPublishedAgents = (route: Route) =>
+          route.fulfill({ json: { data: [] } });
+        await page.route(publishedList, omitPublishedAgents);
+        try {
+          const [response] = await Promise.all([
+            page.waitForResponse((response) =>
+              response.request().method() === "GET" &&
+              new URL(response.url()).pathname.endsWith("/agent-evaluations")
+            ),
+            page.reload(),
+          ]);
+          expect(response.ok()).toBe(true);
+          const payload = await response.json();
+          expect(payload.data).toContainEqual(
+            expect.objectContaining({ agent_evaluation_id: runId, agent_name: agent })
+          );
+          await expect(ownedRow().getByRole("cell", { name: agent, exact: true })).toBeVisible();
+        } finally {
+          await page.unroute(publishedList, omitPublishedAgents);
+        }
+        return `completed run ${runId} scored 1 and showed the agent name without published options`;
       },
       async () => {
         await ownedRow().locator("button:has(svg.lucide-eye)").click();

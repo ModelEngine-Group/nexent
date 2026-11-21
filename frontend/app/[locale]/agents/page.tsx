@@ -4,7 +4,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
+import {
+  App,
+  Empty,
+  InputNumber,
+  Modal,
+  Select,
+  Spin,
+  Button,
+  Input,
+  Pagination,
+  Space,
+} from "antd";
 import {
   ChevronDown,
   ChevronUp,
@@ -17,9 +28,7 @@ import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { useGuidePreference } from "@/hooks/useGuidePreference";
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -148,13 +157,6 @@ export default function AgentsPage() {
     },
     [pathname, router]
   );
-  const openPublishFlow = useCallback(
-    (agentId: number) => {
-      router.push(`${pathname}/${agentId}?publish=1`);
-    },
-    [pathname, router]
-  );
-
   const handleOpenAgent = useCallback(
     (agent: Agent) => updateUrl(Number(agent.id)),
     [updateUrl]
@@ -203,7 +205,7 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
       <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
         <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
           {t("sidebar.agentConfig")}
@@ -264,21 +266,16 @@ export default function AgentsPage() {
                   </span>
                 }
               >
-                <StandardButton
-                  variant="primary"
-                  onClick={() => setIsCreateOpen(true)}
-                >
+                <Button type="primary" onClick={() => setIsCreateOpen(true)}>
                   {t("agent.action.create")}
-                </StandardButton>
+                </Button>
               </Empty>
             </div>
           ) : (
             <>
-              <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
-                <div
-                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
-                >
-                  <StandardInput
+              <div className="mt-3 flex w-full shrink-0 flex-wrap items-center gap-3 lg:gap-4">
+                <div className="w-full min-w-0 lg:w-1/2 lg:shrink-0">
+                  <Input
                     allowClear
                     prefix={<Search className="size-4 text-[#777777]" />}
                     placeholder={t("agentSelector.searchPlaceholder")}
@@ -289,57 +286,44 @@ export default function AgentsPage() {
                     }}
                     className="!h-8 !w-full"
                   />
-                  <TagFilterPopover
-                    definitions={tagDefinitions ?? []}
-                    value={tagPredicates}
-                    onChange={(value) => {
-                      setTagPredicates(value);
-                      setPage(1);
-                    }}
-                    buttonClassName="!h-8 shrink-0"
-                  />
                 </div>
-                <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
-                  <StandardButton
+                <TagFilterPopover
+                  definitions={tagDefinitions ?? []}
+                  value={tagPredicates}
+                  onChange={(value) => {
+                    setTagPredicates(value);
+                    setPage(1);
+                  }}
+                  buttonClassName="!h-8 shrink-0"
+                />
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <Button
                     icon={<FileInput className="size-4" />}
                     onClick={handleImport}
                   >
                     {t("agentConfig.button.import")}
-                  </StandardButton>
-                  <StandardButton
-                    variant="primary"
-                    onClick={() => setIsCreateOpen(true)}
-                  >
+                  </Button>
+                  <Button type="primary" onClick={() => setIsCreateOpen(true)}>
                     {t("agentConfig.list.new")}
-                  </StandardButton>
-                  <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
-                    <button
-                      type="button"
-                      className={`flex size-[30px] items-center justify-center ${
-                        view === "list"
-                          ? "bg-[#0067d1] text-white"
-                          : "text-[#777777]"
-                      }`}
+                  </Button>
+                  <Space.Compact>
+                    <Button
+                      type={view === "list" ? "primary" : "default"}
+                      icon={<List className="size-4" aria-hidden="true" />}
                       aria-label={t("agentConfig.list.listView")}
                       aria-pressed={view === "list"}
                       onClick={() => setView("list")}
-                    >
-                      <List className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      className={`flex size-[30px] items-center justify-center ${
-                        view === "grid"
-                          ? "bg-[#0067d1] text-white"
-                          : "text-[#777777]"
-                      }`}
+                    />
+                    <Button
+                      type={view === "grid" ? "primary" : "default"}
+                      icon={
+                        <LayoutGrid className="size-4" aria-hidden="true" />
+                      }
                       aria-label={t("agentConfig.list.gridView")}
                       aria-pressed={view === "grid"}
                       onClick={() => setView("grid")}
-                    >
-                      <LayoutGrid className="size-4" aria-hidden="true" />
-                    </button>
-                  </div>
+                    />
+                  </Space.Compact>
                 </div>
               </div>
 
@@ -360,9 +344,9 @@ export default function AgentsPage() {
                     <p className="text-sm text-slate-500">
                       {t("agentRepository.mine.loadError")}
                     </p>
-                    <StandardButton onClick={() => refetch()}>
+                    <Button onClick={() => refetch()}>
                       {t("repository.common.retry")}
-                    </StandardButton>
+                    </Button>
                   </div>
                 ) : (
                   <div
@@ -376,7 +360,6 @@ export default function AgentsPage() {
                           onColumnWidthsChange={setTableColumnWidths}
                           onOpen={handleOpenAgent}
                           onConfigure={updateUrl}
-                          onPublish={openPublishFlow}
                           onManageVersions={handleManageVersions}
                         />
                       ) : (
@@ -386,8 +369,6 @@ export default function AgentsPage() {
                               key={agent.id}
                               agent={agent}
                               onOpen={handleOpenAgent}
-                              onConfigure={updateUrl}
-                              onPublish={openPublishFlow}
                               onManageVersions={handleManageVersions}
                             />
                           ))}
@@ -397,7 +378,7 @@ export default function AgentsPage() {
                       <Empty className="py-12" />
                     )}
                     <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
-                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
+                      <span className="text-body-2 ![letter-spacing:0px] text-[#191919]">
                         {t("agentConfig.list.total", {
                           count: pagination?.total ?? 0,
                         })}
@@ -419,7 +400,7 @@ export default function AgentsPage() {
                           }}
                           className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
                         />
-                        <StandardPaginator
+                        <Pagination
                           current={pagination?.page ?? page}
                           pageSize={pageSize}
                           total={pagination?.total ?? 0}
@@ -438,7 +419,7 @@ export default function AgentsPage() {
                           onChange={setJumpPage}
                           className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
                         />
-                        <StandardButton
+                        <Button
                           className="!px-2"
                           onClick={() => {
                             if (jumpPage !== null) {
@@ -457,7 +438,7 @@ export default function AgentsPage() {
                           }}
                         >
                           {t("agentConfig.list.jump")}
-                        </StandardButton>
+                        </Button>
                       </div>
                     </div>
                   </div>

@@ -11,7 +11,7 @@ import tempfile
 import types
 import importlib.machinery
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock, call
 from unittest.mock import patch as _patch
 
 import pytest
@@ -25,17 +25,25 @@ _optional_sdk_stubs: dict = {}
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
 _test_root = os.path.dirname(os.path.abspath(__file__))
+_repo_dir = os.path.dirname(_test_root)
 _backend_dir = os.path.abspath(os.path.join(_test_root, "..", "backend"))
 _sdk_dir = os.path.abspath(os.path.join(_test_root, "..", "sdk"))
 
+if _repo_dir not in sys.path:
+    sys.path.insert(0, _repo_dir)
 if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
-_canonical_backend_packages = {}
+_canonical_backend_packages = {
+    "backend": _backend_dir,
+    "backend.http": os.path.join(_backend_dir, "http"),
+    "backend.http.server": os.path.join(_backend_dir, "http", "server"),
+    "backend.mcp": os.path.join(_backend_dir, "mcp"),
+}
 for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process", "gateway"):
-    _namespace_path = Path(_backend_dir) / _namespace
+    _namespace_path = Path(_repo_dir if _namespace == "infrastructure" else _backend_dir) / _namespace
     _canonical_backend_packages[_namespace] = str(_namespace_path)
     for _initializer in _namespace_path.rglob("__init__.py"):
         _relative = _initializer.parent.relative_to(_namespace_path)
@@ -144,8 +152,46 @@ class _XlrdProxy(types.ModuleType):
 if "xlrd" not in sys.modules or not hasattr(sys.modules["xlrd"], "open_workbook"):
     sys.modules["xlrd"] = _XlrdProxy()
 
-_tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))
+# Pytest temp root lives OUTSIDE the repository tree.  A prior revision
+# placed ``.pytest-tmp`` under ``test/../.pytest-tmp`` inside the workspace,
+# which made GitHub Actions' post-job workspace cleanup trip over files
+# that had landed with ``root`` ownership (tests spawning subprocesses or
+# Docker containers).  The workspace-cleanup step fails with ``EACCES``
+# and the whole job ends red even when every test passes.  Moving the root
+# outside the workspace keeps the same isolation benefits while making the
+# cleanup step invisible to post-job teardown.
+# Explicit overrides (NEXENT_PYTEST_TMPDIR / PYTEST_TMP_ROOT /
+# PYTEST_CACHE_ROOT) always win over the derived defaults.
+_pytest_cache_root = os.environ.get(
+    "PYTEST_CACHE_ROOT",
+    os.path.abspath(os.path.join(_test_root, "..", ".pytest_cache")),
+)
+_explicit_tmp_root = os.environ.get(
+    "NEXENT_PYTEST_TMPDIR"
+) or os.environ.get("PYTEST_TMP_ROOT")
+_explicit_cache_root = bool(os.environ.get("PYTEST_CACHE_ROOT"))
+_tmp_root = _explicit_tmp_root or os.path.abspath(
+    os.path.join(_test_root, "..", ".pytest-tmp")
+)
+# Prefer an out-of-workspace location.  CI always sets HOME/TMPDIR to
+# writable paths outside the checkout tree; when none are available we
+# fall back to the platform's default temp dir (``/tmp`` on Linux,
+# ``$TEMP`` elsewhere) so the repo root never hosts temp files.
+_home_tmp = os.environ.get("TMPDIR") or os.environ.get("TEMP") or os.environ.get("TMP") or os.environ.get("HOME")
+if _home_tmp:
+    if not _explicit_cache_root:
+        _pytest_cache_root = os.path.join(_home_tmp, "pytest-cache")
+    if not _explicit_tmp_root:
+        _tmp_root = os.path.join(_home_tmp, "pytest-tmp")
+# Last-resort platform default — never leave temp paths inside the repo.
+if not _explicit_tmp_root and (not _home_tmp or os.path.commonpath(
+    [str(_tmp_root), os.path.abspath(os.path.join(_test_root, ".."))]
+) == os.path.abspath(os.path.join(_test_root, ".."))):
+    _tmp_root = tempfile.gettempdir() + "/pytest-tmp"
+    if not _explicit_cache_root:
+        _pytest_cache_root = tempfile.gettempdir() + "/pytest-cache"
 os.makedirs(_tmp_root, exist_ok=True)
+os.makedirs(_pytest_cache_root, exist_ok=True)
 os.environ.setdefault("TMP", _tmp_root)
 os.environ.setdefault("TEMP", _tmp_root)
 os.environ.setdefault("TMPDIR", _tmp_root)
@@ -186,6 +232,9 @@ class _PatchProxy:
 
 
 class _MiniMocker:
+    Mock = Mock
+    call = call
+
     def __init__(self):
         self._patchers = []
         self.patch = _PatchProxy(self)
@@ -216,13 +265,82 @@ def tmp_path():
     try:
         yield path
     finally:
-        shutil.rmtree(path, ignore_errors=True)
+        _robust_rmtree(path)
+
+
+def _robust_rmtree(root: Path) -> None:
+    """Best-effort recursive remove that survives permission oddities.
+
+    Some tests create files via subprocesses or inside isolated runners
+    whose effective user differs from the pytest runner (common on Linux
+    CI where subprocesses land files owned by ``root`` inside a temp dir
+    created by the ``runner`` user). A plain ``shutil.rmtree`` with
+    ``ignore_errors=True`` silently leaves those files behind; GitHub
+    Actions' post-job cleanup then fails with ``EACCES`` when it tries to
+    remove the whole workspace.
+
+    This helper walks the tree and for each entry without delete/write
+    permissions on the current user, chmod's the file/directory to add
+    owner write (and for directories, the write+exec bits needed to
+    unlink children). It then falls back to ``shutil.rmtree``. Any file
+    that still cannot be removed after the permission repair is logged
+    but not propagated as a failure — the fixture already finished and
+    we want test results, not cleanup flakiness.
+    """
+    if not root.exists():
+        return
+    import stat as _stat
+
+    def _repair_perms(target):
+        try:
+            st = os.stat(target)
+        except FileNotFoundError:
+            return
+        mode = st.st_mode
+        # Always ensure owner write; add exec on directories so we can
+        # descend into them to unlink children before removing the dir.
+        new_mode = mode | _stat.S_IWUSR
+        if _stat.S_ISDIR(mode):
+            new_mode |= _stat.S_IXUSR
+            # Best-effort group/world write too — CI containers sometimes
+            # run as runner while tests spawn processes that land files
+            # owned by a differing uid (root, nobody, ...). Adding group
+            # write covers the common "same group, different user" case.
+            new_mode |= _stat.S_IWGRP | _stat.S_IXGRP
+        try:
+            os.chmod(target, new_mode)
+        except OSError:
+            pass
+
+    _repair_perms(root)
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        for d in dirnames:
+            _repair_perms(os.path.join(dirpath, d))
+        for f in filenames:
+            _repair_perms(os.path.join(dirpath, f))
+    try:
+        shutil.rmtree(root)
+    except (PermissionError, OSError):
+        # Already repaired above; if something still blocks removal we log
+        # to stderr and move on. The GitHub Actions runner will either
+        # clean it later or report the leftovers as a non-blocking warning.
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                for name in filenames:
+                    _repair_perms(os.path.join(dirpath, name))
+                for name in dirnames:
+                    _repair_perms(os.path.join(dirpath, name))
+            shutil.rmtree(root)
+        except Exception as exc:
+            import sys
+            print(f"[conftest] tmp_path cleanup best-effort failed: {exc}",
+                  file=sys.stderr)
 
 
 def install_supabase_mock():
     """Install a structured supabase package mock into ``sys.modules``.
 
-    ``gateway.authentication.auth`` imports ``from supabase.lib.client_options
+    ``management.services.permission.identity.session`` imports ``from supabase.lib.client_options
     import SyncClientOptions`` at module load time. Test files that simply
     replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
     import to fail (the mock has no ``.lib.client_options`` attribute),
@@ -266,7 +384,7 @@ def _supabase_mock():
     Module-level ``sys.modules['supabase']`` overrides in test files
     (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
     structured attributes (``lib``, ``lib.client_options``,
-    ``SyncClientOptions``) that ``gateway.authentication.auth`` resolves at
+    ``SyncClientOptions``) that ``management.services.permission.identity.session`` resolves at
     import time. The module-level install below covers collection, but
     any test that re-mocks ``supabase`` after collection needs the
     structured attributes re-installed before its test body runs.
@@ -276,7 +394,7 @@ def _supabase_mock():
 
 
 # Install a sane supabase mock at collection time so test modules that
-# import ``gateway.authentication.auth`` (directly or transitively) succeed
+# import ``management.services.permission.identity.session`` (directly or transitively) succeed
 # during pytest's collection phase, before any test fixture has had a
 # chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
 # install before each test body in case individual test modules

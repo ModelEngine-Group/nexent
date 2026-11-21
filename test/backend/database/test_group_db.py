@@ -8,6 +8,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 import pytest
 from unittest.mock import MagicMock
 
+
+@pytest.fixture(autouse=True)
+def _default_system_configuration(monkeypatch):
+    from management.db.identity import group
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(group, "get_config_snapshot", lambda: system_config_snapshot())
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -50,7 +58,7 @@ utils_mock.str_utils = str_utils_mock
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -68,14 +76,16 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -108,7 +118,7 @@ class MockTenantGroupUser:
 
 # Add the mocked db_models module to sys.modules
 sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.models'] = db_models_mock
+sys.modules['infrastructure.rdb.account_record'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()
@@ -1604,7 +1614,9 @@ def test_create_group_rejects_tenant_group_limit(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, "_GROUP_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(MAX_GROUPS_PER_TENANT=1))
 
     with pytest.raises(ResourceLimitError, match="group limit"):
         module.add_group("tenant-1", "group-2")
@@ -1625,7 +1637,9 @@ def test_group_limit_boundaries(monkeypatch, mock_session, current_count, should
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
-    monkeypatch.setattr(module, "_GROUP_LIMIT", 1)
+    from test.backend.configuration.helpers import system_config_snapshot
+
+    monkeypatch.setattr(module, "get_config_snapshot", lambda: system_config_snapshot(MAX_GROUPS_PER_TENANT=1))
 
     if should_reject:
         with pytest.raises(ResourceLimitError):

@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-MODEL-BRIDGE-D5-001
+  feature_id: JIUWEN-MODEL-BRIDGE
+  requirement_ids:
+  - JIUWEN-MODEL-BRIDGE-20261015
+  - JIUWEN-M6-20261016
+  business_rule_ids:
+  - JIUWEN-MODEL-BRIDGE-RULE-003
+  - JIUWEN-MODEL-BRIDGE-RULE-004
+  title: Jiuwen model bridge failure and cancellation boundaries
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Exercise actual runtime and transport boundaries beyond isolated mapping/parser
+    UT.
+  preconditions:
+  - Installed compatible Jiuwen dependency and shared ModelService; controlled loopback
+    HTTP/SSE provider and fixture tools.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Inject the listed failure or cancellation while consuming the actual runtime
+      stream.
+    expected: Persistently invalid JSON fails after at most one explicit argument
+      correction with zero tool effects; incomplete/ambiguous blocks, unknown finish
+      and interrupted streams fail without logical retry.
+  - order: 2
+    action: Inject the listed failure or cancellation while consuming the actual runtime
+      stream.
+    expected: Visible text survives interruption; cancellation closes the response;
+      pre-visible transient recovery is bounded by ModelService and does not replay
+      tools. Identical repeated usage is accepted once; conflicting usage is rejected
+      by the decoder UT.
+  expected_results:
+  - Persistently invalid JSON fails after at most one explicit argument correction
+    with zero tool effects; incomplete/ambiguous blocks, unknown finish and interrupted
+    streams fail without logical retry.
+  - Visible text survives interruption; cancellation closes the response; pre-visible
+    transient recovery is bounded by ModelService and does not replay tools. Identical
+    repeated usage is accepted once; conflicting usage is rejected by the decoder
+    UT.
+  forbidden_side_effects:
+  - No incomplete tool execution, hidden stream replay, fallback core/model/protocol,
+    leaked response or continued model retry after cancellation.
+  acceptance:
+  - id: AC-01
+    description: Prove runtime boundary and forbidden effects.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  risk_type: RELIABILITY
+  risk: Incomplete responses or duplicate recovery can execute stale or unauthorized
+    effects.
+  condition:
+  - Inject malformed/truncated streams, service errors and cancellation.
+  metrics:
+  - Tool effects, physical HTTP attempts, preserved partial content and response closure.
+  thresholds:
+  - Zero effects for invalid/incomplete calls; no retries after visible failure or
+    cancellation; at most three physical attempts.
+  recovery_expectations:
+  - Subsequent isolated run works and resources are closed.

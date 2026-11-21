@@ -13,8 +13,8 @@ acceptance_bindings:
   - AIDP-FE-FILES-01 > query upstream-message failure is visible instead of an empty
     file list
   AC-03:
-  - AIDP-FE-FILES-01 > polling updates counts and import refresh waits for drawer
-    close
+  - AIDP-FE-FILES-01 > polling pauses while importing and refreshes after upload
+    center completion
   AC-04:
   - AIDP-FE-FILES-01 > file deletion success respects cancellation and refreshes the
     count
@@ -22,3 +22,10 @@ acceptance_bindings:
     unhandled rejection
   - AIDP-FE-FILES-01 > file deletion failure keeps the dialog for cancel without an
     unhandled rejection
+  AC-05:
+  - AIDP-FE-FILES-01 > batch move keeps failed files selected and shows reasons
+    inline
+  AC-06:
+  - AIDP-FE-FILES-01 > status 1–6 gates row and batch actions
+  AC-07:
+  - AIDP-FE-FILES-01 > checks folder contents through the tree endpoint before deletion

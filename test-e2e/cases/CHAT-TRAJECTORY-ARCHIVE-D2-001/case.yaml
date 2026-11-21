@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ARCHIVE-D2-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-IMPORT-EXPORT-20261117
+  business_rule_ids:
+  - TRJ-RULE-010
+  - TRJ-RULE-011
+  type: CONTRACT
+  priority: P1
+  status: active
+  automation: automated
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/changes/ops-trajectory-import-export/proposal.md
+    acceptance_criteria:
+    - AC-IE-001
+    - AC-IE-003
+    - AC-IE-004
+    - AC-IE-005
+  title: 原会话目录导出与请求期临时导入保持授权和内容合同
+  objective: 原会话目录导出与请求期临时导入保持授权和内容合同
+  preconditions:
+  - 产品接口和当前Case固定脚本可执行；受控身份/目录边界使用Case独占夹具，轨迹写入、HTTP路由、受管线程和原格式解析使用真实实现。
+  - 使用本Case独占的来源轨迹、身份、服务和浏览器上下文，登记资源所有权并验证清理；沿用runtime责任域。
+  test_data:
+    profile: mock
+    corpus:
+    - 超过一页的多轮轨迹与长Unicode正文
+    - 缺失/partial/expired/unarchived轮次
+    - 同一文件重复选择和同Trace ID不同文件
+  steps:
+  - order: 1
+    action: 通过实际Ops路由及受管线程POST /trajectory/conversations/{conversation_id}/export，源会话超过一页，浏览器仅加载首段。
+    expected: 200 application/zip，Content-Disposition安全文件名、Content-Length与private,no-store正确；原会话路径下的meta.json及其引用的.otlp.jsonl包含全部可读归档节点和正文，不要求预先生成export_plan。
+  - order: 2
+    action: 覆盖未登录、普通用户、跨租户管理员、无可读内容、非法参数、超预算及打包时清理/撤权。
+    expected: 401/403/404/422/413/409/503依合同明确返回，不泄漏标题/正文/路径；没有半份ZIP成功响应，临时文件回收，既有服务轨迹读取与统计保持。
+  - order: 3
+    action: 使用含partial/expired/unarchived及长Unicode正文的会话下载，校验文件hash、执行顺序及原文。
+    expected: 缺失状态明确，未发布正文不导出，长正文和历史版本/null正确；仅请求期导入解析，无持久去重、档案管理或目标租户选择。
+  - order: 4
+    action: 向POST /trajectory/import上传原会话目录ZIP，目标无来源实体；测试meta版本、丢失JSONL、长度/hash及源路径归属不一致，正常请求及取消后检查暂存。
+    expected: 仅合法meta与原JSONL被接收，完整节点和内嵌正文作为有界JSON返回页面，包内身份不能授权或覆盖运行目录；无效包422、超限413，响应private,no-store，请求完成/取消后临时文件释放，无持久档案。
+  expected_results:
+  - 200 application/zip，Content-Disposition安全文件名、Content-Length与private,no-store正确；原会话路径下的meta.json及其引用的.otlp.jsonl包含全部可读归档节点和正文，不要求预先生成export_plan。
+  - 401/403/404/422/413/409/503依合同明确返回，不泄漏标题/正文/路径；没有半份ZIP成功响应，临时文件回收，既有服务轨迹读取与统计保持。
+  - 缺失状态明确，未发布正文不导出，长正文和历史版本/null正确；仅请求期导入解析，无持久去重、档案管理或目标租户选择。
+  - 仅合法meta与原JSONL被接收，完整节点和内嵌正文作为有界JSON返回页面，包内身份不能授权或覆盖运行目录；无效包422、超限413，响应private,no-store，请求完成/取消后临时文件释放，无持久档案。
+  forbidden_side_effects:
+  - 不得新增持久导入记录、数据库记录、持久档案、导入列表或业务用量，不得请求来源资源或调用模型工具。
+  - 不得持久化文件到localStorage/sessionStorage/IndexedDB/Cache或Service Worker；恶意内容不得执行脚本或自动加载外链。
+  contract:
+    protocol: HTTP
+    method: POST
+    endpoint: /trajectory/conversations/{conversation_id}/export; /trajectory/import
+    request_expectations:
+    - 真实导出接口、服务与文件处理，可信身份目录边界受控。
+    response_expectations:
+    - ZIP二进制及头、完整内容、错误结构和授权逐项核验。
+  acceptance:
+  - id: AC-01
+    description: 200 application/zip，Content-Disposition安全文件名、Content-Length与private,no-store正确；原会话路径下的meta.json及其引用的.otlp.jsonl包含全部可读归档节点和正文，不要求预先生成export_plan。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 401/403/404/422/413/409/503依合同明确返回，不泄漏标题/正文/路径；没有半份ZIP成功响应，临时文件回收，既有服务轨迹读取与统计保持。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 缺失状态明确，未发布正文不导出，长正文和历史版本/null正确；仅请求期导入解析，无持久去重、档案管理或目标租户选择。
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-04
+    description: 仅合法meta与原JSONL被接收，完整节点和内嵌正文作为有界JSON返回页面，包内身份不能授权或覆盖运行目录；无效包422、超限413，响应private,no-store，请求完成/取消后临时文件释放，无持久档案。
+    steps:
+    - 4
+    expected_results:
+    - 4

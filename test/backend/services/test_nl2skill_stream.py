@@ -3,15 +3,12 @@
 """Regression tests for Skill observer routing, fragments and retries."""
 
 import json
-import threading
-from types import SimpleNamespace
 
 import pytest
 
 from nexent.core.utils.observer import MessageObserver
 
-from contracts.agent import NL2SkillRunRequest
-import services.nl2skill_service as service
+from management.services.skill.nl2skill import project_creation_events
 
 
 SKILL = "---\nname: demo\ndescription: Demo skill\ntags: [demo]\n---\n# Demo\n"
@@ -31,22 +28,20 @@ def control(phase, attempt="a1"):
 
 
 @pytest.fixture
-def collect(mocker):
-    async def run(chunks, *, failure=None):
-        stop = threading.Event()
-        mocker.patch.object(service, "build_nl2skill_run_info", return_value=SimpleNamespace(stop_event=stop))
-
-        async def agent_run(_run_info, *, thread_manager):
-            assert thread_manager is not None
+def collect():
+    async def run(chunks, *, failure=None, outcome=None):
+        async def events():
             for chunk in chunks:
                 yield json.dumps(chunk)
             if failure:
                 raise failure
+            if outcome is not None:
+                yield {"type": "agentos_execution_error", "payload": json.dumps({
+                    "type": "error", "content": outcome,
+                })}
 
-        mocker.patch.object(service, "agent_run", agent_run)
-        stream = await service.create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
+        stream = project_creation_events(events(), [])
         result = [json.loads(item.removeprefix("data: ")) async for item in stream]
-        assert stop.is_set()
         assert [item["sequence"] for item in result] == list(range(1, len(result) + 1))
         return result
 
@@ -180,3 +175,11 @@ async def test_explicit_reasoning_tag_examples_never_write_skill_files(collect, 
     assert all(item["origin_type"] == "final_answer" for item in events if item["type"] in {
         "skill_body", "file_content", "summary",
     })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failed", "stopped"])
+async def test_native_failed_terminal_cannot_confirm_a_generated_skill(collect, outcome):
+    events = await collect([answer(WIRE)], outcome=outcome)
+    assert events[-1]["type"] == "error"
+    assert not any(event["type"] == "done" for event in events)

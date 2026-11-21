@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-MCP-TOOL-GROUPS-20261110
+  change_type: requirement
+  requirement_id: AGENT-EDITOR-REQ-007
+  title: Group selected Agent MCP tools by service
+  description: Display and edit selected MCP tools in a service group using existing individual tool bindings.
+  affected_features:
+    existing: [F-050]
+    added: []
+    modified: [AGENT-EDITOR-WORKFLOWS]
+    retired: []
+  affected_cases:
+    existing: [AGENT-EDITOR-D4-004]
+    added: [AGENT-EDITOR-D4-007]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/selectedMcpTools.test.tsx
+    behaviors:
+    - Group by service and count unique tools while retaining individual local and unknown-service rows.
+    - Search, edit a matching tool scope, preserve other bindings, and protect read-only and failed selections.
+    reason: Frontend DOM interaction UT covers the selected view. D4 separately exercises the editor autosave and reload. No Python behavior changes.

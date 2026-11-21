@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-WORKBENCH-HITL-20261110
+  change_type: test-fix
+  title: Reconcile real Workbench history checks and add ordinary clarification proof
+  description: Keep creator and ordinary-Agent regressions; add the missing real Workbench root ask_user journey.
+  affected_features:
+    existing: [JIUWEN-MODEL-BRIDGE, AGENT-CORE-CONFIG]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-SKILL-CREATOR-D4-001, JIUWEN-CLARIFICATION-D4-001]
+    modified: [JIUWEN-AGENT-CREATOR-D4-001]
+    added: [JIUWEN-WORKBENCH-HITL-D4-001]
+    retired: []
+  notes: >-
+    Test-backfill scope; no product change or duplicate D1. Existing test_jiuwen_clarification and
+    test_clarification_response UT prove form validation, wire serialization and saved response identity;
+    model-bridge D3 proves native/text execution. JIUWEN-CLARIFICATION-D4-001 uses a cloned ordinary
+    Agent and WB-CREATION-INTENT-D4-001 substitutes HTTP responses, while the real creator Cases use
+    their own wrapper/artifact protocols. None proves a real ordinary Workbench root ask_user card.
+    Reuse the existing Feature ownership routing. The new D4 owns one uniquely marked conversation,
+    temporary authentication state and Docker fixture scripts; it protects original Agent and history
+    hashes, cleans only owned data through the existing API, and removes private files even on failure.
+    Preparation is self-contained with no shared family, deployment switch or source model edits.
+    The creator regression now checks the upstream Submitted label instead of the old Submit label
+    on a read-only card, and strengthens exact restored text and selected/unselected option assertions
+    against the actual submitted payload. Existing disabled controls, matching completion, no-run,
+    database hashes, draft action and result-card assertions remain mandatory.

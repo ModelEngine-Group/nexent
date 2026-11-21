@@ -11,13 +11,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
+from contracts.errors.exceptions import AppException, TokenExpiredError
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbNotFoundError,
     AidpKbPermissionDeniedError,
 )
-from gateway.api import northbound
-from gateway.authentication import northbound_auth
+from management.api import northbound
+from management.services.permission.identity import northbound as northbound_auth
 
 CASE_ID = "AIDP-FILE-IDENTITY-D2-001"
 KDS_ID = "kb-42"
@@ -55,9 +55,10 @@ def client():
         yield test_client
 
 
-def _authorize(authorization):
-    valid = authorization == f"Bearer {NORTHBOUND_KEY}"
-    return valid, {"user_id": "user-1", "token_id": 1} if valid else None
+def _resolve_identity(access_key):
+    if access_key != NORTHBOUND_KEY:
+        raise TokenExpiredError("Invalid or inactive access key")
+    return {"user_id": "user-1", "tenant_id": "tenant-1", "token_id": 1}
 
 
 @contextmanager
@@ -81,26 +82,20 @@ def configured(
         return FakeAidpResponse([])
 
     with patch.object(
-        northbound_auth, "validate_bearer_token", side_effect=_authorize
-    ), patch.object(
         northbound_auth,
         "get_user_and_tenant_by_access_key",
-        return_value={
-            "user_id": "user-1",
-            "tenant_id": "tenant-1",
-            "token_id": 1,
-        },
+        side_effect=_resolve_identity,
     ), patch.object(
         northbound_auth, "log_token_usage"
     ), patch.object(
-        northbound, "AIDP_SERVER_URL", AIDP_INTERNAL_URL
+        northbound, "_AIDP_FILE_SERVER_URL", AIDP_INTERNAL_URL
     ), patch.object(
-        northbound, "AIDP_API_KEY", AIDP_SECRET
+        northbound, "_AIDP_FILE_API_KEY", AIDP_SECRET
     ), patch.object(
-        northbound, "require_permission", side_effect=require_permission
+        northbound, "_require_aidp_permission", side_effect=require_permission
     ), patch.object(
         northbound,
-        "stream_aidp_doc_impl",
+        "_stream_aidp_doc",
         new=upstream or default_upstream,
     ):
         yield

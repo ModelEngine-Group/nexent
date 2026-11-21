@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import asyncio
@@ -79,7 +81,8 @@ def _new_manager():
 @pytest.mark.stage('D1')
 def test_global_thread_pool_removal_and_run_async_migration(monkeypatch) -> None:
     # 1. deleted legacy module must be unresolvable
-    assert importlib.util.find_spec('backend.utils.thread_utils') is None
+    if importlib.util.find_spec('backend.utils') is not None:
+        assert importlib.util.find_spec('backend.utils.thread_utils') is None
 
     # 2. no residual GlobalThreadPool / thread_utils.submit reference
     for py_file in _backend_py_files():
@@ -118,7 +121,7 @@ def test_global_thread_pool_removal_and_run_async_migration(monkeypatch) -> None
     recording = RecordingManager()
     monkeypatch.setattr('nexent.core.concurrency.get_current_thread_manager', lambda: None)
     monkeypatch.setattr(
-        'nexent.core.agents.run_agent._get_default_agent_thread_manager',
+        'nexent.core.agents.orchestration.entry._get_default_agent_thread_manager',
         lambda: recording,
     )
     real_import = builtins.__import__

@@ -39,9 +39,16 @@ export function thinkingDisplayState(
     reasoningSupported ||
     active.some((rule) => thinkingDegreeKeys.includes(rule.key));
   const alwaysOn = declared && !toggle && !offEffort;
+  const compatibleDefault =
+    reasoningSupported &&
+    ["custom_provider_thinking_v1", "operator_thinking_v1"].includes(
+      toggle?.source?.ref ?? ""
+    );
   const enabled = toggle
-    ? (toggle.fixed_value ?? values.enable_thinking ?? toggle.default_value) ===
-      true
+    ? (toggle.fixed_value ??
+        values.enable_thinking ??
+        toggle.default_value ??
+        (compatibleDefault ? true : undefined)) === true
     : offEffort
       ? (offEffort.fixed_value ??
           values.reasoning_effort ??
@@ -119,6 +126,7 @@ export function ModelThinkingSettings({
   prefillReady = true,
   declaredControlsOnly = false,
   reasoningSupported = false,
+  canDisable,
   layout = "inline",
   onToggle,
   onModeChange,
@@ -133,6 +141,7 @@ export function ModelThinkingSettings({
   prefillReady?: boolean;
   declaredControlsOnly?: boolean;
   reasoningSupported?: boolean;
+  canDisable?: boolean | null;
   layout?: "inline" | "panel";
   onToggle: (enabled: boolean) => void;
   onModeChange: (mode: ThinkingDegreeMode) => void;
@@ -187,6 +196,9 @@ export function ModelThinkingSettings({
       enabled &&
       !pending &&
       selectedMode === "default" &&
+      !["custom_provider_thinking_v1", "operator_thinking_v1"].includes(
+        toggle?.source?.ref ?? ""
+      ) &&
       !declaredControlsOnly &&
       !state.alwaysOn
     ) {
@@ -206,6 +218,7 @@ export function ModelThinkingSettings({
     enabled,
     pending,
     selectedMode,
+    toggle?.source?.ref,
     key,
     currentValue,
     prefill,
@@ -231,6 +244,7 @@ export function ModelThinkingSettings({
             checked={enabled}
             disabled={
               state.alwaysOn ||
+              (canDisable === false && enabled) ||
               pending ||
               toggle?.editable === false ||
               (declaredControlsOnly && !toggle && !state.offEffort) ||

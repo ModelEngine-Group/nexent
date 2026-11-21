@@ -135,7 +135,7 @@ def test_migrated_legacy_configuration_reaches_shared_http_without_extra_default
     actual = main.records(journal, scenario=scenario)
     assert len(actual) == 1
     body = actual[0]["body"]
-    assert body["model"] == "unlisted-legacy-model" and body["temperature"] == 0 and body["top_p"] is None
+    assert body["model"] == "unlisted-legacy-model" and body["temperature"] == 0 and "top_p" not in body
     assert body["enable_thinking"] is enabled
     assert body["custom_options"] == {"flag": False, "count": 0}
     assert "thinking_budget" not in body and "max_tokens" not in body

@@ -84,11 +84,46 @@ def test_su_ac_03_upgrade_is_exact_and_idempotent(database):
     assert rows(database) == after
 
 
-def test_su_ac_03_missing_model_identity_fails_without_discarding_settings(database):
-    legacy = config(temperature=0.2)
-    legacy.pop("model_id")
-    insert(database, 1, legacy)
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_su_ac_03_missing_model_identity_discards_only_model_preferences(database, explicit_null):
+    legacy = config(deep_thinking=False, thinking_effort="low", temperature=None,
+                    top_p=None, reasoning_budget_tokens=None, requested_output_tokens=2048)
+    if explicit_null:
+        legacy["model_id"] = None
+    else:
+        legacy.pop("model_id")
+    insert(database, 1, legacy, {"42": {"temperature": 0.9}})
+    insert(database, 2, config(temperature=0, deep_thinking=False))
+    insert(database, 3, None, {"42": {"temperature": 0.5}})
     before = rows(database)
-    with pytest.raises(Exception):
-        postgres_sql(MIGRATION.read_text(), database=database)
-    assert rows(database) == before
+    postgres_sql(MIGRATION.read_text(), database=database)
+    after = rows(database)
+    assert after[0]["selected_model_id"] is None
+    assert after[0]["model_parameter_preferences"] == {}
+    assert after[0]["workbench_config"] == {
+        **{key: value for key, value in legacy.items()
+           if key not in {"generation_config", "model_id", "schema_version"}},
+        "schema_version": 4, "requested_output_tokens": 2048,
+    }
+    assert after[0]["message_fixture"] == before[0]["message_fixture"]
+    assert after[0]["workbench_config_version"] == before[0]["workbench_config_version"] + 1
+    assert after[1]["model_parameter_preferences"] == {"42": {"temperature": 0, "enable_thinking": False}}
+    assert after[2] == before[2]
+    postgres_sql(MIGRATION.read_text(), database=database)
+    assert rows(database) == after
+
+
+def test_su_ac_03_selected_model_identity_retains_explicit_parameters(database):
+    legacy = config(temperature=0.2, top_p=0, deep_thinking=False)
+    legacy["model_id"] = None
+    insert(database, 1, legacy, {"43": {"temperature": 0.7}})
+    postgres_sql("UPDATE nexent.conversation_record_t SET selected_model_id=42;", database=database)
+    postgres_sql(MIGRATION.read_text(), database=database)
+    after = rows(database)
+    assert after[0]["selected_model_id"] == 42
+    assert after[0]["model_parameter_preferences"] == {
+        "42": {"temperature": 0.2, "top_p": 0, "enable_thinking": False},
+        "43": {"temperature": 0.7},
+    }
+    postgres_sql(MIGRATION.read_text(), database=database)
+    assert rows(database) == after

@@ -132,7 +132,7 @@ def test_patch_maps_domain_errors(client, mocker, exception, status):
 
 
 def test_probe_returns_unavailable_as_result_and_passes_owner(client, mocker):
-    invoke = mocker.patch("management.services.model.profiles.validate_model_outlet", new=AsyncMock(
+    invoke = mocker.patch("management.api.model.model_managment.validate_model_outlet", new=AsyncMock(
         return_value={"ok": False, "error": {"category": "AUTHENTICATION_ERROR"},
                       "check_scope": "connection_only", "model_id": 42, "config_revision": 1}))
     response = client.post("/model/outlet_validations", json={"outlet_id": 42, "expected_revision": 1})
@@ -215,7 +215,7 @@ def test_validation_distinguishes_selection_version_and_configuration_errors(cli
 
     errors = {'missing': LookupError(), 'stale': ModelOutletConflictError(),
               'invalid': ModelOutletValidationError('PROFILE_STORAGE_INVALID')}
-    invoke = mocker.patch('management.services.model.profiles.validate_model_outlet', new=AsyncMock(side_effect=errors[kind]))
+    invoke = mocker.patch('management.api.model.model_managment.validate_model_outlet', new=AsyncMock(side_effect=errors[kind]))
     response = client.post('/model/outlet_validations', json={'outlet_id': 42, 'expected_revision': 1})
     assert response.status_code == status
     assert invoke.call_args.args[1] == 'test_tenant'

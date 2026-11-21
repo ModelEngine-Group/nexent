@@ -43,6 +43,9 @@ def ensure_outlet_sampling_rules(profile):
     # Upgrade only the known v1 protocol UI restriction. Model/provider rules,
     # fixed values, schema bounds and wire bindings remain authoritative.
     for rule in data["parameter_rules"]:
+        if (rule["key"] in {"temperature", "top_p"} and rule.get("editable") is True
+                and "fixed_value" not in rule and "outlet" in rule["allowed_scopes"]):
+            rule["required"] = False
         if rule["key"] in OUTLET_TOKEN_LIMIT_KEYS:
             rule["allowed_scopes"] = ["outlet"]
         if (rule["key"] in {"temperature", "top_p"}

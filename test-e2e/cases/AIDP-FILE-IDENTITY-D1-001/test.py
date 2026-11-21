@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from management.services.agent.preparation import tools as tool_preparation
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.resources.tools import ToolResources
 
 CASE_ID = "AIDP-FILE-IDENTITY-D1-001"
 KDS_ID = "kb-42"
@@ -77,9 +77,9 @@ async def _build_tool(northbound_run: bool):
     config = configs[0]
     # Exercise the SDK's real ToolConfig-to-instance path (whitelist and the
     # request-scoped northbound settings included), not a hand-built tool.
-    tool = NexentAgent.create_local_tool(
-        SimpleNamespace(observer=None), config
-    )
+    resources = ToolResources()
+    resources.observer = None
+    tool = resources.create_local_tool(config)
     return config, tool
 
 

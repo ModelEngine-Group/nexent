@@ -1,0 +1,246 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Custom-provider reasoning controls honor explicit restrictions, not missing data."""
+import pytest
+
+from contracts.model import ModelOutletPatchRequest, ModelProfilePreviewRequest
+from contracts.errors.exceptions import ModelOutletValidationError
+from management.services.model import profiles as service
+from management.services.conversation.model_preferences import merge_model_preferences
+from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+from nexent.core.model_service.profiles.protocol_parameters import connectivity_request
+
+
+def make(model="qwen3.8-flash", **kw):
+    return service.build_outlet_draft(ModelProfilePreviewRequest(
+        request_model_id=model, provider_info={"base_url": "https://gateway.invalid/v1"}, **kw), "tenant")[0]
+
+
+@pytest.mark.parametrize("model", ["qwen3.7-plus", "qwen3.7-max", "qwen3.8-flash", "qwen3.8-max", "glm-5.2", "MiniMax-M3", "kimi-k3"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_ac009_custom_model_can_configure_unknown_shutdown_support(model, enabled):
+    profile = make(model, parameter_values={"enable_thinking": enabled})
+    assert connectivity_request(profile)[3]["enable_thinking"] is enabled
+    changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(
+        expected_revision=1, parameter_values={"enable_thinking": not enabled}))
+    assert connectivity_request(changed)[3]["enable_thinking"] is not enabled
+
+
+@pytest.mark.parametrize("model", ["glm-5.3", "glm-5.3-flash", "qwen3.8-2.4t-a95b", "MiniMax-M2.7"])
+def test_ac010_explicit_model_preference_disables_generic_toggle(model):
+    profile = make(model)
+    assert profile.capabilities.reasoning.can_disable is False
+    assert not any(r["key"] == "enable_thinking" for r in profile.parameter_rules)
+    with pytest.raises(ModelOutletValidationError):
+        service.apply_outlet_patch(profile, ModelOutletPatchRequest(
+            expected_revision=1, parameter_values={"enable_thinking": False}))
+
+
+def test_ac010_unmatched_and_nonreasoning_models_do_not_gain_reasoning():
+    for model in ["unlisted-model", "qwen3-coder-next"]:
+        profile = make(model)
+        assert not any(r["key"] == "enable_thinking" for r in profile.parameter_rules)
+
+
+def test_ac009_legacy_outlet_and_conversation_share_the_same_compatible_binding():
+    data = make().model_dump(mode="json")
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] not in {"enable_thinking", "reasoning_effort"}]
+    data["parameter_values"].pop("enable_thinking", None)
+    data["capabilities"]["reasoning"]["controls"] = None
+    legacy = make().__class__.model_validate(data)
+    original = legacy.model_dump()
+    normalized = ensure_outlet_parameter_rules(legacy)
+    assert ensure_outlet_parameter_rules(normalized) == normalized
+    for updated in [merge_model_preferences(legacy, {"enable_thinking": False}),
+                    LegacyInvocationOptions({"enable_thinking": False}).resolve(legacy),
+                    service.apply_outlet_patch(legacy, ModelOutletPatchRequest(
+                        expected_revision=1, parameter_values={"enable_thinking": False}))]:
+        assert connectivity_request(updated)[3]["enable_thinking"] is False
+    assert legacy.model_dump() == original
+
+
+@pytest.mark.parametrize("path,value,wire_value", [
+    ("/enable_thinking", False, False),
+    ("/enable_thinking", True, True),
+    ("/enable_thinking/type", "disabled", {"type": "disabled"}),
+])
+def test_legacy_manual_thinking_parameter_survives_fallback_completion(path, value, wire_value):
+    data = make("qwen3.7-max").model_dump(mode="json")
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    data["capabilities"]["reasoning"]["controls"] = None
+    data["extra_api_parameters"] = [{"path": path, "value": value}]
+    legacy = make().__class__.model_validate(data)
+    original = legacy.model_dump()
+    normalized = ensure_outlet_parameter_rules(legacy)
+    assert normalized.extra_api_parameters == legacy.extra_api_parameters
+    assert not any(r["key"] == "enable_thinking" for r in normalized.parameter_rules)
+    assert ensure_outlet_parameter_rules(normalized) == normalized
+    assert connectivity_request(normalized)[3]["enable_thinking"] == wire_value
+    edited = service.apply_outlet_patch(legacy, ModelOutletPatchRequest(
+        expected_revision=1, parameter_values={"temperature": 0.4}))
+    assert connectivity_request(edited)[3]["enable_thinking"] == wire_value
+    assert legacy.model_dump() == original
+
+
+def test_nonoverlapping_manual_parameter_does_not_suppress_thinking_fallback():
+    data = make("qwen3.7-max").model_dump(mode="json")
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    data["capabilities"]["reasoning"]["controls"] = None
+    data["extra_api_parameters"] = [{"path": "/enable_thinking_extra", "value": False}]
+    legacy = make().__class__.model_validate(data)
+    normalized = ensure_outlet_parameter_rules(legacy)
+    assert any(r["key"] == "enable_thinking" for r in normalized.parameter_rules)
+    assert connectivity_request(normalized)[3]["enable_thinking_extra"] is False
+    created = make("qwen3.7-max", extra_api_parameters=data["extra_api_parameters"])
+    assert any(r["key"] == "enable_thinking" for r in created.parameter_rules)
+    assert connectivity_request(created)[3]["enable_thinking_extra"] is False
+
+
+@pytest.mark.parametrize("path,value,wire_value", [
+    ("/enable_thinking", False, False),
+    ("/enable_thinking", True, True),
+    ("/enable_thinking/type", "disabled", {"type": "disabled"}),
+])
+def test_new_preview_and_reselection_preserve_manual_thinking_path(path, value, wire_value):
+    extras = [{"path": path, "value": value}]
+    request = ModelProfilePreviewRequest(
+        request_model_id="qwen3.7-max", provider_info={"base_url": "https://gateway.invalid/v1"},
+        extra_api_parameters=extras)
+    profile, _ = service.build_outlet_draft(request, "tenant")
+    preview = service.preview_model_profile(request, "tenant")
+    assert not any(r["key"] == "enable_thinking" for r in preview["field_specs"])
+    assert profile.extra_api_parameters == extras
+    assert connectivity_request(profile)[3]["enable_thinking"] == wire_value
+    changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(
+        expected_revision=1, profile_selection={
+            "catalog_revision": preview["catalog_revision"],
+            "model_profile": {"key": profile.model_profile_key,
+                              "revision": service.get_model_profile_catalog().models[profile.model_profile_key].revision},
+            "provider_profile": None,
+        }))
+    assert changed.extra_api_parameters == extras
+    assert connectivity_request(changed)[3]["enable_thinking"] == wire_value
+
+
+def test_manual_parameters_cannot_override_declared_sampling_paths():
+    with pytest.raises(ModelOutletValidationError) as error:
+        make("qwen3.7-max", extra_api_parameters=[{"path": "/temperature", "value": 0.4}])
+    assert error.value.category == "RESERVED_API_PATH"
+
+
+def test_ac010_legacy_limitation_uses_only_the_explicit_shutdown_preference():
+    data = make("glm-5.3").model_dump(mode="json")
+    data["capabilities"]["reasoning"].pop("can_disable")
+    legacy = make().__class__.model_validate(data)
+    normalized = ensure_outlet_parameter_rules(legacy)
+    assert normalized.capabilities.reasoning.can_disable is False
+    assert normalized.parameter_values == legacy.parameter_values
+    assert normalized.identity == legacy.identity
+    assert normalized.connection == legacy.connection
+    assert normalized.context_configuration == legacy.context_configuration
+    with pytest.raises(ModelOutletValidationError):
+        merge_model_preferences(legacy, {"enable_thinking": False})
+
+
+@pytest.mark.parametrize("preset,path", [("thinking_type", "thinking"), ("chat_template", "chat_template_kwargs")])
+def test_ac009_explicit_custom_format_is_preserved(preset, path):
+    profile = make(thinking_control=preset, parameter_values={"enable_thinking": False})
+    normalized = ensure_outlet_parameter_rules(profile)
+    body = connectivity_request(normalized)[3]
+    assert "enable_thinking" not in body
+    assert body[path] == ({"type": "disabled"} if preset == "thinking_type" else {"enable_thinking": False})
+    assert normalized == profile
+
+
+def test_ac010_explicit_format_cannot_bypass_a_model_shutdown_restriction():
+    with pytest.raises(ModelOutletValidationError):
+        make("glm-5.3", thinking_control="thinking_type", parameter_values={"enable_thinking": False})
+
+@pytest.mark.parametrize("model", ["glm-5.2", "kimi-k3"])
+def test_ac011_provider_preferences_record_the_documented_hybrid_override(model):
+    catalog = service.get_model_profile_catalog()
+    atom = catalog.providers["alibaba-cn"]
+    profile = make(model, provider_profile={"key": atom.key, "revision": atom.revision},
+                   parameter_values={"enable_thinking": False})
+    assert profile.provider_key == "alibaba-cn"
+    assert profile.capabilities.reasoning.can_disable is True
+    assert connectivity_request(profile)[3]["enable_thinking"] is False
+
+@pytest.mark.parametrize("restriction", ["fixed", "readonly"])
+def test_ac010_existing_toggle_constraints_survive_compatible_completion(restriction):
+    data = make(parameter_values={"enable_thinking": False}).model_dump(mode="json")
+    rule = next(r for r in data["parameter_rules"] if r["key"] == "enable_thinking")
+    if restriction == "fixed":
+        rule.pop("default_value", None)
+        rule["fixed_value"] = False
+    else:
+        rule["editable"] = False
+    profile = make().__class__.model_validate(data)
+    assert ensure_outlet_parameter_rules(profile) == profile
+    with pytest.raises(ModelOutletValidationError):
+        service.apply_outlet_patch(profile, ModelOutletPatchRequest(
+            expected_revision=1, parameter_values={"enable_thinking": True}))
+
+
+def test_ac010_old_off_setting_remains_readable_and_can_be_corrected():
+    profile = make("glm-5.3", thinking_control="thinking_type", parameter_values={"enable_thinking": True})
+    data = profile.model_dump(mode="json")
+    data["parameter_values"]["enable_thinking"] = False
+    old = profile.__class__.model_validate(data)
+    normalized = ensure_outlet_parameter_rules(old)
+    assert normalized.parameter_values["enable_thinking"] is False
+    assert normalized.capabilities.reasoning.can_disable is False
+    assert normalized.parameter_rules == old.parameter_rules
+    repaired = service.apply_outlet_patch(old, ModelOutletPatchRequest(
+        expected_revision=1, parameter_values={"enable_thinking": True}))
+    assert connectivity_request(repaired)[3]["thinking"] == {"type": "enabled"}
+    with pytest.raises(ModelOutletValidationError):
+        service.apply_outlet_patch(repaired, ModelOutletPatchRequest(
+            expected_revision=1, parameter_values={"enable_thinking": False}))
+    with pytest.raises(ModelOutletValidationError):
+        merge_model_preferences(old, {})
+
+
+def test_ac009_untouched_custom_toggle_does_not_force_an_unqualified_upstream_parameter():
+    profile = make()
+    assert any(r["key"] == "enable_thinking" for r in profile.parameter_rules)
+    assert "enable_thinking" not in profile.parameter_values
+    assert "enable_thinking" not in connectivity_request(profile)[3]
+    changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(expected_revision=1, reset_parameters=True))
+    assert "enable_thinking" not in connectivity_request(changed)[3]
+
+
+@pytest.mark.parametrize("model,levels", [
+    ("qwen3.8-flash", ["low", "medium", "xhigh"]),
+    ("qwen3.8-max", ["low", "medium", "xhigh"]),
+    ("deepseek-v4-flash", ["low", "high", "max"]),
+    ("deepseek-v4-pro", ["low", "high", "max"]),
+    ("deepseek-v4.1-flash", ["low", "high", "max"]),
+    ("glm-5.3", ["low", "high", "max"]),
+])
+def test_model_preferences_supply_compatible_effort_without_provider(model, levels):
+    profile = make(model)
+    before = profile.model_dump()
+    rule = next(rule for rule in profile.parameter_rules if rule["key"] == "reasoning_effort")
+    assert rule["schema"]["enum"] == levels
+    assert rule["allowed_scopes"] == ["outlet", "conversation"]
+    assert rule["api_binding"]["path"] == "/reasoning_effort"
+    values = {"reasoning_effort": levels[0]}
+    if any(rule["key"] == "enable_thinking" for rule in profile.parameter_rules):
+        values["enable_thinking"] = True
+    changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(expected_revision=1, parameter_values=values))
+    assert connectivity_request(changed)[3]["reasoning_effort"] == levels[0]
+    assert profile.model_dump() == before
+    with pytest.raises(ModelOutletValidationError):
+        service.apply_outlet_patch(profile, ModelOutletPatchRequest(expected_revision=1,
+            parameter_values={**values, "reasoning_effort": "invalid-effort"}))
+
+
+def test_hosted_provider_replaces_generic_effort_domain_and_binding():
+    catalog = service.get_model_profile_catalog()
+    provider = catalog.providers["alibaba-cn"]
+    profile = make("deepseek-v4-flash", provider_profile={"key": provider.key, "revision": provider.revision})
+    rule = next(rule for rule in profile.parameter_rules if rule["key"] == "reasoning_effort")
+    assert rule["schema"]["enum"] == ["high", "max"]
+    assert rule["source"]["ref"] != "custom_provider_thinking_v1"

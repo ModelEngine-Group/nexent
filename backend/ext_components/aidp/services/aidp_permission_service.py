@@ -15,7 +15,7 @@ Decision order:
     2. ``PRIVATE`` -> no access for every non-creator, including management
        roles.
     3. USER -> no access to any non-owned KB.
-    4. Management roles (SU/ADMIN/SPEED/ASSET_OWNER) -> EDIT for shared KBs.
+    4. Management roles (SU/ADMIN/ASSET_OWNER) -> EDIT for shared KBs.
     5. DEV with a group intersection -> ``ingroup_permission``.
     6. Empty ``group_ids`` or no intersection -> no access.
 
@@ -32,8 +32,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
-from management.db.identity import group as group_db_module
-from management.db.identity import user_tenant as user_tenant_db_module
+from infrastructure.rdb import account_access
+from contracts.roles import has_any_role
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbConflictError,
@@ -41,7 +41,8 @@ from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbPermissionDeniedError,
 )
 from ext_components.aidp.database import aidp_permission_db
-
+from management.db.identity import group as group_db_module
+from management.db.identity import user_tenant as user_tenant_db_module
 
 logger = logging.getLogger("aidp_permission_service")
 
@@ -114,7 +115,7 @@ def _validate_group_ids_strict(
     """
     if not group_ids:
         return []
-    valid = set(group_db_module.filter_tenant_group_ids(list(group_ids), tenant_id))
+    valid = set(account_access.filter_tenant_group_ids(list(group_ids), tenant_id))
     invalid = [int(g) for g in group_ids if int(g) not in valid]
     if invalid:
         raise AidpGroupValidationError(invalid_ids=invalid, tenant_id=tenant_id)
@@ -122,11 +123,11 @@ def _validate_group_ids_strict(
 
 
 def _get_user_role(user_id: str, tenant_id: str) -> str:
-    return user_tenant_db_module.get_user_role_by_tenant(user_id, tenant_id)
+    return account_access.get_user_role_by_tenant(user_id, tenant_id)
 
 
 def _get_user_groups(user_id: str, tenant_id: str) -> list[int]:
-    return group_db_module.query_group_ids_by_user_in_tenant(user_id, tenant_id)
+    return account_access.query_group_ids_by_user_in_tenant(user_id, tenant_id)
 
 
 def _resolve_permission(
@@ -173,7 +174,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if role == "USER":
+    if has_any_role(role, {"USER"}) and not has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -183,7 +184,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if role in CAN_EDIT_ALL_USER_ROLES:
+    if has_any_role(role, CAN_EDIT_ALL_USER_ROLES):
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,
@@ -193,7 +194,7 @@ def _resolve_permission(
             matched_group_ids=tuple(),
         )
 
-    if role != "DEV" or not record_groups:
+    if not has_any_role(role, {'DEV'}) or not record_groups:
         return AidpPermissionDecision(
             kb_id=kb_id,
             tenant_id=tenant_id,

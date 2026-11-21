@@ -136,7 +136,10 @@ export interface ModelOutletProfile {
     concurrency_limit: number | null;
   };
   capabilities: {
-    reasoning?: { status: "supported" | "unsupported" | "unknown" };
+    reasoning?: {
+      status: "supported" | "unsupported" | "unknown";
+      can_disable?: boolean | null;
+    };
     sampling?: {
       top_p?: { status: "supported" | "unsupported" | "unknown" };
     };
@@ -224,6 +227,7 @@ export interface ModelOutletValidationResponse {
 
 export interface ConversationModelPreferenceView {
   reasoning_status?: "supported" | "unsupported" | "unknown";
+  reasoning_can_disable?: boolean | null;
   output_limit?: number | null;
   config_revision: number;
   parameter_values: Record<string, unknown>;

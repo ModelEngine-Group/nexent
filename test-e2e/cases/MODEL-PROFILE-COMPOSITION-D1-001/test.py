@@ -304,3 +304,17 @@ api_binding = {{ path = "/temperature", transform_ref = "identity_v1", transform
         previous = policy
     assert compose(original).parameter_values.get("temperature") is None
     assert load_profile_catalog(ROOT).revision == original.revision
+
+
+def test_explicit_shutdown_preferences_do_not_mutate_source_inventory(no_external_access):
+    catalog = load_profile_catalog()
+    for key in ("zhipuai/glm-5.3", "zhipuai/glm-5.3-flash", "alibaba/qwen3.8-2.4t-a95b", "minimax/MiniMax-M2.7"):
+        atom = catalog.models[key]
+        assert atom.capabilities["reasoning"]["can_disable"] is False
+        assert atom.source.capabilities["reasoning"]["can_disable"] is None
+    for key in ("alibaba/qwen3.7-plus", "alibaba/qwen3.8-flash", "moonshotai/kimi-k3"):
+        assert catalog.models[key].capabilities["reasoning"]["can_disable"] is None
+    import tomllib
+    manifest = tomllib.loads((ROOT / "manifest.toml").read_text())
+    for entry in manifest["sources"]:
+        assert hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest() == entry["content_sha256"]

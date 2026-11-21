@@ -171,9 +171,9 @@ def _configure_thinking_degree_data(data, mode):
 
 def configure_outlet_policy(profile, *, thinking_control=None, thinking_mode=None, has_credential=None):
     """Apply the same finite allowed policy changes in services and persistence guards."""
-    from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+    from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
-    data = ensure_outlet_sampling_rules(profile).model_dump(mode="json")
+    data = ensure_outlet_parameter_rules(profile).model_dump(mode="json")
     if thinking_mode == "default":
         # Restore the child degree before its parent toggle so the frozen parent
         # status/controls win over an operator-generated intermediate snapshot.
@@ -187,4 +187,4 @@ def configure_outlet_policy(profile, *, thinking_control=None, thinking_mode=Non
         kind = "model_record" if has_credential else "none"
         data["connection"]["credential_ref"]["kind"] = kind
         data["connection_rules"]["credential_kind"] = kind
-    return ResolvedModelProfile.model_validate(data)
+    return ensure_outlet_parameter_rules(ResolvedModelProfile.model_validate(data))

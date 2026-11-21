@@ -7,6 +7,7 @@ import { Select, Tooltip } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { Plus, Trash2 } from "lucide-react";
 
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { SliderStepper } from "@/components/common/SliderStepper";
 
 import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
@@ -118,6 +119,7 @@ export function ModelParamsModal({
       title={title || t("modelParams.title", { defaultValue: "模型配置参数" })}
       onClose={onClose}
       onConfirm={onConfirm}
+      confirmDisabled={!samplingComplete(value)}
     >
       {/* Model selector + inherit hint */}
       <Select
@@ -181,7 +183,9 @@ export function ModelParamsModal({
               ? value.temperature
               : undefined
           }
+          samplingField="temperature"
           fallback={inheritedNumber("temperature")}
+          showFallbackValue={typeof inheritedDefaults.temperature === "number"}
           min={0}
           max={2}
           step={0.1}
@@ -208,7 +212,13 @@ export function ModelParamsModal({
         <SliderStepper
           label={t("modelParams.topP", { defaultValue: "Top P" })}
           value={typeof value.top_p === "number" ? value.top_p : undefined}
-          fallback={inheritedNumber("top_p")}
+          samplingField="top_p"
+          fallback={
+            typeof inheritedDefaults.top_p === "number"
+              ? inheritedDefaults.top_p
+              : 0.01
+          }
+          showFallbackValue={typeof inheritedDefaults.top_p === "number"}
           min={0}
           max={1}
           step={0.1}

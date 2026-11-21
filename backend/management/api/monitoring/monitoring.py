@@ -18,8 +18,9 @@ from sqlalchemy import text
 from contracts.constants.environment import ENABLE_TELEMETRY, MONITORING_DASHBOARD_ALLOWED_ROLES, MONITORING_DASHBOARD_URL, MONITORING_PROVIDER
 from contracts.conversation import ConversationResponse
 from contracts.errors.exceptions import TokenExpiredError
-from management.db.client import get_monitoring_db_session
-from gateway.authentication.auth import get_current_user_id
+from management.utils.managed_read import managed_read
+from infrastructure.rdb.client import get_monitoring_db_session
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
 
@@ -64,11 +65,11 @@ def _compute_time_range_filter(time_range: str) -> str:
     return f"m.create_time >= NOW() - INTERVAL '{hours} hours'"
 
 
-def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None) -> list[dict[str, Any]]:
+def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None, page: int | None = None, page_size: int = 20) -> list[dict[str, Any]]:
     time_filter = _compute_time_range_filter(time_range)
 
     tenant_filter = ""
-    params: dict[str, str] = {}
+    params: dict[str, str | int] = {}
     if tenant_id:
         tenant_filter = "AND m.tenant_id = :tenant_id"
         params["tenant_id"] = tenant_id
@@ -78,7 +79,7 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None) 
             m.model_id,
             m.model_name,
             MAX(COALESCE(m.model_type, 'llm')) AS model_type,
-            MAX(COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown')) AS display_name,
+            COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown') AS display_name,
             COUNT(*) AS request_count,
             ROUND(
                 COALESCE(
@@ -94,9 +95,13 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None) 
         WHERE {time_filter}
         {tenant_filter}
         AND m.delete_flag = 'N'
-        GROUP BY m.model_id, m.model_name
+        GROUP BY m.model_id, m.model_name, COALESCE(m.display_name, split_part(m.model_name, '/', -1), 'Unknown')
         ORDER BY request_count DESC
     """
+
+    if page is not None:
+        query_sql += " LIMIT :page_size OFFSET :offset"
+        params.update(page_size=page_size, offset=(page - 1) * page_size)
 
     try:
         with get_monitoring_db_session() as session:
@@ -123,7 +128,8 @@ def _query_model_metrics_from_db(time_range: str, tenant_id: str | None = None) 
 
 
 @router.get("/models", response_model=ConversationResponse)
-async def list_models_endpoint(
+@managed_read
+def list_models_endpoint(
     time_range: Annotated[str, Query(description="Time range: 24h, 7d, 30d")] = "24h",
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 20,
@@ -133,11 +139,7 @@ async def list_models_endpoint(
     try:
         _, tenant_id = get_current_user_id(authorization)
 
-        all_metrics = _query_model_metrics_from_db(time_range, tenant_id)
-
-        start = (page - 1) * page_size
-        end = start + page_size
-        paginated = all_metrics[start:end]
+        paginated = _query_model_metrics_from_db(time_range, tenant_id, page=page, page_size=page_size)
 
         return ConversationResponse(code=0, message="success", data=paginated)
     except TokenExpiredError as e:

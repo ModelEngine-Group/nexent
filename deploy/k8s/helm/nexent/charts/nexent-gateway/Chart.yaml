@@ -1,0 +1,16 @@
+apiVersion: v2
+name: nexent-gateway
+description: Nexent Gateway for ordinary backend and Northbound API requests
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nexent
+  - northbound
+  - api
+maintainers:
+  - name: Nexent Team
+dependencies:
+  - name: nexent-common
+    version: 0.1.0
+    repository: "file://../nexent-common"

@@ -207,6 +207,16 @@ data: {"type":"final_answer","content":"分析完成","unit_index":2}
 
 默认或显式传入 `"final_answer_mode":"complete"` 时，过程事件仍实时发送，最终答案在执行成功并完成持久化后一次性返回。旧客户端收到第一个 `final_answer` 即可读取全文。子 Agent 的答案不会作为最终结果提前返回；失败或停止不会把部分答案当作成功结果返回。
 
+使用 smolagents 时，主 Agent 的答案正文还会以 `model_output_thinking` 增量发送，并带有 `answer_preview: true` 和 `answer_phase: "delta"`。这些事件是尚未确认的答案预览，与普通 thinking 分开处理。客户端应依据 `step_id`、`attempt_id` 和 invocation 范围更新同一个答案位置；最后的完整 `final_answer` 确认或替换该位置的内容，避免再次追加全文。收到 `model_attempt_control` 回滚事件时应撤销对应的预览。预览不会另存为 thinking，重新加载历史时只保留一份正式答案。`delta` 模式和 jiuwen 的现有事件行为保持不变。
+
+```text
+data: {"type":"model_output_thinking","answer_preview":true,"answer_phase":"delta","step_id":"s1","content":"分析"}
+
+data: {"type":"model_output_thinking","answer_preview":true,"answer_phase":"delta","step_id":"s1","content":"完成"}
+
+data: {"type":"final_answer","answer_phase":"complete","step_id":"s1","content":"分析完成"}
+```
+
 需要增量答案的客户端须在请求体中传入 `"final_answer_mode":"delta"`。事件类型仍为 `final_answer`，通过 `answer_phase` 区分阶段：
 
 ```text

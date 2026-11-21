@@ -2,7 +2,6 @@
 
 "use client";
 
-import { ConfigProvider } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { Inbox, Puzzle, ShieldCheck, User } from "lucide-react";
@@ -12,10 +11,6 @@ import { McpToolsServicesTab } from "@/const/mcpTools";
 import { McpSpace, useMcpSpaceController } from "./agent-space";
 import { MyMcp } from "./my-mcp";
 import { ReviewCenter } from "./review-center";
-
-const mcpToolsTheme = {
-  token: { colorPrimary: "#2563eb", colorInfo: "#0284c7" },
-};
 
 export default function McpToolsPage() {
   const { t } = useTranslation("common");
@@ -31,7 +26,7 @@ export default function McpToolsPage() {
   } = controller;
 
   return (
-    <ConfigProvider theme={mcpToolsTheme}>
+    <>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
@@ -122,6 +117,6 @@ export default function McpToolsPage() {
           </motion.div>
         </div>
       </div>
-    </ConfigProvider>
+    </>
   );
 }
