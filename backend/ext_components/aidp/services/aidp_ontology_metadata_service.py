@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Ontology Metadata definition operations."""
+
 from __future__ import annotations
 
 import logging
@@ -79,7 +80,11 @@ def create_ontology_metadata_field_impl(
     )
     _log_business_failure(payload, "create-ontology-metadata-field")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def rename_ontology_metadata_field_impl(
@@ -101,7 +106,11 @@ def rename_ontology_metadata_field_impl(
     )
     _log_business_failure(payload, "rename-ontology-metadata-field")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def delete_ontology_metadata_field_impl(

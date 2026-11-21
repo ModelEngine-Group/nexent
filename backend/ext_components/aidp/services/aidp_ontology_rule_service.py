@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Ontology rule proxy operations."""
+
 from __future__ import annotations
 
 import logging
@@ -27,11 +28,19 @@ def _rules_envelope(
     size: int,
 ) -> dict[str, Any]:
     data = payload.get("data") if isinstance(payload, dict) else None
-    source = data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    source = (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
     raw_items = source.get("value")
     if not isinstance(raw_items, list):
         raw_items = source.get("rules")
-    items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+    items = (
+        [item for item in raw_items if isinstance(item, dict)]
+        if isinstance(raw_items, list)
+        else []
+    )
     raw_total = source.get("total_count")
     if raw_total is None:
         raw_total = source.get("total")
@@ -85,7 +94,11 @@ def count_ontology_rules_impl(
         operation="count-ontology-rules",
     )
     data = payload.get("data") if isinstance(payload, dict) else None
-    source = data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    source = (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
     count = source.get("count")
     if isinstance(count, int) and not isinstance(count, bool):
         return count
@@ -112,7 +125,11 @@ def get_ontology_rule_impl(
         operation="get-ontology-rule",
     )
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def create_ontology_rule_impl(
@@ -133,7 +150,11 @@ def create_ontology_rule_impl(
     )
     _log_business_failure(payload, "create-ontology-rule")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def update_ontology_rule_impl(
@@ -155,7 +176,11 @@ def update_ontology_rule_impl(
     )
     _log_business_failure(payload, "update-ontology-rule")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def delete_ontology_rule_impl(
@@ -180,4 +205,3 @@ def delete_ontology_rule_impl(
         if upstream_status == HTTPStatus.NOT_FOUND:
             return True
         raise
-

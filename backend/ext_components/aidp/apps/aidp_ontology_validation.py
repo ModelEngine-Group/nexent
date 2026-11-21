@@ -2,6 +2,7 @@
 
 
 """Validation and request-boundary helpers for ontology routes."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -37,7 +38,9 @@ def _utf8_size(value: str) -> int:
     return len(value.encode("utf-8"))
 
 
-def _bad_request(message: str, errors: list[dict[str, Any]] | None = None) -> AppException:
+def _bad_request(
+    message: str, errors: list[dict[str, Any]] | None = None
+) -> AppException:
     return AppException(
         ErrorCode.COMMON_PARAMETER_INVALID,
         message,
@@ -93,13 +96,9 @@ def _validate_field_name(value: str, *, message: str = "字段名不能为空") 
     """
     name = _clean_required(value, message)
     if len(name) > _METADATA_FIELD_NAME_MAX_CHARS:
-        raise _bad_request(
-            f"字段名不能超过 {_METADATA_FIELD_NAME_MAX_CHARS} 个字符"
-        )
+        raise _bad_request(f"字段名不能超过 {_METADATA_FIELD_NAME_MAX_CHARS} 个字符")
     if _utf8_size(name) > _METADATA_FIELD_NAME_MAX_BYTES:
-        raise _bad_request(
-            f"字段名不能超过 {_METADATA_FIELD_NAME_MAX_BYTES} 字节"
-        )
+        raise _bad_request(f"字段名不能超过 {_METADATA_FIELD_NAME_MAX_BYTES} 字节")
     return name
 
 
@@ -115,4 +114,3 @@ def _numeric_domain_id(domain_id: str) -> int:
     if value < 0:
         raise _bad_request("本体库 ID 不合法")
     return value
-

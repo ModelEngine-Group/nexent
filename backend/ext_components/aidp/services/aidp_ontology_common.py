@@ -5,6 +5,7 @@
 All ontology resource modules build tenant-scoped requests through
 :func:`_ontology_request` so transport failures and list envelopes are handled
 identically. No state is persisted on the Nexent side."""
+
 from __future__ import annotations
 
 import logging
@@ -123,7 +124,9 @@ def _ontology_request(
             ) from error
         _raise_aidp_http_error(error, operation)
     except httpx.RequestError as error:
-        logger.error("AIDP %s connection error: [%s] %s", operation, type(error).__name__, error)
+        logger.error(
+            "AIDP %s connection error: [%s] %s", operation, type(error).__name__, error
+        )
         raise AppException(
             ErrorCode.AIDP_CONNECTION_ERROR,
             f"AIDP connection failed: {error}",
@@ -173,7 +176,11 @@ def _list_envelope(
     inspected. Tasks are normalized separately because they use ``task_list``.
     """
     data = payload.get("data") if isinstance(payload, dict) else None
-    source = data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    source = (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
     raw_items = source.get("items")
     if not isinstance(raw_items, list):
         raw_items = source.get("value")
@@ -181,7 +188,11 @@ def _list_envelope(
         raw_items = payload.get("items")
         if not isinstance(raw_items, list):
             raw_items = payload.get("value")
-    items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+    items = (
+        [item for item in raw_items if isinstance(item, dict)]
+        if isinstance(raw_items, list)
+        else []
+    )
     # AIDP's ontology-domain list exposes `total`; most other endpoints use
     # `total_count`. Accept both, preferring `total`.
     raw_total = source.get("total")

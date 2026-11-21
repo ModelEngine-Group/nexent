@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """AIDP background task routes."""
+
 from __future__ import annotations
 
 import logging
@@ -62,4 +63,3 @@ async def get_aidp_task(
         owner="config",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
-

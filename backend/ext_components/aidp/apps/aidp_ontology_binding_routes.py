@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Ontology binding routes (domain list/unbind plus KB-side lookup)."""
+
 from __future__ import annotations
 
 import logging
@@ -199,7 +200,9 @@ async def delete_domain_binding(
             "success": True,
             "accepted": bool(task),
             "task_id": (task or {}).get("task_id") if isinstance(task, dict) else None,
-            "task_type": (task or {}).get("task_type") if isinstance(task, dict) else None,
+            "task_type": (task or {}).get("task_type")
+            if isinstance(task, dict)
+            else None,
         },
     )
 
@@ -237,4 +240,3 @@ async def get_knowledge_base_binding(
         status_code=HTTPStatus.OK,
         content={"binding": enriched[0] if enriched else None},
     )
-

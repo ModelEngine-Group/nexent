@@ -4,6 +4,7 @@
 
 The deployed AIDP exposes bind/unbind on the knowledge-base side and a
 per-domain binding list without BindingId; a by-KB lookup scans domains."""
+
 from __future__ import annotations
 
 import logging
@@ -75,7 +76,9 @@ def _list_domain_bindings_raw(
             params=params,
         )
         _log_business_failure(payload, "list-ontology-bindings")
-        envelope = _list_envelope(payload, page=params["page"], page_size=params["page_size"])
+        envelope = _list_envelope(
+            payload, page=params["page"], page_size=params["page_size"]
+        )
         rows.extend(
             binding
             for item in envelope["value"]
@@ -155,7 +158,11 @@ def create_ontology_binding_impl(
     )
     _log_business_failure(payload, "create-ontology-binding")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def delete_ontology_binding_impl(
@@ -182,5 +189,8 @@ def delete_ontology_binding_impl(
     )
     _log_business_failure(payload, "delete-ontology-binding")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
-
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
