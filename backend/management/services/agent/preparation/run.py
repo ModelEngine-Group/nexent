@@ -358,6 +358,7 @@ async def create_agent_run_info(
         agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
         catalog_model_versions=model_versions,
         model_parameter_preferences=model_parameter_preferences,
+        northbound_run=northbound_run,
         **export_options,
     )
 

@@ -659,7 +659,7 @@ def _export_memory_search(agent, allow_memory):
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
     allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None, allow_sandbox_policy=False,
-    user_id=None,
+    user_id=None, northbound_run=False,
 ):
     if agent.sandbox_policy and not allow_sandbox_policy:
         raise ValueError("Unsupported prepared resource")
@@ -794,13 +794,14 @@ def _export_resource(
         max_steps=agent.max_steps, tools=tools, skill_refs=skill_refs, model_alias=agent.model_name,
         workbench_skill_refs=refs if workbench_skills else [],
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
+        northbound_run=northbound_run,
         memory_search=memory_search,
         sandbox_policy=agent.sandbox_policy or None,
         evaluation_options=EvaluationAgentOptions(**profile),
         subagents=[
             _export_resource(
                 child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory, user_id=user_id,
-                allow_sandbox_policy=allow_sandbox_policy,
+                allow_sandbox_policy=allow_sandbox_policy, northbound_run=northbound_run,
             )
             for child in agent.worker_agents
         ],
@@ -886,7 +887,7 @@ def compile_snapshot(
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
     allow_debug_planning=False, workbench_knowledge_tools=None, catalog_model_versions=None,
-    model_parameter_preferences=None,
+    model_parameter_preferences=None, northbound_run=False,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -901,6 +902,7 @@ def compile_snapshot(
             workbench_skills=workbench_skills,
             workbench_knowledge_tools=workbench_knowledge_tools,
             allow_sandbox_policy=True, user_id=user_id,
+            northbound_run=northbound_run,
         )
         stage = "model"
         bindings = [
