@@ -1,21 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
-
-from ..configuration import (
-    _build_otlp_headers,
-    _require_choice,
-    _require_positive,
-    _resolve_app_version,
-    parse_agent_core,
-    parse_port,
-    parse_positive_float,
-    parse_positive_int,
-    validate_deployment_version,
-)
-
+from ..configuration import _build_otlp_headers, _require_choice, _require_positive, _resolve_app_version, parse_agent_core, parse_port, parse_positive_float, parse_positive_int, validate_deployment_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -219,9 +206,6 @@ HIDE_HOME_PAGE = os.getenv('HIDE_HOME_PAGE', 'true').lower() in ('true', '1', 'y
 AIDP_SERVER_URL = os.getenv('AIDP_SERVER_URL', '')
 AIDP_API_KEY = os.getenv('AIDP_API_KEY', '')
 AIDP_TENANT_ID = os.getenv('AIDP_TENANT_ID', 'aidp')
-# Demo mode marks local mock/example data so the UI can label it and never
-# present it as a real AIDP response. Default off for real deployments.
-AIDP_MOCK_MODE = os.getenv('AIDP_MOCK_MODE', 'false').lower() in ('true', '1', 'yes', 'on')
 
 # Minio Configuration
 MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT')
