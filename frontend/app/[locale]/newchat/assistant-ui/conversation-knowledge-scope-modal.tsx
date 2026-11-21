@@ -36,6 +36,8 @@ import type {
 } from "@/types/knowledgeScope";
 import {
   DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE,
+  EMPTY_AIDP_METADATA_FILTER,
+  normalizeAidpMetadataFilter,
   withAidpMetadataFilter,
 } from "@/types/knowledgeScope";
 import { AdvancedMetadataFilter } from "./advanced-metadata-filter";
@@ -63,8 +65,8 @@ interface ConversationKnowledgeScopeModalProps {
 
 const copyScope = (
   value: ConversationKnowledgeScope | null
-): ConversationKnowledgeScope =>
-  JSON.parse(
+): ConversationKnowledgeScope => {
+  const scope = JSON.parse(
     JSON.stringify({
       schema_version:
         (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).schema_version ?? 1,
@@ -72,6 +74,13 @@ const copyScope = (
       aidp: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).aidp,
     })
   ) as ConversationKnowledgeScope;
+  if (scope.aidp.metadata_filter) {
+    scope.aidp.metadata_filter = normalizeAidpMetadataFilter(
+      scope.aidp.metadata_filter
+    );
+  }
+  return scope;
+};
 
 const normalizeScopeForSource = (
   value: ConversationKnowledgeScope | null,
@@ -504,10 +513,16 @@ export const ConversationKnowledgeScopeModal: FC<
   const handleConfirm = async () => {
     if (!configuredSource || loading || saving || resourceError) return;
     const draftFilter = draft.aidp.metadata_filter;
+    const graphSearchEnabled = Boolean(
+      capabilities?.sources.aidp.graph_search_enabled ||
+      capabilities?.sources.aidp.search_method?.includes("graph_search")
+    );
     if (
       configuredSource === "aidp" &&
+      !graphSearchEnabled &&
       draftFilter?.enabled &&
-      !draftFilter.file_name?.value?.trim()
+      (draftFilter.conditions.length === 0 ||
+        draftFilter.conditions.some((condition) => !condition.value.trim()))
     ) {
       message.warning(t("chat.knowledgeScope.advancedFilterNeedsValue"));
       return;
@@ -943,24 +958,42 @@ export const ConversationKnowledgeScopeModal: FC<
   );
   const drawerSelection = source ? getSourceSelection(source) : null;
   const draftFilter = draft.aidp.metadata_filter;
-  const filterIncomplete = Boolean(
-    source === "aidp" &&
-    draftFilter?.enabled &&
-    !draftFilter.file_name?.value?.trim()
+  const aidpCapabilities = capabilities?.sources.aidp;
+  const graphSearchEnabled = Boolean(
+    aidpCapabilities?.graph_search_enabled ||
+    aidpCapabilities?.search_method?.includes("graph_search")
   );
-  const filterContent =
-    source === "aidp" ? (
-      <AdvancedMetadataFilter
-        value={draftFilter ?? { enabled: false }}
-        disabled={disabled || saving}
-        onChange={(nextFilter) =>
-          setDraft((current) => ({
-            ...current,
-            aidp: { ...current.aidp, metadata_filter: nextFilter },
-          }))
-        }
-      />
-    ) : undefined;
+  const filterAvailable = source === "aidp" && !graphSearchEnabled;
+  const filterIncomplete = Boolean(
+    filterAvailable &&
+    draftFilter?.enabled &&
+    (draftFilter.conditions.length === 0 ||
+      draftFilter.conditions.some((condition) => !condition.value.trim()))
+  );
+  const aidpLabelById = new Map(
+    aidpOptions.map((option) => [String(option.value), String(option.label)])
+  );
+  const filterSearchTargets = Array.from(
+    new Set(
+      (draft.aidp.mode === "override"
+        ? draft.aidp.kds_ids
+        : (aidpCapabilities?.default_knowledge_ids ?? [])
+      ).map(String)
+    )
+  ).map((id) => ({ id, name: aidpLabelById.get(id) ?? id }));
+  const filterContent = filterAvailable ? (
+    <AdvancedMetadataFilter
+      value={draftFilter ?? EMPTY_AIDP_METADATA_FILTER}
+      targets={filterSearchTargets}
+      disabled={disabled || saving}
+      onChange={(nextFilter) =>
+        setDraft((current) => ({
+          ...current,
+          aidp: { ...current.aidp, metadata_filter: nextFilter },
+        }))
+      }
+    />
+  ) : undefined;
   const scopeDrawer = (
     <WorkbenchResourceDrawer
       open={open}

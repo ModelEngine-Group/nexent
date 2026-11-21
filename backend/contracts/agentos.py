@@ -415,9 +415,26 @@ class SkillDerivedLocalToolBinding(LocalToolBinding):
     tool_id: PositiveInt
 
 
+class ScopedSharedAidpFileNameCondition(RunSpecModel):
+    operator: Literal["contains", "is", "starts_with", "ends_with"] = "contains"
+    value: str = Field(min_length=1, max_length=256)
+
+
+class ScopedSharedAidpMetadataFilter(RunSpecModel):
+    enabled: bool = False
+    match: Literal["all", "any"] = "all"
+    conditions: list[ScopedSharedAidpFileNameCondition] = Field(
+        default_factory=list, max_length=20
+    )
+
+
+_SCOPED_AIDP_CHANNELS = frozenset({"vector_search", "full_text_search", "graph_search"})
+
+
 class ScopedSharedAidpOptions(RunSpecModel):
     kds_list: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(max_length=10)
-    search_method: Literal["hybrid_search", "vector_search", "full_text_search", "graph_search"] | None = None
+    metadata_filter: ScopedSharedAidpMetadataFilter | None = None
+    search_method: str | None = None
     reranking_enable: bool | None = None
     reranking_mode: Literal["performance", "high_accuracy", "jargon_coverage"] | None = None
     rewrite_enable: bool | None = None
@@ -425,6 +442,29 @@ class ScopedSharedAidpOptions(RunSpecModel):
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     top_k: int | None = Field(default=None, ge=1, le=100)
     multi_modal: bool | None = None
+    vector_candidates: int | None = Field(default=None, ge=1, le=500)
+    full_text_candidates: int | None = Field(default=None, ge=1, le=500)
+    hybrid_top_k: int | None = Field(default=None, ge=0, le=100)
+    graph_top_k: int | None = Field(default=None, ge=0, le=100)
+    vector_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    full_text_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    graph_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    graph_reranking_enable: bool | None = None
+    query_expansion_enable: bool | None = None
+    ontology_enhance_enable: bool | None = None
+    rule_enable: bool | None = None
+
+    @field_validator("search_method")
+    @classmethod
+    def validate_search_method(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value == "hybrid_search":
+            return value
+        tokens = value.split("|")
+        if not tokens or any(token not in _SCOPED_AIDP_CHANNELS for token in tokens):
+            raise ValueError("search_method must combine the AIDP retrieval channels")
+        return value
 
     @model_serializer(mode="wrap")
     def serialize_explicit_options(self, handler):
@@ -584,6 +624,7 @@ class PreparedHistoryTurn(RunSpecModel):
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
+    execution_records: list[dict[str, JsonValue]] = Field(default_factory=list)
 
 
 class PreparedConversationHistory(RunSpecModel):

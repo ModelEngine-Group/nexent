@@ -35,6 +35,7 @@ import type {
   AidpFolderOperationResult,
   AidpFileMoveResponse,
   AidpFileRenameResponse,
+  AidpIngestedFileListResponse,
 } from "../types/management";
 
 function buildUrl(
@@ -482,6 +483,38 @@ class AidpKnowledgeService {
     if (response.status === 204) return {};
     const text = await response.text();
     return text ? (JSON.parse(text) as AidpFileRenameResponse) : {};
+  }
+
+  /**
+   * List only files AIDP confirms as ingested; upload history stays separate.
+   * Backed by the /files endpoint (not the legacy /documents view).
+   */
+  async listIngestedFiles(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    signal?: AbortSignal
+  ): Promise<AidpIngestedFileListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : 0,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
+      total_reliable: result.total_reliable !== false,
+    };
   }
 
   /**

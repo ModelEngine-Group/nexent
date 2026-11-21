@@ -9,7 +9,12 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
-from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
+from nexent.core.ext_components.aidp.retrieval_config import (
+    CONFIG_KEYS,
+    active_channels,
+    normalize_method,
+    prepare_config,
+)
 
 from contracts.errors.exceptions import ValidationError
 from contracts.knowledge import ConversationKnowledgeScopeRequest
@@ -80,6 +85,13 @@ def _tool_default(tool: Dict[str, Any], param_name: str) -> List[str]:
         if param.get("name") == param_name:
             return _parse_list(param.get("default"))
     return []
+
+
+def _tool_scalar_default(tool: Dict[str, Any], param_name: str) -> Any:
+    for param in tool.get("params") or []:
+        if param.get("name") == param_name:
+            return param.get("default")
+    return None
 
 
 def _tool_identifier(tool: Dict[str, Any]) -> str:
@@ -222,6 +234,14 @@ def get_agent_knowledge_capabilities(
         if tool.get("class_name") == AIDP_TOOL_CLASS
         for kds_id in _tool_default(tool, AIDP_RANGE_PARAM)
     ))
+    aidp_search_methods = [
+        normalize_method(
+            str(_tool_scalar_default(tool, "search_method") or "hybrid_search")
+        )
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == AIDP_TOOL_CLASS
+    ]
     if user_id:
         local_default_indices = ElasticSearchService.filter_accessible_indices(
             local_default_indices,
@@ -268,6 +288,13 @@ def get_agent_knowledge_capabilities(
             "max_select": AIDP_MAX_SELECT,
             "metadata_filter_supported": True,
             "metadata_filter_graph_supported": False,
+            "search_method": (
+                aidp_search_methods[0] if aidp_search_methods else None
+            ),
+            "graph_search_enabled": any(
+                "graph_search" in active_channels(method)
+                for method in aidp_search_methods
+            ),
             "default_summary": "Follow each agent's default configuration",
             "default_knowledge_ids": aidp_default_ids,
             "default_range_values": aidp_default_ids,
@@ -498,13 +525,14 @@ def resolve_knowledge_scope(
 
     aidp_metadata_filter: Dict[str, Any] = {"enabled": False}
     requested_filter = scope.aidp.metadata_filter
-    if requested_filter.enabled and requested_filter.file_name is not None:
+    if requested_filter.enabled and requested_filter.conditions:
         aidp_metadata_filter = {
             "enabled": True,
-            "file_name": {
-                "operator": requested_filter.file_name.operator,
-                "value": requested_filter.file_name.value,
-            },
+            "match": requested_filter.match,
+            "conditions": [
+                {"operator": condition.operator, "value": condition.value}
+                for condition in requested_filter.conditions
+            ],
         }
         # The filter applies to every AIDP tool of the run; the tool itself
         # decides the effective kds_list, so no per-tool filtering is needed.

@@ -9,8 +9,13 @@ export interface AidpFileNameCondition {
   value: string;
 }
 
+export type AidpMetadataFilterMatch = "all" | "any";
+
 export interface AidpMetadataFilter {
   enabled: boolean;
+  match: AidpMetadataFilterMatch;
+  conditions: AidpFileNameCondition[];
+  /** Legacy single-condition shape accepted from old conversations. */
   file_name?: AidpFileNameCondition;
 }
 
@@ -29,22 +34,42 @@ export interface ConversationKnowledgeScope {
 
 export const EMPTY_AIDP_METADATA_FILTER: AidpMetadataFilter = {
   enabled: false,
+  match: "all",
+  conditions: [],
 };
+
+export function normalizeAidpMetadataFilter(
+  filter: AidpMetadataFilter | null | undefined
+): AidpMetadataFilter {
+  if (!filter?.enabled) {
+    return EMPTY_AIDP_METADATA_FILTER;
+  }
+  const raw = Array.isArray(filter.conditions)
+    ? filter.conditions
+    : filter.file_name
+      ? [filter.file_name]
+      : [];
+  const seen = new Set<string>();
+  const conditions: AidpFileNameCondition[] = [];
+  raw.forEach((condition) => {
+    const value = String(condition?.value ?? "").trim();
+    if (!value) return;
+    const key = `${condition.operator}\u0000${value}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    conditions.push({ operator: condition.operator, value });
+  });
+  return {
+    enabled: true,
+    match: filter.match === "any" ? "any" : "all",
+    conditions: conditions.slice(0, 20),
+  };
+}
 
 export function getAidpMetadataFilter(
   scope: ConversationKnowledgeScope | null | undefined
 ): AidpMetadataFilter {
-  const filter = scope?.aidp.metadata_filter;
-  if (!filter?.enabled || !filter.file_name?.value) {
-    return EMPTY_AIDP_METADATA_FILTER;
-  }
-  return {
-    enabled: true,
-    file_name: {
-      operator: filter.file_name.operator,
-      value: filter.file_name.value,
-    },
-  };
+  return normalizeAidpMetadataFilter(scope?.aidp.metadata_filter);
 }
 
 export function withAidpMetadataFilter(
@@ -52,16 +77,17 @@ export function withAidpMetadataFilter(
   filter: AidpMetadataFilter | null | undefined
 ): ConversationKnowledgeScope {
   const base = scope ?? DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE;
+  const candidate = normalizeAidpMetadataFilter(filter);
   const enabled = Boolean(
-    filter?.enabled && filter.file_name?.value && base.aidp.mode !== "disabled"
+    candidate.enabled &&
+    candidate.conditions.length > 0 &&
+    base.aidp.mode !== "disabled"
   );
   const normalized: AidpMetadataFilter | undefined = enabled
     ? {
         enabled: true,
-        file_name: {
-          operator: filter!.file_name!.operator,
-          value: filter!.file_name!.value,
-        },
+        match: candidate.match,
+        conditions: candidate.conditions,
       }
     : undefined;
   return {
@@ -99,6 +125,8 @@ export interface KnowledgeCapabilities {
       max_select: number;
       metadata_filter_supported?: boolean;
       metadata_filter_graph_supported?: boolean;
+      search_method?: string | null;
+      graph_search_enabled?: boolean;
       default_summary: string;
       default_knowledge_ids: string[];
       default_range_values: string[];

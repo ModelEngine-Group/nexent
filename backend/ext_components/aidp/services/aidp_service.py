@@ -213,6 +213,26 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(raw)
     out["created_at"] = _timestamp_or_iso(_first_reported(raw, _CREATED_AT_KEYS))
     out["updated_at"] = _timestamp_or_iso(_first_reported(raw, _UPDATED_AT_KEYS))
+    # Real AIDP listings may report the display name without the extension,
+    # while retrieval filters on the internal ``original_file_name`` that does
+    # include it. Reconstruct it once here so the file-name filter can match
+    # exact/prefix/suffix operators. The upstream field wins when present and
+    # the reconstruction is idempotent for deployments whose ``file_name``
+    # already carries the extension.
+    if not out.get("original_file_name"):
+        name = str(out.get("file_name") or "").strip()
+        file_type = str(out.get("file_type") or "").strip().lstrip(".")
+        if (
+            name
+            and file_type
+            and file_type.isascii()
+            and file_type.isalnum()
+            and len(file_type) <= 10
+            and not name.lower().endswith(f".{file_type.lower()}")
+        ):
+            name = f"{name}.{file_type}"
+        if name:
+            out["original_file_name"] = name
     return out
 
 

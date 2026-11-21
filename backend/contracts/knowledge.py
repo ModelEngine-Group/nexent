@@ -88,23 +88,45 @@ class AidpFileNameCondition(BaseModel):
         return item
 
 
+AIDP_FILTER_CONDITIONS_MAX = 20
+AidpMetadataFilterMatch = Literal["all", "any"]
+
+
 class AidpMetadataFilterRequest(BaseModel):
     """Conversation-scoped advanced filter inside the effective AIDP range.
 
-    Only ``original_file_name`` is exposed by the current UI; the model keeps a
-    single-condition shape so later fields can be added without a wire change.
+    The UI exposes one or more file-name conditions with a single match policy
+    (all/any). ``file_name`` is accepted only as a legacy input shape and is
+    folded into ``conditions`` before persistence.
     """
 
     enabled: bool = False
-    file_name: Optional[AidpFileNameCondition] = None
+    match: AidpMetadataFilterMatch = "all"
+    conditions: List[AidpFileNameCondition] = Field(
+        default_factory=list, max_length=AIDP_FILTER_CONDITIONS_MAX
+    )
+    file_name: Optional[AidpFileNameCondition] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
-    def validate_enabled_condition(self):
-        if self.enabled and self.file_name is None:
+    def validate_conditions(self):
+        if self.file_name is not None:
+            if not self.conditions:
+                self.conditions = [self.file_name]
+            self.file_name = None
+        unique: List[AidpFileNameCondition] = []
+        seen = set()
+        for condition in self.conditions:
+            key = (condition.operator, condition.value)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(condition)
+        self.conditions = unique
+        if self.enabled and not self.conditions:
             raise ValueError(
                 "enabled AIDP metadata filter requires a file-name condition"
             )
-        if not self.enabled and self.file_name is not None:
+        if not self.enabled and self.conditions:
             raise ValueError(
                 "disabled AIDP metadata filter does not accept conditions"
             )

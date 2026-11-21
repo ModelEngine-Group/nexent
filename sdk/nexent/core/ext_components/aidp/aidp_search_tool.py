@@ -579,20 +579,24 @@ class AidpSearchTool(Tool):
         request_filter = None
         if self.metadata_filter.get("enabled"):
             if "graph_search" in active_channels(self.search_method):
-                logger.warning(
-                    "AIDP metadata filter cannot be applied to graph retrieval; no request was sent"
+                # Graph retrieval does not consume metadata_condition. The
+                # conversation filter is ignored for graph-enabled methods so
+                # the retrieval still runs; the assistant UI hides the filter
+                # entry for these Agents.
+                logger.info(
+                    "AIDP metadata filter ignored because graph retrieval is enabled"
                 )
-                return metadata_filter_rules.FILTER_GRAPH_UNSUPPORTED_MESSAGE
-            try:
-                request_filter = metadata_filter_rules.build_metadata_condition(
-                    self.metadata_filter
-                )
-            except metadata_filter_rules.AidpMetadataFilterUnavailableError:
-                logger.warning(
-                    "AIDP metadata filter cannot be represented as a request condition; "
-                    "no request was sent"
-                )
-                return metadata_filter_rules.FILTER_UNAVAILABLE_MESSAGE
+            else:
+                try:
+                    request_filter = metadata_filter_rules.build_metadata_condition(
+                        self.metadata_filter
+                    )
+                except metadata_filter_rules.AidpMetadataFilterUnavailableError:
+                    logger.warning(
+                        "AIDP metadata filter cannot be represented as a request condition; "
+                        "no request was sent"
+                    )
+                    return metadata_filter_rules.FILTER_UNAVAILABLE_MESSAGE
 
         self._emit_running_prompt(query)
 

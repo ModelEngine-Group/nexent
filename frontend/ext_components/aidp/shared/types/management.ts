@@ -35,6 +35,8 @@ export interface AidpDocumentItem {
   file_uuid: string;
   file_ino_no: string;
   file_name: string;
+  /** ``file_name`` plus ``file_type`` when the upstream list omits the suffix. */
+  original_file_name?: string;
   file_size?: number;
   file_type?: string;
   created_at?: string;
@@ -127,6 +129,14 @@ export interface AidpUploadTaskStats {
   failed: number;
   success: number;
   queued: number;
+}
+
+export interface AidpIngestedFileListResponse {
+  value: AidpDocumentItem[];
+  total_count: number;
+  has_more?: boolean;
+  /** False when the backend skipped the exact Count call (keyword search). */
+  total_reliable?: boolean;
 }
 
 export interface AidpUploadTaskListResponse {

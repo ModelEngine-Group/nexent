@@ -28,10 +28,11 @@ def _build_tool(metadata_filter=None, kds_list=None, search_method="vector_searc
     return AidpSearchTool(**params)
 
 
-def _enabled_filter(operator="contains", value="合同"):
+def _enabled_filter(operator="contains", value="合同", match="all"):
     return {
         "enabled": True,
-        "file_name": {"operator": operator, "value": value},
+        "match": match,
+        "conditions": [{"operator": operator, "value": value}],
     }
 
 
@@ -70,23 +71,61 @@ def test_filter_builds_single_original_file_name_condition(
     assert "file_scope" not in captured["payload"]
 
 
-def test_graph_retrieval_fails_closed_for_metadata_filter(monkeypatch):
-    calls = []
+def test_multiple_conditions_follow_the_match_policy(monkeypatch):
+    captured = {}
 
-    def _unexpected(*args, **kwargs):
-        calls.append(kwargs)
-        raise AssertionError("FusionSearch must not be called")
+    def _records(client, url, api_key, payload):
+        captured["payload"] = payload
+        return []
 
-    monkeypatch.setattr(tool_module, "post_retrieval", _unexpected)
+    monkeypatch.setattr(tool_module, "post_retrieval", _records)
+    tool = _build_tool(
+        {
+            "enabled": True,
+            "match": "any",
+            "conditions": [
+                {"operator": "contains", "value": "合同"},
+                {"operator": "is", "value": "预算.xlsx"},
+            ],
+        }
+    )
+
+    tool.forward("question")
+
+    condition = captured["payload"]["metadata_condition"]
+    assert condition["logical_operator"] == "or"
+    assert condition["conditions"] == [
+        {
+            "name": "original_file_name",
+            "comparison_operator": "contains",
+            "value": "合同",
+        },
+        {
+            "name": "original_file_name",
+            "comparison_operator": "is",
+            "value": "预算.xlsx",
+        },
+    ]
+
+
+def test_graph_retrieval_ignores_the_metadata_filter(monkeypatch):
+    captured = {}
+
+    def _records(client, url, api_key, payload):
+        captured["payload"] = payload
+        return []
+
+    monkeypatch.setattr(tool_module, "post_retrieval", _records)
     tool = _build_tool(
         _enabled_filter(),
         search_method="vector_search|graph_search",
     )
 
-    result = tool.forward("question")
+    tool.forward("question")
 
-    assert result == filter_module.FILTER_GRAPH_UNSUPPORTED_MESSAGE
-    assert calls == []
+    payload = captured["payload"]
+    assert "metadata_condition" not in payload
+    assert payload["search_method"] == "vector_search|graph_search"
 
 
 def test_disabled_filter_preserves_retrieval_configuration(monkeypatch):

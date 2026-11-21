@@ -9,8 +9,9 @@ implementations:
 acceptance_bindings:
   AC-01:
   - test_filter_builds_single_original_file_name_condition
+  - test_multiple_conditions_follow_the_match_policy
   AC-02:
-  - test_graph_retrieval_fails_closed_for_metadata_filter
+  - test_graph_retrieval_ignores_the_metadata_filter
   AC-03:
   - test_unsupported_operator_fails_closed_without_request
   AC-04:

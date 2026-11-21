@@ -31,11 +31,13 @@ def _tree(*ranges):
 def _scope(
     *,
     enabled=True,
-    operator="contains",
-    value="合同",
+    match="all",
+    conditions=None,
     aidp_mode="override",
     kds_ids=None,
 ):
+    if conditions is None:
+        conditions = [{"operator": "contains", "value": "合同"}]
     payload = {
         "schema_version": 3 if enabled else 1,
         "local": {"mode": "inherit", "knowledge_ids": []},
@@ -47,7 +49,8 @@ def _scope(
     if enabled:
         payload["aidp"]["metadata_filter"] = {
             "enabled": True,
-            "file_name": {"operator": operator, "value": value},
+            "match": match,
+            "conditions": conditions,
         }
     return ConversationKnowledgeScopeRequest.model_validate(payload)
 
@@ -76,7 +79,14 @@ def _resolve(monkeypatch, scope, tree, accessible, request_tool_params=None):
 def test_filter_is_projected_to_every_aidp_tool(monkeypatch):
     resolved = _resolve(
         monkeypatch,
-        _scope(operator="starts_with", value="年度报告", kds_ids=["kb-1", "kb-2"]),
+        _scope(
+            match="any",
+            conditions=[
+                {"operator": "starts_with", "value": "年度报告"},
+                {"operator": "is", "value": "预算.xlsx"},
+            ],
+            kds_ids=["kb-1", "kb-2"],
+        ),
         _tree(("root", ["kb-1", "kb-2"]), ("child", ["kb-1"])),
         {"kb-1", "kb-2"},
     )
@@ -87,7 +97,11 @@ def test_filter_is_projected_to_every_aidp_tool(monkeypatch):
     assert child["kds_list"] == ["kb-1", "kb-2"]
     expected = {
         "enabled": True,
-        "file_name": {"operator": "starts_with", "value": "年度报告"},
+        "match": "any",
+        "conditions": [
+            {"operator": "starts_with", "value": "年度报告"},
+            {"operator": "is", "value": "预算.xlsx"},
+        ],
     }
     assert root["metadata_filter"] == expected
     assert child["metadata_filter"] == expected
@@ -119,8 +133,8 @@ def test_filter_survives_inherit_mode_and_bounded_request_params(monkeypatch):
     child = resolved.tool_params.agents["child"].tools["aidp_search"]
     assert root["kds_list"] == ["kb-1"]
     assert child["kds_list"] == ["kb-2"]
-    assert root["metadata_filter"]["file_name"]["value"] == "合同"
-    assert child["metadata_filter"]["file_name"]["value"] == "合同"
+    assert root["metadata_filter"]["conditions"][0]["value"] == "合同"
+    assert child["metadata_filter"]["conditions"][0]["value"] == "合同"
 
     request_params = ToolParamsRequest.model_validate(
         {
@@ -131,7 +145,10 @@ def test_filter_survives_inherit_mode_and_bounded_request_params(monkeypatch):
                             "kds_list": ["kb-1", "kb-2", "kb-3"],
                             "metadata_filter": {
                                 "enabled": True,
-                                "file_name": {"operator": "is", "value": "other"},
+                                "match": "all",
+                                "conditions": [
+                                    {"operator": "is", "value": "other"},
+                                ],
                             },
                         }
                     }
@@ -148,7 +165,6 @@ def test_filter_survives_inherit_mode_and_bounded_request_params(monkeypatch):
     )
     params = bounded.tool_params.agents["root"].tools["aidp_search"]
     assert params["kds_list"] == ["kb-1"]
-    assert params["metadata_filter"]["file_name"] == {
-        "operator": "contains",
-        "value": "合同",
-    }
+    assert params["metadata_filter"]["conditions"] == [
+        {"operator": "contains", "value": "合同"}
+    ]

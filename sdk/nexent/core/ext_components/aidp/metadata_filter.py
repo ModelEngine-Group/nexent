@@ -13,7 +13,7 @@ of issuing an unfiltered request.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 FILE_NAME_METADATA_FIELD = "original_file_name"
@@ -23,13 +23,8 @@ FILTER_UNAVAILABLE_MESSAGE = (
     "Adjust the file-name filter or turn it off, then try again."
 )
 
-FILTER_GRAPH_UNSUPPORTED_MESSAGE = (
-    "Advanced filtering is not available with the current retrieval method. "
-    "No search was performed. Disable graph retrieval or turn off advanced "
-    "filtering, then try again."
-)
-
 FILTER_VALUE_MAX_LENGTH = 256
+FILTER_CONDITIONS_MAX = 20
 
 # UI operator key -> AIDP wire spelling. Wire spellings are accepted as stored
 # values too, so scopes written by older clients keep working.
@@ -48,7 +43,7 @@ class AidpMetadataFilterUnavailableError(RuntimeError):
 
 def _file_name_condition(value: Any) -> Dict[str, str]:
     if not isinstance(value, dict):
-        raise ValueError("metadata_filter.file_name must be an object")
+        raise ValueError("metadata_filter conditions entries must be objects")
     operator = str(value.get("operator") or "").strip()
     text = str(value.get("value") or "").strip()
     if not operator and not text:
@@ -57,7 +52,11 @@ def _file_name_condition(value: Any) -> Dict[str, str]:
 
 
 def normalize_metadata_filter(value: Any) -> Dict[str, Any]:
-    """Return a validated ``{enabled, file_name?}`` filter or raise ``ValueError``."""
+    """Return a validated ``{enabled, match, conditions}`` filter.
+
+    The legacy single ``file_name`` shape is folded into ``conditions`` so
+    conversations saved before multi-condition support keep working.
+    """
     if value is None or value == "":
         return {"enabled": False}
     if isinstance(value, str):
@@ -69,12 +68,27 @@ def normalize_metadata_filter(value: Any) -> Dict[str, Any]:
         raise ValueError("metadata_filter must be an object")
     if not value.get("enabled"):
         return {"enabled": False}
-    result: Dict[str, Any] = {"enabled": True}
-    file_name = value.get("file_name")
-    if file_name is not None:
-        condition = _file_name_condition(file_name)
+    match = str(value.get("match") or "all").strip().lower()
+    if match not in ("all", "any"):
+        raise ValueError("metadata_filter.match must be 'all' or 'any'")
+    conditions: List[Dict[str, str]] = []
+    raw_conditions = value.get("conditions")
+    if isinstance(raw_conditions, list):
+        for item in raw_conditions:
+            condition = _file_name_condition(item)
+            if condition:
+                conditions.append(condition)
+    elif value.get("file_name") is not None:
+        condition = _file_name_condition(value["file_name"])
         if condition:
-            result["file_name"] = condition
+            conditions.append(condition)
+    if len(conditions) > FILTER_CONDITIONS_MAX:
+        raise ValueError(
+            f"metadata_filter supports at most {FILTER_CONDITIONS_MAX} conditions"
+        )
+    result: Dict[str, Any] = {"enabled": True, "match": match}
+    if conditions:
+        result["conditions"] = conditions
     return result
 
 
@@ -90,30 +104,44 @@ def build_metadata_condition(
     """Return the FusionSearch ``metadata_condition`` payload, or ``None``.
 
     Raises ``AidpMetadataFilterUnavailableError`` when the filter is enabled but
-    cannot be expressed as one safe condition; the caller must fail closed.
+    cannot be expressed as a safe condition list; the caller must fail closed.
     """
     if not isinstance(metadata_filter, dict) or not metadata_filter.get("enabled"):
         return None
-    file_name = metadata_filter.get("file_name")
-    if not isinstance(file_name, dict):
+    match = str(metadata_filter.get("match") or "all").strip().lower()
+    if match not in ("all", "any"):
+        raise AidpMetadataFilterUnavailableError("unsupported metadata match policy")
+    raw_conditions = metadata_filter.get("conditions")
+    if not isinstance(raw_conditions, list) or not raw_conditions:
         raise AidpMetadataFilterUnavailableError(
             "enabled filter has no file-name condition"
         )
-    operator = _wire_operator(str(file_name.get("operator") or "").strip())
-    value = str(file_name.get("value") or "").strip()
-    if operator is None:
-        raise AidpMetadataFilterUnavailableError("unsupported file-name operator")
-    if not value or len(value) > FILTER_VALUE_MAX_LENGTH:
-        raise AidpMetadataFilterUnavailableError("invalid file-name filter value")
+    if len(raw_conditions) > FILTER_CONDITIONS_MAX:
+        raise AidpMetadataFilterUnavailableError("too many file-name conditions")
+    conditions = []
+    for condition in raw_conditions:
+        operator = _wire_operator(
+            str(condition.get("operator") or "").strip()
+            if isinstance(condition, dict)
+            else ""
+        )
+        value = str(condition.get("value") or "").strip() if isinstance(condition, dict) else ""
+        if operator is None:
+            raise AidpMetadataFilterUnavailableError(
+                "unsupported file-name operator"
+            )
+        if not value or len(value) > FILTER_VALUE_MAX_LENGTH:
+            raise AidpMetadataFilterUnavailableError("invalid file-name filter value")
+        conditions.append(
+            {
+                "name": FILE_NAME_METADATA_FIELD,
+                "comparison_operator": operator,
+                "value": value,
+            }
+        )
     return {
         "metadata_condition": {
-            "logical_operator": "and",
-            "conditions": [
-                {
-                    "name": FILE_NAME_METADATA_FIELD,
-                    "comparison_operator": operator,
-                    "value": value,
-                }
-            ],
+            "logical_operator": "and" if match == "all" else "or",
+            "conditions": conditions,
         }
     }

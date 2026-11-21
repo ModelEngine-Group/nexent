@@ -126,7 +126,11 @@ def test_conversation_scope_accepts_v3_metadata_filter():
                 "mode": "inherit",
                 "metadata_filter": {
                     "enabled": True,
-                    "file_name": {"operator": "contains", "value": "合同"},
+                    "match": "any",
+                    "conditions": [
+                        {"operator": "contains", "value": "合同"},
+                        {"operator": "is", "value": "预算.xlsx"},
+                    ],
                 },
             },
         }
@@ -134,7 +138,11 @@ def test_conversation_scope_accepts_v3_metadata_filter():
 
     assert scope.schema_version == 3
     assert scope.aidp.metadata_filter.enabled is True
-    assert scope.aidp.metadata_filter.file_name.value == "合同"
+    assert scope.aidp.metadata_filter.match == "any"
+    assert [item.value for item in scope.aidp.metadata_filter.conditions] == [
+        "合同",
+        "预算.xlsx",
+    ]
 
 
 def test_metadata_filter_requires_v3_and_rejects_disabled_mode():

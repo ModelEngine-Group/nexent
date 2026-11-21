@@ -19,7 +19,7 @@
     "priority": "P1",
     "status": "active",
     "automation": "automated",
-    "objective": "Prove that conversation knowledge scopes accept a v3 AIDP metadata filter with one file-name condition, normalize its operator/value, reject unsafe combinations, and keep v1/v2 records readable without reintroducing file selection.",
+    "objective": "Prove that conversation knowledge scopes accept a v3 AIDP metadata filter with one or more file-name conditions and an all/any match policy, normalize each operator/value, reject unsafe combinations, and keep v1/v2 records readable without reintroducing file selection.",
     "preconditions": [
       "Parse scope payloads directly with the Pydantic contracts; no database, AIDP or model access."
     ],

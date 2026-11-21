@@ -11,7 +11,9 @@ acceptance_bindings:
   - test_v1_scope_defaults_to_no_filter
   - test_v2_file_scope_is_ignored_on_read
   AC-02:
-  - test_v3_filter_normalizes_operator_and_value
+  - test_v3_filter_normalizes_conditions_and_match
+  - test_v3_duplicate_conditions_are_removed
+  - test_legacy_single_file_name_is_folded_into_conditions
   - test_v3_disabled_filter_carries_no_condition
   AC-03:
   - test_filter_rejects_invalid_combinations

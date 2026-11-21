@@ -14,12 +14,12 @@
       "AIDP-FILE-SCOPE-RULE-03",
       "AIDP-FILE-SCOPE-RULE-04"
     ],
-    "title": "AidpSearchTool emits one original_file_name condition and fails closed for graph",
+    "title": "AidpSearchTool emits original_file_name conditions per row and ignores the filter for graph",
     "type": "SDK-UT",
     "priority": "P0",
     "status": "active",
     "automation": "automated",
-    "objective": "Prove that an enabled metadata filter becomes a single FusionSearch metadata_condition on original_file_name with the mapped operator, that graph retrieval and unsupported operators fail closed without an unfiltered request, and that a disabled filter leaves the existing payload untouched.",
+    "objective": "Prove that an enabled metadata filter becomes a FusionSearch metadata_condition on original_file_name with one condition per row and the mapped operator, that graph-enabled retrieval ignores the filter and still issues the request, and that unsupported operators fail closed without a request.",
     "preconditions": [
       "Construct AidpSearchTool directly with a fake AIDP URL and API key; replace the transport so no network call is possible.",
       "Operators follow the confirmed AIDP contract: contains / is / start with / end with."
@@ -42,12 +42,12 @@
       {
         "order": 1,
         "action": "Call forward with an enabled filter and vector retrieval for each supported operator.",
-        "expected": "FusionSearch carries logical_operator and with exactly one original_file_name condition using the mapped wire operator."
+        "expected": "FusionSearch carries one original_file_name condition per row using the mapped wire operator; logical_operator follows the all/any match policy."
       },
       {
         "order": 2,
         "action": "Call forward with an enabled filter while the method includes graph_search.",
-        "expected": "No request is sent and the graph-unsupported denial is returned."
+        "expected": "The FusionSearch request is sent without metadata_condition; the filter is ignored for graph retrieval."
       },
       {
         "order": 3,
@@ -67,13 +67,13 @@
     ],
     "expected_results": [
       "Supported operators map to contains / is / start with / end with in one AND condition.",
-      "Graph-enabled filters and unsupported operators fail closed with zero transport calls.",
+      "Graph-enabled retrieval ignores the filter and still issues the request without metadata_condition.",
       "Disabled filters keep the existing payload.",
       "Malformed filters are rejected at construction."
     ],
     "forbidden_side_effects": [
       "Do not send an unfiltered request when a filter is enabled.",
-      "Do not send graph retrieval under a filter it does not honor.",
+      "Do not attach metadata_condition to a graph-enabled retrieval.",
       "Do not change retrieval method, Top K, thresholds or reranking."
     ],
     "unit_boundary": "sdk/nexent/core/ext_components/aidp/aidp_search_tool.py and metadata_filter.py with the transport replaced",
@@ -89,12 +89,13 @@
       "graph denial",
       "no condition when disabled",
       "operator denial",
-      "construction error"
+      "construction error",
+      "Graph-enabled retrieval sends the request without metadata_condition."
     ],
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "Filter becomes a single condition",
+        "description": "File conditions become original_file_name conditions in the payload.",
         "steps": [
           1
         ],
@@ -108,7 +109,7 @@
       },
       {
         "id": "AC-02",
-        "description": "Graph fails closed",
+        "description": "Graph retrieval ignores the filter.",
         "steps": [
           2
         ],

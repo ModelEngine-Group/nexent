@@ -16,15 +16,15 @@
       },
       {
         "rule_id": "AIDP-FILE-SCOPE-RULE-02",
-        "description": "An enabled filter is saved in conversation knowledge_scope schema v3 as aidp.metadata_filter = {enabled, file_name: {operator, value}}; disabled filters carry no condition. v1/v2 records remain readable and the retired v2 file_scope is ignored. Turning the switch off clears the condition. Scopes remain isolated per conversation, restore on history, and changes apply only to later runs."
+        "description": "An enabled filter is saved in conversation knowledge_scope schema v3 as aidp.metadata_filter = {enabled, match: all|any, conditions: [{operator, value}, ...]}; disabled filters carry no condition. v1/v2 records remain readable and the retired v2 file_scope is ignored. Turning the switch off clears the condition. Scopes remain isolated per conversation, restore on history, and changes apply only to later runs."
       },
       {
         "rule_id": "AIDP-FILE-SCOPE-RULE-03",
-        "description": "The backend revalidates KB READ and the Agent/conversation knowledge range, injects kds_list and metadata_filter into every main and sub-Agent AidpSearchTool, and never lets model or sub-Agent arguments replace them. Vector/full-text retrieval uses one FusionSearch metadata_condition on original_file_name with the confirmed operators (contains / is / start with / end with), applied before recall. Graph retrieval cannot consume the condition, so a filtered run with graph enabled fails closed before an unfiltered request. The product does not claim UUID-level isolation and does not use post-topK trimming as the filter."
+        "description": "The backend revalidates KB READ and the Agent/conversation knowledge range, injects kds_list and metadata_filter into every main and sub-Agent AidpSearchTool, and never lets model or sub-Agent arguments replace them. Vector/full-text retrieval uses one FusionSearch metadata_condition on original_file_name with the confirmed operators (contains / is / start with / end with), applied before recall. Graph retrieval cannot consume the condition; for graph-enabled Agents the drawer hides the advanced filter and the request is sent without metadata_condition. The product does not claim UUID-level isolation and does not use post-topK trimming as the filter."
       },
       {
         "rule_id": "AIDP-FILE-SCOPE-RULE-04",
-        "description": "Enabled-but-empty filters, unsupported operators, graph-enabled retrieval, revoked KB access or upstream-rejected conditions fail closed: no unfiltered fallback, no out-of-scope result is exposed, the user receives a concise readable status, and credentials are never exposed."
+        "description": "Enabled-but-empty filters, unsupported operators, revoked KB access or upstream-rejected conditions fail closed: no unfiltered fallback, no out-of-scope result is exposed, the user receives a concise readable status, and credentials are never exposed."
       },
       {
         "rule_id": "AIDP-FILE-SCOPE-RULE-05",
