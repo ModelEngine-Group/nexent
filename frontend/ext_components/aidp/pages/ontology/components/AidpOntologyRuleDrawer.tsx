@@ -179,21 +179,71 @@ const buildPayload = (values: RuleFormValues): AidpOntologyRulePayload => {
   };
 };
 
-/** Value control depends on both the field type and the operator. */
-const ConditionValueInput: React.FC<{ name: number; fieldType: FieldType }> = ({
+interface ConditionValueInputProps {
+  name: number;
+  fieldType: FieldType;
+  value?: unknown;
+  onChange?: (value: unknown) => void;
+  id?: string;
+  disabled?: boolean;
+}
+
+/** Value control depends on the field type and forwards Form.Item props. */
+const ConditionValueInput: React.FC<ConditionValueInputProps> = ({
   name,
   fieldType,
+  value,
+  onChange,
+  id,
+  disabled,
 }) => {
   const operator = Form.useWatch(["conditions", name, "operator"]) as
     string | undefined;
   if (operator && NO_VALUE_OPERATORS.has(operator)) return null;
   if (fieldType === "number") {
-    return <InputNumber className={styles.fullWidth} precision={3} />;
+    const numberValue =
+      value === null || value === undefined || value === ""
+        ? undefined
+        : typeof value === "number"
+          ? value
+          : Number(value);
+    return (
+      <InputNumber
+        id={id}
+        disabled={disabled}
+        className={styles.fullWidth}
+        precision={3}
+        value={Number.isFinite(numberValue) ? numberValue : undefined}
+        onChange={onChange}
+      />
+    );
   }
   if (fieldType === "date") {
-    return <DatePicker showTime className={styles.fullWidth} />;
+    return (
+      <DatePicker
+        id={id}
+        disabled={disabled}
+        showTime
+        className={styles.fullWidth}
+        value={
+          value === null || value === undefined || value === ""
+            ? null
+            : dayjs.isDayjs(value)
+              ? value
+              : dayjs(String(value))
+        }
+        onChange={onChange}
+      />
+    );
   }
-  return <Input />;
+  return (
+    <Input
+      id={id}
+      disabled={disabled}
+      value={value === null || value === undefined ? "" : String(value)}
+      onChange={onChange}
+    />
+  );
 };
 
 const question = (text: string) => (
@@ -325,16 +375,31 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
   }, [fieldTypeByName, rule]);
 
   const initialValuesRef = useRef(initialValues);
+  const hydratedMode = useRef<"create" | string | null>(null);
 
   useEffect(() => {
     initialValuesRef.current = initialValues;
   }, [initialValues]);
 
   useEffect(() => {
-    if (!open) return;
-    form.resetFields();
-    form.setFieldsValue(initialValuesRef.current);
-  }, [form, open]);
+    if (!open) {
+      hydratedMode.current = null;
+      return;
+    }
+    if (ruleId) {
+      // Wait for the detail response, then hydrate exactly once per rule.
+      if (!rule || hydratedMode.current === ruleId) return;
+      form.resetFields();
+      form.setFieldsValue(initialValues);
+      hydratedMode.current = ruleId;
+      return;
+    }
+    if (hydratedMode.current !== "create") {
+      form.resetFields();
+      form.setFieldsValue(initialValuesRef.current);
+      hydratedMode.current = "create";
+    }
+  }, [form, initialValues, open, rule, ruleId]);
 
   const close = () => {
     setErrorMessage(null);
@@ -451,7 +516,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
             detailQuery.error,
             t,
             t("aidpKnowledge.ontologyRulesLoadFailed")
-          )}
+          ) || t("aidpKnowledge.ontologyRulesLoadFailed")}
         </div>
       ) : (
         <Form<RuleFormValues>

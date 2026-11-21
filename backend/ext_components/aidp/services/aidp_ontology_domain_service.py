@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Ontology domain, entity and relation proxy operations."""
+
 from __future__ import annotations
 
 import logging
@@ -64,7 +65,11 @@ def get_ontology_domain_impl(
     if isinstance(data, dict):
         return data
     domain = payload.get("domain") if isinstance(payload, dict) else None
-    return domain if isinstance(domain, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        domain
+        if isinstance(domain, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def create_ontology_domain_impl(
@@ -84,7 +89,11 @@ def create_ontology_domain_impl(
     )
     _log_business_failure(payload, "create-ontology-domain")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def update_ontology_domain_impl(
@@ -105,7 +114,11 @@ def update_ontology_domain_impl(
     )
     _log_business_failure(payload, "update-ontology-domain")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def delete_ontology_domain_impl(
@@ -131,16 +144,16 @@ def delete_ontology_domain_impl(
         raise
 
 
-def list_ontology_entities_impl(
+def _request_entity_page(
     server_url: str,
     api_key: str,
     domain_id: str,
     *,
-    page: int = 1,
-    page_size: int = 20,
-    keyword: str | None = None,
-    kind: str | None = None,
-    tenant_id: str | None = None,
+    page: int,
+    page_size: int,
+    keyword: str | None,
+    kind: str | None,
+    tenant_id: str | None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"page": page, "size": page_size}
     if keyword and keyword.strip():
@@ -156,9 +169,62 @@ def list_ontology_entities_impl(
         params=params,
     )
     _log_business_failure(payload, "list-ontology-entities")
-    # Confirmed contract puts items/page/page_size/total at the top level; the
-    # generic envelope already accepts that shape as well as data-wrapped ones.
     return _list_envelope(payload, page=page, page_size=page_size)
+
+
+def list_ontology_entities_impl(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: str | None = None,
+    kind: str | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    if not kind:
+        return _request_entity_page(
+            server_url,
+            api_key,
+            domain_id,
+            page=page,
+            page_size=page_size,
+            keyword=keyword,
+            kind=None,
+            tenant_id=tenant_id,
+        )
+
+    # AIDP ignores kind, so aggregate every page and filter locally; otherwise
+    # the type picker receives entities mixed into its options.
+    rows: list[dict[str, Any]] = []
+    fetch_page = 1
+    while fetch_page <= 100:
+        envelope = _request_entity_page(
+            server_url,
+            api_key,
+            domain_id,
+            page=fetch_page,
+            page_size=100,
+            keyword=keyword,
+            kind=kind,
+            tenant_id=tenant_id,
+        )
+        rows.extend(envelope["value"])
+        if not envelope["has_more"]:
+            break
+        fetch_page += 1
+    wanted = kind.lower()
+    filtered = [item for item in rows if str(item.get("kind") or "").lower() == wanted]
+    total = len(filtered)
+    start = max(page - 1, 0) * page_size
+    end = start + page_size
+    return {
+        "value": filtered[start:end],
+        "total_count": total,
+        "has_more": end < total,
+        "total_reliable": True,
+    }
 
 
 def get_ontology_entity_impl(
@@ -182,7 +248,11 @@ def get_ontology_entity_impl(
     if isinstance(data, dict):
         return data
     entity = payload.get("entity") if isinstance(payload, dict) else None
-    return entity if isinstance(entity, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        entity
+        if isinstance(entity, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def create_ontology_entity_impl(
@@ -203,7 +273,11 @@ def create_ontology_entity_impl(
     )
     _log_business_failure(payload, "create-ontology-entity")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def update_ontology_entity_impl(
@@ -225,7 +299,11 @@ def update_ontology_entity_impl(
     )
     _log_business_failure(payload, "update-ontology-entity")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def delete_ontology_entity_impl(
@@ -309,9 +387,7 @@ def list_ontology_relations_impl(
     )
     _log_business_failure(payload, "list-ontology-relations")
     envelope = _list_envelope(payload, page=page, page_size=size)
-    envelope["value"] = [
-        _normalize_relation(item) for item in envelope["value"]
-    ]
+    envelope["value"] = [_normalize_relation(item) for item in envelope["value"]]
     return envelope
 
 
@@ -333,7 +409,11 @@ def create_ontology_relation_impl(
     )
     _log_business_failure(payload, "create-ontology-relation")
     data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    return (
+        data
+        if isinstance(data, dict)
+        else (payload if isinstance(payload, dict) else {})
+    )
 
 
 def delete_ontology_relation_impl(
@@ -358,4 +438,3 @@ def delete_ontology_relation_impl(
         if upstream_status == HTTPStatus.NOT_FOUND:
             return True
         raise
-

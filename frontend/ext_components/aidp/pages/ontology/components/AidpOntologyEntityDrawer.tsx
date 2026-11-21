@@ -346,10 +346,13 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
 
   const typeOptions = useMemo(
     () =>
-      (typesQuery.data?.value ?? []).map((item) => ({
-        value: relationId(item.entity_id),
-        label: item.display_name || item.api_name,
-      })),
+      (typesQuery.data?.value ?? [])
+        // AIDP ignores the kind query parameter, so filter defensively.
+        .filter((item) => item.kind === "type")
+        .map((item) => ({
+          value: relationId(item.entity_id),
+          label: item.display_name || item.api_name,
+        })),
     [typesQuery.data?.value]
   );
 

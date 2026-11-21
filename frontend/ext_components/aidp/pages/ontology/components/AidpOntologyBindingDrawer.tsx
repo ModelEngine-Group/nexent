@@ -91,15 +91,21 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
           aidpOntologyService.createBinding(domainId, String(kdsId))
         )
       );
-      const failed = outcomes.filter(
-        (outcome) => outcome.status === "rejected"
-      ).length;
-      if (failed > 0) {
-        setErrorMessage(
-          t("aidpKnowledge.ontologyBindingBatchPartial", { count: failed })
+      const failures = outcomes.filter(
+        (outcome): outcome is PromiseRejectedResult =>
+          outcome.status === "rejected"
+      );
+      if (failures.length > 0) {
+        const detail = getAidpErrorMessage(
+          failures[0].reason,
+          t,
+          t("aidpKnowledge.ontologyBindingCreateFailed")
         );
-        setSelectedKeys([]);
-        onBound();
+        setErrorMessage(
+          `${t("aidpKnowledge.ontologyBindingBatchFailed", {
+            count: failures.length,
+          })}${detail ? `：${detail}` : ""}`
+        );
         return;
       }
       message.success(t("aidpKnowledge.ontologyBindingCreated"));

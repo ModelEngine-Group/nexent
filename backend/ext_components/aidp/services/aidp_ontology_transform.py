@@ -7,6 +7,7 @@ import endpoint expects the flat uppercase ``DOMAIN_ID / ENTITIES / RELATIONS``
 request table. This module owns the conversion and every pre-submit validation
 so the HTTP layer only has to map the result to a response. It performs no I/O.
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,7 +49,9 @@ class OntologyImportValidationError(ValueError):
 
     def __init__(self, errors: list[dict[str, Any]]):
         self.errors = errors
-        message = errors[0]["message"] if errors else "Ontology import document is invalid"
+        message = (
+            errors[0]["message"] if errors else "Ontology import document is invalid"
+        )
         super().__init__(message)
 
 
@@ -72,7 +75,9 @@ def _clean_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _resolve_export_groups(document: Any, errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _resolve_export_groups(
+    document: Any, errors: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Return the exported domain payloads, unwrapping the dynamic domain key.
 
     A single export file carries one dynamic key named after the ontology
@@ -139,12 +144,20 @@ def _project_entity(
             projected[field] = item[field]
     properties = projected.get("properties")
     if properties is not None and not isinstance(properties, list):
-        errors.append(_issue(index, object_type, api_name, "properties", "properties 必须是数组"))
+        errors.append(
+            _issue(index, object_type, api_name, "properties", "properties 必须是数组")
+        )
         return None
     primary = projected.get("primary_properties")
     if primary is not None and not isinstance(primary, list):
         errors.append(
-            _issue(index, object_type, api_name, "primary_properties", "primary_properties 必须是数组")
+            _issue(
+                index,
+                object_type,
+                api_name,
+                "primary_properties",
+                "primary_properties 必须是数组",
+            )
         )
         return None
     for position, prop in enumerate(properties or []):
@@ -188,7 +201,13 @@ def _resolve_relation_endpoint(
     if declared_kind:
         if declared_kind not in _ONTOLOGY_KINDS:
             errors.append(
-                _issue(index, "relation", api_name, kind_field, f"{kind_field} 只能是 type 或 entity")
+                _issue(
+                    index,
+                    "relation",
+                    api_name,
+                    kind_field,
+                    f"{kind_field} 只能是 type 或 entity",
+                )
             )
             return False
         if endpoint_name not in entity_kinds:
@@ -259,18 +278,36 @@ def _project_relation(
     for field in _EXPORTED_RELATION_FIELDS:
         if field in item:
             projected[field] = item[field]
+    # AIDP auto-created is-a relations can carry an empty display_name; the
+    # import validator rejects them even though the relation itself is valid.
+    if not _clean_text(projected.get("display_name")):
+        projected["display_name"] = api_name
     if not _resolve_relation_endpoint(
-        projected, "source_api_name", "source_kind", entity_kinds, errors, index, api_name
+        projected,
+        "source_api_name",
+        "source_kind",
+        entity_kinds,
+        errors,
+        index,
+        api_name,
     ):
         return None
     if not _resolve_relation_endpoint(
-        projected, "object_api_name", "object_kind", entity_kinds, errors, index, api_name
+        projected,
+        "object_api_name",
+        "object_kind",
+        entity_kinds,
+        errors,
+        index,
+        api_name,
     ):
         return None
     return projected
 
 
-def build_import_request(document: Any, domain_name: str) -> tuple[dict[str, Any], dict[str, int]]:
+def build_import_request(
+    document: Any, domain_name: str
+) -> tuple[dict[str, Any], dict[str, int]]:
     """Convert an exported ontology document into the confirmed import body.
 
     The deployed service wants ``{"<target domain name>": {types, entities,
@@ -301,12 +338,12 @@ def build_import_request(document: Any, domain_name: str) -> tuple[dict[str, Any
         ):
             raw_items = group.get(source_key) or []
             if not isinstance(raw_items, list):
-                errors.append(_issue(None, kind, None, source_key, f"{source_key} 必须是数组"))
+                errors.append(
+                    _issue(None, kind, None, source_key, f"{source_key} 必须是数组")
+                )
                 continue
             for index, item in enumerate(raw_items):
-                projected = _project_entity(
-                    item, kind=kind, index=index, errors=errors
-                )
+                projected = _project_entity(item, kind=kind, index=index, errors=errors)
                 if projected is None:
                     continue
                 key = (projected["api_name"], kind)
@@ -332,7 +369,9 @@ def build_import_request(document: Any, domain_name: str) -> tuple[dict[str, Any
     for group in groups:
         raw_items = group.get("relations") or []
         if not isinstance(raw_items, list):
-            errors.append(_issue(None, "relation", None, "relations", "relations 必须是数组"))
+            errors.append(
+                _issue(None, "relation", None, "relations", "relations 必须是数组")
+            )
             continue
         for index, item in enumerate(raw_items):
             projected = _project_relation(
@@ -373,7 +412,9 @@ def is_async_task_payload(payload: Any) -> bool:
     data = unwrap_payload(payload)
     if not data:
         return False
-    if any(key in data for key in ("imported_count", "failed_count", "types", "entities")):
+    if any(
+        key in data for key in ("imported_count", "failed_count", "types", "entities")
+    ):
         return False
     return bool(data.get("task_id") or data.get("taskId"))
 
@@ -388,7 +429,14 @@ def async_task_summary(payload: Any) -> dict[str, Any]:
 
 
 def _extract_error_message(item: dict[str, Any]) -> str:
-    for key in ("message_zh", "message", "reason_zh", "reason", "message_en", "reason_en"):
+    for key in (
+        "message_zh",
+        "message",
+        "reason_zh",
+        "reason",
+        "message_en",
+        "reason_en",
+    ):
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
