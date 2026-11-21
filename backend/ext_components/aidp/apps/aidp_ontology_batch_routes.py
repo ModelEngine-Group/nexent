@@ -1,11 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Ontology JSON import/export routes."""
+
 from __future__ import annotations
 
 import logging
 from http import HTTPStatus
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -24,9 +25,10 @@ from ext_components.aidp.apps.aidp_ontology_validation import (
     _numeric_domain_id,
     _require_ontology_manager,
 )
-from ext_components.aidp.services.aidp_ontology_batch_service import (
-    export_ontology_impl,
-    import_ontology_impl,
+from ext_components.aidp.services.aidp_ontology_common import (
+    _domain_id_value,
+    _get_ontology_path,
+    _ontology_request,
 )
 from ext_components.aidp.services.aidp_ontology_domain_service import (
     get_ontology_domain_impl,
@@ -45,6 +47,49 @@ from ext_components.aidp.services.aidp_ontology_transform import (
 
 logger = logging.getLogger("aidp_ontology_batch_routes")
 aidp_ontology_batch_router = APIRouter()
+
+
+def export_ontology_impl(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    *,
+    include_properties: bool = True,
+    include_relations: bool = True,
+    kind: str | None = None,
+    tenant_id: str | None = None,
+) -> Any:
+    return _ontology_request(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/batch/export",
+        operation="export-ontology",
+        json_body={
+            "DOMAIN_ID": _domain_id_value(domain_id),
+            "INCLUDE_PROPERTIES": bool(include_properties),
+            "INCLUDE_RELATIONS": bool(include_relations),
+            "KIND": kind,
+        },
+    )
+
+
+def import_ontology_impl(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    body: dict[str, Any],
+    *,
+    tenant_id: str | None = None,
+) -> Any:
+    return _ontology_request(
+        server_url,
+        api_key,
+        "POST",
+        f"{_get_ontology_path(tenant_id)}/{_domain_id_value(domain_id)}/batch/import",
+        operation="import-ontology",
+        json_body=body,
+    )
 
 
 @aidp_ontology_batch_router.post("/domains/{domain_id}/export")
@@ -90,7 +135,9 @@ async def export_ontology(
             owner="config",
         )
     except AppException as error:
-        logger.warning("AIDP export filename lookup failed for domain %s: %s", domain_id, error)
+        logger.warning(
+            "AIDP export filename lookup failed for domain %s: %s", domain_id, error
+        )
         domain = {}
     domain_name = domain.get("name") or domain.get("display_name") or ""
     normalized["filename"] = sanitize_export_filename(
@@ -155,4 +202,3 @@ async def import_ontology(
     result["counts"] = counts
     result["errors"] = normalize_import_errors(payload)
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
-

@@ -7,6 +7,7 @@ The routes are split by resource into sibling modules; this aggregator keeps the
 single ``aidp_ontology_router`` entry point (and therefore every public path)
 unchanged.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -16,9 +17,6 @@ from ext_components.aidp.apps.aidp_ontology_batch_routes import (
 )
 from ext_components.aidp.apps.aidp_ontology_binding_routes import (
     aidp_ontology_binding_router,
-)
-from ext_components.aidp.apps.aidp_ontology_chunk_routes import (
-    aidp_ontology_chunk_router,
 )
 from ext_components.aidp.apps.aidp_ontology_domain_routes import (
     aidp_ontology_domain_router,
@@ -39,7 +37,6 @@ for _resource_router in (
     aidp_ontology_domain_router,
     aidp_ontology_binding_router,
     aidp_ontology_metadata_router,
-    aidp_ontology_chunk_router,
     aidp_ontology_rule_router,
     aidp_ontology_task_router,
     aidp_ontology_batch_router,
