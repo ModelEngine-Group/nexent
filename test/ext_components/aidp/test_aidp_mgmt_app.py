@@ -91,7 +91,13 @@ for mod in (_db_pkg, _db_client):
     sys.modules[mod.__name__] = mod
 
 # Production modules under test
-from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common, aidp_sensitive_word_routes
+from ext_components.aidp.apps import (
+    aidp_chunk_routes,
+    aidp_mgmt_app,
+    aidp_mgmt_common,
+    aidp_sensitive_word_routes,
+    aidp_summary_routes,
+)
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
@@ -3003,7 +3009,7 @@ class TestChunkEndpoints:
         }
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "list_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
                           return_value=page) as list_chunks:
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}"
@@ -3035,7 +3041,7 @@ class TestChunkEndpoints:
         }
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "search_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "search_aidp_chunks_impl",
                           return_value=result) as search_chunks:
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/chunks/search"
@@ -3060,7 +3066,7 @@ class TestChunkEndpoints:
         rows = [{"chunk_id": index} for index in range(20)]
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
-             patch.object(aidp_mgmt_app, "list_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
                           return_value={"value": rows, "total_count": 21}):
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}"
@@ -3078,7 +3084,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
-             patch.object(aidp_mgmt_app, "list_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
                           return_value={"value": [{"chunk_id": 1}, {"chunk_id": 2}]}):
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}"
@@ -3098,7 +3104,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
-             patch.object(aidp_mgmt_app, "list_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl",
                           return_value={"total_count": 1}):
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}",
@@ -3116,7 +3122,7 @@ class TestChunkEndpoints:
         with patch.object(aidp_permission_service, "require_permission",
                           side_effect=aidp_mgmt_app.HTTPException(
                               status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
-             patch.object(aidp_mgmt_app, "list_aidp_chunks_impl") as list_chunks:
+             patch.object(aidp_chunk_routes, "list_aidp_chunks_impl") as list_chunks:
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/chunks?file_uuid={self.FILE_UUID}",
                 headers=_bearer(),
@@ -3133,7 +3139,7 @@ class TestChunkEndpoints:
         chunk = {"chunk_id": 7, "chunk_text": "完整文本", "page_ids": [1]}
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "get_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
                           return_value=chunk) as get_chunk:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks/7",
@@ -3152,7 +3158,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "create_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl",
                           return_value={"chunk_id": "12"}) as create_chunk:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks",
@@ -3175,7 +3181,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "create_aidp_chunk_impl") as create_chunk:
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl") as create_chunk:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks",
                 headers=_bearer(),
@@ -3192,7 +3198,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "create_aidp_chunk_impl") as create_chunk:
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl") as create_chunk:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks",
                 headers=_bearer(),
@@ -3219,9 +3225,9 @@ class TestChunkEndpoints:
         }
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "get_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
                           return_value={"chunk_id": 5, "chunk_type": "TEXT"}) as get_chunk, \
-             patch.object(aidp_mgmt_app, "update_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl",
                           return_value=updated) as update_chunk:
             response = client.patch(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
@@ -3248,9 +3254,9 @@ class TestChunkEndpoints:
             current["chunk_type"] = chunk_type
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "get_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
                           return_value=current), \
-             patch.object(aidp_mgmt_app, "update_aidp_chunk_impl") as update_chunk:
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl") as update_chunk:
             response = client.patch(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
                 headers=_bearer(),
@@ -3269,9 +3275,9 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "get_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "get_aidp_chunk_impl",
                           return_value={"chunk_id": 5, "chunk_type": chunk_type}), \
-             patch.object(aidp_mgmt_app, "update_aidp_chunk_impl",
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl",
                           return_value={"chunk_id": 5, "chunk_type": "TEXT"}) as update_chunk:
             response = client.patch(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
@@ -3290,7 +3296,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "update_aidp_chunk_impl") as update_chunk:
+             patch.object(aidp_chunk_routes, "update_aidp_chunk_impl") as update_chunk:
             response = client.patch(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks/5",
                 headers=_bearer(),
@@ -3308,7 +3314,7 @@ class TestChunkEndpoints:
         with patch.object(aidp_permission_service, "require_permission",
                           side_effect=aidp_mgmt_app.HTTPException(
                               status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
-             patch.object(aidp_mgmt_app, "create_aidp_chunk_impl") as create_chunk:
+             patch.object(aidp_chunk_routes, "create_aidp_chunk_impl") as create_chunk:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks",
                 headers=_bearer(),
@@ -3325,7 +3331,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "remove_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl",
                           return_value={}) as remove_chunks:
             response = client.request(
                 "DELETE",
@@ -3347,7 +3353,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "remove_aidp_chunks_impl") as remove_chunks:
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl") as remove_chunks:
             response = client.request(
                 "DELETE",
                 "/aidp-mgmt/knowledge-bases/kb-1/chunks",
@@ -3366,7 +3372,7 @@ class TestChunkEndpoints:
         chunk_ids = list(range(2000))
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "remove_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl",
                           return_value={}) as remove_chunks:
             response = client.request(
                 "DELETE",
@@ -3385,7 +3391,7 @@ class TestChunkEndpoints:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "remove_aidp_chunks_impl",
+             patch.object(aidp_chunk_routes, "remove_aidp_chunks_impl",
                           side_effect=AppException(
                               ErrorCode.AIDP_SERVICE_ERROR, "upstream down")):
             response = client.request(
@@ -3969,7 +3975,7 @@ class TestChunkImageEndpoint:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "get_aidp_image_impl",
+             patch.object(aidp_chunk_routes, "get_aidp_image_impl",
                           return_value=(self.PNG_BYTES, "image/png")) as view_image:
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/images/{self.FILE_ID}",
@@ -4083,7 +4089,7 @@ class TestFileSummaryEndpoints:
         payload = {"result": {"summary_status": "pending"}}
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "get_aidp_file_summary_impl",
+             patch.object(aidp_summary_routes, "get_aidp_file_summary_impl",
                           return_value=payload) as get_summary:
             response = _client().get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/documents/{self.FILE_UUID}/summary",
@@ -4107,7 +4113,7 @@ class TestFileSummaryEndpoints:
         }
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")) as mock_perm, \
-             patch.object(aidp_mgmt_app, "retry_aidp_file_summaries_impl",
+             patch.object(aidp_summary_routes, "retry_aidp_file_summaries_impl",
                           return_value=result) as retry_summary:
             response = _client().post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
@@ -4129,7 +4135,7 @@ class TestFileSummaryEndpoints:
         for payload in ({"file_uuids": []}, {"file_uuids": ["not-a-uuid"]}):
             with patch.object(aidp_permission_service, "require_permission",
                               return_value=MagicMock(permission="EDIT")), \
-                 patch.object(aidp_mgmt_app,
+                 patch.object(aidp_summary_routes,
                               "retry_aidp_file_summaries_impl") as retry_summary:
                 response = _client().post(
                     "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
@@ -4146,7 +4152,7 @@ class TestFileSummaryEndpoints:
         with patch.object(aidp_permission_service, "require_permission",
                           side_effect=aidp_mgmt_app.HTTPException(
                               status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
-             patch.object(aidp_mgmt_app, "get_aidp_file_summary_impl") as get_summary:
+             patch.object(aidp_summary_routes, "get_aidp_file_summary_impl") as get_summary:
             response = _client().get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/documents/{self.FILE_UUID}/summary",
                 headers=_bearer(),
@@ -4162,7 +4168,7 @@ class TestFileSummaryEndpoints:
         with patch.object(aidp_permission_service, "require_permission",
                           side_effect=aidp_mgmt_app.HTTPException(
                               status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
-             patch.object(aidp_mgmt_app,
+             patch.object(aidp_summary_routes,
                           "retry_aidp_file_summaries_impl") as retry_summary:
             response = _client().post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",

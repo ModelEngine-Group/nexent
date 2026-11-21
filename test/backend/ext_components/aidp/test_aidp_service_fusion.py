@@ -29,6 +29,14 @@ def fusion():
     return importlib.import_module("ext_components.aidp.services.aidp_service")
 
 
+@pytest.fixture
+def chunk_service():
+    """Freshly imported split chunk service (search lives there now)."""
+    if "ext_components.aidp.services.aidp_chunk_service" in sys.modules:
+        del sys.modules["ext_components.aidp.services.aidp_chunk_service"]
+    return importlib.import_module("ext_components.aidp.services.aidp_chunk_service")
+
+
 def _install_client(monkeypatch, fusion, response) -> MagicMock:
     """Swap the shared http client for one returning ``response`` on POST."""
     client = MagicMock()
@@ -134,16 +142,21 @@ class TestFusionSearchImpl:
 class TestChunkSearchImpl:
     """The dedicated chunk search path reuses the SDK payload builder."""
 
-    def test_builds_file_name_condition_and_maps_hits(self, fusion, monkeypatch):
+    def test_builds_file_name_condition_and_maps_hits(
+        self, chunk_service, monkeypatch
+    ):
         captured = {}
 
-        def fake_request(server_url, api_key, method, path, operation, *, params=None, json_body=None):
+        def fake_request(
+            server_url, api_key, method, path, *, context=None,
+            params=None, json_body=None,
+        ):
             captured.update({
                 "server_url": server_url,
                 "api_key": api_key,
                 "method": method,
                 "path": path,
-                "operation": operation,
+                "context": context,
                 "payload": json_body,
             })
             return {
@@ -166,9 +179,9 @@ class TestChunkSearchImpl:
                 ]
             }
 
-        monkeypatch.setattr(fusion, "_request_aidp_json", fake_request)
+        monkeypatch.setattr(chunk_service, "_request_aidp_json", fake_request)
 
-        result = fusion.search_aidp_chunks_impl(
+        result = chunk_service.search_aidp_chunks_impl(
             SERVER_URL, API_KEY, "aidp-kb-demo", "演示.pdf", "检索", top_k=5,
             tenant_id="aidp",
         )
@@ -196,13 +209,15 @@ class TestChunkSearchImpl:
         assert result["value"][0]["page_ids"] == [2]
         assert result["value"][0]["metadata"] == {"章节": "检索指标"}
 
-    def test_non_list_result_raises_response_error(self, fusion, monkeypatch):
+    def test_non_list_result_raises_response_error(
+        self, chunk_service, monkeypatch
+    ):
         monkeypatch.setattr(
-            fusion, "_request_aidp_json",
+            chunk_service, "_request_aidp_json",
             lambda *args, **kwargs: {"result": {"unexpected": True}},
         )
-        with pytest.raises(fusion.AppException) as exc_info:
-            fusion.search_aidp_chunks_impl(
+        with pytest.raises(chunk_service.AppException) as exc_info:
+            chunk_service.search_aidp_chunks_impl(
                 SERVER_URL, API_KEY, "aidp-kb-demo", "演示.pdf", "检索",
             )
-        assert exc_info.value.error_code == fusion.ErrorCode.AIDP_RESPONSE_ERROR
+        assert exc_info.value.error_code == chunk_service.ErrorCode.AIDP_RESPONSE_ERROR

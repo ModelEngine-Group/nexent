@@ -45,6 +45,26 @@ def aidp_service_module():
     http_client_mod.http_client_manager = MagicMock()
     register_module("nexent.utils.http_client_manager", http_client_mod)
 
+    # The retrieval policy is an SDK dependency; stub it so the module loads
+    # without a full SDK install (the search payload itself is covered by
+    # test_aidp_service_fusion.py against the real module).
+    for _pkg in (
+        "nexent.core",
+        "nexent.core.ext_components",
+        "nexent.core.ext_components.aidp",
+    ):
+        _pkg_mod = ModuleType(_pkg)
+        _pkg_mod.__path__ = []
+        register_module(_pkg, _pkg_mod)
+    retrieval_config_mod = ModuleType(
+        "nexent.core.ext_components.aidp.retrieval_config"
+    )
+    retrieval_config_mod.build_payload = MagicMock(return_value={})
+    retrieval_config_mod.resolve_config = MagicMock(return_value={})
+    register_module(
+        "nexent.core.ext_components.aidp.retrieval_config", retrieval_config_mod
+    )
+
     backend_pkg = ModuleType("backend")
     backend_pkg.__path__ = [os.path.join(PROJECT_ROOT, "backend")]
     register_module("backend", backend_pkg)
@@ -69,12 +89,38 @@ def aidp_service_module():
             "backend",
             "nexent.utils.http_client_manager",
             "nexent.utils",
+            "nexent.core.ext_components.aidp.retrieval_config",
+            "nexent.core.ext_components.aidp",
+            "nexent.core.ext_components",
+            "nexent.core",
             "nexent",
         ]:
             if name in original_modules:
                 sys.modules[name] = original_modules[name]
             else:
                 sys.modules.pop(name, None)
+
+
+@pytest.fixture
+def aidp_chunk_service_module(aidp_service_module):
+    """Load the split chunk service against the same stubbed SDK surface."""
+    import importlib
+
+    module_name = "ext_components.aidp.services.aidp_chunk_service"
+    sys.modules.pop(module_name, None)
+    yield importlib.import_module(module_name)
+    sys.modules.pop(module_name, None)
+
+
+@pytest.fixture
+def aidp_summary_service_module(aidp_service_module):
+    """Load the split summary service against the same stubbed SDK surface."""
+    import importlib
+
+    module_name = "ext_components.aidp.services.aidp_summary_service"
+    sys.modules.pop(module_name, None)
+    yield importlib.import_module(module_name)
+    sys.modules.pop(module_name, None)
 
 
 class TestFetchAidpKnowledgeBasesImpl:
@@ -4096,10 +4142,14 @@ class TestChunkImpls:
     """The chunk adapter forwards exactly the fields the AIDP contract declares."""
 
     @staticmethod
-    def _install_client(aidp_service_module, client):
+    def _install_client(aidp_chunk_service_module, client):
+        import ext_components.aidp.services.aidp_client as aidp_client
+
         mock_manager = MagicMock()
         mock_manager.get_sync_client.return_value = client
-        aidp_service_module.http_client_manager = mock_manager
+        # JSON requests go through the shared client helper.
+        aidp_client.http_client_manager = mock_manager
+        aidp_chunk_service_module.aidp_client.http_client_manager = mock_manager
         return mock_manager
 
     @staticmethod
@@ -4111,7 +4161,7 @@ class TestChunkImpls:
         return response
 
     def test_list_forwards_file_scoped_query_and_normalizes_ids(
-        self, aidp_service_module
+        self, aidp_chunk_service_module
     ):
         response = self._json_response({
             "value": [
@@ -4128,21 +4178,21 @@ class TestChunkImpls:
             "next_link": "/next",
         })
         mock_client = MagicMock()
-        mock_client.get.return_value = response
-        self._install_client(aidp_service_module, mock_client)
+        mock_client.request.return_value = response
+        self._install_client(aidp_chunk_service_module, mock_client)
 
-        result = aidp_service_module.list_aidp_chunks_impl(
+        result = aidp_chunk_service_module.list_aidp_chunks_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1",
             "fdde6c86-39b2-4ed5-9490-45a22d3931bc", 2, 20,
         )
 
-        mock_client.get.assert_called_once()
-        url = mock_client.get.call_args.args[0]
+        mock_client.request.assert_called_once()
+        url = mock_client.request.call_args.args[1]
         assert url == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
             "/KnowledgeBases/kb-1/Chunks"
         )
-        assert mock_client.get.call_args.kwargs["params"] == {
+        assert mock_client.request.call_args.kwargs["params"] == {
             "file_uuid": "fdde6c86-39b2-4ed5-9490-45a22d3931bc",
             "page": 2,
             "page_size": 20,
@@ -4154,128 +4204,128 @@ class TestChunkImpls:
         assert result["value"][1]["page_ids"] == []
         assert result["value"][1]["metadata"] == {}
 
-    def test_list_rejects_payload_without_chunk_list(self, aidp_service_module):
+    def test_list_rejects_payload_without_chunk_list(self, aidp_chunk_service_module):
         mock_client = MagicMock()
-        mock_client.get.return_value = self._json_response(
+        mock_client.request.return_value = self._json_response(
             {"unexpected": True}, content=b'{"unexpected": true}'
         )
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_chunk_service_module, mock_client)
 
         with pytest.raises(AppException) as exc_info:
-            aidp_service_module.list_aidp_chunks_impl(
+            aidp_chunk_service_module.list_aidp_chunks_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
             )
 
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
-    def test_detail_reads_chunk_scoped_path(self, aidp_service_module):
+    def test_detail_reads_chunk_scoped_path(self, aidp_chunk_service_module):
         mock_client = MagicMock()
-        mock_client.get.return_value = self._json_response({
+        mock_client.request.return_value = self._json_response({
             "chunk_id": "9",
             "chunk_text": "完整文本",
             "file_name": "西游记.pdf",
         })
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_chunk_service_module, mock_client)
 
-        result = aidp_service_module.get_aidp_chunk_impl(
+        result = aidp_chunk_service_module.get_aidp_chunk_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", 9
         )
 
-        assert mock_client.get.call_args.args[0] == (
+        assert mock_client.request.call_args.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
             "/KnowledgeBases/kb-1/Chunks/9"
         )
         assert result["chunk_id"] == 9
         assert result["chunk_text"] == "完整文本"
 
-    def test_create_sends_only_file_uuid_and_text(self, aidp_service_module):
+    def test_create_sends_only_file_uuid_and_text(self, aidp_chunk_service_module):
         mock_client = MagicMock()
-        mock_client.put.return_value = self._json_response({"chunk_id": "12"})
-        self._install_client(aidp_service_module, mock_client)
+        mock_client.request.return_value = self._json_response({"chunk_id": "12"})
+        self._install_client(aidp_chunk_service_module, mock_client)
 
-        result = aidp_service_module.create_aidp_chunk_impl(
+        result = aidp_chunk_service_module.create_aidp_chunk_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1", "新文本"
         )
 
-        assert mock_client.put.call_args.args[0] == (
+        assert mock_client.request.call_args.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
             "/KnowledgeBases/kb-1/Chunks"
         )
-        assert mock_client.put.call_args.kwargs["json"] == {
+        assert mock_client.request.call_args.kwargs["json"] == {
             "file_uuid": "uuid-1",
             "chunk_text": "新文本",
         }
         assert result == {"chunk_id": 12}
 
     def test_update_sends_only_chunk_text_and_returns_full_chunk(
-        self, aidp_service_module
+        self, aidp_chunk_service_module
     ):
         mock_client = MagicMock()
-        mock_client.patch.return_value = self._json_response({
+        mock_client.request.return_value = self._json_response({
             "chunk_id": "5",
             "chunk_text": "改后文本",
             "chunk_type": "TEXT",
             "page_ids": ["1", "2"],
             "metadata": {"section": "a"},
         })
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_chunk_service_module, mock_client)
 
-        result = aidp_service_module.update_aidp_chunk_impl(
+        result = aidp_chunk_service_module.update_aidp_chunk_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", 5, "改后文本"
         )
 
-        assert mock_client.patch.call_args.args[0] == (
+        assert mock_client.request.call_args.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
             "/KnowledgeBases/kb-1/Chunks/5"
         )
-        assert mock_client.patch.call_args.kwargs["json"] == {"chunk_text": "改后文本"}
+        assert mock_client.request.call_args.kwargs["json"] == {"chunk_text": "改后文本"}
         assert result["chunk_id"] == 5
         assert result["chunk_text"] == "改后文本"
         assert result["page_ids"] == [1, 2]
 
-    def test_update_tolerates_empty_success_body(self, aidp_service_module):
+    def test_update_tolerates_empty_success_body(self, aidp_chunk_service_module):
         mock_client = MagicMock()
-        mock_client.patch.return_value = self._json_response({}, content=b"")
-        self._install_client(aidp_service_module, mock_client)
+        mock_client.request.return_value = self._json_response({}, content=b"")
+        self._install_client(aidp_chunk_service_module, mock_client)
 
-        result = aidp_service_module.update_aidp_chunk_impl(
+        result = aidp_chunk_service_module.update_aidp_chunk_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", 5, "改后文本"
         )
 
         assert result == {}
 
-    def test_remove_uses_post_remove_with_json_body_and_204(self, aidp_service_module):
+    def test_remove_uses_post_remove_with_json_body_and_204(self, aidp_chunk_service_module):
         mock_client = MagicMock()
-        mock_client.post.return_value = self._json_response(
+        mock_client.request.return_value = self._json_response(
             {}, status_code=204, content=b""
         )
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_chunk_service_module, mock_client)
 
-        result = aidp_service_module.remove_aidp_chunks_impl(
+        result = aidp_chunk_service_module.remove_aidp_chunks_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", [1, 2, 3]
         )
 
         # The 2026-11-20 verified contract serves removal on POST
         # /Chunks/Remove; DELETE /Chunks answers 405 on the real deployment.
-        assert mock_client.post.call_args.args == (
+        assert mock_client.request.call_args.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
-            "/KnowledgeBases/kb-1/Chunks/Remove",
+            "/KnowledgeBases/kb-1/Chunks/Remove"
         )
-        assert mock_client.post.call_args.kwargs["json"] == {"chunk_ids": [1, 2, 3]}
+        assert mock_client.request.call_args.kwargs["json"] == {"chunk_ids": [1, 2, 3]}
         assert result == {}
 
-    def test_upstream_failure_is_not_reported_as_success(self, aidp_service_module):
+    def test_upstream_failure_is_not_reported_as_success(self, aidp_chunk_service_module):
         response = MagicMock(status_code=500)
         response.json.return_value = {"message": "inkernel error"}
         response.raise_for_status.side_effect = httpx.HTTPStatusError(
             "boom", request=MagicMock(), response=response
         )
         mock_client = MagicMock()
-        mock_client.patch.return_value = response
-        self._install_client(aidp_service_module, mock_client)
+        mock_client.request.return_value = response
+        self._install_client(aidp_chunk_service_module, mock_client)
 
         with pytest.raises(AppException) as exc_info:
-            aidp_service_module.update_aidp_chunk_impl(
+            aidp_chunk_service_module.update_aidp_chunk_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", 5, "文本"
             )
 
@@ -4287,10 +4337,12 @@ class TestFileSummaryImpls:
     """File summary reads and retries stay on the documented AIDP paths."""
 
     @staticmethod
-    def _install_client(aidp_service_module, client):
+    def _install_client(aidp_summary_service_module, client):
+        import ext_components.aidp.services.aidp_client as aidp_client
+
         mock_manager = MagicMock()
         mock_manager.get_sync_client.return_value = client
-        aidp_service_module.http_client_manager = mock_manager
+        aidp_client.http_client_manager = mock_manager
 
     @staticmethod
     def _json_response(payload, status_code=200):
@@ -4301,23 +4353,23 @@ class TestFileSummaryImpls:
         return response
 
     def test_summary_reads_file_scoped_path_and_normalizes_status(
-        self, aidp_service_module
+        self, aidp_summary_service_module
     ):
         mock_client = MagicMock()
-        mock_client.get.return_value = self._json_response({
+        mock_client.request.return_value = self._json_response({
             "result": {
                 "summary_status": "PENDING",
                 "summary_text": "摘要正文",
                 "summary_model": "qwen3",
             }
         })
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_summary_service_module, mock_client)
 
-        result = aidp_service_module.get_aidp_file_summary_impl(
+        result = aidp_summary_service_module.get_aidp_file_summary_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
         )
 
-        assert mock_client.get.call_args.args[0] == (
+        assert mock_client.request.call_args.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
             "/KnowledgeBases/kb-1/KnowledgeFiles/file-1/Summary"
         )
@@ -4330,22 +4382,22 @@ class TestFileSummaryImpls:
         }
 
     def test_summary_lifts_top_level_fields_and_keeps_empty_result(
-        self, aidp_service_module
+        self, aidp_summary_service_module
     ):
         mock_client = MagicMock()
-        mock_client.get.side_effect = [
+        mock_client.request.side_effect = [
             self._json_response({
                 "summary_status": "FAILED",
                 "summary_text": "",
             }),
             self._json_response({"result": {}}),
         ]
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_summary_service_module, mock_client)
 
-        lifted = aidp_service_module.get_aidp_file_summary_impl(
+        lifted = aidp_summary_service_module.get_aidp_file_summary_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
         )
-        empty = aidp_service_module.get_aidp_file_summary_impl(
+        empty = aidp_summary_service_module.get_aidp_file_summary_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "file-1"
         )
 
@@ -4353,27 +4405,27 @@ class TestFileSummaryImpls:
         assert empty == {"result": {}}
 
     def test_summary_retry_posts_file_uuid_array_and_preserves_lists(
-        self, aidp_service_module
+        self, aidp_summary_service_module
     ):
         mock_client = MagicMock()
-        mock_client.post.return_value = self._json_response({
+        mock_client.request.return_value = self._json_response({
             "partial_success_list": [{"file_uuid": "file-1"}],
             "failed_list": [{"file_uuid": "file-2", "err_code": 500}],
         })
-        self._install_client(aidp_service_module, mock_client)
+        self._install_client(aidp_summary_service_module, mock_client)
 
-        result = aidp_service_module.retry_aidp_file_summaries_impl(
+        result = aidp_summary_service_module.retry_aidp_file_summaries_impl(
             "http://127.0.0.1:30081",
             "jwt-token",
             "kb-1",
             ["file-1", "file-2"],
         )
 
-        assert mock_client.post.call_args.args[0] == (
+        assert mock_client.request.call_args.args[1] == (
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
             "/KnowledgeBases/kb-1/KnowledgeFiles/RetrySummary"
         )
-        assert mock_client.post.call_args.kwargs["json"] == {
+        assert mock_client.request.call_args.kwargs["json"] == {
             "file_uuids": ["file-1", "file-2"]
         }
         assert result["partial_success_list"] == [{"file_uuid": "file-1"}]

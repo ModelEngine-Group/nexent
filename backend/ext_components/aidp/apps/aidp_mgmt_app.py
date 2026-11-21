@@ -45,7 +45,10 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.roles import has_any_role
 from ext_components.aidp.apps.aidp_folder_routes import aidp_folder_router
+from ext_components.aidp.apps.aidp_chunk_routes import aidp_chunk_router
 from ext_components.aidp.apps.aidp_mgmt_common import (
+    AIDP_FILE_UUID_PATTERN,
+    AidpFileUuid,
     _auth,
     _credentials,
     _normalize_folder_path,
@@ -54,6 +57,7 @@ from ext_components.aidp.apps.aidp_mgmt_common import (
 from ext_components.aidp.apps.aidp_sensitive_word_routes import (
     aidp_sensitive_word_router,
 )
+from ext_components.aidp.apps.aidp_summary_routes import aidp_summary_router
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -76,32 +80,21 @@ from ext_components.aidp.services.aidp_permission_service import (
     READ_ONLY,
 )
 from ext_components.aidp.services.aidp_service import (
-    AIDP_CHUNK_REMOVE_MAX_IDS,
-    AIDP_CHUNK_TEXT_MAX_LENGTH,
     _timestamp_to_iso,
     count_aidp_docs_impl,
-    create_aidp_chunk_impl,
     create_aidp_kb_impl,
-    get_aidp_chunk_impl,
-    get_aidp_file_summary_impl,
     get_aidp_graph_template_impl,
-    get_aidp_image_impl,
     get_aidp_kb_impl,
     list_aidp_channels_impl,
-    list_aidp_chunks_impl,
     list_aidp_doc_history_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
     merge_graph_config_update,
-    remove_aidp_chunks_impl,
     remove_aidp_docs_impl,
     retry_aidp_docs_impl,
-    retry_aidp_file_summaries_impl,
-    search_aidp_chunks_impl,
     select_aidp_channel,
     stream_aidp_doc_impl,
     stream_aidp_preview_impl,
-    update_aidp_chunk_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
@@ -116,6 +109,8 @@ from management.services.permission.identity.display import enrich_cas_usernames
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 aidp_mgmt_router.include_router(aidp_folder_router)
 aidp_mgmt_router.include_router(aidp_sensitive_word_router)
+aidp_mgmt_router.include_router(aidp_chunk_router)
+aidp_mgmt_router.include_router(aidp_summary_router)
 logger = logging.getLogger("aidp_mgmt_app")
 
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
@@ -389,22 +384,6 @@ class SetPermissionRequest(BaseModel):
         return self
 
 
-# AIDP reports file_uuid in two shapes across deployments: 32-char hex
-# without dashes (the 2026-11-20 contract run) and the standard 36-char UUID
-# with dashes (earlier environments). Every UUID the page sends came from an
-# AIDP response, so the proxy forwards it verbatim and only enforces this
-# loose shape instead of normalizing through uuid.UUID (which would rewrite
-# the 32-hex form and break the upstream lookup).
-AIDP_FILE_UUID_PATTERN = r"^[0-9a-fA-F-]{32,36}$"
-AidpFileUuid = Annotated[
-    str,
-    Field(
-        pattern=AIDP_FILE_UUID_PATTERN,
-        description="AIDP file UUID exactly as returned upstream",
-    ),
-]
-
-
 class RemoveAidpDocumentsRequest(BaseModel):
 
     file_uuids: List[AidpFileUuid] = Field(..., min_length=1, description="AIDP file UUIDs")
@@ -420,23 +399,6 @@ class DownloadAidpDocumentRequest(BaseModel):
     """AIDP file selected for download."""
 
     file_uuid: AidpFileUuid = Field(..., description="AIDP file UUID")
-
-
-def _normalize_chunk_text(value: str) -> str:
-    """Trim chunk text and enforce the AIDP 1-10240 character contract.
-
-    The AIDP contract counts characters, not bytes, and rejects an empty text.
-    Both rules are enforced here so an invalid write never reaches AIDP; the
-    returned value is the trimmed text that actually gets stored.
-    """
-    text = value.strip()
-    if not text:
-        raise ValueError("chunk_text must not be blank")
-    if len(text) > AIDP_CHUNK_TEXT_MAX_LENGTH:
-        raise ValueError(
-            f"chunk_text must not exceed {AIDP_CHUNK_TEXT_MAX_LENGTH} characters"
-        )
-    return text
 
 
 def _validate_summary_update(model) -> None:
@@ -461,54 +423,6 @@ def _validate_summary_update(model) -> None:
     else:
         model.summary_model = None
     model.summary_preview = bool(model.summary_enable)
-
-
-class CreateAidpChunkRequest(BaseModel):
-    """Body for adding one chunk to a file."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    file_uuid: AidpFileUuid = Field(..., description="AIDP file UUID the chunk belongs to")
-    chunk_text: str = Field(..., description="Chunk text (1-10240 characters)")
-
-    @field_validator("chunk_text")
-    @classmethod
-    def validate_chunk_text(cls, value: str) -> str:
-        return _normalize_chunk_text(value)
-
-
-class UpdateAidpChunkRequest(BaseModel):
-    """Body for updating one chunk's text; no other field is writable."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    chunk_text: str = Field(..., description="Chunk text (1-10240 characters)")
-
-    @field_validator("chunk_text")
-    @classmethod
-    def validate_chunk_text(cls, value: str) -> str:
-        return _normalize_chunk_text(value)
-
-
-class RetryAidpSummariesRequest(BaseModel):
-    """Body for retrying summary generation; the array is never empty."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    file_uuids: List[AidpFileUuid] = Field(..., min_length=1, description="AIDP file UUIDs")
-
-
-class RemoveAidpChunksRequest(BaseModel):
-    """Body for removing chunks; AIDP accepts one batch of 1-2000 ids."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    chunk_ids: List[Annotated[int, Field(strict=True, ge=0)]] = Field(
-        ...,
-        min_length=1,
-        max_length=AIDP_CHUNK_REMOVE_MAX_IDS,
-        description=f"Chunk ids (1-{AIDP_CHUNK_REMOVE_MAX_IDS} items)",
-    )
 
 
 def _infer_is_multimodal(detail: dict) -> bool:
@@ -1469,316 +1383,6 @@ async def preview_document(
         file_uuid,
     )
     return _stream_aidp_preview(aidp_response)
-@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/chunks")
-async def list_chunks(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[str, Query(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
-    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 20,
-) -> JSONResponse:
-    """List the chunks AIDP generated for one file.
-
-    AIDP addresses the list by ``file_uuid`` only: the contract has no keyword
-    filter, so the page cannot offer a content search. Its ``next_link`` is
-    returned on every page, including the last, and ``total_count`` is the
-    current page's row count rather than a global total (both verified against
-    the real 2026-11-18 deployment), so ``has_more`` is derived from the page
-    being full instead of either field.
-    """
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-
-    server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-list-chunks",
-        list_aidp_chunks_impl,
-        server_url,
-        api_key,
-        kds_id,
-        str(file_uuid),
-        page,
-        page_size,
-        lane="control-io",
-        owner="config",
-    )
-    payload = dict(result or {})
-    rows = payload.get("value")
-    if not isinstance(rows, list):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "Unexpected AIDP chunk list response format",
-        )
-    # A full page means another page may exist; a short page (or an empty
-    # out-of-range page) is the last one. This deliberately over-reports one
-    # page when the row count is an exact multiple of page_size; the following
-    # fetch then returns an empty page and stops.
-    total = (page - 1) * page_size + len(rows)
-    payload.update({
-        "total_count": total,
-        "has_more": len(rows) >= page_size,
-        "total_reliable": False,
-    })
-    return JSONResponse(status_code=HTTPStatus.OK, content=payload)
-
-
-@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/chunks/search")
-async def search_chunks(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[str, Query(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
-    file_name: Annotated[
-        str,
-        Query(
-            min_length=1,
-            max_length=255,
-            description="Current file name used by the AIDP file-name filter",
-        ),
-    ],
-    query: Annotated[
-        str,
-        Query(min_length=1, max_length=2048, description="Chunk content query"),
-    ],
-    topk: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> JSONResponse:
-    """Search chunk content in one file through AIDP FusionSearch.
-
-    AIDP's list endpoint has no keyword parameter, so this dedicated route
-    builds a FusionSearch request constrained by the documented
-    ``metadata_condition.original_file_name`` filter. ``file_uuid`` keeps the
-    route tied to the current file; ``file_name`` is the filter value.
-    """
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-
-    server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-search-chunks",
-        search_aidp_chunks_impl,
-        server_url,
-        api_key,
-        kds_id,
-        file_name,
-        query,
-        topk,
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
-@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/images/{file_id}")
-async def view_chunk_image(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_id: Annotated[
-        str,
-        Path(
-            pattern=r"^[A-Za-z0-9_-]+\.png$",
-            description="AIDP image file id: {file_ino_no}_{image_uuid}.png",
-        ),
-    ],
-) -> Response:
-    """Return an image chunk's picture as PNG bytes through AIDP ViewImage.
-
-    The ``file_id`` is derived on the page from the chunk's ``file_url``
-    (``{kds_id}/{file_ino_no}/{image_uuid}.png`` → ``{file_ino_no}_
-    {image_uuid}.png``). The upstream answer is binary, so the proxy returns
-    the bytes with AIDP's content type instead of a JSON body.
-    """
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-
-    server_url, api_key = _credentials()
-    content, content_type = await run_blocking(
-        "aidp-view-image",
-        get_aidp_image_impl,
-        server_url,
-        api_key,
-        kds_id,
-        file_id,
-        lane="control-io",
-        owner="config",
-    )
-    return Response(content=content, media_type=content_type)
-
-
-@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/chunks")
-async def create_chunk(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    body: CreateAidpChunkRequest,
-) -> JSONResponse:
-    """Add one text chunk to a file; only ``file_uuid`` and text are forwarded."""
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-
-    server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-create-chunk",
-        create_aidp_chunk_impl,
-        server_url,
-        api_key,
-        kds_id,
-        str(body.file_uuid),
-        body.chunk_text,
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
-@aidp_mgmt_router.delete("/knowledge-bases/{kds_id}/chunks")
-async def remove_chunks(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    body: RemoveAidpChunksRequest,
-) -> Response:
-    """Remove up to 2000 chunks; AIDP receives a JSON body on POST /Chunks/Remove.
-
-    AIDP answers ``204 No Content``, so this proxy mirrors the empty success
-    response instead of inventing a result payload.
-    """
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-
-    server_url, api_key = _credentials()
-    await run_blocking(
-        "aidp-remove-chunks",
-        remove_aidp_chunks_impl,
-        server_url,
-        api_key,
-        kds_id,
-        body.chunk_ids,
-        lane="control-io",
-        owner="config",
-    )
-    return Response(status_code=HTTPStatus.NO_CONTENT)
-
-
-@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/chunks/{chunk_id}")
-async def get_chunk(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    chunk_id: Annotated[int, Path(ge=0, description="AIDP chunk ID")],
-) -> JSONResponse:
-    """Read one chunk's full text and read-only metadata."""
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-
-    server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-get-chunk",
-        get_aidp_chunk_impl,
-        server_url,
-        api_key,
-        kds_id,
-        chunk_id,
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
-@aidp_mgmt_router.patch("/knowledge-bases/{kds_id}/chunks/{chunk_id}")
-async def update_chunk(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    chunk_id: Annotated[int, Path(ge=0, description="AIDP chunk ID")],
-    body: UpdateAidpChunkRequest,
-) -> JSONResponse:
-    """Update one chunk's text; AIDP declares no other writable field."""
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-
-    server_url, api_key = _credentials()
-    # TEXT and TABLE chunks are editable: real AIDP accepts a table chunk's
-    # HTML text on PATCH (verified 2026-11-18). IMAGE chunks stay read-only —
-    # their chunk_text is a VLM-generated description, and editing it is not
-    # validated upstream. The check uses the type AIDP reports, never the
-    # source file's extension or upload size class.
-    current = await run_blocking(
-        "aidp-get-chunk-for-update",
-        get_aidp_chunk_impl,
-        server_url,
-        api_key,
-        kds_id,
-        chunk_id,
-        lane="control-io",
-        owner="config",
-    )
-    chunk_type = str((current or {}).get("chunk_type") or "").strip().upper()
-    if chunk_type not in ("TEXT", "TABLE"):
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="Only TEXT and TABLE chunks can be edited",
-        )
-
-    result = await run_blocking(
-        "aidp-update-chunk",
-        update_aidp_chunk_impl,
-        server_url,
-        api_key,
-        kds_id,
-        chunk_id,
-        body.chunk_text,
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
-@aidp_mgmt_router.get(
-    "/knowledge-bases/{kds_id}/documents/{file_uuid}/summary"
-)
-async def get_file_summary(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    file_uuid: Annotated[str, Path(pattern=AIDP_FILE_UUID_PATTERN, description="AIDP file UUID")],
-) -> JSONResponse:
-    """Read one file's summary; the KB and file are addressed by path."""
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-
-    server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-file-summary",
-        get_aidp_file_summary_impl,
-        server_url,
-        api_key,
-        kds_id,
-        str(file_uuid),
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
-@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/retry-summary")
-async def retry_file_summaries(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    body: RetryAidpSummariesRequest,
-) -> JSONResponse:
-    """Retry summary generation; AIDP always receives a file_uuid array."""
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
-
-    server_url, api_key = _credentials()
-    file_uuids = [str(file_uuid) for file_uuid in body.file_uuids]
-    result = await run_blocking(
-        "aidp-retry-file-summaries",
-        retry_aidp_file_summaries_impl,
-        server_url,
-        api_key,
-        kds_id,
-        file_uuids,
-        lane="control-io",
-        owner="config",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
 @aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
 async def list_ingested_files(
     request: Request,

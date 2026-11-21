@@ -36,6 +36,17 @@ if _backend_dir not in sys.path:
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
+# A shared dev venv may resolve `nexent` through an editable install that
+# points at another checkout (for example the deploy worktree's older SDK),
+# which shadows this checkout's sdk directory. Drop those finders so imports
+# resolve against the sources under test.
+for _finder in list(sys.meta_path):
+    _finder_module = getattr(type(_finder), "__module__", "") or ""
+    _finder_name = getattr(type(_finder), "__name__", "") or ""
+    if "__editable__" in _finder_module or "__editable__" in _finder_name:
+        sys.meta_path.remove(_finder)
+del _finder
+
 _canonical_backend_packages = {
     "backend": _backend_dir,
     "backend.http": os.path.join(_backend_dir, "http"),
