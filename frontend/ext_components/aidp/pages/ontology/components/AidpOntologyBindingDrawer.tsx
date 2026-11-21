@@ -20,6 +20,7 @@ import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnow
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import AidpOntologyFieldLabel from "@/ext_components/aidp/shared/components/AidpOntologyFieldLabel";
+import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
 import styles from "./AidpOntologyBindingDrawer.module.css";
 
@@ -165,6 +166,9 @@ const AidpOntologyBindingDrawer: React.FC<AidpOntologyBindingDrawerProps> = ({
             required
           />
         </div>
+        <AidpOntologyGapNote>
+          {t("aidpKnowledge.ontologyBindingCandidateScanGap")}
+        </AidpOntologyGapNote>
         {kbQuery.isLoading || bindingsQuery.isLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />
         ) : (

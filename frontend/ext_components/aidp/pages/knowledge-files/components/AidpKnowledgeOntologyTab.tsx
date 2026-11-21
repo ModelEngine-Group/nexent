@@ -30,6 +30,7 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type {
   AidpOntologyEntity,
@@ -394,6 +395,9 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
   if (!binding) {
     return (
       <div className={styles.emptyBlock}>
+        <AidpOntologyGapNote>
+          {t("aidpKnowledge.ontologyKbBindingLookupGap")}
+        </AidpOntologyGapNote>
         <Empty
           image={
             <ApartmentOutlined
@@ -423,6 +427,9 @@ const AidpKnowledgeOntologyTab: React.FC<AidpKnowledgeOntologyTabProps> = ({
 
   return (
     <div className={styles.tab}>
+      <AidpOntologyGapNote>
+        {t("aidpKnowledge.ontologyKbBindingLookupGap")}
+      </AidpOntologyGapNote>
       <section className={styles.overview}>
         <div className={styles.overviewText}>
           <div className={styles.titleRow}>
