@@ -22,7 +22,6 @@ import {
 } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
@@ -88,7 +87,6 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
 }) => {
   const { t } = useTranslation();
   const scope = useAidpQueryScope();
-  const demo = useAidpOntologyDemoMode();
   const [view, setView] = useState<PreviewView>("metadata");
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -289,9 +287,7 @@ const AidpOntologyPreviewDrawer: React.FC<AidpOntologyPreviewDrawerProps> = ({
               </div>
             </div>
             <AidpOntologyGapNote>
-              {demo
-                ? t("aidpKnowledge.ontologyPreviewDemoStatsGap")
-                : t("aidpKnowledge.ontologyPreviewRealStatsGap")}
+              {t("aidpKnowledge.ontologyPreviewCountsGap")}
             </AidpOntologyGapNote>
           </section>
 

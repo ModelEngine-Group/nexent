@@ -143,9 +143,6 @@ const AidpKnowledgeOntologyPicker: React.FC<
         <AidpOntologyGapNote>
           {t("aidpKnowledge.ontologyPickerGap")}
         </AidpOntologyGapNote>
-        <AidpOntologyGapNote>
-          {t("aidpKnowledge.ontologyPickerCountsGap")}
-        </AidpOntologyGapNote>
         <Input
           allowClear
           prefix={<SearchOutlined />}

@@ -17,9 +17,7 @@ import { InfoCircleOutlined, SearchOutlined } from "@ant-design/icons";
 import { useParams } from "next/navigation";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyDomain } from "@/ext_components/aidp/shared/types/ontology";
@@ -56,7 +54,6 @@ const AidpCreateOntologyStep: React.FC<AidpCreateOntologyStepProps> = ({
   const params = useParams();
   const locale = (params?.locale as string) || "zh";
   const scope = useAidpQueryScope();
-  const demo = useAidpOntologyDemoMode();
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const [searchInput, setSearchInput] = useState("");
@@ -142,11 +139,6 @@ const AidpCreateOntologyStep: React.FC<AidpCreateOntologyStepProps> = ({
           </Button>
         )}
       </div>
-      <AidpOntologyGapNote>
-        {demo
-          ? t("aidpKnowledge.createOntologyDemoGap")
-          : t("aidpKnowledge.createOntologyRealGap")}
-      </AidpOntologyGapNote>
       <div className={styles.tableArea}>
         {query.isLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />
