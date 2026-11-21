@@ -494,46 +494,6 @@ export const Composer: FC<ComposerProps> = ({
   const selectedSkillNames = conversationSkills.map((skill) => skill.name);
 
   const isRunning = useAuiState((state) => state.thread.isRunning);
-  const composerText = useAuiState((state) => state.composer.text);
-  const mentionTriggerActive = useMemo(
-    () => /(?:^|\s)@([^\s@]*)$/.test(composerText),
-    [composerText]
-  );
-  const handleMentionKeyDown = (event: {
-    key: string;
-    shiftKey: boolean;
-    preventDefault(): void;
-    stopPropagation(): void;
-  }): boolean => {
-    if (!mentionTriggerActive) return false;
-    if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return false;
-    const listbox = document.querySelector('[role="listbox"]');
-    if (!listbox) return false;
-    const options = Array.from(
-      listbox.querySelectorAll<HTMLElement>('[role="option"]')
-    );
-    if (options.length === 0) return false;
-    const highlighted =
-      listbox.querySelector<HTMLElement>("[data-highlighted]");
-    if (event.key === "Enter") {
-      if (event.shiftKey) return false;
-      const target = highlighted ?? options[0];
-      event.preventDefault();
-      event.stopPropagation();
-      target.click();
-      return true;
-    }
-    const currentIndex = highlighted ? options.indexOf(highlighted) : -1;
-    const delta = event.key === "ArrowDown" ? 1 : -1;
-    const next =
-      options[(currentIndex + delta + options.length) % options.length];
-    if (!next) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    next.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-    next.scrollIntoView({ block: "nearest" });
-    return true;
-  };
   const modelParameterScope = useAuiState(
     (state) => state.threads?.mainThreadId
   );
@@ -570,7 +530,6 @@ export const Composer: FC<ComposerProps> = ({
         id,
     };
   });
-  const mentionEnabled = Boolean(skillFiles);
   const toggleKnowledgeBase = async (id: string) => {
     if (
       isRunning ||
@@ -626,7 +585,6 @@ export const Composer: FC<ComposerProps> = ({
       setKnowledgeSaving(false);
     }
   };
-
   const hasIncompatibleScope = Boolean(
     isDeploymentReady &&
     knowledgeScope &&
@@ -759,9 +717,7 @@ export const Composer: FC<ComposerProps> = ({
 
         {/* Composer Primitive Root */}
         <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-          {mentionEnabled ? (
-            <SkillFileMentionPopover files={skillFiles ?? []} />
-          ) : null}
+          {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
           <ComposerPrimitive.Root
             className="flex w-full flex-col gap-2.5 outline-none"
             onSubmit={(event) => {
@@ -769,7 +725,6 @@ export const Composer: FC<ComposerProps> = ({
               else prepareSend(event);
             }}
             onKeyDownCapture={(event) => {
-              if (handleMentionKeyDown(event)) return;
               if (isRunning && event.key === "Enter" && !event.shiftKey)
                 event.preventDefault();
             }}
@@ -849,7 +804,7 @@ export const Composer: FC<ComposerProps> = ({
                   )}
                 </div>
               )}
-            {mentionEnabled ? (
+            {skillFiles ? (
               <LexicalComposerInput
                 aria-label={t("chat.composer.inputLabel")}
                 placeholder=""

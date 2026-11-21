@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Render authorized knowledge data into localized prompt sections."""
 
 from collections.abc import Mapping, Sequence
@@ -15,12 +13,6 @@ def render_knowledge_scope_resources(language: str, scope: Mapping[str, Any]) ->
     aidp_capable = bool(scope["aidp_capable"])
     local_names = list(scope["local_display_names"])
     aidp_names = list(scope["aidp_display_names"])
-    metadata_filter = scope.get("aidp_metadata_filter") or {}
-    filter_file_name = (
-        metadata_filter.get("file_name")
-        if isinstance(metadata_filter.get("file_name"), dict)
-        else {}
-    )
     lines = [labels["heading"], "", labels["untrusted_notice"], ""]
     if local_capable and local_names:
         lines.append(labels["local_heading"])
@@ -30,18 +22,6 @@ def render_knowledge_scope_resources(language: str, scope: Mapping[str, Any]) ->
             lines.append("")
         lines.append(labels["aidp_heading"])
         lines.extend(f"{index}. {name}" for index, name in enumerate(aidp_names, 1))
-    if aidp_capable and metadata_filter.get("enabled"):
-        lines.append("")
-        lines.append(labels["aidp_filter_heading"])
-        value = str(filter_file_name.get("value") or "").strip()
-        operator = str(filter_file_name.get("operator") or "contains").strip()
-        if value:
-            operator_label = labels.get(f"operator_{operator}", operator)
-            lines.append(
-                labels["aidp_filter_line"].format(operator=operator_label, value=value)
-            )
-        else:
-            lines.append(labels["aidp_filter_empty"])
     has_capability = local_capable or aidp_capable
     all_disabled = has_capability and (
         (not local_capable or bool(scope["local_disabled"]))

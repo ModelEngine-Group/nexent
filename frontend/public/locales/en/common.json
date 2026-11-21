@@ -7157,20 +7157,11 @@
     "failedHint": "This outlet could not be migrated. An administrator must review and resolve its configuration."
   },
   "modelProfile.selectionCheckFailed": "Check failed",
-  "chat.knowledgeScope.mentionAriaLabel": "Knowledge base files and Skill files",
-  "chat.knowledgeScope.mentionFilesGroup": "Knowledge base files",
-  "chat.knowledgeScope.mentionSkillGroup": "Skill files",
-  "chat.knowledgeScope.mentionLoading": "Loading files…",
-  "chat.knowledgeScope.mentionLoadFailed": "Some knowledge base files failed to load",
-  "chat.knowledgeScope.mentionSelected": "{{count}} selected",
-  "chat.knowledgeScope.mentionSelectedMark": "Selected",
-  "chat.knowledgeScope.mentionEmpty": "No knowledge base files available",
   "chat.knowledgeScope.advancedFilter": "Advanced filter",
   "chat.knowledgeScope.advancedFilterHint": "Restrict the chunks that participate in retrieval by file metadata",
   "chat.knowledgeScope.advancedFilterOffHint": "Turn on the switch to configure the advanced filter",
   "chat.knowledgeScope.advancedFilterOnHint": "Only chunks matching the filter rules will be retrieved",
   "chat.knowledgeScope.advancedFilterNeedsValue": "Enter a file name after turning on the advanced filter",
-  "chat.knowledgeScope.filterFileName": "File name",
   "chat.knowledgeScope.filterAddCondition": "Add file",
   "chat.knowledgeScope.filterRemoveCondition": "Remove condition",
   "chat.knowledgeScope.filterMatchLabel": "Condition match",
@@ -7514,4 +7505,5 @@
   "trajectory.noImports": "No imported trajectories",
   "trajectory.errors.import_not_found": "Import not found or access denied",
   "trajectory.errors.invalid_saved_import": "The saved archive is damaged. Delete it and import it again.",
-  "trajectory.errors.import_store_busy": "Import storage is busy. Please retry shortly."}
+  "trajectory.errors.import_store_busy": "Import storage is busy. Please retry shortly."
+}
