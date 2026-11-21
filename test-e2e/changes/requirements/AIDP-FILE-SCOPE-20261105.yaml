@@ -4,8 +4,8 @@
     "change_id": "AIDP-FILE-SCOPE-20261105",
     "change_type": "requirement",
     "requirement_id": "AIDP-FILE-SCOPE-REQ-001",
-    "title": "Conversation AIDP file-scoped retrieval",
-    "description": "Implement AIDP-UI-07 as a conversation-level retrieval scope in the existing right drawer. The drawer exposes mutually exclusive 'by knowledge base' and 'by files' modes; file mode shows collapsible KB groups, loads only the first KB page on entry, fetches other KBs on expansion, and paginates each KB independently. File-name search covers all KBs with backend keyword queries, at most three concurrent requests and the first 20 matches per KB; matched KBs auto-expand without progress or failure messaging. The mode derives kds_ids from selected files and replaces KB tags with file tags, without an extra banner. The previous @-based knowledge-file entry is removed for this iteration; Skill @, attachments, send and history are preserved. Filename filtering uses metadata_condition.original_file_name, graph-enabled file scope fails closed, and real AIDP recall/topK acceptance remains blocked.",
+    "title": "Conversation AIDP advanced metadata filtering",
+    "description": "Implement AIDP-UI-07 as a conversation-level retrieval scope in the existing right drawer. The knowledge-base picker keeps its existing search, tag filter and pagination. A new advanced-filter switch reveals one file-name condition (operator + keyword); saving persists it in knowledge_scope schema v3 as aidp.metadata_filter. The tool projects it as a single FusionSearch metadata_condition on original_file_name (contains / is / start with / end with), applies it before recall, keeps the Agent retrieval configuration unchanged, and fails closed when graph retrieval is enabled or the condition cannot be expressed. The retired file-list mode, file tags and v2 file_scope are not exposed; Skill @, attachments, send and history are preserved. Real AIDP filtered recall acceptance remains blocked.",
     "affected_features": {
       "added": [
         "AIDP-FILE-SCOPE"
@@ -37,10 +37,10 @@
     "traditional_ut": {
       "decision": "strengthen",
       "behaviors": [
-        "knowledge_scope v1/v2 parsing, file-scope validation and unknown-version rejection",
-        "Scope resolution keeps existing kds_list intersection and preview behavior"
+        "knowledge_scope v1/v2/v3 parsing, metadata-filter validation and unknown-version rejection",
+        "Scope resolution injects the metadata filter into every AIDP tool and keeps the existing kds_list intersection"
       ],
-      "reason": "The existing scope model and scope service UT encode the v1-only contract that this change extends; they are updated in place. New file-scope component contracts are proven by formal D1 Cases instead of adding duplicate legacy UT.",
+      "reason": "The existing scope model and scope service UT encode the v1-only contract that this change extends; they are updated in place. New metadata-filter component contracts are proven by formal D1 Cases instead of adding duplicate legacy UT.",
       "test_selectors": [
         "test/backend/consts/test_knowledge_scope_models.py",
         "test/backend/services/test_knowledge_scope_service.py"

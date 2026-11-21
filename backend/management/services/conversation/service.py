@@ -651,10 +651,10 @@ def update_conversation_knowledge_scope_service(
                 "disabled": resolved.aidp_disabled,
                 "kds_ids": resolved.aidp_kds_ids,
                 "display_names": resolved.aidp_display_names,
-                "file_scope": (
-                    resolved.aidp_file_scope
-                    if isinstance(getattr(resolved, "aidp_file_scope", None), dict)
-                    else {"mode": "all", "files": []}
+                "metadata_filter": (
+                    resolved.aidp_metadata_filter
+                    if isinstance(getattr(resolved, "aidp_metadata_filter", None), dict)
+                    else {"enabled": False}
                 ),
             },
         }

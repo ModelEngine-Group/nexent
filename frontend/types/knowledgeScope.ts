@@ -1,22 +1,21 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 export type KnowledgeScopeMode = "inherit" | "override" | "disabled";
-export type AidpFileScopeMode = "all" | "selected";
+export type AidpMetadataFilterOperator =
+  "contains" | "is" | "starts_with" | "ends_with";
 
-export interface AidpFileRef {
-  kds_id: string;
-  file_uuid: string;
-  file_name?: string;
-  kds_name?: string;
+export interface AidpFileNameCondition {
+  operator: AidpMetadataFilterOperator;
+  value: string;
 }
 
-export interface AidpFileScope {
-  mode: AidpFileScopeMode;
-  files: AidpFileRef[];
+export interface AidpMetadataFilter {
+  enabled: boolean;
+  file_name?: AidpFileNameCondition;
 }
 
 export interface ConversationKnowledgeScope {
-  schema_version: 1 | 2;
+  schema_version: 1 | 2 | 3;
   local: {
     mode: KnowledgeScopeMode;
     knowledge_ids: string[];
@@ -24,47 +23,55 @@ export interface ConversationKnowledgeScope {
   aidp: {
     mode: KnowledgeScopeMode;
     kds_ids: string[];
-    file_scope?: AidpFileScope;
+    metadata_filter?: AidpMetadataFilter;
   };
 }
 
-export const EMPTY_AIDP_FILE_SCOPE: AidpFileScope = { mode: "all", files: [] };
+export const EMPTY_AIDP_METADATA_FILTER: AidpMetadataFilter = {
+  enabled: false,
+};
 
-export function getAidpFileScope(
+export function getAidpMetadataFilter(
   scope: ConversationKnowledgeScope | null | undefined
-): AidpFileScope {
-  const fileScope = scope?.aidp.file_scope;
-  if (!fileScope || fileScope.mode !== "selected") {
-    return EMPTY_AIDP_FILE_SCOPE;
+): AidpMetadataFilter {
+  const filter = scope?.aidp.metadata_filter;
+  if (!filter?.enabled || !filter.file_name?.value) {
+    return EMPTY_AIDP_METADATA_FILTER;
   }
   return {
-    mode: "selected",
-    files: Array.isArray(fileScope.files) ? fileScope.files : [],
+    enabled: true,
+    file_name: {
+      operator: filter.file_name.operator,
+      value: filter.file_name.value,
+    },
   };
 }
 
-export function withAidpFileScope(
+export function withAidpMetadataFilter(
   scope: ConversationKnowledgeScope | null | undefined,
-  fileScope: AidpFileScope
+  filter: AidpMetadataFilter | null | undefined
 ): ConversationKnowledgeScope {
   const base = scope ?? DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE;
-  const normalized: AidpFileScope =
-    fileScope.mode === "selected" && fileScope.files.length > 0
-      ? {
-          mode: "selected",
-          files: fileScope.files.map((file) => ({ ...file })),
-        }
-      : EMPTY_AIDP_FILE_SCOPE;
+  const enabled = Boolean(
+    filter?.enabled && filter.file_name?.value && base.aidp.mode !== "disabled"
+  );
+  const normalized: AidpMetadataFilter | undefined = enabled
+    ? {
+        enabled: true,
+        file_name: {
+          operator: filter!.file_name!.operator,
+          value: filter!.file_name!.value,
+        },
+      }
+    : undefined;
   return {
     ...base,
-    schema_version:
-      normalized.mode === "selected" ? 2 : (base.schema_version ?? 1),
+    schema_version: normalized ? 3 : (base.schema_version ?? 1),
     local: { ...base.local },
     aidp: {
-      ...base.aidp,
-      ...(normalized.mode === "selected" || base.aidp.file_scope
-        ? { file_scope: normalized }
-        : {}),
+      mode: base.aidp.mode,
+      kds_ids: [...base.aidp.kds_ids],
+      ...(normalized ? { metadata_filter: normalized } : {}),
     },
   };
 }
@@ -90,8 +97,8 @@ export interface KnowledgeCapabilities {
     aidp: {
       enabled: boolean;
       max_select: number;
-      max_file_select?: number;
-      file_scope_supported?: boolean;
+      metadata_filter_supported?: boolean;
+      metadata_filter_graph_supported?: boolean;
       default_summary: string;
       default_knowledge_ids: string[];
       default_range_values: string[];
@@ -115,7 +122,7 @@ export interface KnowledgeScopeEffectivePreview {
     disabled: boolean;
     kds_ids: string[];
     display_names: string[];
-    file_scope?: AidpFileScope;
+    metadata_filter?: AidpMetadataFilter;
   };
 }
 

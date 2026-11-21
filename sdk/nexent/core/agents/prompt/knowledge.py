@@ -15,8 +15,12 @@ def render_knowledge_scope_resources(language: str, scope: Mapping[str, Any]) ->
     aidp_capable = bool(scope["aidp_capable"])
     local_names = list(scope["local_display_names"])
     aidp_names = list(scope["aidp_display_names"])
-    file_scope = scope.get("aidp_file_scope") or {}
-    file_names = list(file_scope.get("display_names") or [])
+    metadata_filter = scope.get("aidp_metadata_filter") or {}
+    filter_file_name = (
+        metadata_filter.get("file_name")
+        if isinstance(metadata_filter.get("file_name"), dict)
+        else {}
+    )
     lines = [labels["heading"], "", labels["untrusted_notice"], ""]
     if local_capable and local_names:
         lines.append(labels["local_heading"])
@@ -26,13 +30,18 @@ def render_knowledge_scope_resources(language: str, scope: Mapping[str, Any]) ->
             lines.append("")
         lines.append(labels["aidp_heading"])
         lines.extend(f"{index}. {name}" for index, name in enumerate(aidp_names, 1))
-    if aidp_capable and file_scope.get("mode") == "selected":
+    if aidp_capable and metadata_filter.get("enabled"):
         lines.append("")
-        lines.append(labels["aidp_files_heading"])
-        if file_names:
-            lines.extend(f"{index}. {name}" for index, name in enumerate(file_names, 1))
+        lines.append(labels["aidp_filter_heading"])
+        value = str(filter_file_name.get("value") or "").strip()
+        operator = str(filter_file_name.get("operator") or "contains").strip()
+        if value:
+            operator_label = labels.get(f"operator_{operator}", operator)
+            lines.append(
+                labels["aidp_filter_line"].format(operator=operator_label, value=value)
+            )
         else:
-            lines.append(labels["aidp_files_empty"])
+            lines.append(labels["aidp_filter_empty"])
     has_capability = local_capable or aidp_capable
     all_disabled = has_capability and (
         (not local_capable or bool(scope["local_disabled"]))

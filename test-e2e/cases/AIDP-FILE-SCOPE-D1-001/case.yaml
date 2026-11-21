@@ -6,104 +6,132 @@
     "case_id": "AIDP-FILE-SCOPE-D1-001",
     "feature_id": "AIDP-FILE-SCOPE",
     "requirement_ids": [
-      "AIDP-FILE-SCOPE-REQ-002"
+      "AIDP-FILE-SCOPE-REQ-002",
+      "AIDP-FILE-SCOPE-REQ-003"
     ],
     "business_rule_ids": [
       "AIDP-FILE-SCOPE-RULE-02",
+      "AIDP-FILE-SCOPE-RULE-03",
       "AIDP-FILE-SCOPE-RULE-04"
     ],
-    "title": "knowledge_scope v2 file scope contract, kds_ids derivation and v1 compatibility",
+    "title": "knowledge_scope v3 metadata filter contract and legacy compatibility",
     "type": "BE-UT",
     "priority": "P1",
     "status": "active",
     "automation": "automated",
-    "objective": "Prove that conversation knowledge scopes accept v2 AIDP file scopes, normalize/deduplicate structured file identities, derive kds_ids from selected files, reject unsafe combinations, and read legacy v1 records as all files.",
+    "objective": "Prove that conversation knowledge scopes accept a v3 AIDP metadata filter with one file-name condition, normalize its operator/value, reject unsafe combinations, and keep v1/v2 records readable without reintroducing file selection.",
     "preconditions": [
-      "Import the backend knowledge contracts directly; no database, HTTP, AIDP or model service is required.",
-      "Do not read or write any persisted conversation record."
+      "Parse scope payloads directly with the Pydantic contracts; no database, AIDP or model access."
     ],
     "test_data": {
       "profile": "mock",
-      "v1": "schema_version 1 with local and aidp resource modes and no file_scope",
-      "v2_all": "schema_version 2 with aidp.file_scope mode all and an empty file list",
-      "v2_selected": "schema_version 2 with duplicate and whitespace-padded (kds_id, file_uuid) pairs",
-      "invalid": "selected with v1, selected with empty files, all with files, selected with aidp disabled, override file outside kds_ids, more than 20 files, unknown schema version"
+      "schema_versions": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "operators": [
+        "contains",
+        "is",
+        "starts_with",
+        "ends_with"
+      ],
+      "invalid": [
+        "unknown operator",
+        "blank value",
+        "oversized value",
+        "enabled without condition"
+      ]
     },
     "steps": [
       {
         "order": 1,
-        "action": "Validate a legacy v1 scope and a v2 scope whose aidp.file_scope mode is all.",
-        "expected": "Both resolve aidp.file_scope.mode to all with an empty file list; no validation error is raised."
+        "action": "Parse a v1 scope without any filter.",
+        "expected": "The parsed scope has metadata_filter.enabled = false."
       },
       {
         "order": 2,
-        "action": "Validate a v2 selected scope whose file list repeats a pair and pads identifiers with whitespace.",
-        "expected": "Identifiers are trimmed, duplicates collapse to one pair, order is preserved, and the scope keeps schema_version 2."
+        "action": "Parse a v2 record that still carries the retired file_scope.",
+        "expected": "The retired field is ignored and no filter is enabled."
       },
       {
         "order": 3,
-        "action": "Submit each invalid combination and an unknown schema version.",
-        "expected": "Selected identifiers are trimmed, duplicates collapse to one pair, and aidp.mode/kds_ids are derived from the files."
+        "action": "Parse a v3 enabled filter and trim its value.",
+        "expected": "Operator and trimmed value are preserved and schema_version stays 3."
+      },
+      {
+        "order": 4,
+        "action": "Parse a v3 disabled filter.",
+        "expected": "No condition is carried."
+      },
+      {
+        "order": 5,
+        "action": "Parse enabled filters with schema v2, disabled mode, unknown operator, blank or oversized value.",
+        "expected": "Every unsafe combination is rejected with a validation error."
       }
     ],
     "expected_results": [
-      "Legacy v1 and v2 all-file scopes normalize to file_scope mode all with no files.",
-      "Selected file identities are structured, trimmed and deduplicated, and their KB IDs are derived into aidp.kds_ids.",
-      "Selected is rejected with v1, empty files, aidp disabled, out-of-range override kds_ids and more than 20 files; all is rejected when files are present.",
-      "Schema versions other than 1 and 2 remain rejected."
+      "v1/v2 scopes stay readable and produce no filter.",
+      "A v3 filter carries exactly one operator and one trimmed value.",
+      "Enabled filters require schema v3, a condition and a non-disabled AIDP mode.",
+      "Invalid operators and blank/oversized values are rejected."
     ],
     "forbidden_side_effects": [
-      "Do not persist, migrate or rewrite stored conversation scopes.",
-      "Do not contact AIDP, a database or any external service during validation.",
-      "Do not accept an empty selected list as a synonym for all files."
+      "Do not accept the retired file_scope as an active restriction.",
+      "Do not coerce invalid operators or blank values."
     ],
-    "unit_boundary": "backend/contracts/knowledge.py Pydantic request models",
+    "unit_boundary": "contracts/knowledge.py conversation knowledge scope models",
     "inputs": [
-      "legacy v1 scope payload",
-      "v2 all-file scope payload",
-      "v2 selected scope payload with duplicates and whitespace",
-      "invalid scope payloads"
+      "v1 scope",
+      "v2 scope with file_scope",
+      "v3 enabled filter",
+      "v3 disabled filter",
+      "invalid combinations"
     ],
     "assertions": [
-      "A missing file_scope reads as mode all with no files.",
-      "Selected file pairs are trimmed and deduplicated.",
-      "Invalid mode, version, range and count combinations raise pydantic ValidationError.",
-      "schema_version 3 is rejected."
+      "v1 defaults to no filter",
+      "v2 file_scope ignored",
+      "v3 filter normalized",
+      "invalid combinations rejected"
     ],
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "v1 and v2 all-file scopes are backward compatible.",
+        "description": "v3 filter contract",
         "steps": [
-          1
+          1,
+          2,
+          3,
+          4
         ],
         "expected_results": [
-          1
-        ],
-        "forbidden_side_effects": [
           1,
           2
+        ],
+        "forbidden_side_effects": [
+          1
         ]
       },
       {
         "id": "AC-02",
-        "description": "Selected file identities are structured, normalized and deduplicated.",
+        "description": "Legacy compatibility",
         "steps": [
+          1,
           2
         ],
         "expected_results": [
-          2
+          1
         ],
         "forbidden_side_effects": [
-          1,
-          2
+          1
         ]
       },
       {
         "id": "AC-03",
-        "description": "Unsafe combinations and unknown versions are rejected.",
+        "description": "Unsafe combinations rejected",
         "steps": [
-          3
+          5
         ],
         "expected_results": [
           3,
@@ -111,8 +139,7 @@
         ],
         "forbidden_side_effects": [
           1,
-          2,
-          3
+          2
         ]
       }
     ]

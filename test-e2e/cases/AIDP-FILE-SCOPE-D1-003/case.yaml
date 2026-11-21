@@ -6,92 +6,95 @@
     "case_id": "AIDP-FILE-SCOPE-D1-003",
     "feature_id": "AIDP-FILE-SCOPE",
     "requirement_ids": [
-      "AIDP-FILE-SCOPE-REQ-003",
-      "AIDP-FILE-SCOPE-REQ-005"
+      "AIDP-FILE-SCOPE-REQ-002",
+      "AIDP-FILE-SCOPE-REQ-003"
     ],
     "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-02",
       "AIDP-FILE-SCOPE-RULE-03",
-      "AIDP-FILE-SCOPE-RULE-04",
-      "AIDP-FILE-SCOPE-RULE-05"
+      "AIDP-FILE-SCOPE-RULE-04"
     ],
-    "title": "AidpSearchTool applies original_file_name metadata filter and fails closed for graph",
+    "title": "AidpSearchTool emits one original_file_name condition and fails closed for graph",
     "type": "SDK-UT",
     "priority": "P0",
     "status": "active",
     "automation": "automated",
-    "objective": "Prove that a selected file scope becomes a FusionSearch metadata_condition on original_file_name for vector/full-text retrieval, while graph retrieval, nameless files, malformed scopes and out-of-scope records fail closed without an unfiltered request.",
+    "objective": "Prove that an enabled metadata filter becomes a single FusionSearch metadata_condition on original_file_name with the mapped operator, that graph retrieval and unsupported operators fail closed without an unfiltered request, and that a disabled filter leaves the existing payload untouched.",
     "preconditions": [
-      "Construct AidpSearchTool directly with a fake AIDP URL and API key; replace the transport and HTTP client so no network call is possible.",
-      "Treat a synthetic filter field only as an adapter-wiring test; do not claim a confirmed AIDP file-filter contract."
+      "Construct AidpSearchTool directly with a fake AIDP URL and API key; replace the transport so no network call is possible.",
+      "Operators follow the confirmed AIDP contract: contains / is / start with / end with."
     ],
     "test_data": {
       "profile": "mock",
       "kds_list": [
         "kb-1"
       ],
-      "selected": "file-a (a.txt) and file-b (b.txt) in kb-1",
-      "graph": "vector_search plus graph_search",
-      "response": "one in-scope record and one out-of-scope record"
+      "filter": "file name contains 合同",
+      "operators": [
+        "contains",
+        "is",
+        "starts_with",
+        "ends_with"
+      ],
+      "graph": "vector_search plus graph_search"
     },
     "steps": [
       {
         "order": 1,
-        "action": "Call forward with selected files carrying names and vector/full-text retrieval.",
-        "expected": "FusionSearch carries metadata_condition with logical_operator or and one original_file_name = condition per selected name; retrieval configuration is otherwise preserved."
+        "action": "Call forward with an enabled filter and vector retrieval for each supported operator.",
+        "expected": "FusionSearch carries logical_operator and with exactly one original_file_name condition using the mapped wire operator."
       },
       {
         "order": 2,
-        "action": "Call forward with a selected file scope while the configured method includes graph_search.",
-        "expected": "No request is sent and a readable graph-unsupported denial is returned."
+        "action": "Call forward with an enabled filter while the method includes graph_search.",
+        "expected": "No request is sent and the graph-unsupported denial is returned."
       },
       {
         "order": 3,
-        "action": "Call forward with a selected file that has no display name.",
-        "expected": "No request is sent and a readable unavailable denial is returned."
+        "action": "Call forward with the filter disabled.",
+        "expected": "The existing retrieval payload is preserved and no metadata_condition is sent."
       },
       {
         "order": 4,
-        "action": "Return an in-scope record and a record whose original_file_name is outside the selected names.",
-        "expected": "The out-of-scope record is rejected, no result is emitted, and the tool fails closed."
+        "action": "Call forward with an unsupported operator.",
+        "expected": "No request is sent and the unavailable denial is returned."
       },
       {
         "order": 5,
-        "action": "Run all-files mode and a malformed selected scope.",
-        "expected": "All-files mode keeps the existing payload without metadata_condition; malformed scope is rejected at construction."
+        "action": "Construct the tool with a malformed filter object.",
+        "expected": "Construction raises a validation error."
       }
     ],
     "expected_results": [
-      "A selected scope is translated into an OR metadata_condition on original_file_name for vector/full-text retrieval.",
-      "Graph-enabled retrieval and selected files without names fail closed and never send an unfiltered request.",
-      "Out-of-scope returned records are rejected and no answer is produced from them.",
-      "All-files mode keeps the existing retrieval payload; malformed scope cannot start a search."
+      "Supported operators map to contains / is / start with / end with in one AND condition.",
+      "Graph-enabled filters and unsupported operators fail closed with zero transport calls.",
+      "Disabled filters keep the existing payload.",
+      "Malformed filters are rejected at construction."
     ],
     "forbidden_side_effects": [
-      "Do not send FusionSearch when the selected scope cannot be expressed for the configured channels.",
-      "Do not send graph retrieval under a file-name filter it does not honor.",
-      "Do not emit out-of-scope records, images or citations.",
-      "Do not change retrieval method, Top K, thresholds or reranking from the Agent configuration."
+      "Do not send an unfiltered request when a filter is enabled.",
+      "Do not send graph retrieval under a filter it does not honor.",
+      "Do not change retrieval method, Top K, thresholds or reranking."
     ],
-    "unit_boundary": "sdk/nexent/core/ext_components/aidp/aidp_search_tool.py and file_scope.py with the transport replaced",
+    "unit_boundary": "sdk/nexent/core/ext_components/aidp/aidp_search_tool.py and metadata_filter.py with the transport replaced",
     "inputs": [
-      "selected file scope with names",
-      "graph-enabled method",
-      "selected file without a name",
-      "in-scope and out-of-scope records",
-      "all-files mode",
-      "malformed file-scope JSON"
+      "vector filter payload",
+      "graph method",
+      "disabled filter",
+      "unsupported operator",
+      "malformed filter"
     ],
     "assertions": [
-      "The payload metadata_condition uses logical_operator or and original_file_name = each selected name.",
-      "Graph-enabled file scope returns a denial and makes zero transport calls.",
-      "A selected file without a name returns a denial and makes zero transport calls.",
-      "Out-of-scope records are rejected and fail closed.",
-      "All-files mode has no metadata_condition; malformed scope raises during construction."
+      "single original_file_name condition",
+      "graph denial",
+      "no condition when disabled",
+      "operator denial",
+      "construction error"
     ],
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "Selected files become an original_file_name metadata filter.",
+        "description": "Filter becomes a single condition",
         "steps": [
           1
         ],
@@ -100,15 +103,14 @@
         ],
         "forbidden_side_effects": [
           1,
-          4
+          3
         ]
       },
       {
         "id": "AC-02",
-        "description": "Graph and nameless selections fail closed without HTTP.",
+        "description": "Graph fails closed",
         "steps": [
-          2,
-          3
+          2
         ],
         "expected_results": [
           2
@@ -120,21 +122,22 @@
       },
       {
         "id": "AC-03",
-        "description": "Out-of-scope records are rejected.",
+        "description": "Disabled filter keeps payload",
         "steps": [
-          4
+          3
         ],
         "expected_results": [
           3
         ],
         "forbidden_side_effects": [
-          3
+          1
         ]
       },
       {
         "id": "AC-04",
-        "description": "All-files and malformed scopes keep existing safety boundaries.",
+        "description": "Unsupported/malformed filters stop the request",
         "steps": [
+          4,
           5
         ],
         "expected_results": [
@@ -142,7 +145,7 @@
         ],
         "forbidden_side_effects": [
           1,
-          4
+          2
         ]
       }
     ]

@@ -6,75 +6,129 @@
     "case_id": "AIDP-FILE-SCOPE-D5-001",
     "feature_id": "AIDP-FILE-SCOPE",
     "requirement_ids": [
-      "AIDP-FILE-SCOPE-REQ-004"
+      "AIDP-FILE-SCOPE-REQ-002",
+      "AIDP-FILE-SCOPE-REQ-003"
     ],
     "business_rule_ids": [
+      "AIDP-FILE-SCOPE-RULE-02",
       "AIDP-FILE-SCOPE-RULE-03",
       "AIDP-FILE-SCOPE-RULE-04"
     ],
-    "title": "Model expansion, deletion, revoked access and upstream refusal fail closed",
+    "title": "Invalid filters, revoked access and graph retrieval fail closed",
     "type": "SECURITY",
     "priority": "P0",
     "status": "blocked",
     "automation": "manual",
-    "objective": "Verify that neither model tool arguments, sub-Agent scope, removed KB permission, deleted files nor upstream filter refusal can produce an unfiltered AIDP search or expose out-of-scope or credential data.",
+    "objective": "Prove that an enabled filter with no usable condition, revoked knowledge-base access, an unsupported retrieval method (graph) or an upstream rejection never falls back to an unfiltered full-KB search and never exposes out-of-scope results.",
     "preconditions": [
-      "An authorized local test stack with a controllable test Agent/version and AIDP access, plus the confirmed AIDP file-filter contract from D2-002.",
-      "A file and KB permission can be removed between turns without affecting the fixed historical data directory.",
-      "One turn can capture AIDP request payloads and backend logs with sanitization."
+      "A test user with revocable AIDP KB permissions and a graph-enabled Agent."
     ],
     "test_data": {
-      "profile": "real_smoke",
-      "selected": "kb-1/file-a",
-      "attack_inputs": "kds_list expansion, fabricated file_uuid, sub-Agent invocation, deleted file, revoked KB READ, upstream filter refusal"
+      "profile": "mock",
+      "revoked": "remove READ permission between runs",
+      "graph": "vector_search plus graph_search"
     },
     "steps": [
       {
         "order": 1,
-        "action": "Make the model request another KB or another file, and invoke a sub-Agent tool with a wider kds_list.",
-        "expected": "Every FusionSearch request remains limited to kb-1/file-a; the out-of-scope KB/file is not searched and cannot enter the answer."
+        "action": "Enable the filter with no value through a direct API call.",
+        "expected": "The request is rejected or the tool fails closed; no unfiltered search runs."
       },
       {
         "order": 2,
-        "action": "Delete the selected file and, separately, revoke the user's KB READ before the next turn.",
-        "expected": "The run returns a readable safe failure or empty result, marks the chip unavailable, and issues no unfiltered search; the user can remove the invalid file."
+        "action": "Revoke KB READ after a filter was saved and run again.",
+        "expected": "No search runs against the revoked KB; the response is a readable failure."
       },
       {
         "order": 3,
-        "action": "Simulate AIDP rejecting or ignoring the file filter and returning an out-of-scope record.",
-        "expected": "The out-of-scope record is discarded, no citation/source card is produced, the run fails closed with a readable status, and an upstream contract violation is logged without secrets."
+        "action": "Run a graph-enabled Agent with the filter enabled.",
+        "expected": "No FusionSearch request is sent; a readable denial is returned."
       },
       {
         "order": 4,
-        "action": "Inspect API errors, tool observations, logs and evidence for AIDP key/URL/tenant leakage.",
-        "expected": "No credential or raw upstream authorization header appears in user-visible output or retained evidence."
+        "action": "Make AIDP reject the condition.",
+        "expected": "The tool fails closed; no unfiltered retry occurs."
       }
     ],
     "expected_results": [
-      "Model and sub-Agent arguments cannot expand the file or KB range.",
-      "Deleted files and revoked READ fail safely without falling back to all files.",
-      "Upstream refusal or out-of-scope responses never expose out-of-scope content.",
-      "Credentials remain redacted and the failure is understandable to the user."
+      "No unfiltered fallback",
+      "No out-of-scope results",
+      "Readable failures without credentials"
     ],
     "forbidden_side_effects": [
-      "Do not issue an unfiltered FusionSearch under any tested failure.",
-      "Do not present out-of-scope hits as sources or citations.",
-      "Do not leak AIDP credentials or tenant identifiers into responses and logs.",
-      "Do not modify production data or the fixed historical data directory."
+      "Do not widen to all KBs",
+      "Do not retry without the filter",
+      "Do not expose upstream secrets"
+    ],
+    "unit_boundary": "conversation scope + AidpSearchTool fail-closed paths",
+    "inputs": [
+      "empty condition",
+      "revoked permission",
+      "graph method",
+      "upstream rejection"
+    ],
+    "assertions": [
+      "no request or denial",
+      "no unfiltered fallback"
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Empty condition",
+        "steps": [
+          1
+        ],
+        "expected_results": [
+          1
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Revoked access",
+        "steps": [
+          2
+        ],
+        "expected_results": [
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Graph and upstream rejection",
+        "steps": [
+          3,
+          4
+        ],
+        "expected_results": [
+          3
+        ],
+        "forbidden_side_effects": [
+          2,
+          3
+        ]
+      }
     ],
     "risk_type": "SECURITY",
-    "risk": "A user selecting files could unknowingly trigger a full-knowledge-base search, exposing unselected content to the model and answer, or credentials could leak through error handling.",
-    "condition": [
-      "Model-generated tool arguments, sub-Agent tool instances, permission changes between turns, deleted file UUIDs and upstream filter refusal."
-    ],
     "metrics": [
-      "Number of FusionSearch requests with any out-of-scope KB or file, out-of-scope records in tool observation/source cards, unfiltered requests after failure, and credential occurrences in output/logs."
+      "Number of FusionSearch requests with a missing filter when it should fail closed, unfiltered fallbacks after failure, out-of-scope records, and credential occurrences in output or logs."
     ],
     "thresholds": [
-      "Zero out-of-scope or unfiltered requests; zero out-of-scope records shown to the model or user; zero credential occurrences."
+      "Zero unfiltered or out-of-scope requests; zero out-of-scope records shown to the model or user; zero credential occurrences."
     ],
     "recovery_expectations": [
-      "The conversation stays usable after removing invalid files or restoring all files; a readable status explains the safe failure and no retry silently widens the scope."
+      "The conversation stays usable after the user fixes the filter, restores permissions or disables graph retrieval; a readable status explains the safe failure and no retry silently widens the scope."
+    ],
+    "risk": "A user applying a file-name filter could unknowingly trigger a full-knowledge-base search when the filter is enabled but not effective, exposing unrelated content to the model and answer, or credentials could leak through error handling.",
+    "condition": [
+      "Model-generated tool arguments, sub-Agent tool instances, permission changes between turns, graph-enabled retrieval and upstream rejection of the condition."
     ]
   }
 }

@@ -8,10 +8,11 @@ implementations:
   - mock
 acceptance_bindings:
   AC-01:
-  - test_v1_scope_defaults_to_all_files
-  - test_v2_all_mode_has_no_files
+  - test_v1_scope_defaults_to_no_filter
+  - test_v2_file_scope_is_ignored_on_read
   AC-02:
-  - test_v2_selected_normalizes_and_deduplicates
+  - test_v3_filter_normalizes_operator_and_value
+  - test_v3_disabled_filter_carries_no_condition
   AC-03:
-  - test_v2_rejects_invalid_combinations
+  - test_filter_rejects_invalid_combinations
   - test_unknown_schema_version_is_rejected

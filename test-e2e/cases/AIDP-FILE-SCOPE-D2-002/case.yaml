@@ -6,56 +6,100 @@
     "case_id": "AIDP-FILE-SCOPE-D2-002",
     "feature_id": "AIDP-FILE-SCOPE",
     "requirement_ids": [
+      "AIDP-FILE-SCOPE-REQ-002",
       "AIDP-FILE-SCOPE-REQ-003"
     ],
     "business_rule_ids": [
-      "AIDP-FILE-SCOPE-RULE-03"
+      "AIDP-FILE-SCOPE-RULE-02",
+      "AIDP-FILE-SCOPE-RULE-03",
+      "AIDP-FILE-SCOPE-RULE-04"
     ],
-    "title": "AIDP FusionSearch original_file_name metadata filter protocol",
+    "title": "Real AIDP FusionSearch original_file_name metadata-condition protocol",
     "type": "CONTRACT",
     "priority": "P0",
     "status": "blocked",
     "automation": "manual",
-    "objective": "Confirm with AIDP that metadata_condition with original_file_name filters vector/full-text candidates before topK, how OR conditions are represented and limited, and that graph retrieval is excluded so file-scoped graph runs must fail closed.",
+    "objective": "Prove against the real AIDP service that a single original_file_name condition with the four supported operators filters before recall and is rejected for unsupported operators, and that the graph channel behavior is recorded.",
     "preconditions": [
-      "AIDP supplies a writable contract or live endpoint and credentials under an authorized environment lease.",
-      "The documented field list is treated as authoritative: original_file_name, uploader, upload_time, last_update_time and source; no file_uuid or kds_id field is assumed.",
-      "The product has accepted file-name filtering, including same-name files across KBs sharing one condition.",
-      "Real AIDP verification remains unavailable in this task; the case stays blocked rather than claiming live acceptance."
+      "A real AIDP environment reachable from the test host; no mock substitute for the acceptance conclusion."
     ],
     "test_data": {
-      "profile": "real_smoke",
-      "files": "Two selected names and one unselected higher-scoring name in the same KB and across two KBs",
-      "channels": "vector_search, full_text_search, graph_search and combined methods"
+      "profile": "real-aidp",
+      "operators": [
+        "contains",
+        "is",
+        "start with",
+        "end with"
+      ],
+      "graph": "determine whether graph consumes metadata_condition"
     },
     "steps": [
       {
         "order": 1,
-        "action": "Obtain the documented metadata_condition schema for original_file_name, including OR semantics, operator support, limits and cross-KB scope.",
-        "expected": "A versioned AIDP contract states that original_file_name is supported, one condition set applies to all selected KBs, and graph retrieval does not consume it."
+        "action": "Send a vector FusionSearch with each supported operator.",
+        "expected": "Only matching files are returned and no 400/422 occurs."
       },
       {
         "order": 2,
-        "action": "Send a vector/full-text FusionSearch with metadata_condition OR-ing the selected names while an unselected file scores higher.",
-        "expected": "The unselected file is absent before topK, and only selected-file hits are returned."
+        "action": "Send an unsupported operator or unknown field.",
+        "expected": "AIDP rejects the request with an explicit error."
       },
       {
         "order": 3,
-        "action": "Repeat with graph enabled and with a selected name that is duplicated across two KBs.",
-        "expected": "Graph is excluded or the run fails closed; the name condition applies across both KBs as accepted, without requiring a file_uuid identity."
+        "action": "Send graph retrieval with the same condition and compare with an unfiltered run.",
+        "expected": "Record whether graph honors the filter; if it does not, the product keeps failing closed."
       }
     ],
     "expected_results": [
-      "AIDP confirms the original_file_name metadata_condition request shape and OR semantics.",
-      "Vector/full-text filtering is proven before candidate recall and topK.",
-      "Graph retrieval is explicitly excluded, so the product fails closed for graph-enabled file scopes.",
-      "Same-name files across KBs are covered by the accepted name condition; no file_uuid contract is invented."
+      "Supported operators filter before recall",
+      "Invalid operators are rejected",
+      "Graph behavior is recorded"
     ],
     "forbidden_side_effects": [
-      "Do not assume file_uuid or kds_id is a metadata_condition field.",
-      "Do not send an unfiltered graph request under a file scope.",
-      "Do not implement post-topK trimming as the filter.",
-      "Do not record credentials in evidence."
+      "Do not claim UUID-level isolation",
+      "Do not use an unfiltered retry as a fallback"
+    ],
+    "unit_boundary": "real AIDP FusionSearch",
+    "inputs": [
+      "four operators",
+      "invalid operator",
+      "graph comparison"
+    ],
+    "assertions": [
+      "filtered results",
+      "explicit error",
+      "graph behavior"
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Operator acceptance",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Graph behavior",
+        "steps": [
+          3
+        ],
+        "expected_results": [
+          3
+        ],
+        "forbidden_side_effects": [
+          2
+        ]
+      }
     ],
     "contract": {
       "protocol": "AIDP FusionSearch HTTP/JSON",
@@ -63,8 +107,8 @@
       "endpoint": "/KnowledgeBase/Tenants/{tenant_id}/Retrieval/FusionSearch",
       "request_expectations": [
         "metadata_condition is a top-level object with logical_operator and conditions[]; each condition has name, comparison_operator and value.",
-        "The supported file-identifying field is original_file_name; OR conditions identify the selected names and apply to all selected KBs.",
-        "Graph retrieval does not consume metadata_condition; the product must not send a file-scoped graph request."
+        "The filter uses one condition on original_file_name with one of contains / is / start with / end with; the same condition applies to all selected KBs and is evaluated before recall.",
+        "Graph retrieval does not consume metadata_condition (unverified whether any version honors it); the product must not send a filtered graph request."
       ],
       "response_expectations": [
         "Hits carry original_file_name (or an equivalent returned file name) so defensive verification is possible.",

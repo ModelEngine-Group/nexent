@@ -22,17 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Empty,
-  Input,
-  Segmented,
-  Spin,
-  message,
-} from "antd";
-import { ChevronDown, ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { Alert, Button, Empty, Input, Spin, message } from "antd";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -40,24 +30,15 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 import type {
-  AidpFileScope,
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
 import {
   DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE,
-  EMPTY_AIDP_FILE_SCOPE,
-  getAidpFileScope,
-  withAidpFileScope,
+  withAidpMetadataFilter,
 } from "@/types/knowledgeScope";
-import {
-  FILE_SCOPE_BROWSE_PAGE_SIZE,
-  useFileScopeCatalog,
-  type FileScopeFile,
-  type FileScopeGroupState,
-  type FileScopeKnowledgeBase,
-} from "./useFileScopeCatalog";
+import { AdvancedMetadataFilter } from "./advanced-metadata-filter";
 import { ResourceCard } from "@/features/workbench";
 import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSelectionList";
 import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
@@ -89,19 +70,6 @@ const copyScope = (
     })
   ) as ConversationKnowledgeScope;
 
-const fileScopeForSelection = (
-  scope: ConversationKnowledgeScope,
-  selectedIds: string[] | null
-): AidpFileScope => {
-  const current = scope.aidp.file_scope;
-  if (!current || current.mode !== "selected") return EMPTY_AIDP_FILE_SCOPE;
-  const files =
-    selectedIds === null
-      ? current.files
-      : current.files.filter((file) => selectedIds.includes(file.kds_id));
-  return files.length > 0 ? { mode: "selected", files } : EMPTY_AIDP_FILE_SCOPE;
-};
-
 const normalizeScopeForSource = (
   value: ConversationKnowledgeScope | null,
   source: "local" | "aidp" | null
@@ -111,52 +79,35 @@ const normalizeScopeForSource = (
   if (scope.local.mode === "disabled" && scope.aidp.mode === "disabled") {
     return scope;
   }
-  if (source === "local" && scope.local.mode === "inherit") {
-    return withAidpFileScope(
-      {
+  if (source === "local") {
+    if (scope.local.mode === "override") {
+      return { ...scope, aidp: { mode: "disabled", kds_ids: [] } };
+    }
+    if (scope.local.mode === "inherit") {
+      return {
         schema_version: 1,
         local: { mode: "inherit", knowledge_ids: [] },
         aidp: { mode: "disabled", kds_ids: [] },
-      },
-      EMPTY_AIDP_FILE_SCOPE
-    );
+      };
+    }
   }
-  if (source === "aidp" && scope.aidp.mode === "inherit") {
-    return withAidpFileScope(
-      {
+  if (source === "aidp") {
+    if (scope.aidp.mode === "override") {
+      return { ...scope, local: { mode: "disabled", knowledge_ids: [] } };
+    }
+    if (scope.aidp.mode === "inherit") {
+      return {
         ...scope,
         local: { mode: "disabled", knowledge_ids: [] },
         aidp: { mode: "inherit", kds_ids: [] },
-      },
-      fileScopeForSelection(scope, null)
-    );
+      };
+    }
   }
-  if (source === "local" && scope.local.mode === "override") {
-    return withAidpFileScope(
-      {
-        ...scope,
-        aidp: { mode: "disabled", kds_ids: [] },
-      },
-      EMPTY_AIDP_FILE_SCOPE
-    );
-  }
-  if (source === "aidp" && scope.aidp.mode === "override") {
-    return withAidpFileScope(
-      {
-        ...scope,
-        local: { mode: "disabled", knowledge_ids: [] },
-      },
-      fileScopeForSelection(scope, scope.aidp.kds_ids)
-    );
-  }
-  return withAidpFileScope(
-    {
-      schema_version: 1,
-      local: { mode: "disabled", knowledge_ids: [] },
-      aidp: { mode: "disabled", kds_ids: [] },
-    },
-    EMPTY_AIDP_FILE_SCOPE
-  );
+  return {
+    schema_version: 1,
+    local: { mode: "disabled", knowledge_ids: [] },
+    aidp: { mode: "disabled", kds_ids: [] },
+  };
 };
 
 export const ConversationKnowledgeScopeModal: FC<
@@ -210,20 +161,6 @@ export const ConversationKnowledgeScopeModal: FC<
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(RESOURCE_PAGE_SIZE);
-  const initialScopeMode: "kb" | "files" =
-    value?.aidp.file_scope?.mode === "selected" ? "files" : "kb";
-  const [scopeMode, setScopeMode] = useState<"kb" | "files">(initialScopeMode);
-  const [expandedFileGroups, setExpandedFileGroups] = useState<Set<string>>(
-    new Set()
-  );
-  const [modeInputs, setModeInputs] = useState({ open, initialScopeMode });
-  if (
-    modeInputs.open !== open ||
-    modeInputs.initialScopeMode !== initialScopeMode
-  ) {
-    setModeInputs({ open, initialScopeMode });
-    if (open) setScopeMode(initialScopeMode);
-  }
   const tags = useResourceTags(
     open && presentation === "drawer" && configuredSource === "local",
     "knowledge_base",
@@ -364,7 +301,9 @@ export const ConversationKnowledgeScopeModal: FC<
                   aidp: {
                     mode: "override",
                     kds_ids: visibleSelected.map(String),
-                    file_scope: normalized.aidp.file_scope,
+                    ...(normalized.aidp.metadata_filter
+                      ? { metadata_filter: normalized.aidp.metadata_filter }
+                      : {}),
                   },
                 }
               : normalized
@@ -405,469 +344,6 @@ export const ConversationKnowledgeScopeModal: FC<
     [aidpKnowledgeBases]
   );
 
-  const fileScopeKnowledgeBases = useMemo(() => {
-    if (configuredSource !== "aidp") return [];
-    const available = new Set(aidpKnowledgeBases.map((kb) => String(kb.id)));
-    const configured = capabilities?.sources.aidp.default_knowledge_ids ?? [];
-    const fallback = draft.aidp.kds_ids;
-    const ids = (configured.length > 0 ? configured : fallback)
-      .map(String)
-      .filter((id) => available.has(id));
-    return Array.from(new Set(ids)).map((id) => {
-      const kb = aidpKnowledgeBases.find(
-        (candidate) => String(candidate.id) === id
-      );
-      return {
-        id,
-        name: kb ? kb.display_name || kb.name : id,
-      };
-    });
-  }, [aidpKnowledgeBases, capabilities, configuredSource, draft.aidp.kds_ids]);
-
-  const fileCatalog = useFileScopeCatalog({
-    knowledgeBases: fileScopeKnowledgeBases,
-    enabled: open && scopeMode === "files" && configuredSource === "aidp",
-    searchTerm: scopeMode === "files" ? search : "",
-  });
-
-  const selectedFileScope = getAidpFileScope(draft);
-  const selectedFiles = selectedFileScope.files;
-  const selectedFileKeys = useMemo(
-    () =>
-      new Set(selectedFiles.map((file) => `${file.kds_id}:${file.file_uuid}`)),
-    [selectedFiles]
-  );
-  const duplicatedSelectedNames = useMemo(() => {
-    const counts = new Map<string, number>();
-    selectedFiles.forEach((file) => {
-      const name = file.file_name || file.file_uuid;
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    });
-    return new Set(
-      Array.from(counts.entries())
-        .filter(([, count]) => count > 1)
-        .map(([name]) => name)
-    );
-  }, [selectedFiles]);
-  const selectedCountByGroup = useMemo(() => {
-    const counts = new Map<string, number>();
-    selectedFiles.forEach((file) => {
-      const id = String(file.kds_id);
-      counts.set(id, (counts.get(id) ?? 0) + 1);
-    });
-    return counts;
-  }, [selectedFiles]);
-  const firstFileGroupId = fileScopeKnowledgeBases[0]?.id ?? "";
-  const fileEntryKey =
-    open && scopeMode === "files" && configuredSource === "aidp"
-      ? `${open}:${firstFileGroupId}`
-      : "";
-  const [fileEntry, setFileEntry] = useState({ key: "", firstId: "" });
-  if (fileEntry.key !== fileEntryKey) {
-    setFileEntry({ key: fileEntryKey, firstId: firstFileGroupId });
-    setExpandedFileGroups(
-      fileEntryKey && firstFileGroupId ? new Set([firstFileGroupId]) : new Set()
-    );
-  }
-  const toggleFileGroup = (id: string) => {
-    if (disabled || saving) return;
-    const isExpanded = expandedFileGroups.has(id);
-    setExpandedFileGroups((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-    if (!isExpanded) fileCatalog.loadGroup(id);
-  };
-  const refreshFileScope = () => {
-    fileCatalog.reload();
-    setExpandedFileGroups(
-      firstFileGroupId ? new Set([firstFileGroupId]) : new Set()
-    );
-  };
-  const maxFileSelect = capabilities?.sources.aidp.max_file_select ?? 20;
-  const maxFileKbSelect = capabilities?.sources.aidp.max_select ?? 10;
-
-  const toggleFile = (file: FileScopeFile) => {
-    if (disabled || saving) return;
-    setSelectionTouched(true);
-    setDraft((current) => {
-      const existing = getAidpFileScope(current).files;
-      const key = `${file.kdsId}:${file.fileUuid}`;
-      const isSelected = existing.some(
-        (item) => `${item.kds_id}:${item.file_uuid}` === key
-      );
-      let nextFiles;
-      if (isSelected) {
-        nextFiles = existing.filter(
-          (item) => `${item.kds_id}:${item.file_uuid}` !== key
-        );
-      } else {
-        if (existing.length >= maxFileSelect) {
-          message.warning(
-            t("chat.knowledgeScope.fileScopeMax", { count: maxFileSelect })
-          );
-          return current;
-        }
-        const nextKbIds = new Set([
-          ...existing.map((item) => item.kds_id),
-          file.kdsId,
-        ]);
-        if (nextKbIds.size > maxFileKbSelect) {
-          message.warning(
-            t("chat.knowledgeScope.fileScopeMaxKbs", {
-              count: maxFileKbSelect,
-            })
-          );
-          return current;
-        }
-        nextFiles = [
-          ...existing,
-          {
-            kds_id: file.kdsId,
-            file_uuid: file.fileUuid,
-            file_name: file.fileName,
-            kds_name: file.kdsName,
-          },
-        ];
-      }
-      const kdsIds = Array.from(new Set(nextFiles.map((item) => item.kds_id)));
-      return {
-        ...current,
-        schema_version: 2,
-        local: { mode: "disabled", knowledge_ids: [] },
-        aidp: {
-          mode: kdsIds.length > 0 ? "override" : "inherit",
-          kds_ids: kdsIds,
-          file_scope: { mode: "selected", files: nextFiles },
-        },
-      };
-    });
-  };
-
-  const removeFileByKey = (key: string) => {
-    const file = selectedFiles.find(
-      (item) => `${item.kds_id}:${item.file_uuid}` === key
-    );
-    if (file) {
-      toggleFile({
-        kdsId: file.kds_id,
-        fileUuid: file.file_uuid,
-        fileName: file.file_name || file.file_uuid,
-        fileType: undefined,
-        kdsName: file.kds_name || file.kds_id,
-      });
-    }
-  };
-
-  const switchScopeMode = (mode: "kb" | "files") => {
-    if (mode === scopeMode || disabled || saving) return;
-    if (mode === "files" && configuredSource !== "aidp") return;
-    setSearch("");
-    setPage(1);
-    setSelectionTouched(true);
-    setScopeMode(mode);
-    if (mode === "files") {
-      setDraft((current) => {
-        const existing = getAidpFileScope(current);
-        return {
-          ...current,
-          schema_version: 2,
-          local: { mode: "disabled", knowledge_ids: [] },
-          aidp: {
-            ...current.aidp,
-            mode:
-              current.aidp.mode === "disabled" ? "inherit" : current.aidp.mode,
-            file_scope:
-              existing.mode === "selected"
-                ? existing
-                : { mode: "selected", files: [] },
-          },
-        };
-      });
-      return;
-    }
-    setDraft((current) => {
-      const files = getAidpFileScope(current).files;
-      const derivedIds = Array.from(new Set(files.map((file) => file.kds_id)));
-      const nextKdsIds =
-        derivedIds.length > 0
-          ? derivedIds
-          : current.aidp.kds_ids.length > 0
-            ? current.aidp.kds_ids
-            : defaultSelectedIds;
-      return {
-        ...current,
-        schema_version: 1,
-        local: { mode: "disabled", knowledge_ids: [] },
-        aidp: {
-          mode: nextKdsIds.length > 0 ? "override" : "inherit",
-          kds_ids: nextKdsIds,
-          file_scope: EMPTY_AIDP_FILE_SCOPE,
-        },
-      };
-    });
-  };
-
-  const modeSwitch = (
-    <Segmented
-      block
-      value={scopeMode}
-      disabled={saving}
-      onChange={(nextMode) => switchScopeMode(nextMode as "kb" | "files")}
-      options={[
-        {
-          label: t("chat.knowledgeScope.modeKnowledge"),
-          value: "kb",
-        },
-        {
-          label: t("chat.knowledgeScope.modeFiles"),
-          value: "files",
-          disabled: configuredSource !== "aidp",
-        },
-      ]}
-    />
-  );
-
-  const filePageItems = (
-    current: number,
-    total: number
-  ): Array<number | "gap"> => {
-    if (total <= 7) {
-      return Array.from({ length: total }, (_, index) => index + 1);
-    }
-    const pages = Array.from(
-      new Set([1, total, current - 1, current, current + 1])
-    )
-      .filter((item) => item >= 1 && item <= total)
-      .sort((left, right) => left - right);
-    const items: Array<number | "gap"> = [];
-    pages.forEach((item, index) => {
-      if (index > 0 && item - pages[index - 1] > 1) items.push("gap");
-      items.push(item);
-    });
-    return items;
-  };
-
-  const renderSelectedFilePill = (groupId: string) => {
-    const count = selectedCountByGroup.get(groupId) ?? 0;
-    if (count === 0) return null;
-    return (
-      <span className="shrink-0 rounded-full bg-[#eaf2fd] px-1.5 py-0.5 text-[11px] leading-4 text-[#2f6fd0]">
-        {t("chat.knowledgeScope.fileGroupSelected", { count })}
-      </span>
-    );
-  };
-
-  const renderFileRow = (file: FileScopeFile) => {
-    const key = `${file.kdsId}:${file.fileUuid}`;
-    const selected = selectedFileKeys.has(key);
-    return (
-      <label
-        key={key}
-        className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-accent ${
-          selected ? "bg-[#f5f9ff]" : ""
-        }`}
-      >
-        <Checkbox
-          checked={selected}
-          disabled={disabled || saving}
-          onChange={() => toggleFile(file)}
-        />
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-[#eaf2fd]">
-          <FileText className="size-3.5 text-[#2f6fd0]" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-sm">{file.fileName}</span>
-        {file.fileType ? (
-          <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {file.fileType.toUpperCase()}
-          </span>
-        ) : null}
-      </label>
-    );
-  };
-
-  const renderBrowseFileGroup = (group: FileScopeKnowledgeBase) => {
-    const state: FileScopeGroupState = fileCatalog.groupStates[group.id] ?? {
-      files: [],
-      page: 1,
-      total: 0,
-      hasMore: false,
-      loaded: false,
-      loading: false,
-      error: false,
-    };
-    const expanded = expandedFileGroups.has(group.id);
-    const totalPages = Math.max(
-      1,
-      Math.ceil(state.total / FILE_SCOPE_BROWSE_PAGE_SIZE)
-    );
-    return (
-      <section key={group.id} className="border-b border-border last:border-0">
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left hover:bg-accent"
-          onClick={() => toggleFileGroup(group.id)}
-          aria-expanded={expanded}
-        >
-          {expanded ? (
-            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-            {group.name}
-          </span>
-          {state.loaded ? (
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {t("chat.knowledgeScope.fileGroupCount", { count: state.total })}
-            </span>
-          ) : null}
-          {renderSelectedFilePill(group.id)}
-        </button>
-        {expanded ? (
-          <div className="pb-1">
-            {state.error ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground">
-                <span>{t("chat.knowledgeScope.fileListLoadFailed")}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  className="h-auto p-0 text-xs"
-                  onClick={() => fileCatalog.loadGroup(group.id, state.page)}
-                >
-                  {t("chat.knowledgeScope.fileGroupRetry")}
-                </Button>
-              </div>
-            ) : !state.loaded ? (
-              <div className="flex justify-center py-5">
-                <Spin size="small" />
-              </div>
-            ) : state.files.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">
-                {t("chat.knowledgeScope.fileEmpty")}
-              </div>
-            ) : (
-              <Spin spinning={state.loading} size="small">
-                {state.files.map(renderFileRow)}
-                {totalPages > 1 ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground">
-                    <span>
-                      {t("chat.knowledgeScope.filePageLabel", {
-                        page: state.page,
-                        total: totalPages,
-                      })}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="text"
-                        size="small"
-                        className="h-6 min-w-6 px-1"
-                        disabled={state.page <= 1}
-                        aria-label={t("chat.knowledgeScope.filePrevPage")}
-                        onClick={() =>
-                          fileCatalog.loadGroup(group.id, state.page - 1)
-                        }
-                      >
-                        <ChevronLeft className="size-3.5" />
-                      </Button>
-                      {filePageItems(state.page, totalPages).map(
-                        (item, index) =>
-                          item === "gap" ? (
-                            <span key={`gap-${index}`} className="px-1">
-                              …
-                            </span>
-                          ) : (
-                            <Button
-                              key={item}
-                              type={item === state.page ? "primary" : "text"}
-                              size="small"
-                              className="h-6 min-w-6 px-1.5"
-                              onClick={() =>
-                                fileCatalog.loadGroup(group.id, item)
-                              }
-                            >
-                              {item}
-                            </Button>
-                          )
-                      )}
-                      <Button
-                        type="text"
-                        size="small"
-                        className="h-6 min-w-6 px-1"
-                        disabled={state.page >= totalPages}
-                        aria-label={t("chat.knowledgeScope.fileNextPage")}
-                        onClick={() =>
-                          fileCatalog.loadGroup(group.id, state.page + 1)
-                        }
-                      >
-                        <ChevronRight className="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </Spin>
-            )}
-          </div>
-        ) : null}
-      </section>
-    );
-  };
-
-  const renderSearchFileGroup = (group: FileScopeKnowledgeBase) => {
-    const result = fileCatalog.searchResults[group.id];
-    if (!result || result.files.length === 0) return null;
-    return (
-      <section key={group.id} className="border-b border-border last:border-0">
-        <div className="flex items-center gap-2 px-3 py-2.5">
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-            {group.name}
-          </span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {result.hasMore
-              ? t("chat.knowledgeScope.fileSearchMatchesMore", {
-                  count: result.files.length,
-                })
-              : t("chat.knowledgeScope.fileSearchMatches", {
-                  count: result.files.length,
-                })}
-          </span>
-          {renderSelectedFilePill(group.id)}
-        </div>
-        <div className="pb-1">{result.files.map(renderFileRow)}</div>
-      </section>
-    );
-  };
-
-  const renderFileScope = () => {
-    if (fileScopeKnowledgeBases.length === 0) {
-      return <Empty description={t("chat.knowledgeScope.fileModeNoKb")} />;
-    }
-    if (fileCatalog.searchActive) {
-      const matchedGroups = fileScopeKnowledgeBases.filter(
-        (group) => (fileCatalog.searchResults[group.id]?.files.length ?? 0) > 0
-      );
-      if (matchedGroups.length > 0) {
-        return (
-          <div className="divide-y divide-border">
-            {matchedGroups.map(renderSearchFileGroup)}
-          </div>
-        );
-      }
-      if (fileCatalog.searchSettled && fileCatalog.searchHasSuccess) {
-        return <Empty description={t("chat.knowledgeScope.fileSearchEmpty")} />;
-      }
-      return <div className="min-h-[120px]" />;
-    }
-    return (
-      <div className="divide-y divide-border">
-        {fileScopeKnowledgeBases.map(renderBrowseFileGroup)}
-      </div>
-    );
-  };
-
   const getKnowledgeBaseId = (
     source: "local" | "aidp",
     knowledgeBase: KnowledgeBase
@@ -884,35 +360,25 @@ export const ConversationKnowledgeScopeModal: FC<
   const updateSelectedValues = (source: "local" | "aidp", values: string[]) => {
     setSelectionTouched(true);
     setRestoreDefaultClicked(false);
-    const nextFileScope =
-      source === "local"
-        ? EMPTY_AIDP_FILE_SCOPE
-        : fileScopeForSelection(draft, values);
-    const previousCount = draft.aidp.file_scope?.files.length ?? 0;
-    const nextCount = nextFileScope.files.length;
-    if (previousCount > nextCount) {
-      message.warning(
-        t("chat.knowledgeScope.fileScopeRemoved", {
-          count: previousCount - nextCount,
-        })
-      );
-    }
-    setDraft((current) =>
-      withAidpFileScope(
-        source === "local"
-          ? {
-              ...current,
-              local: { mode: "override", knowledge_ids: values },
-              aidp: { mode: "disabled", kds_ids: [] },
-            }
-          : {
-              ...current,
-              local: { mode: "disabled", knowledge_ids: [] },
-              aidp: { mode: "override", kds_ids: values },
-            },
-        nextFileScope
-      )
-    );
+    setDraft((current) => {
+      const filter = current.aidp.metadata_filter;
+      if (source === "local") {
+        return {
+          ...current,
+          local: { mode: "override", knowledge_ids: values },
+          aidp: { mode: "disabled", kds_ids: [] },
+        };
+      }
+      return {
+        ...current,
+        local: { mode: "disabled", knowledge_ids: [] },
+        aidp: {
+          mode: "override",
+          kds_ids: values,
+          ...(filter ? { metadata_filter: filter } : {}),
+        },
+      };
+    });
   };
 
   const sameSelection = (left: string[], right: string[]) => {
@@ -923,79 +389,60 @@ export const ConversationKnowledgeScopeModal: FC<
       left.every((id) => rightIds.has(id))
     );
   };
-
   const buildScopeForSelection = (
     source: "local" | "aidp",
     selectedIds: string[]
   ): ConversationKnowledgeScope => {
-    if (selectedIds.length === 0) {
-      return withAidpFileScope(
-        {
-          schema_version: 1,
-          local: { mode: "disabled", knowledge_ids: [] },
-          aidp: { mode: "disabled", kds_ids: [] },
-        },
-        EMPTY_AIDP_FILE_SCOPE
-      );
-    }
-    if (sameSelection(selectedIds, defaultSelectedIds)) {
-      return source === "local"
-        ? withAidpFileScope(
-            {
-              schema_version: 1,
-              local: { mode: "inherit", knowledge_ids: [] },
-              aidp: { mode: "disabled", kds_ids: [] },
-            },
-            EMPTY_AIDP_FILE_SCOPE
-          )
-        : withAidpFileScope(
-            {
-              schema_version: 1,
-              local: { mode: "disabled", knowledge_ids: [] },
-              aidp: { mode: "inherit", kds_ids: [] },
-            },
-            fileScopeForSelection(draft, null)
-          );
-    }
-    return source === "local"
-      ? withAidpFileScope(
-          {
-            schema_version: 1,
-            local: { mode: "override", knowledge_ids: selectedIds },
-            aidp: { mode: "disabled", kds_ids: [] },
-          },
-          EMPTY_AIDP_FILE_SCOPE
-        )
-      : withAidpFileScope(
-          {
+    const base: ConversationKnowledgeScope =
+      selectedIds.length === 0
+        ? {
             schema_version: 1,
             local: { mode: "disabled", knowledge_ids: [] },
-            aidp: { mode: "override", kds_ids: selectedIds },
-          },
-          fileScopeForSelection(draft, selectedIds)
-        );
+            aidp: { mode: "disabled", kds_ids: [] },
+          }
+        : sameSelection(selectedIds, defaultSelectedIds)
+          ? source === "local"
+            ? {
+                schema_version: 1,
+                local: { mode: "inherit", knowledge_ids: [] },
+                aidp: { mode: "disabled", kds_ids: [] },
+              }
+            : {
+                schema_version: 1,
+                local: { mode: "disabled", knowledge_ids: [] },
+                aidp: { mode: "inherit", kds_ids: [] },
+              }
+          : source === "local"
+            ? {
+                schema_version: 1,
+                local: { mode: "override", knowledge_ids: selectedIds },
+                aidp: { mode: "disabled", kds_ids: [] },
+              }
+            : {
+                schema_version: 1,
+                local: { mode: "disabled", knowledge_ids: [] },
+                aidp: { mode: "override", kds_ids: selectedIds },
+              };
+    return withAidpMetadataFilter(base, draft.aidp.metadata_filter);
   };
 
   const buildInheritScope = (
     source: "local" | "aidp"
-  ): ConversationKnowledgeScope =>
-    source === "local"
-      ? withAidpFileScope(
-          {
+  ): ConversationKnowledgeScope => {
+    const base: ConversationKnowledgeScope =
+      source === "local"
+        ? {
             schema_version: 1,
             local: { mode: "inherit", knowledge_ids: [] },
             aidp: { mode: "disabled", kds_ids: [] },
-          },
-          EMPTY_AIDP_FILE_SCOPE
-        )
-      : withAidpFileScope(
-          {
+          }
+        : {
             schema_version: 1,
             local: { mode: "disabled", knowledge_ids: [] },
             aidp: { mode: "inherit", kds_ids: [] },
-          },
-          fileScopeForSelection(draft, null)
-        );
+          };
+    return withAidpMetadataFilter(base, draft.aidp.metadata_filter);
+  };
 
   const toggleKnowledgeBase = (source: "local" | "aidp", id: string) => {
     const currentValues =
@@ -1039,48 +486,19 @@ export const ConversationKnowledgeScopeModal: FC<
 
   const handleConfirm = async () => {
     if (!configuredSource || loading || saving) return;
+    if (listError) return;
+    const draftFilter = draft.aidp.metadata_filter;
+    if (
+      configuredSource === "aidp" &&
+      draftFilter?.enabled &&
+      !draftFilter.file_name?.value?.trim()
+    ) {
+      message.warning(t("chat.knowledgeScope.advancedFilterNeedsValue"));
+      return;
+    }
     const aidpNamesById = new Map(
       aidpOptions.map((option) => [String(option.value), String(option.label)])
     );
-    if (scopeMode === "files") {
-      if (configuredSource !== "aidp") return;
-      const files = getAidpFileScope(draft).files;
-      if (files.length === 0) {
-        message.warning(t("chat.knowledgeScope.fileModeNeedsFile"));
-        return;
-      }
-      const kdsIds = Array.from(new Set(files.map((file) => file.kds_id)));
-      const nextScope: ConversationKnowledgeScope = {
-        schema_version: 2,
-        local: { mode: "disabled", knowledge_ids: [] },
-        aidp: {
-          mode: "override",
-          kds_ids: kdsIds,
-          file_scope: { mode: "selected", files },
-        },
-      };
-      const preview: KnowledgeScopeEffectivePreview = {
-        local: { disabled: true, knowledge_ids: [], display_names: [] },
-        aidp: {
-          disabled: false,
-          kds_ids: kdsIds,
-          display_names: kdsIds.map((id) => aidpNamesById.get(id) ?? id),
-          file_scope: { mode: "selected", files },
-        },
-      };
-      setSaving(true);
-      try {
-        await onConfirm(nextScope, preview);
-      } catch {
-        message.error(
-          t("chat.knowledgeScope.saveFailed", "知识库配置保存失败，请重试")
-        );
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-    if (listError) return;
     const selectedIds =
       configuredSource === "local"
         ? draft.local.knowledge_ids
@@ -1092,11 +510,11 @@ export const ConversationKnowledgeScopeModal: FC<
       sameSelection(selectedIds, initialSelectedIds)
     ) {
       nextScope = normalizeScopeForSource(value, configuredSource);
+      nextScope = withAidpMetadataFilter(nextScope, draftFilter);
     }
     if (restoreDefaultClicked) {
       nextScope = buildInheritScope(configuredSource);
     }
-    nextScope = withAidpFileScope(nextScope, EMPTY_AIDP_FILE_SCOPE);
     if (!validateLocalEmbeddingModels()) return;
     const localNamesById = new Map(
       localOptions.map((option) => [String(option.value), String(option.label)])
@@ -1123,7 +541,7 @@ export const ConversationKnowledgeScopeModal: FC<
           nextScope.aidp.mode === "override"
             ? nextScope.aidp.kds_ids.map((id) => aidpNamesById.get(id) ?? id)
             : [],
-        file_scope: EMPTY_AIDP_FILE_SCOPE,
+        metadata_filter: nextScope.aidp.metadata_filter,
       },
     };
     setSaving(true);
@@ -1480,7 +898,6 @@ export const ConversationKnowledgeScopeModal: FC<
         disabled={loading || listError || saving || !configuredSource}
         onClick={() => {
           if (!configuredSource) return;
-          setScopeMode("kb");
           setDraft(
             configuredSource === "local"
               ? {
@@ -1497,7 +914,6 @@ export const ConversationKnowledgeScopeModal: FC<
                   aidp: {
                     mode: "override",
                     kds_ids: defaultSelectedIds,
-                    file_scope: EMPTY_AIDP_FILE_SCOPE,
                   },
                 }
           );
@@ -1510,19 +926,25 @@ export const ConversationKnowledgeScopeModal: FC<
     </div>
   );
   const drawerSelection = source ? getSourceSelection(source) : null;
-  const fileMode = scopeMode === "files";
-  const selectedFileOptions = selectedFiles.map((file) => {
-    const name = file.file_name || file.file_uuid;
-    const kbName =
-      file.kds_name ||
-      aidpOptions.find((option) => String(option.value) === String(file.kds_id))
-        ?.label ||
-      file.kds_id;
-    return {
-      id: `${file.kds_id}:${file.file_uuid}`,
-      label: duplicatedSelectedNames.has(name) ? `${name} · ${kbName}` : name,
-    };
-  });
+  const draftFilter = draft.aidp.metadata_filter;
+  const filterIncomplete = Boolean(
+    source === "aidp" &&
+    draftFilter?.enabled &&
+    !draftFilter.file_name?.value?.trim()
+  );
+  const filterContent =
+    source === "aidp" ? (
+      <AdvancedMetadataFilter
+        value={draftFilter ?? { enabled: false }}
+        disabled={disabled || saving}
+        onChange={(nextFilter) =>
+          setDraft((current) => ({
+            ...current,
+            aidp: { ...current.aidp, metadata_filter: nextFilter },
+          }))
+        }
+      />
+    ) : undefined;
   const scopeDrawer = (
     <WorkbenchResourceDrawer
       open={open}
@@ -1534,125 +956,92 @@ export const ConversationKnowledgeScopeModal: FC<
       saving={saving}
       disabled={disabled}
       confirmDisabled={
-        fileMode
-          ? selectedFiles.length === 0
-          : loading ||
-            listError ||
-            !source ||
-            (!!tags.predicates.length && tags.loading)
+        loading ||
+        listError ||
+        !source ||
+        (!!tags.predicates.length && tags.loading) ||
+        filterIncomplete
       }
-      picker={
-        fileMode
-          ? {
-              keyword: search,
-              searchPlaceholder: t("chat.knowledgeScope.fileSearchPlaceholder"),
-              onSearch: setSearch,
-              listTitle: t("chat.knowledgeScope.fileList"),
-              selected: selectedFileOptions,
-              onRemoveSelected: removeFileByKey,
-              headerContent: modeSwitch,
-              controlsContent: (
-                <div className="text-xs text-muted-foreground">
-                  {t("chat.knowledgeScope.fileSelectedCount", {
-                    count: selectedFiles.length,
-                    max: maxFileSelect,
-                  })}
-                </div>
-              ),
-              showPagination: false,
-              onRefresh: refreshFileScope,
-              refreshDisabled: saving,
-            }
-          : {
-              keyword: search,
-              searchPlaceholder: t(
-                "resourcePicker.search.knowledge",
-                "搜索知识库名称及描述"
-              ),
-              onSearch: setSearch,
-              headerContent: modeSwitch,
-              tagFilter:
-                source === "local" ? (
-                  <ResourceTagFilter
-                    filter={tags}
-                    onChange={() => setPage(1)}
-                  />
-                ) : undefined,
-              listTitle: t("resourcePicker.list.knowledge", "知识库列表"),
-              selected: drawerKnowledge
-                .filter((kb) =>
-                  selectedScopeIds.includes(
-                    getKnowledgeBaseId(source ?? "local", kb)
-                  )
-                )
-                .map((kb) => ({
-                  id: getKnowledgeBaseId(source ?? "local", kb),
-                  label: kb.display_name || kb.name,
-                })),
-              onRemoveSelected: (id) => {
-                if (source) toggleKnowledgeBase(source, id);
-              },
-              total: source ? filterKnowledgeBases(source).length : 0,
-              page,
-              pageSize,
-              onPageSizeChange: (size) => {
-                setPageSize(size);
-                setPage(1);
-              },
-              onPageChange: setPage,
-              onSelectAll: drawerSelection
-                ? drawerSelection.handleSelectAll
-                : undefined,
-              allSelected: drawerSelection?.allSelected,
-              partiallySelected: Boolean(
-                drawerSelection &&
-                !drawerSelection.allSelected &&
-                drawerSelection.selectableIds.some((id) =>
-                  drawerSelection.selectedSet.has(id)
-                )
-              ),
-              selectAllDisabled:
-                loading ||
-                saving ||
-                listError ||
-                !drawerSelection?.selectableIds.length,
-              onRefresh: () => {
-                if (loading || saving) return;
-                setListError(false);
-                tags.retry?.();
-                setRefreshRevision((value) => value + 1);
-              },
-              refreshDisabled: loading || saving || !source,
-              controlsContent:
-                listError ||
-                capabilities?.legacy_prompt_warning?.detected ||
-                (value &&
-                  ((value.local.mode === "override" && source === "aidp") ||
-                    (value.aidp.mode === "override" && source === "local"))) ? (
-                  <>
-                    {knowledgeWarnings}
-                    {listError && (
-                      <Alert
-                        type="error"
-                        title={t("chat.knowledgeScope.listLoadFailed")}
-                      />
-                    )}
-                  </>
-                ) : undefined,
-            }
-      }
+      picker={{
+        keyword: search,
+        searchPlaceholder: t(
+          "resourcePicker.search.knowledge",
+          "搜索知识库名称及描述"
+        ),
+        onSearch: setSearch,
+        tagFilter:
+          source === "local" ? (
+            <ResourceTagFilter filter={tags} onChange={() => setPage(1)} />
+          ) : undefined,
+        listTitle: t("resourcePicker.list.knowledge", "知识库列表"),
+        selected: drawerKnowledge
+          .filter((kb) =>
+            selectedScopeIds.includes(getKnowledgeBaseId(source ?? "local", kb))
+          )
+          .map((kb) => ({
+            id: getKnowledgeBaseId(source ?? "local", kb),
+            label: kb.display_name || kb.name,
+          })),
+        onRemoveSelected: (id) => {
+          if (source) toggleKnowledgeBase(source, id);
+        },
+        total: source ? filterKnowledgeBases(source).length : 0,
+        page,
+        pageSize,
+        onPageSizeChange: (size) => {
+          setPageSize(size);
+          setPage(1);
+        },
+        onPageChange: setPage,
+        onSelectAll: drawerSelection
+          ? drawerSelection.handleSelectAll
+          : undefined,
+        allSelected: drawerSelection?.allSelected,
+        partiallySelected: Boolean(
+          drawerSelection &&
+          !drawerSelection.allSelected &&
+          drawerSelection.selectableIds.some((id) =>
+            drawerSelection.selectedSet.has(id)
+          )
+        ),
+        selectAllDisabled:
+          loading ||
+          saving ||
+          listError ||
+          !drawerSelection?.selectableIds.length,
+        onRefresh: () => {
+          if (loading || saving) return;
+          setListError(false);
+          tags.retry?.();
+          setRefreshRevision((value) => value + 1);
+        },
+        refreshDisabled: loading || saving || !source,
+        controlsContent:
+          listError ||
+          capabilities?.legacy_prompt_warning?.detected ||
+          (value &&
+            ((value.local.mode === "override" && source === "aidp") ||
+              (value.aidp.mode === "override" && source === "local"))) ? (
+            <>
+              {knowledgeWarnings}
+              {listError && (
+                <Alert
+                  type="error"
+                  title={t("chat.knowledgeScope.listLoadFailed")}
+                />
+              )}
+            </>
+          ) : undefined,
+        filterContent,
+      }}
       listContent={
-        fileMode ? (
-          renderFileScope()
-        ) : (
-          <Spin spinning={loading || !isDeploymentReady}>
-            {source ? (
-              renderSource(source, "list")
-            ) : (
-              <Empty description={t("chat.knowledgeScope.noTool")} />
-            )}
-          </Spin>
-        )
+        <Spin spinning={loading || !isDeploymentReady}>
+          {source ? (
+            renderSource(source, "list")
+          ) : (
+            <Empty description={t("chat.knowledgeScope.noTool")} />
+          )}
+        </Spin>
       }
     >
       {null}
@@ -1676,12 +1065,12 @@ export const ConversationKnowledgeScopeModal: FC<
           cancelText={t("chat.knowledgeScope.cancel")}
           confirmLoading={saving}
           okButtonProps={{
-            disabled: fileMode
-              ? selectedFiles.length === 0
-              : loading ||
-                listError ||
-                !configuredSource ||
-                (!!tags.predicates.length && tags.loading),
+            disabled:
+              loading ||
+              listError ||
+              !configuredSource ||
+              (!!tags.predicates.length && tags.loading) ||
+              filterIncomplete,
           }}
           width={920}
           centered
@@ -1696,39 +1085,9 @@ export const ConversationKnowledgeScopeModal: FC<
           )}
         >
           {knowledgeWarnings}
-          <Spin spinning={fileMode ? false : loading || !isDeploymentReady}>
+          <Spin spinning={loading || !isDeploymentReady}>
             <div className="space-y-3 py-2">
-              {modeSwitch}
-              {fileMode ? (
-                configuredSource === "aidp" ? (
-                  <>
-                    <Input.Search
-                      aria-label={t(
-                        "chat.knowledgeScope.fileSearchPlaceholder"
-                      )}
-                      value={search}
-                      onChange={(event) => {
-                        setSearch(event.target.value);
-                      }}
-                      placeholder={t(
-                        "chat.knowledgeScope.fileSearchPlaceholder"
-                      )}
-                      allowClear
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      <span>
-                        {t("chat.knowledgeScope.fileSelectedCount", {
-                          count: selectedFiles.length,
-                          max: maxFileSelect,
-                        })}
-                      </span>
-                    </div>
-                    {renderFileScope()}
-                  </>
-                ) : (
-                  <Empty description={t("chat.knowledgeScope.noTool")} />
-                )
-              ) : configuredSource ? (
+              {configuredSource ? (
                 <>
                   <ResourceTagFilter
                     filter={tags}
@@ -1747,6 +1106,7 @@ export const ConversationKnowledgeScopeModal: FC<
                     }
                   />
                   {renderSource(configuredSource, "all")}
+                  {configuredSource === "aidp" && filterContent}
                 </>
               ) : (
                 <Empty description={t("chat.knowledgeScope.noTool")} />

@@ -1,12 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Formal D1 coverage for resolving AIDP file scopes into tool parameters."""
+"""Formal D1 coverage for resolving AIDP metadata filters into tool parameters."""
 
 import json
 from types import SimpleNamespace
 
 import pytest
-
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from contracts.tool import ToolParamsRequest
 from management.services.knowledge_base import scope as scope_module
@@ -29,18 +28,28 @@ def _tree(*ranges):
     ]
 
 
-def _scope(files, *, aidp_mode="override", kds_ids=None):
-    return ConversationKnowledgeScopeRequest.model_validate(
-        {
-            "schema_version": 2,
-            "local": {"mode": "inherit", "knowledge_ids": []},
-            "aidp": {
-                "mode": aidp_mode,
-                "kds_ids": kds_ids if kds_ids is not None else sorted({item["kds_id"] for item in files}),
-                "file_scope": {"mode": "selected", "files": files},
-            },
+def _scope(
+    *,
+    enabled=True,
+    operator="contains",
+    value="合同",
+    aidp_mode="override",
+    kds_ids=None,
+):
+    payload = {
+        "schema_version": 3 if enabled else 1,
+        "local": {"mode": "inherit", "knowledge_ids": []},
+        "aidp": {
+            "mode": aidp_mode,
+            "kds_ids": ["kb-1"] if kds_ids is None and aidp_mode == "override" else (kds_ids or []),
+        },
+    }
+    if enabled:
+        payload["aidp"]["metadata_filter"] = {
+            "enabled": True,
+            "file_name": {"operator": operator, "value": value},
         }
-    )
+    return ConversationKnowledgeScopeRequest.model_validate(payload)
 
 
 def _resolve(monkeypatch, scope, tree, accessible, request_tool_params=None):
@@ -64,19 +73,10 @@ def _resolve(monkeypatch, scope, tree, accessible, request_tool_params=None):
     )
 
 
-def _file_pairs(file_scope):
-    return [(item["kds_id"], item["file_uuid"]) for item in file_scope["files"]]
-
-
-def test_selected_files_are_projected_per_tool(monkeypatch):
+def test_filter_is_projected_to_every_aidp_tool(monkeypatch):
     resolved = _resolve(
         monkeypatch,
-        _scope(
-            [
-                {"kds_id": "kb-1", "file_uuid": "file-a", "file_name": "a.txt"},
-                {"kds_id": "kb-2", "file_uuid": "file-b", "file_name": "b.txt"},
-            ]
-        ),
+        _scope(operator="starts_with", value="年度报告", kds_ids=["kb-1", "kb-2"]),
         _tree(("root", ["kb-1", "kb-2"]), ("child", ["kb-1"])),
         {"kb-1", "kb-2"},
     )
@@ -85,66 +85,42 @@ def test_selected_files_are_projected_per_tool(monkeypatch):
     child = resolved.tool_params.agents["child"].tools["aidp_search"]
     assert root["kds_list"] == ["kb-1", "kb-2"]
     assert child["kds_list"] == ["kb-1", "kb-2"]
-    assert _file_pairs(root["file_scope"]) == [("kb-1", "file-a"), ("kb-2", "file-b")]
-    assert _file_pairs(child["file_scope"]) == [("kb-1", "file-a"), ("kb-2", "file-b")]
-    assert resolved.aidp_file_scope["mode"] == "selected"
-    assert len(resolved.aidp_file_scope["files"]) == 2
+    expected = {
+        "enabled": True,
+        "file_name": {"operator": "starts_with", "value": "年度报告"},
+    }
+    assert root["metadata_filter"] == expected
+    assert child["metadata_filter"] == expected
+    assert resolved.aidp_metadata_filter == expected
+    assert "file_scope" not in root
 
 
-def test_out_of_range_and_empty_selected_fail_closed(monkeypatch):
-    tree = _tree(("root", ["kb-1", "kb-3"]))
-    mixed = _resolve(
-        monkeypatch,
-        _scope(
-            [
-                {"kds_id": "kb-1", "file_uuid": "file-a", "file_name": "a.txt"},
-                {"kds_id": "kb-3", "file_uuid": "file-c", "file_name": "c.txt"},
-            ],
-            kds_ids=["kb-1", "kb-3"],
-        ),
-        tree,
-        {"kb-1"},
-    )
-
-    mixed_scope = mixed.tool_params.agents["root"].tools["aidp_search"]["file_scope"]
-    assert _file_pairs(mixed_scope) == [("kb-1", "file-a")]
-    assert any(
-        warning["code"] == "KNOWLEDGE_SCOPE_FILE_UNAVAILABLE" and warning["count"] == 1
-        for warning in mixed.warnings
-    )
-
-    empty = _resolve(
-        monkeypatch,
-        _scope(
-            [{"kds_id": "kb-3", "file_uuid": "file-c", "file_name": "c.txt"}],
-            kds_ids=["kb-3"],
-        ),
-        tree,
-        {"kb-1"},
-    )
-    empty_scope = empty.tool_params.agents["root"].tools["aidp_search"]["file_scope"]
-    assert empty_scope == {"mode": "selected", "files": []}
-    assert empty.aidp_file_scope["mode"] == "selected"
-    assert empty.aidp_file_scope["files"] == []
-
-
-def test_selected_file_scope_applies_to_every_tool(monkeypatch):
+def test_disabled_filter_adds_no_parameter(monkeypatch):
     resolved = _resolve(
         monkeypatch,
-        _scope(
-            [{"kds_id": "kb-1", "file_uuid": "file-a", "file_name": "a.txt"}],
-            aidp_mode="inherit",
-            kds_ids=[],
-        ),
+        _scope(enabled=False),
+        _tree(("root", ["kb-1"])),
+        {"kb-1"},
+    )
+
+    params = resolved.tool_params.agents["root"].tools["aidp_search"]
+    assert "metadata_filter" not in params
+    assert resolved.aidp_metadata_filter == {"enabled": False}
+
+
+def test_filter_survives_inherit_mode_and_bounded_request_params(monkeypatch):
+    resolved = _resolve(
+        monkeypatch,
+        _scope(aidp_mode="inherit", kds_ids=[]),
         _tree(("root", ["kb-1"]), ("child", ["kb-2"])),
         {"kb-1", "kb-2"},
     )
-    inherit_params = resolved.tool_params.agents["root"].tools["aidp_search"]
-    child_params = resolved.tool_params.agents["child"].tools["aidp_search"]
-    assert inherit_params["kds_list"] == ["kb-1"]
-    assert child_params["kds_list"] == ["kb-1"]
-    assert _file_pairs(inherit_params["file_scope"]) == [("kb-1", "file-a")]
-    assert _file_pairs(child_params["file_scope"]) == [("kb-1", "file-a")]
+    root = resolved.tool_params.agents["root"].tools["aidp_search"]
+    child = resolved.tool_params.agents["child"].tools["aidp_search"]
+    assert root["kds_list"] == ["kb-1"]
+    assert child["kds_list"] == ["kb-2"]
+    assert root["metadata_filter"]["file_name"]["value"] == "合同"
+    assert child["metadata_filter"]["file_name"]["value"] == "合同"
 
     request_params = ToolParamsRequest.model_validate(
         {
@@ -153,7 +129,10 @@ def test_selected_file_scope_applies_to_every_tool(monkeypatch):
                     "tools": {
                         "aidp_search": {
                             "kds_list": ["kb-1", "kb-2", "kb-3"],
-                            "file_scope": {"mode": "all", "files": []},
+                            "metadata_filter": {
+                                "enabled": True,
+                                "file_name": {"operator": "is", "value": "other"},
+                            },
                         }
                     }
                 }
@@ -162,14 +141,14 @@ def test_selected_file_scope_applies_to_every_tool(monkeypatch):
     )
     bounded = _resolve(
         monkeypatch,
-        _scope(
-            [{"kds_id": "kb-1", "file_uuid": "file-a", "file_name": "a.txt"}],
-            kds_ids=["kb-1"],
-        ),
+        _scope(kds_ids=["kb-1"]),
         _tree(("root", ["kb-1"])),
         {"kb-1"},
         request_tool_params=request_params,
     )
     params = bounded.tool_params.agents["root"].tools["aidp_search"]
     assert params["kds_list"] == ["kb-1"]
-    assert _file_pairs(params["file_scope"]) == [("kb-1", "file-a")]
+    assert params["metadata_filter"]["file_name"] == {
+        "operator": "contains",
+        "value": "合同",
+    }

@@ -7,72 +7,104 @@
     "feature_id": "AIDP-FILE-SCOPE",
     "requirement_ids": [
       "AIDP-FILE-SCOPE-REQ-002",
-      "AIDP-FILE-SCOPE-REQ-004"
+      "AIDP-FILE-SCOPE-REQ-003"
     ],
     "business_rule_ids": [
       "AIDP-FILE-SCOPE-RULE-02",
+      "AIDP-FILE-SCOPE-RULE-03",
       "AIDP-FILE-SCOPE-RULE-04"
     ],
-    "title": "Knowledge-scope API persists file-derived v2 scopes and isolates conversations",
+    "title": "Knowledge-scope API persists v3 metadata filters and isolates conversations",
     "type": "CONTRACT",
     "priority": "P1",
     "status": "blocked",
     "automation": "manual",
-    "objective": "Verify the conversation knowledge-scope HTTP contract for the drawer file mode: v2 selected files derive kds_ids, persist and restore per conversation, v1 reads remain compatible, and invalid or empty file scopes are rejected.",
+    "objective": "Prove through the conversation knowledge-scope API that a v3 metadata filter is stored, echoed, isolated per conversation and cleared when the AIDP source is disabled or the filter is turned off.",
     "preconditions": [
-      "A local Nexent test stack and an authorized test user are available under an environment lease.",
-      "Two test conversations on an Agent with an AIDP knowledge base exist; no shared deployment or fixed data directory is used.",
-      "This Case is not executable until the environment is leased and the browser/API journey can be run against the changed build."
+      "A running management/runtime stack with a test user and at least one AIDP-enabled Agent."
     ],
     "test_data": {
       "profile": "mock",
-      "conversation_a": "select kb-1/file-a and kb-2/file-b",
-      "conversation_b": "no file selection",
-      "legacy_payload": "schema_version 1 without file_scope"
+      "conversation_a": "file name contains 合同",
+      "conversation_b": "no filter"
     },
     "steps": [
       {
         "order": 1,
-        "action": "PUT a v2 scope with selected files (and no separate kds_ids) to conversation A and read the conversation detail and update response.",
-        "expected": "The stored desired scope contains the structured files and derived kds_ids; the effective preview mirrors them; HTTP 200."
+        "action": "Save a v3 filter on conversation A and read it back.",
+        "expected": "The response echoes the same operator and value with schema_version 3."
       },
       {
         "order": 2,
-        "action": "Read conversation B and send a run request that carries no knowledge_scope.",
-        "expected": "Conversation B has no file scope, uses the Agent default range, and does not inherit conversation A's files."
+        "action": "Read conversation B.",
+        "expected": "Conversation B has no filter and is not affected."
       },
       {
         "order": 3,
-        "action": "Reopen conversation A, submit a v1 scope without file_scope, and then submit an invalid selected scope (empty list or file outside kds_ids).",
-        "expected": "The v1 scope reads as all files; the invalid scope is rejected with a client error before persistence and does not widen retrieval."
-      },
-      {
-        "order": 4,
-        "action": "Send a new run request in conversation A with the stored v2 scope.",
-        "expected": "The run request and resolved scope carry the selected files to the effective AIDP tool configuration; prior messages and sources are unchanged."
+        "action": "Disable the filter or switch to the local source and save.",
+        "expected": "The stored scope carries no metadata_filter."
       }
     ],
     "expected_results": [
-      "v2 file scopes persist and round-trip through the conversation scope API.",
-      "Legacy v1 conversations remain readable and behave as all-files mode.",
-      "Conversation A/B file scopes do not leak across conversations.",
-      "Invalid selected scopes are rejected with no persistence and no scope expansion.",
-      "The next run receives the stored file scope; previous answers are not recomputed."
+      "v3 filters persist and restore",
+      "Conversations remain isolated",
+      "Turning the filter off clears it"
     ],
     "forbidden_side_effects": [
-      "Do not use the fixed historical data directory, production AIDP or shared services.",
-      "Do not silently convert a selected scope to all files on any error.",
-      "Do not mutate conversations outside the case-owned fixtures.",
-      "Do not expose AIDP credentials in responses or logs."
+      "Do not leak filters across conversations",
+      "Do not persist a condition with enabled=false"
+    ],
+    "unit_boundary": "conversation knowledge-scope API",
+    "inputs": [
+      "save/read filter",
+      "second conversation",
+      "disable filter"
+    ],
+    "assertions": [
+      "round-trip",
+      "isolation",
+      "cleared"
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Persistence",
+        "steps": [
+          1
+        ],
+        "expected_results": [
+          1
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Isolation and clearing",
+        "steps": [
+          2,
+          3
+        ],
+        "expected_results": [
+          2,
+          3
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
     ],
     "contract": {
       "protocol": "HTTPS/JSON through the Nexent conversation API",
       "method": "PUT",
       "endpoint": "/conversation/{conversation_id}/knowledge-scope",
       "request_expectations": [
-        "Body is {scope: {...}} where scope.schema_version is 1 or 2 and scope.aidp.file_scope is {mode: all|selected, files: [{kds_id, file_uuid, file_name}]}.",
-        "Selected requires a non-empty deduplicated file list of at most 20 pairs; the server derives kds_ids from the distinct file KBs (at most 10).",
-        "Selected with AIDP disabled or with an override kds_ids range that excludes the file KB is rejected with 4xx before persistence."
+        "Body is {scope: {...}} where scope.schema_version is 3 and scope.aidp.metadata_filter is {enabled: true, file_name: {operator: contains|is|starts_with|ends_with, value: string}}.",
+        "Enabled requires a non-empty trimmed value of at most 256 characters and a non-disabled AIDP mode; disabled filters carry no file_name condition.",
+        "schema_version 1 or 2 records remain accepted; the retired file_scope is ignored."
       ],
       "response_expectations": [
         "Success response contains desired_scope and effective_preview; aidp.kds_ids equal the distinct selected-file KBs and the effective preview does not add KBs.",

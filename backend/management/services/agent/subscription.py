@@ -434,12 +434,12 @@ async def run_agent_stream(
                     "disabled": resolved_scope.aidp_disabled,
                     "kds_ids": resolved_scope.aidp_kds_ids,
                     "display_names": resolved_scope.aidp_display_names,
-                    "file_scope": (
-                        resolved_scope.aidp_file_scope
+                    "metadata_filter": (
+                        resolved_scope.aidp_metadata_filter
                         if isinstance(
-                            getattr(resolved_scope, "aidp_file_scope", None), dict
+                            getattr(resolved_scope, "aidp_metadata_filter", None), dict
                         )
-                        else {"mode": "all", "files": []}
+                        else {"enabled": False}
                     ),
                 },
             },

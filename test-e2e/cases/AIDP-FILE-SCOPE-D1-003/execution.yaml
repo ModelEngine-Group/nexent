@@ -8,12 +8,11 @@ implementations:
   - mock
 acceptance_bindings:
   AC-01:
-  - test_selected_scope_sends_original_file_name_condition
+  - test_filter_builds_single_original_file_name_condition
   AC-02:
-  - test_graph_retrieval_fails_closed_for_file_scope
-  - test_selected_file_without_name_fails_closed
+  - test_graph_retrieval_fails_closed_for_metadata_filter
   AC-03:
-  - test_out_of_scope_record_fails_closed
+  - test_unsupported_operator_fails_closed_without_request
   AC-04:
-  - test_all_mode_preserves_retrieval_configuration
-  - test_malformed_file_scope_is_rejected
+  - test_disabled_filter_preserves_retrieval_configuration
+  - test_malformed_filter_is_rejected

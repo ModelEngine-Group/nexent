@@ -8,8 +8,8 @@ implementations:
   - mock
 acceptance_bindings:
   AC-01:
-  - test_selected_files_are_projected_per_tool
+  - test_filter_is_projected_to_every_aidp_tool
   AC-02:
-  - test_out_of_range_and_empty_selected_fail_closed
+  - test_disabled_filter_adds_no_parameter
   AC-03:
-  - test_selected_file_scope_applies_to_every_tool
+  - test_filter_survives_inherit_mode_and_bounded_request_params

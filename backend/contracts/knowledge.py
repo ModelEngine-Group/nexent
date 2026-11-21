@@ -24,8 +24,8 @@ class ResolvedKnowledgeScope:
     local_display_names: List[str] = field(default_factory=list)
     aidp_kds_ids: List[str] = field(default_factory=list)
     aidp_display_names: List[str] = field(default_factory=list)
-    aidp_file_scope: Dict[str, Any] = field(
-        default_factory=lambda: {"mode": "all", "files": []}
+    aidp_metadata_filter: Dict[str, Any] = field(
+        default_factory=lambda: {"enabled": False}
     )
     local_disabled: bool = False
     aidp_disabled: bool = False
@@ -63,66 +63,50 @@ class ClassifiedIngestionException:
 
 
 KnowledgeScopeMode = Literal["inherit", "override", "disabled"]
-AidpFileScopeMode = Literal["all", "selected"]
-AIDP_FILE_SCOPE_MAX_FILES = 20
+AidpMetadataFilterOperator = Literal["contains", "is", "starts_with", "ends_with"]
+AIDP_FILTER_VALUE_MAX_LENGTH = 256
 
 
-class AidpFileRefRequest(BaseModel):
-    """Structured identity of one selected AIDP knowledge-base file."""
+class AidpFileNameCondition(BaseModel):
+    """One conversation-scoped file-name condition for AIDP retrieval."""
 
-    kds_id: str
-    file_uuid: str
-    file_name: Optional[str] = Field(default=None, max_length=512)
-    kds_name: Optional[str] = Field(default=None, max_length=256)
+    operator: AidpMetadataFilterOperator = "contains"
+    value: str = Field(min_length=1, max_length=AIDP_FILTER_VALUE_MAX_LENGTH)
 
-    @field_validator("kds_id", "file_uuid")
+    @field_validator("value")
     @classmethod
-    def normalize_identifier(cls, value: str) -> str:
+    def normalize_value(cls, value: str) -> str:
         item = str(value).strip()
-        if not item or len(item) > 256:
+        if not item:
+            raise ValueError("AIDP file-name filter value must be non-empty")
+        if len(item) > AIDP_FILTER_VALUE_MAX_LENGTH:
             raise ValueError(
-                "AIDP file identifiers must be non-empty and at most 256 characters"
+                "AIDP file-name filter value must be at most "
+                f"{AIDP_FILTER_VALUE_MAX_LENGTH} characters"
             )
         return item
 
-    @field_validator("file_name", "kds_name")
-    @classmethod
-    def normalize_optional_name(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        item = str(value).strip()
-        return item or None
 
+class AidpMetadataFilterRequest(BaseModel):
+    """Conversation-scoped advanced filter inside the effective AIDP range.
 
-class AidpFileScopeRequest(BaseModel):
-    """Conversation-scoped file restriction inside the effective AIDP range."""
+    Only ``original_file_name`` is exposed by the current UI; the model keeps a
+    single-condition shape so later fields can be added without a wire change.
+    """
 
-    mode: AidpFileScopeMode = "all"
-    files: List[AidpFileRefRequest] = Field(
-        default_factory=list, max_length=AIDP_FILE_SCOPE_MAX_FILES
-    )
-
-    @field_validator("files")
-    @classmethod
-    def normalize_files(
-        cls, values: List[AidpFileRefRequest]
-    ) -> List[AidpFileRefRequest]:
-        normalized = []
-        seen = set()
-        for value in values:
-            key = (value.kds_id, value.file_uuid)
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized.append(value)
-        return normalized
+    enabled: bool = False
+    file_name: Optional[AidpFileNameCondition] = None
 
     @model_validator(mode="after")
-    def validate_mode_and_files(self):
-        if self.mode == "selected" and not self.files:
-            raise ValueError("selected AIDP file scope requires at least one file")
-        if self.mode == "all" and self.files:
-            raise ValueError("AIDP all-file scope does not accept files")
+    def validate_enabled_condition(self):
+        if self.enabled and self.file_name is None:
+            raise ValueError(
+                "enabled AIDP metadata filter requires a file-name condition"
+            )
+        if not self.enabled and self.file_name is not None:
+            raise ValueError(
+                "disabled AIDP metadata filter does not accept conditions"
+            )
         return self
 
 
@@ -160,7 +144,9 @@ class AidpKnowledgeScopeRequest(BaseModel):
 
     mode: KnowledgeScopeMode = "inherit"
     kds_ids: List[str] = Field(default_factory=list, max_length=10)
-    file_scope: AidpFileScopeRequest = Field(default_factory=AidpFileScopeRequest)
+    metadata_filter: AidpMetadataFilterRequest = Field(
+        default_factory=AidpMetadataFilterRequest
+    )
 
     @field_validator("kds_ids")
     @classmethod
@@ -178,24 +164,10 @@ class AidpKnowledgeScopeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_and_ids(self):
-        if self.file_scope.mode == "selected":
-            if self.mode == "disabled":
-                raise ValueError(
-                    "AIDP disabled mode does not accept a selected file scope"
-                )
-            derived_ids: List[str] = []
-            for item in self.file_scope.files:
-                if item.kds_id not in derived_ids:
-                    derived_ids.append(item.kds_id)
-            if len(derived_ids) > 10:
-                raise ValueError(
-                    "AIDP file scope may reference at most 10 knowledge bases"
-                )
-            # File mode owns the KB range: kds_ids are derived from the
-            # selected files, never maintained as a second editable list.
-            self.mode = "override"
-            self.kds_ids = derived_ids
-            return self
+        if self.metadata_filter.enabled and self.mode == "disabled":
+            raise ValueError(
+                "AIDP disabled mode does not accept a metadata filter"
+            )
         if self.mode == "override" and not self.kds_ids:
             raise ValueError("AIDP override mode requires at least one kds_id")
         if self.mode != "override" and self.kds_ids:
@@ -206,7 +178,7 @@ class AidpKnowledgeScopeRequest(BaseModel):
 class ConversationKnowledgeScopeRequest(BaseModel):
     """Persisted knowledge resource selection; retrieval parameters belong to tools."""
 
-    schema_version: Literal[1, 2] = 1
+    schema_version: Literal[1, 2, 3] = 1
     local: LocalKnowledgeScopeRequest = Field(
         default_factory=LocalKnowledgeScopeRequest
     )
@@ -214,9 +186,9 @@ class ConversationKnowledgeScopeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_schema_version(self):
-        if self.schema_version == 1 and self.aidp.file_scope.mode == "selected":
+        if self.schema_version < 3 and self.aidp.metadata_filter.enabled:
             raise ValueError(
-                "AIDP selected file scope requires knowledge_scope schema_version 2"
+                "AIDP metadata filter requires knowledge_scope schema_version 3"
             )
         return self
 

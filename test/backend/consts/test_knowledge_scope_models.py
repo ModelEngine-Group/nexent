@@ -115,23 +115,53 @@ def test_aidp_disabled_mode_without_ids():
 
 def test_conversation_scope_rejects_wrong_version():
     with pytest.raises(ValidationError):
-        ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 3})
+        ConversationKnowledgeScopeRequest.parse_obj({"schema_version": 4})
 
 
-def test_conversation_scope_accepts_v2_file_scope():
+def test_conversation_scope_accepts_v3_metadata_filter():
     scope = ConversationKnowledgeScopeRequest.parse_obj(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "aidp": {
                 "mode": "inherit",
-                "file_scope": {
-                    "mode": "selected",
-                    "files": [{"kds_id": "kb-1", "file_uuid": "file-a"}],
+                "metadata_filter": {
+                    "enabled": True,
+                    "file_name": {"operator": "contains", "value": "合同"},
                 },
             },
         }
     )
 
-    assert scope.schema_version == 2
-    assert scope.aidp.file_scope.mode == "selected"
-    assert scope.aidp.file_scope.files[0].file_uuid == "file-a"
+    assert scope.schema_version == 3
+    assert scope.aidp.metadata_filter.enabled is True
+    assert scope.aidp.metadata_filter.file_name.value == "合同"
+
+
+def test_metadata_filter_requires_v3_and_rejects_disabled_mode():
+    with pytest.raises(ValidationError):
+        ConversationKnowledgeScopeRequest.parse_obj(
+            {
+                "schema_version": 2,
+                "aidp": {
+                    "mode": "inherit",
+                    "metadata_filter": {
+                        "enabled": True,
+                        "file_name": {"operator": "contains", "value": "合同"},
+                    },
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        AidpKnowledgeScopeRequest.parse_obj(
+            {
+                "mode": "disabled",
+                "metadata_filter": {
+                    "enabled": True,
+                    "file_name": {"operator": "contains", "value": "合同"},
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        AidpKnowledgeScopeRequest.parse_obj(
+            {"metadata_filter": {"enabled": True}}
+        )

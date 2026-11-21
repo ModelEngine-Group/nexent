@@ -1013,7 +1013,9 @@ class HybridSearchConfig(BaseModel):
 
     vector_candidates: int = Field(default=10, ge=1, le=500)
     full_text_candidates: int = Field(default=10, ge=1, le=500)
-    hybrid_top_k: int = Field(0, ge=0, le=100)
+    # Present values mirror the real AIDP contract (1-100); omission means
+    # "no separate cap", which the mock evaluates as falling back to topk.
+    hybrid_top_k: Optional[int] = Field(None, ge=1, le=100)
     vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -1021,7 +1023,7 @@ class HybridSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Per-channel knobs for the graph part of a FusionSearch call."""
 
-    graph_top_k: int = Field(0, ge=0, le=100)
+    graph_top_k: Optional[int] = Field(None, ge=1, le=100)
     graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     graph_reranking_enable: bool = True
 
@@ -1082,8 +1084,8 @@ class FusionSearchRequest(BaseModel):
             raise ValueError("hybrid_search_config must not be sent for pure graph retrieval")
         if not graph and self.graph_search_config is not None:
             raise ValueError("graph_search_config must not be sent without graph retrieval")
-        h = self.hybrid_search_config.hybrid_top_k if self.hybrid_search_config else 0
-        g = self.graph_search_config.graph_top_k if self.graph_search_config else 0
+        h = (self.hybrid_search_config.hybrid_top_k or 0) if self.hybrid_search_config else 0
+        g = (self.graph_search_config.graph_top_k or 0) if self.graph_search_config else 0
         if hybrid and h > self.topk:
             raise ValueError("hybrid_top_k must not exceed topk")
         if graph and g > self.topk:
@@ -2207,7 +2209,7 @@ def fusion_search(
     results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
 
     # Hybrid caps the combined vector+full-text part; graph is capped above.
-    if hybrid and hybrid.hybrid_top_k > 0:
+    if hybrid and (hybrid.hybrid_top_k or 0) > 0:
         hybrid_hits = [hit for hit in results
                        if {"vector_search", "full_text_search"} & set(hit["sources"])]
         overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}
