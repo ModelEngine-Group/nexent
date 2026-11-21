@@ -377,6 +377,22 @@ def _get_retrieval_path(tenant_id: str | None = None) -> str:
     )
 
 
+def _get_batch_metadata_path(
+    kds_id: str, *, async_mode: bool = False, tenant_id: str | None = None
+) -> str:
+    """Build the batch chunk-metadata edit path (sync or async variant)."""
+    suffix = "BatchMetadataJsonAsync" if async_mode else "BatchMetadataJson"
+    return f"{_get_chunks_path(kds_id, tenant_id)}/{suffix}"
+
+
+def _get_tags_sync_path(tenant_id: str | None = None) -> str:
+    """Build the knowledge-base level auto-tagging trigger path."""
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        "/KnowledgeBases/Tags/Sync"
+    )
+
+
 def _build_list_query(page: int, page_size: int, keyword: str | None = None) -> str:
     """Build the query string for a knowledge-base list request.
 

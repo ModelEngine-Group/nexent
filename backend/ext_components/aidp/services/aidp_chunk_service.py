@@ -24,8 +24,10 @@ from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_client
 from ext_components.aidp.services.aidp_client import (
     _AIDP_READ_TIMEOUT_SECONDS,
+    _get_batch_metadata_path,
     _get_chunks_path,
     _get_retrieval_path,
+    _get_tags_sync_path,
     _get_view_image_path,
     _raise_aidp_http_error,
     _request_aidp_json,
@@ -410,3 +412,83 @@ def search_aidp_chunks_impl(
         "total_reliable": True,
     }
 
+
+def update_chunk_metadata_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    *,
+    od_id: int,
+    metadata_json: Dict[str, Any],
+    chunk_id_list: List[int] | None = None,
+    file_uuid_list: List[str] | None = None,
+    async_mode: bool = False,
+    tenant_id: str | None = None,
+) -> Dict[str, Any]:
+    """Batch-apply user metadata to chunks of one knowledge base.
+
+    AIDP requires a non-empty ``metadata_json`` (verified 2026-11-20) and
+    silently ignores a ``tag`` parameter, so only user metadata is forwarded.
+    The sync route caps ``chunk_id_list`` at 300 ids; ``file_uuid_list`` stays
+    capped at 100 on both variants; the async variant lifts the chunk-id cap
+    and answers with an acceptance snapshot instead of per-chunk counts.
+    """
+    body: Dict[str, Any] = {"od_id": od_id, "metadata_json": metadata_json}
+    if chunk_id_list is not None:
+        body["chunk_id_list"] = list(chunk_id_list)
+    if file_uuid_list is not None:
+        body["file_uuid_list"] = list(file_uuid_list)
+    return _request_aidp_json(
+        server_url,
+        api_key,
+        "PATCH",
+        _get_batch_metadata_path(
+            kds_id, async_mode=async_mode, tenant_id=tenant_id
+        ),
+        context="batch-chunk-metadata",
+        json_body=body,
+        retry=False,
+    )
+
+
+def sync_chunk_tags_impl(
+    server_url: str,
+    api_key: str,
+    kb_ids: List[int],
+    *,
+    tenant_id: str | None = None,
+) -> Dict[str, Any]:
+    """Trigger AIDP's incremental auto-tagging for the given knowledge bases.
+
+    The upstream envelope is ``{code, data:{task_id}, message}`` unlike the
+    bare payloads of most endpoints, so the proxy normalizes it to a task
+    snapshot. Tags themselves arrive later on chunk reads; this call only
+    queues the task.
+    """
+    payload = _request_aidp_json(
+        server_url,
+        api_key,
+        "POST",
+        _get_tags_sync_path(tenant_id),
+        context="sync-chunk-tags",
+        json_body={"kb_ids": list(kb_ids)},
+        retry=False,
+    )
+    if not isinstance(payload, dict):
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            "Unexpected AIDP tag sync response format",
+        )
+    code = payload.get("code")
+    if code not in (None, 0, "0", "Success"):
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP tag sync failed: {payload.get('message') or code}",
+        )
+    data = payload.get("data")
+    result: Dict[str, Any] = {
+        "task_id": data.get("task_id") if isinstance(data, dict) else None,
+    }
+    if payload.get("message"):
+        result["message"] = payload["message"]
+    return result

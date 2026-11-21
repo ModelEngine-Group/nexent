@@ -16,7 +16,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -36,7 +36,9 @@ from ext_components.aidp.services.aidp_chunk_service import (
     list_aidp_chunks_impl,
     remove_aidp_chunks_impl,
     search_aidp_chunks_impl,
+    sync_chunk_tags_impl,
     update_aidp_chunk_impl,
+    update_chunk_metadata_impl,
 )
 
 
@@ -97,6 +99,56 @@ class RemoveAidpChunksRequest(BaseModel):
         max_length=AIDP_CHUNK_REMOVE_MAX_IDS,
         description=f"Chunk ids (1-{AIDP_CHUNK_REMOVE_MAX_IDS} items)",
     )
+
+
+AIDP_BATCH_METADATA_SYNC_MAX_IDS = 300
+AIDP_BATCH_METADATA_FILE_MAX_IDS = 100
+
+
+class BatchChunkMetadataRequest(BaseModel):
+    """Body for a batch chunk-metadata edit; one id list is required.
+
+    AIDP requires a non-empty ``metadata_json`` (it rejects ``{}``) and
+    silently ignores a ``tag`` parameter, so the proxy only forwards user
+    metadata. Field limits: at most 20 fields, keys <= 64 bytes, values <=
+    256 bytes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    od_id: int = Field(..., ge=0, description="Ontology domain that owns the fields")
+    metadata_json: dict = Field(..., description="At least one field/value pair")
+    chunk_id_list: List[Annotated[int, Field(strict=True, ge=0)]] | None = Field(
+        default=None, description="Chunk ids addressed directly"
+    )
+    file_uuid_list: List[AidpFileUuid] | None = Field(
+        default=None,
+        max_length=AIDP_BATCH_METADATA_FILE_MAX_IDS,
+        description="Files whose chunks all receive the metadata",
+    )
+
+    @model_validator(mode="after")
+    def validate_scope(self):
+        if not self.metadata_json:
+            raise ValueError("metadata_json must not be empty")
+        if len(self.metadata_json) > 20:
+            raise ValueError("metadata_json must not exceed 20 fields")
+        for key, value in self.metadata_json.items():
+            if not isinstance(key, str) or len(key.encode("utf-8")) > 64:
+                raise ValueError("metadata_json keys must be strings of at most 64 bytes")
+            if not isinstance(value, str) or len(value.encode("utf-8")) > 256:
+                raise ValueError(
+                    "metadata_json values must be strings of at most 256 bytes"
+                )
+        if (self.chunk_id_list is None) == (self.file_uuid_list is None):
+            raise ValueError(
+                "exactly one of chunk_id_list or file_uuid_list is required"
+            )
+        if self.chunk_id_list is not None and not self.chunk_id_list:
+            raise ValueError("chunk_id_list must not be empty")
+        if self.file_uuid_list is not None and not self.file_uuid_list:
+            raise ValueError("file_uuid_list must not be empty")
+        return self
 
 
 @aidp_chunk_router.get("/knowledge-bases/{kds_id}/chunks")
@@ -286,6 +338,77 @@ async def remove_chunks(
     return Response(status_code=HTTPStatus.NO_CONTENT)
 
 
+@aidp_chunk_router.patch("/knowledge-bases/{kds_id}/chunks/batch-metadata")
+async def update_chunks_metadata(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: BatchChunkMetadataRequest,
+) -> JSONResponse:
+    """Apply user metadata to many chunks; AIDP answers per-chunk counts.
+
+    The sync upstream route accepts at most 300 chunk ids; larger sets must
+    use the async variant. Values are forwarded as sent: AIDP owns field
+    validation against the ontology domain definition.
+    """
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    if body.chunk_id_list is not None and (
+        len(body.chunk_id_list) > AIDP_BATCH_METADATA_SYNC_MAX_IDS
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=(
+                "chunk_id_list must not exceed "
+                f"{AIDP_BATCH_METADATA_SYNC_MAX_IDS} ids on the sync route; "
+                "use /chunks/batch-metadata-async for larger batches"
+            ),
+        )
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-batch-chunk-metadata",
+        update_chunk_metadata_impl,
+        server_url,
+        api_key,
+        kds_id,
+        od_id=body.od_id,
+        metadata_json=body.metadata_json,
+        chunk_id_list=body.chunk_id_list,
+        file_uuid_list=body.file_uuid_list,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_chunk_router.patch("/knowledge-bases/{kds_id}/chunks/batch-metadata-async")
+async def update_chunks_metadata_async(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: BatchChunkMetadataRequest,
+) -> JSONResponse:
+    """Queue a batch metadata edit; AIDP answers a task acceptance snapshot."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-batch-chunk-metadata-async",
+        update_chunk_metadata_impl,
+        server_url,
+        api_key,
+        kds_id,
+        od_id=body.od_id,
+        metadata_json=body.metadata_json,
+        chunk_id_list=body.chunk_id_list,
+        file_uuid_list=body.file_uuid_list,
+        async_mode=True,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
 @aidp_chunk_router.get("/knowledge-bases/{kds_id}/chunks/{chunk_id}")
 async def get_chunk(
     request: Request,
@@ -352,6 +475,34 @@ async def update_chunk(
         kds_id,
         chunk_id,
         body.chunk_text,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_chunk_router.post("/knowledge-bases/{kds_id}/tags/sync")
+async def sync_knowledge_base_tags(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+) -> JSONResponse:
+    """Trigger AIDP's incremental auto-tagging for this knowledge base.
+
+    The knowledge base must be bound to an ontology domain; AIDP validates
+    that and reports a business error otherwise. Tagging runs asynchronously
+    and the tags surface on later chunk reads (``tag`` field).
+    """
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+
+    kb_id: int | str = int(kds_id) if str(kds_id).isdigit() else kds_id
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-sync-chunk-tags",
+        sync_chunk_tags_impl,
+        server_url,
+        api_key,
+        [kb_id],
         lane="control-io",
         owner="config",
     )

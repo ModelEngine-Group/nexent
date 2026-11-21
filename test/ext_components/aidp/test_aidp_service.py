@@ -4333,6 +4333,71 @@ class TestChunkImpls:
         assert exc_info.value.details["upstream_status"] == 500
 
 
+    def test_batch_metadata_forwards_contract_body(
+        self, aidp_chunk_service_module
+    ):
+        captured = {}
+
+        def fake_request(server_url, api_key, method, path, *, context=None, params=None, json_body=None, retry=True):
+            captured.update(
+                method=method, path=path, json=json_body, retry=retry
+            )
+            return {"kds_id": 2, "updated_chunks": 3, "partial_failure": False}
+
+        aidp_chunk_service_module._request_aidp_json = fake_request
+        result = aidp_chunk_service_module.update_chunk_metadata_impl(
+            "http://127.0.0.1:30081",
+            "jwt-token",
+            "2",
+            od_id=5,
+            metadata_json={"部门": "研发"},
+            chunk_id_list=[1, 2, 3],
+            async_mode=True,
+        )
+
+        assert captured["method"] == "PATCH"
+        assert captured["path"].endswith(
+            "/KnowledgeBases/2/Chunks/BatchMetadataJsonAsync"
+        )
+        assert captured["json"] == {
+            "od_id": 5,
+            "metadata_json": {"部门": "研发"},
+            "chunk_id_list": [1, 2, 3],
+        }
+        # Writes must not be replayed on a lost response.
+        assert captured["retry"] is False
+        assert result["updated_chunks"] == 3
+
+    def test_tag_sync_normalizes_envelope(self, aidp_chunk_service_module):
+        captured = {}
+
+        def fake_request(server_url, api_key, method, path, *, context=None, params=None, json_body=None, retry=True):
+            captured.update(method=method, path=path, json=json_body)
+            return {"code": 0, "data": {"task_id": 10086}, "message": "ok"}
+
+        aidp_chunk_service_module._request_aidp_json = fake_request
+        result = aidp_chunk_service_module.sync_chunk_tags_impl(
+            "http://127.0.0.1:30081", "jwt-token", [7]
+        )
+
+        assert captured["method"] == "POST"
+        assert captured["path"].endswith("/KnowledgeBases/Tags/Sync")
+        assert captured["json"] == {"kb_ids": [7]}
+        assert result["task_id"] == 10086
+        assert result["message"] == "ok"
+
+    def test_tag_sync_business_error_is_not_reported_as_success(
+        self, aidp_chunk_service_module
+    ):
+        aidp_chunk_service_module._request_aidp_json = lambda *args, **kwargs: {
+            "code": 1002,
+            "message": "knowledge base is not bound to an ontology domain",
+        }
+        with pytest.raises(aidp_chunk_service_module.AppException):
+            aidp_chunk_service_module.sync_chunk_tags_impl(
+                "http://127.0.0.1:30081", "jwt-token", [7]
+            )
+
 class TestFileSummaryImpls:
     """File summary reads and retries stay on the documented AIDP paths."""
 

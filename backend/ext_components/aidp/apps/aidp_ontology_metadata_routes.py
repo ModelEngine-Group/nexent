@@ -18,9 +18,13 @@ from ext_components.aidp.apps.aidp_ontology_common import (
     _load_metadata_fields,
 )
 from ext_components.aidp.apps.aidp_ontology_models import (
+    ChunkMetadataExportRequest,
+    ChunkMetadataImportRequest,
+    OntologyMetadataBatchUnbindSyncRequest,
     OntologyMetadataFieldRenameRequest,
     OntologyMetadataFieldRequest,
     OntologyMetadataUnbindRequest,
+    OntologyTagSyncRequest,
 )
 from ext_components.aidp.apps.aidp_ontology_validation import (
     _bad_request,
@@ -30,10 +34,14 @@ from ext_components.aidp.apps.aidp_ontology_validation import (
 from ext_components.aidp.services.aidp_ontology_common import METADATA_FIELD_LIMIT
 from ext_components.aidp.services.aidp_ontology_metadata_service import (
     batch_unbind_metadata_impl,
+    batch_unbind_metadata_sync_impl,
     create_ontology_metadata_field_impl,
     delete_ontology_metadata_field_impl,
+    export_chunk_metadata_impl,
+    import_chunk_metadata_impl,
     list_ontology_metadata_fields_impl,
     rename_ontology_metadata_field_impl,
+    sync_ontology_tags_impl,
 )
 from ext_components.aidp.services.aidp_ontology_transform import (
     async_task_summary,
@@ -261,3 +269,98 @@ async def delete_metadata_field(
             "partial_failure": bool(failed_kbs),
         },
     )
+
+
+@aidp_ontology_metadata_router.post("/domains/{domain_id}/chunks/metadata/export")
+async def export_chunk_metadata(
+    request: Request,
+    domain_id: Annotated[str, _domain_id_path()],
+    body: ChunkMetadataExportRequest,
+) -> JSONResponse:
+    """Export one chunk's user metadata; empty ``metadata_json`` means none."""
+    user_id, tenant_id = await _auth(request)
+    _require_ontology_manager(user_id, tenant_id)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-export-chunk-metadata",
+        export_chunk_metadata_impl,
+        server_url,
+        api_key,
+        domain_id,
+        kds_id=body.kds_id,
+        chunk_id=body.chunk_id,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_ontology_metadata_router.post("/domains/{domain_id}/chunks/metadata/import")
+async def import_chunk_metadata(
+    request: Request,
+    domain_id: Annotated[str, _domain_id_path()],
+    body: ChunkMetadataImportRequest,
+) -> JSONResponse:
+    """Write user metadata onto chunks; AIDP reports per-chunk results."""
+    user_id, tenant_id = await _auth(request)
+    _require_ontology_manager(user_id, tenant_id)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-import-chunk-metadata",
+        import_chunk_metadata_impl,
+        server_url,
+        api_key,
+        domain_id,
+        kds_id=body.kds_id,
+        metadata_json=body.metadata_json,
+        chunk_id_list=body.chunk_id_list,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_ontology_metadata_router.post(
+    "/domains/{domain_id}/metadata/batch-unbind-sync"
+)
+async def batch_unbind_metadata_fields_sync(
+    request: Request,
+    domain_id: Annotated[str, _domain_id_path()],
+    body: OntologyMetadataBatchUnbindSyncRequest,
+) -> JSONResponse:
+    """Run the synchronous metadata unbind; AIDP answers aggregate counts."""
+    user_id, tenant_id = await _auth(request)
+    _require_ontology_manager(user_id, tenant_id)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-ontology-metadata-unbind-sync",
+        batch_unbind_metadata_sync_impl,
+        server_url,
+        api_key,
+        domain_id,
+        metadata_ids=body.metadata_id_list,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_ontology_metadata_router.post("/tags/sync")
+async def sync_ontology_tags(
+    request: Request,
+    body: OntologyTagSyncRequest,
+) -> JSONResponse:
+    """Queue the domain-scoped auto-tagging task for the given knowledge bases."""
+    user_id, tenant_id = await _auth(request)
+    _require_ontology_manager(user_id, tenant_id)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-sync-ontology-tags",
+        sync_ontology_tags_impl,
+        server_url,
+        api_key,
+        kb_ids=body.kb_ids,
+        lane="control-io",
+        owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
