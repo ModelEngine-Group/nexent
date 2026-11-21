@@ -540,6 +540,9 @@ class AgentResource(RunSpecModel):
     invocation_name: str | None = Field(default=None, min_length=1)
     runtime_ref: str | None = Field(default=None, min_length=1)
     origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    # Request-scoped provenance installed by the internal Northbound entry.
+    # Ordinary page runs keep the default and never expose download links.
+    northbound_run: bool = False
     tools: list[ToolBinding] = Field(default_factory=list)
     skill_refs: list[SkillExecutionBinding] = Field(default_factory=list)
     workbench_skill_refs: list[WorkbenchSkillBinding] = Field(default_factory=list)

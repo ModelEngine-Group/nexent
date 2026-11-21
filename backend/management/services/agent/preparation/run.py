@@ -125,6 +125,7 @@ async def create_agent_run_info(
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
     metadata: Optional[Dict[str, Any]] = None,
     user_query: str | None = None,
+    northbound_run: bool = False,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -218,6 +219,7 @@ async def create_agent_run_info(
                 captured_records[captured["model_id"]] = captured
     if captured_records:
         create_config_kwargs["runtime_model_records"] = captured_records
+    create_config_kwargs["northbound_run"] = northbound_run
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
@@ -356,6 +358,7 @@ async def create_agent_run_info(
         agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
         catalog_model_versions=model_versions,
         model_parameter_preferences=model_parameter_preferences,
+        northbound_run=northbound_run,
         **export_options,
     )
 

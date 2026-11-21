@@ -1,0 +1,65 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+schema_version: '1.0'
+stage: D4
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-FILE-IDENTITY-D4-001
+  feature_id: AIDP-CHAT-FILE-IDENTITY
+  business_rule_ids:
+    - AIDP-CHAT-FILE-IDENTITY-RULE-01
+    - AIDP-CHAT-FILE-IDENTITY-RULE-02
+    - AIDP-CHAT-FILE-IDENTITY-RULE-03
+  title: 普通页面无下载提示词的真实问答不出现北向链接且来源卡按身份可下载
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: manual
+  objective: >-
+    通过浏览器用同一已发布 AIDP 检索 Agent/知识库做普通提问，确认真实模型运行中工具给模型的
+    结果不含 northbound_api_download_url、最终答案不含北向下载地址、原有引用来源正常；带显式身份的
+    来源卡可通过登录态下载原文件，旧记录无身份时不显示下载。
+  preconditions:
+    - 已部署前后端同一受测 commit 与真实模型；AIDP 使用隔离知识库并已返回 file_uuid/kds_id。
+    - 浏览器可登录具备知识库 READ 的测试账号；不启用任何要求下载 URL 的提示词。
+    - 使用隔离会话与文件，结束后清理。
+  test_data:
+    agent: 同一真实 AIDP 检索 Agent
+    knowledge_base: 含带身份文本块、同名不同 UUID、图片与无身份旧来源的隔离库
+    prompt: 正常领域知识问答，不要求下载或 URL
+  actor: 具备知识库 READ 的普通页面用户
+  journey:
+    - 登录并在普通聊天页选择同一 Agent 与知识库，发送正常知识问题并等待真实模型回答完成。
+    - 打开浏览器网络/工具事件，检查本次运行的 AIDP 工具给模型的结果与持久化来源快照。
+    - 点击正文引用打开来源卡，检查内容、提供方与下载按钮。
+    - 使用带身份来源卡下载原文件，刷新/重进会话后再检查同一来源与下载。
+    - 交错执行一次北向调用后重复页面提问，检查页面运行仍无北向字段。
+  final_business_result:
+    - 普通页面运行的模型结果、最终答案与来源数据均不含 northbound_api_download_url 或 /nb/v1 下载地址。
+    - 带显式身份的来源卡下载到正确原文件；无身份/旧记录不显示可用下载。
+    - 原有引用角标、来源面板与图片展示保持正常，北向/页面交错不串值。
+  failure_evidence:
+    - 截图、浏览器网络记录与工具事件日志（脱敏）。
+    - 会话历史中的来源快照与下载响应头/字节校验记录。
+  steps:
+    - order: 1
+      action: 普通页面用真实模型完成一轮普通知识问答并触发 AIDP 检索。
+      expected: 工具给模型的结果无 northbound_api_download_url，最终答案无 /nb/v1/.../download，引用与来源卡正常。
+    - order: 2
+      action: 打开带身份来源卡并下载，再刷新/重进会话重复打开同一来源。
+      expected: 登录态下载返回正确原文件；历史来源保持同一身份并可再次下载。
+    - order: 3
+      action: 同时触发一次北向调用与页面提问，比较两侧工具结果。
+      expected: 北向结果有字段，页面结果无字段，互不串值。
+  expected_results:
+    - 页面无提示词真实模型场景满足隔离要求，来源卡与下载行为正确。
+    - 旧记录缺身份时无可用下载，图片 file_url 不被当作原文件。
+  forbidden_side_effects:
+    - 不得把北向 URL 写入页面来源数据或普通问答最终答案。
+    - 不得按文件名、图片 URL 或 chunk id 猜测原文件。
+    - 不得以 Mock AIDP 结果代替真实字段/原字节验收。
+  tags:
+    - aidp
+    - chat
+    - browser
+    - real-model

@@ -10,18 +10,40 @@ import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Literal, Optional
 from urllib.parse import unquote, urlparse
+from uuid import UUID
 
 import httpx
-from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, RATE_LIMIT_EXCEEDED_DETAIL, CONFIG_SERVICE_NAME
-from contracts.knowledge import VectorDatabaseType, HybridSearchRequest, ProcessParams
+from contracts.constants.constants import (
+    ASSET_OWNER_TENANT_ID,
+    CONFIG_SERVICE_NAME,
+    RATE_LIMIT_EXCEEDED_DETAIL,
+)
+from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.conversation import GenerateTitleRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    LimitExceededError,
+    NotFoundException,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    ValidationError,
+    tenant_resource_limit_error_payload,
+)
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
+from contracts.knowledge import HybridSearchRequest, ProcessParams, VectorDatabaseType
 from contracts.tool import ToolParamsRequest
+from ext_components.aidp.consts.aidp_exceptions import (
+    AidpKbNotFoundError,
+    AidpKbPermissionDeniedError,
+)
 from fastapi import (
     APIRouter,
     Body,
@@ -41,19 +63,15 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from management.services.permission.identity.session import generate_session_jwt, get_user_language
-from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
+from management.services.permission.identity.northbound import (
+    get_northbound_context as _get_northbound_context,
+)
+from management.services.permission.identity.session import (
+    generate_session_jwt,
+    get_user_language,
+)
 from pydantic import ValidationError as PydanticValidationError
-from contracts.a2a import JSONRPCRequest
-from contracts.agent import reject_legacy_agent_fields
-from contracts.authentication import NorthboundContext
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, NORTHBOUND_SERVICE_NAME, RATE_LIMIT_EXCEEDED_DETAIL
-from contracts.constants.environment import MINIO_ENDPOINT
-from contracts.conversation import GenerateTitleRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
-from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
-from contracts.knowledge import HybridSearchRequest, ProcessParams, VectorDatabaseType
-from contracts.tool import ToolParamsRequest
+from starlette.background import BackgroundTask
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.agent.a2a.service import (
@@ -84,7 +102,6 @@ from management.services.permission.api_keys import (
     revoke_user_api_keys,
 )
 from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
-from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
     generate_conversation_title,
     get_agent_info_by_name_for_northbound,
@@ -104,6 +121,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nb/v1", tags=["northbound"])
 
 __all__ = ["router", "_get_northbound_context"]
+
+# Resolved lazily so legacy Northbound unit tests can stub the environment
+# module without the AIDP credentials it does not exercise. The runtime values
+# come from the shared backend constants; tests may override these attributes.
+_AIDP_FILE_SERVER_URL: Optional[str] = None
+_AIDP_FILE_API_KEY: Optional[str] = None
+
+
+def _aidp_file_credentials() -> tuple[str, str]:
+    if _AIDP_FILE_SERVER_URL is not None and _AIDP_FILE_API_KEY is not None:
+        return _AIDP_FILE_SERVER_URL, _AIDP_FILE_API_KEY
+    from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
+
+    return AIDP_SERVER_URL, AIDP_API_KEY
+
+
+def _require_aidp_permission(**kwargs):
+    """Keep AIDP permission imports out of the legacy Northbound test stubs."""
+    from ext_components.aidp.services.aidp_permission_service import require_permission
+
+    return require_permission(**kwargs)
+
+
+async def _stream_aidp_doc(server_url, api_key, kds_id, file_uuid):
+    from ext_components.aidp.services.aidp_service import stream_aidp_doc_impl
+
+    return await stream_aidp_doc_impl(server_url, api_key, kds_id, file_uuid)
 
 
 def _resolve_proxy_download_filename(presigned_url: str, content_disposition: str) -> str:
@@ -567,6 +611,89 @@ async def get_agent_knowledge_bases(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Internal Server Error",
         ) from exc
+
+
+@router.get(
+    "/knowledge-bases/{kds_id}/files/{file_uuid}/download",
+    tags=["northbound-knowledge"],
+    summary="Download one AIDP original file with an API key",
+    description=(
+        "Returns the current version of one AIDP knowledge-base file. The "
+        "caller must authenticate with a northbound API key and hold READ "
+        "permission on the target knowledge base. The URL carries only the "
+        "knowledge-base and file identifiers; the API key travels in the "
+        "Authorization header and is never embedded in the link."
+    ),
+)
+async def download_knowledge_base_file(
+    request: Request,
+    kds_id: Annotated[str, Path(description="AIDP knowledge base ID")],
+    file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
+):
+    ctx: NorthboundContext = await _get_northbound_context(request)
+    try:
+        _require_aidp_permission(
+            kb_id=kds_id,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+            required="READ",
+        )
+    except AidpKbNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="AIDP knowledge base not found",
+        ) from exc
+    except AidpKbPermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="No read permission for this AIDP knowledge base",
+        ) from exc
+
+    server_url, api_key = _aidp_file_credentials()
+    try:
+        aidp_response = await _stream_aidp_doc(
+            server_url,
+            api_key,
+            kds_id,
+            str(file_uuid),
+        )
+    except AppException as exc:
+        # AIDP's KB-scoped download endpoint rejects a file that does not
+        # belong to the requested knowledge base. Keep that boundary explicit
+        # and never forward AIDP credentials or upstream bodies to the caller.
+        upstream_status = (exc.details or {}).get("upstream_status")
+        if upstream_status == HTTPStatus.NOT_FOUND:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="Original file not found in the AIDP knowledge base",
+            ) from exc
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail="Failed to fetch the original file from AIDP",
+        ) from exc
+    except Exception as exc:
+        logger.exception("Northbound AIDP file download failed")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail="Failed to fetch the original file from AIDP",
+        ) from exc
+
+    response_headers: Dict[str, str] = {}
+    content_disposition = aidp_response.headers.get("Content-Disposition")
+    if content_disposition:
+        response_headers["Content-Disposition"] = content_disposition
+    file_size = aidp_response.headers.get("X-File-Size")
+    if file_size:
+        response_headers["X-File-Size"] = file_size
+    content_type = aidp_response.headers.get(
+        "Content-Type", "application/octet-stream"
+    )
+    return StreamingResponse(
+        aidp_response.aiter_bytes(),
+        media_type=content_type,
+        headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
+    )
 
 
 @router.get("/conversations")

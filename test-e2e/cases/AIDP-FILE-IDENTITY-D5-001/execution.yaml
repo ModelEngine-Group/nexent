@@ -1,0 +1,26 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+schema_version: '1.0'
+case_id: AIDP-FILE-IDENTITY-D5-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+acceptance_bindings:
+  AC-01:
+    - test_concurrent_downloads_stay_isolated_per_request
+  AC-02:
+    - test_unauthorized_or_unauthenticated_never_reaches_aidp
+    - test_cross_knowledge_base_file_is_rejected_by_aidp_scope
+  AC-03:
+    - test_northbound_and_page_tool_instances_do_not_share_the_link
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained security and concurrency proof. Real northbound routing, API-key
+  context assembly, async request concurrency and SDK tool instances execute
+  in-process; token, permission and AIDP stream are controlled substitutes. It
+  does not replace real-AIDP original-byte or deployed-gateway verification.

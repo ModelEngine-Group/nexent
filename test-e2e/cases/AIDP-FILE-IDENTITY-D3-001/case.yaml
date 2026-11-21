@@ -1,0 +1,65 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+schema_version: '1.0'
+stage: D3
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-FILE-IDENTITY-D3-001
+  feature_id: AIDP-CHAT-FILE-IDENTITY
+  business_rule_ids:
+    - AIDP-CHAT-FILE-IDENTITY-RULE-01
+    - AIDP-CHAT-FILE-IDENTITY-RULE-03
+    - AIDP-CHAT-FILE-IDENTITY-RULE-04
+  title: 真实 AIDP 与真实模型下北向提示词引用链接、历史原文与最新原文件下载
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: manual
+  objective: >-
+    在同一已发布 Agent/AIDP 知识库上，以真实模型和真实 AIDP 命中验证：工具给模型的每命中
+    northbound_api_download_url、调用方提示词要求时 final_answer 逐字包含该 URL、北向历史返回
+    同一保存正文，以及携 API Key 下载到该文件当前最新版本。
+  preconditions:
+    - 已部署 config/runtime/northbound 与前端，且三者使用同一受测 commit。
+    - AIDP FusionSearch 已上线 metadata.file_uuid / metadata.kds_id，且知识库含可下载文件。
+    - 已配置可调用的真实模型与北向 API Key；测试账号对隔离知识库有 READ。
+    - 使用隔离知识库与测试会话，结束后清理测试数据。
+  test_data:
+    agent: 已发布的真实 AIDP 检索 Agent
+    knowledge_base: 隔离知识库，含同文件多块、同名不同 UUID、图片命中与可删除文件
+    prompt: 明确要求在实际引用知识库文件时逐字输出 northbound_api_download_url
+  integration_boundary:
+    - 真实 Nexent northbound → runtime 内部 northbound 入口 → Agent/子智能体配置 → AIDP ToolConfig。
+    - 真实 AIDP FusionSearch 响应与 KnowledgeFiles Download 当前版本。
+    - 真实模型对工具结果的遵循情况与现有 final_answer 持久化/历史读取。
+  observations:
+    - 工具给模型的结果与最终答案中的 URL 文本。
+    - 北向历史返回的正文与实时 final_answer 是否逐字一致。
+    - 下载响应的文件名、MIME、字节与目标文件当前版本是否一致。
+  cleanup:
+    - 仅删除本用例创建的隔离知识库文件、会话与临时下载文件。
+  steps:
+    - order: 1
+      action: 以北向 API Key 调用带明确提示词的 /nb/v1/chat/run，触发 AIDP 检索并记录工具结果、final_answer 与 conversation_id。
+      expected: 每命中具备身份时工具结果含唯一 northbound_api_download_url；模型按提示词逐字输出引用文件的 URL；漏写/改写如实记录为该场景未通过。
+    - order: 2
+      action: 读取 /nb/v1/conversations/{id}，比对历史正文与实时 final_answer。
+      expected: 历史返回已保存的同一正文，不拼接、不修正 URL；非当前调用身份访问同一会话不返回正文。
+    - order: 3
+      action: 携同一 API Key GET 工具给出的 URL，并在文件更新后再次下载。
+      expected: 返回目标文件当前最新版本的原字节、文件名与 MIME；无 Key/错误 Key/无 READ/跨库/删除后明确失败且不泄露凭据。
+    - order: 4
+      action: 对子智能体触发 AIDP 检索的同一运行重复步骤 1。
+      expected: 子智能体的 AIDP 工具同样仅在本次北向运行提供字段，普通页面运行不提供。
+  expected_results:
+    - 真实 AIDP 字段上线后，北向提示词场景可端到端得到可下载的原文件链接并保留同一历史正文。
+    - 缺字段、撤权或删除时安全失败；普通页面/子智能体行为不串用北向标识。
+  forbidden_side_effects:
+    - 不得把 AIDP API Key、北向 API Key 或 AIDP 内部地址写入聊天记录、URL 或日志。
+    - 不得由 Nexent 拼接或修正模型 final_answer。
+    - 不得在未取得真实 AIDP 字段/原字节时宣称本用例通过。
+  tags:
+    - aidp
+    - northbound
+    - real-model
+    - real-aidp

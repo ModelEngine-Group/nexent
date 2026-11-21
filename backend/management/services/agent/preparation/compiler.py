@@ -98,6 +98,7 @@ async def create_agent_config(
     portable_evaluation: bool = False,
     authorized_knowledge_tools: dict | None = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
+    northbound_run: bool = False,
 ):
     portable_options = {"portable_evaluation": True} if portable_evaluation else {}
     if authorized_knowledge_tools is not None:
@@ -156,6 +157,7 @@ async def create_agent_config(
             runtime_skill_snapshot=None,
             **portable_options,
             runtime_model_records=runtime_model_records,
+            northbound_run=northbound_run,
         )
         # Persisted Agent relations are rendered into the manager prompt by
         # their configured business name. Keep the callable registered in the
@@ -194,6 +196,7 @@ async def create_agent_config(
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
             **portable_options,
+            northbound_run=northbound_run,
         )
         invocation_name = str(
             mount.get("invocation_name")
@@ -228,6 +231,7 @@ async def create_agent_config(
         runtime_knowledge_tools=runtime_knowledge_tools,
         language=language,
         **portable_options,
+        northbound_run=northbound_run,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]

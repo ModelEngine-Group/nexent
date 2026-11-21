@@ -50,8 +50,8 @@ case:
     action: 注入同名 AIDP 多切片且 metadata 含零、false、数组、嵌套对象的来源，点击各自引用并检查面板和属性悬浮内容；无 metadata 时检查没有空区域。
     expected: 每条命中的原始 metadata、searchType 与技术引用完整透传；提供方显示 AIDP 而业务 source 原值保留；属性可通过悬浮、聚焦和点击访问，操作不触发文件预览。
   - order: 9
-    action: 为 AIDP 来源提供文件名、业务 metadata、切片 ID、图片 URL 和其他可能的下载地址，检查不提供下载；对本地附件检查下载，并在A消息下载未完成时切换到同有a1的B消息，再使A下载失败；同一消息内再次选择引用。
-    expected: AIDP 来源始终没有下载动作；本地附件仍走已有存储下载。跨消息不继承下载中或错误状态，同消息再次选择保留进行中的下载。
+    action: 为 AIDP 来源提供文件名、业务 metadata、切片 ID、图片 URL、downloadUrl 和 objectName 但不提供 sourceReference 定位，检查不提供下载；再提供 kds_id/file_uuid 的显式定位并点击下载；对本地附件检查下载，并在A消息下载未完成时切换到同有a1的B消息，再使A下载失败；同一消息内再次选择引用。
+    expected: 无显式 kds_id/file_uuid 的 AIDP 来源没有下载动作，也不落到存储/文件名猜测；有显式定位时只调用 AIDP 文档下载并传对应知识库和文件 ID。本地附件仍走已有存储下载。跨消息不继承下载中或错误状态，同消息再次选择保留进行中的下载。
   - order: 10
     action: 注入原始来源a1、a2和图片a3、a4，按a1、a3、a4、a2引用并检查编号；将3张citeIndex为0的网页图片切换为另一消息1张图片；恢复同一无编号图片同时存在content和registry以及仅在registry中的图片。
     expected: a2在正文、悬浮提示与来源卡均显示4；图片a3/a4显示2/3且引用键不变。未编号网页图片不因默认0合并或残留；历史重复图片只显示一次，仅注册表图片保留。
@@ -62,7 +62,7 @@ case:
   - 高亮开启与关闭情况下点击角标均能用 selectedCitationKey 选中并滚动到来源。
   - retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
   - metadata 和技术引用按命中完整透传，原始 key/value 可访问，提供方与业务 source 分开且空 metadata 无区域。
-  - AIDP 引用来源不提供下载动作；本地附件回归通过，跨消息下载状态与错误隔离，同消息引用操作不重挂载卡片。
+  - AIDP 引用来源仅在显式 kds_id/file_uuid 时经 AIDP 文档下载，无定位不下载且不猜身份；本地附件回归通过，跨消息下载状态与错误隔离，同消息引用操作不重挂载卡片。
   - 图片参与回答统一编号；正文、提示和标签页编号与身份不变；无编号图片按实际身份合并，切换消息无旧图片残留。
   forbidden_side_effects:
   - AIDP 来源不调用本地存储或按文件名、切片 ID、图片地址猜原文件；查看属性不触发预览或下载。
@@ -86,7 +86,7 @@ case:
     expected_results: [6]
     forbidden_side_effects: [1]
   - id: AC-05
-    description: AIDP citation downloads remain unavailable; local downloads remain available and isolated across messages without remounting on same-message selection.
+    description: AIDP citation downloads use only an explicit kds_id/file_uuid locator; missing locators stay undownloadable, while local downloads remain available and isolated across messages without remounting on same-message selection.
     steps: [9]
     expected_results: [7]
     forbidden_side_effects: [1]
