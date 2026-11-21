@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
-
+from enum import Enum
 
 if TYPE_CHECKING:
     from contracts.tool import ToolParamsRequest
