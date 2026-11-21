@@ -428,41 +428,17 @@ class ScopedSharedAidpMetadataFilter(RunSpecModel):
     )
 
 
-_SCOPED_AIDP_CHANNELS = frozenset({"vector_search", "full_text_search", "graph_search"})
-
-
 class ScopedSharedAidpOptions(RunSpecModel):
+    """Scope plus the catalog tool's own parameters, passed through unchanged.
+
+    The AIDP tool catalog owns its retrieval parameters; the scoped contract
+    only owns the knowledge scope and the conversation filter.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
     kds_list: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(max_length=10)
     metadata_filter: ScopedSharedAidpMetadataFilter | None = None
-    search_method: str | None = None
-    reranking_enable: bool | None = None
-    reranking_mode: Literal["performance", "high_accuracy", "jargon_coverage"] | None = None
-    rewrite_enable: bool | None = None
-    related_search_enable: bool | None = None
-    score_threshold: float | None = Field(default=None, ge=0, le=1)
-    top_k: int | None = Field(default=None, ge=1, le=100)
-    multi_modal: bool | None = None
-    vector_candidates: int | None = Field(default=None, ge=1, le=500)
-    full_text_candidates: int | None = Field(default=None, ge=1, le=500)
-    hybrid_top_k: int | None = Field(default=None, ge=0, le=100)
-    graph_top_k: int | None = Field(default=None, ge=0, le=100)
-    vector_score_threshold: float | None = Field(default=None, ge=0, le=1)
-    full_text_score_threshold: float | None = Field(default=None, ge=0, le=1)
-    graph_score_threshold: float | None = Field(default=None, ge=0, le=1)
-    graph_reranking_enable: bool | None = None
-    query_expansion_enable: bool | None = None
-
-    @field_validator("search_method")
-    @classmethod
-    def validate_search_method(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value == "hybrid_search":
-            return value
-        tokens = value.split("|")
-        if not tokens or any(token not in _SCOPED_AIDP_CHANNELS for token in tokens):
-            raise ValueError("search_method must combine the AIDP retrieval channels")
-        return value
 
     @model_serializer(mode="wrap")
     def serialize_explicit_options(self, handler):
