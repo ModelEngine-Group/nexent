@@ -31,6 +31,7 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import { ruleOperatorLabel } from "@/ext_components/aidp/shared/utils/aidpOntologyRule";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
@@ -44,6 +45,7 @@ import type {
 } from "@/ext_components/aidp/shared/types/ontology";
 import styles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 import AidpOntologyRuleDrawer from "./AidpOntologyRuleDrawer";
+import AidpOntologyRuleDetailDrawer from "./AidpOntologyRuleDetailDrawer";
 import ruleStyles from "./AidpOntologyRulesTab.module.css";
 
 interface AidpOntologyRulesTabProps {
@@ -60,28 +62,6 @@ const toPayload = (rule: AidpOntologyRule): AidpOntologyRulePayload => ({
   condition: rule.condition,
   action: rule.action,
 });
-
-/** Format an AIDP rule audit value with minutes, never inventing a time. */
-const OPERATOR_LABELS: Record<string, string> = {
-  is: "等于",
-  equals: "等于",
-  is_not: "不等于",
-  contains: "包含",
-  not_contains: "不包含",
-  starts_with: "开头是",
-  ends_with: "结尾是",
-  gt: "大于",
-  gte: "大于等于",
-  lt: "小于",
-  lte: "小于等于",
-  before: "早于",
-  after: "晚于",
-  exists: "存在",
-  not_exists: "不存在",
-  empty: "为空",
-  not_empty: "不为空",
-  "not empty": "不为空",
-};
 
 const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   domainId,
@@ -103,6 +83,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
     updateTime: true,
   });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [detailRule, setDetailRule] = useState<AidpOntologyRule | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
 
@@ -162,6 +143,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   };
 
   const openEdit = (rule: AidpOntologyRule) => {
+    setDetailRule(null);
     setEditingRuleId(rule.rule_id);
     setDrawerOpen(true);
   };
@@ -287,8 +269,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
           <div className={ruleStyles.conditionList}>
             {conditions.map((condition, index) => (
               <div key={`${condition.field}-${index}`}>
-                {condition.field}:{" "}
-                {OPERATOR_LABELS[condition.operator] ?? condition.operator}
+                {condition.field}: {ruleOperatorLabel(condition.operator)}
                 {condition.value !== undefined &&
                 condition.value !== null &&
                 condition.value !== ""
@@ -324,6 +305,15 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       key: "name",
       width: 180,
       ellipsis: true,
+      render: (value: string, record) => (
+        <button
+          type="button"
+          className={ruleStyles.nameLink}
+          onClick={() => setDetailRule(record)}
+        >
+          {value || "—"}
+        </button>
+      ),
     },
     ...(visibleColumns.description
       ? [
@@ -680,6 +670,16 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
         onSaved={() => {
           setDrawerOpen(false);
           refresh();
+        }}
+      />
+      <AidpOntologyRuleDetailDrawer
+        open={!!detailRule}
+        rule={detailRule}
+        onClose={() => setDetailRule(null)}
+        onEdit={openEdit}
+        onDelete={(rule) => {
+          setDetailRule(null);
+          handleDelete(rule);
         }}
       />
     </div>

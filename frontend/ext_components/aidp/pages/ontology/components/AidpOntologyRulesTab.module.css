@@ -41,3 +41,18 @@
   font-size: 12px;
   cursor: help;
 }
+
+
+.nameLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #0067d1;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.nameLink:hover {
+  color: #0052a8;
+}
