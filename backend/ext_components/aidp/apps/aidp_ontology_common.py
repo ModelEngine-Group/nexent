@@ -269,6 +269,36 @@ def _synonym_values(item: dict[str, Any]) -> list[str]:
     return values
 
 
+async def _list_all_relations(
+    server_url: str,
+    api_key: str,
+    domain_id: str,
+    *,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
+    """Page through all Relations; AIDP rejects size > 100."""
+    rows: list[dict[str, Any]] = []
+    page = 1
+    while page <= 100:
+        envelope = await run_blocking(
+            "aidp-ontology-entity-relations",
+            list_ontology_relations_impl,
+            server_url,
+            api_key,
+            domain_id,
+            page=page,
+            size=page_size,
+            lane="control-io",
+            owner="config",
+        )
+        values = envelope.get("value") or []
+        rows.extend(item for item in values if isinstance(item, dict))
+        if not envelope.get("has_more") or len(values) < page_size:
+            break
+        page += 1
+    return rows
+
+
 async def _enrich_entity_rows(
     server_url: str,
     api_key: str,
@@ -288,21 +318,13 @@ async def _enrich_entity_rows(
     if not rows:
         return rows
     try:
-        relations = await run_blocking(
-            "aidp-ontology-entity-relations",
-            list_ontology_relations_impl,
-            server_url,
-            api_key,
-            domain_id,
-            page=1,
-            size=200,
-            lane="control-io",
-            owner="config",
+        relation_rows = await _list_all_relations(
+            server_url, api_key, domain_id, page_size=100
         )
     except AppException as error:
         logger.warning("AIDP relations unavailable for domain %s: %s", domain_id, error)
-        relations = {"value": []}
-    parents, children = _relation_maps(relations.get("value") or [])
+        relation_rows = []
+    parents, children = _relation_maps(relation_rows)
     semaphore = asyncio.Semaphore(5)
 
     async def load_detail(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -381,18 +403,7 @@ async def _reconcile_entity_relations(
     """
     if parent_ids is None and child_ids is None:
         return
-    envelope = await run_blocking(
-        "aidp-ontology-entity-relations-sync",
-        list_ontology_relations_impl,
-        server_url,
-        api_key,
-        domain_id,
-        page=1,
-        size=500,
-        lane="control-io",
-        owner="config",
-    )
-    relations = envelope.get("value") or []
+    relations = await _list_all_relations(server_url, api_key, domain_id, page_size=100)
     current_parents: dict[str, dict[str, Any]] = {}
     current_children: dict[str, dict[str, Any]] = {}
     for relation in relations:

@@ -198,15 +198,20 @@
   color: #191919;
 }
 
-.typeSegmented :global(.ant-segmented-item-selected) {
-  border-color: #0067d1;
+.typeSegmented :global(.ant-segmented-item-selected),
+.typeSegmented :global(.ant-segmented-item-selected-text) {
   background: #ffffff;
   color: #0067d1;
   box-shadow: none;
 }
 
+.typeSegmented
+  :global(.ant-segmented-item:has(.ant-segmented-item-selected-text)) {
+  border-color: #0067d1;
+}
+
 .typeSegmented :global(.ant-segmented-thumb) {
-  display: none;
+  background: #e8f2ff;
 }
 
 .fieldLabel {

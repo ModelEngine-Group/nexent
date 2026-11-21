@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Drawer, Form, Input } from "antd";
 
@@ -48,9 +48,19 @@ const AidpOntologyDomainDrawer: React.FC<AidpOntologyDomainDrawerProps> = ({
   const descriptionLength = descriptionValue.length;
   const editing = !!domain;
 
+  useEffect(() => {
+    if (!open) return;
+    form.resetFields();
+    form.setFieldsValue({
+      name: domain?.name ?? "",
+      description: domain?.description ?? "",
+    });
+  }, [domain, form, open]);
+
   const handleClose = () => {
     setErrorMessage(null);
     setSaving(false);
+    form.resetFields();
     onClose();
   };
 

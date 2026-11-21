@@ -30,9 +30,7 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   ClockCircleOutlined,
-  DeploymentUnitOutlined,
   DownOutlined,
-  FileTextOutlined,
   MoreOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -42,6 +40,7 @@ import {
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { formatAidpDate } from "@/ext_components/aidp/shared/utils/aidpTime";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
@@ -75,20 +74,6 @@ const BASE_COLUMN_WEIGHTS: Record<ColumnKey, number> = {
   description: 4,
   update_time: 1.6,
   actions: 3,
-};
-
-/** Format AIDP audit values without inventing a missing date. */
-const formatDisplayDate = (value?: string | number | null): string => {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const milliseconds = value < 1_000_000_000_000 ? value * 1000 : value;
-    const date = new Date(milliseconds);
-    return Number.isNaN(date.getTime())
-      ? String(value)
-      : date.toISOString().slice(0, 10);
-  }
-  const text = String(value).trim();
-  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : text || "—";
 };
 
 const AidpOntologyListPage: React.FC = () => {
@@ -368,7 +353,7 @@ const AidpOntologyListPage: React.FC = () => {
       dataIndex: "update_time",
       key: "update_time",
       render: (value: string | number | null | undefined) =>
-        formatDisplayDate(value),
+        formatAidpDate(value),
     }),
   ];
 
@@ -462,22 +447,8 @@ const AidpOntologyListPage: React.FC = () => {
         <span className={styles.cardUpdated}>
           <ClockCircleOutlined />
           {t("aidpKnowledge.ontologyCardUpdatedAt", {
-            time: formatDisplayDate(domain.update_time),
+            time: formatAidpDate(domain.update_time),
           })}
-        </span>
-        <span className={styles.cardCounts}>
-          <Tooltip title={t("aidpKnowledge.ontologyDomainColumnMetadataCount")}>
-            <span>
-              <FileTextOutlined />
-              {domain.metadata_count ?? "—"}
-            </span>
-          </Tooltip>
-          <Tooltip title={t("aidpKnowledge.ontologyDomainColumnEntityCount")}>
-            <span>
-              <DeploymentUnitOutlined />
-              {domain.entity_count ?? "—"}
-            </span>
-          </Tooltip>
         </span>
       </div>
     </article>

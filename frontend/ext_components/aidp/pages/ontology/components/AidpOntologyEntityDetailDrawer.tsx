@@ -8,6 +8,8 @@ import { Button, Descriptions, Drawer, Tag, Tooltip } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 
 import type { AidpOntologyEntity } from "@/ext_components/aidp/shared/types/ontology";
+import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
 import styles from "./AidpOntologyEntityDetailDrawer.module.css";
@@ -19,6 +21,25 @@ interface AidpOntologyEntityDetailDrawerProps {
   onEdit?: (entity: AidpOntologyEntity) => void;
   onDelete?: (entity: AidpOntologyEntity) => void;
 }
+
+const propertyTypeLabel = (
+  value: string | undefined,
+  t: (key: string) => string
+): string => {
+  switch (value) {
+    case "str":
+    case "string":
+      return t("aidpKnowledge.ontologyEntityPropertyTypeStr");
+    case "float":
+      return t("aidpKnowledge.ontologyEntityPropertyTypeFloat");
+    case "datetime":
+      return t("aidpKnowledge.ontologyEntityPropertyTypeDatetime");
+    case "list[str]":
+      return t("aidpKnowledge.ontologyEntityPropertyTypeList");
+    default:
+      return value || "—";
+  }
+};
 
 const relationName = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -34,16 +55,6 @@ const relationName = (value: unknown): string => {
     );
   }
   return "—";
-};
-
-/** Format an audit value with minutes without inventing a timestamp. */
-const formatAuditTime = (value?: string | null): string => {
-  if (!value) return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
 };
 
 const AidpOntologyEntityDetailDrawer: React.FC<
@@ -104,60 +115,88 @@ const AidpOntologyEntityDetailDrawer: React.FC<
       }
     >
       {entity && (
-        <Descriptions
-          size="small"
-          column={1}
-          bordered
-          items={[
-            {
-              key: "description",
-              label: t("aidpKnowledge.ontologyEntityDescription"),
-              children: entity.description || "—",
-            },
-            {
-              key: "created",
-              label: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
-              children: formatAuditTime(entity.create_time),
-            },
-            {
-              key: "updated",
-              label: t("aidpKnowledge.ontologyMetadataColumnUpdateTime"),
-              children: formatAuditTime(entity.update_time),
-            },
-            {
-              key: "parents",
-              label: t("aidpKnowledge.ontologyEntityParent"),
-              children: renderRelations(entity.parent_entities),
-            },
-            {
-              key: "synonyms",
-              label: t("aidpKnowledge.ontologyEntitySynonym"),
-              children: renderRelations(entity.synonym_entities),
-            },
-            {
-              key: "children",
-              label: t("aidpKnowledge.ontologyEntityChild"),
-              children: renderRelations(entity.child_entities),
-            },
-            {
-              key: "properties",
-              label: t("aidpKnowledge.ontologyEntityExtended"),
-              children:
-                properties.length === 0 ? (
-                  "—"
-                ) : (
-                  <div className={styles.propertyTags}>
-                    {properties.map((property, index) => (
-                      <Tag key={`${property.api_name}-${index}`}>
-                        {property.display_name || property.api_name}:{" "}
-                        {property.value || "—"}
-                      </Tag>
-                    ))}
-                  </div>
-                ),
-            },
-          ]}
-        />
+        <>
+          <AidpOntologyGapNote>
+            {t("aidpKnowledge.ontologyEntityRelationScanGap")}
+          </AidpOntologyGapNote>
+          <Descriptions
+            size="small"
+            column={1}
+            bordered
+            items={[
+              {
+                key: "description",
+                label: t("aidpKnowledge.ontologyEntityDescription"),
+                children: entity.description || "—",
+              },
+              {
+                key: "created",
+                label: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
+                children: formatAidpDateTime(entity.create_time),
+              },
+              {
+                key: "updated",
+                label: t("aidpKnowledge.ontologyMetadataColumnUpdateTime"),
+                children: formatAidpDateTime(entity.update_time),
+              },
+              {
+                key: "parents",
+                label: t("aidpKnowledge.ontologyEntityParent"),
+                children: renderRelations(entity.parent_entities),
+              },
+              {
+                key: "synonyms",
+                label: t("aidpKnowledge.ontologyEntitySynonym"),
+                children: renderRelations(entity.synonym_entities),
+              },
+              {
+                key: "children",
+                label: t("aidpKnowledge.ontologyEntityChild"),
+                children: renderRelations(entity.child_entities),
+              },
+              {
+                key: "properties",
+                label: t("aidpKnowledge.ontologyEntityExtended"),
+                children:
+                  properties.length === 0 ? (
+                    "—"
+                  ) : (
+                    <div className={styles.propertyTable}>
+                      <div className={styles.propertyTableHeader}>
+                        <span>
+                          {t("aidpKnowledge.ontologyEntityPropertyName")}
+                        </span>
+                        <span>
+                          {t("aidpKnowledge.ontologyEntityPropertyType")}
+                        </span>
+                        <span>
+                          {t("aidpKnowledge.ontologyEntityPropertyValue")}
+                        </span>
+                        <span>
+                          {t("aidpKnowledge.ontologyEntityPropertyRange")}
+                        </span>
+                      </div>
+                      {properties.map((property, index) => (
+                        <div
+                          key={`${property.api_name}-${index}`}
+                          className={styles.propertyTableRow}
+                        >
+                          <span>
+                            {property.display_name || property.api_name}
+                          </span>
+                          <span>
+                            {propertyTypeLabel(property.data_type, t)}
+                          </span>
+                          <span>{property.value || "—"}</span>
+                          <span>{property.range || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ),
+              },
+            ]}
+          />
+        </>
       )}
     </Drawer>
   );

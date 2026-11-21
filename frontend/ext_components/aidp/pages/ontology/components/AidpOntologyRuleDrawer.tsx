@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -81,69 +81,51 @@ const CONDITION_LIMIT = 10;
 
 const OPERATOR_LABELS: Record<string, string> = {
   is: "等于",
+  "is not": "不等于",
+  "start with": "开头是",
+  "end with": "结尾是",
+  in: "包含",
+  not_in: "不包含",
+  exists: "存在",
+  not_exists: "不存在",
+  before: "早于",
+  after: "晚于",
+  "=": "等于",
+  "!=": "不等于",
+  ">": "大于",
+  "<": "小于",
+  ">=": "大于等于",
+  "<=": "小于等于",
+  // Legacy labels kept only so old rows still render readably.
   is_not: "不等于",
   contains: "包含",
   not_contains: "不包含",
   starts_with: "开头是",
   ends_with: "结尾是",
-  in: "包含",
-  not_in: "不包含",
   gt: "大于",
   gte: "大于等于",
   lt: "小于",
   lte: "小于等于",
-  before: "早于",
-  after: "晚于",
-  exists: "存在",
-  not_exists: "不存在",
   empty: "为空",
   not_empty: "不为空",
   "not empty": "不为空",
 };
 
-const NO_VALUE_OPERATORS = new Set([
-  "exists",
-  "not_exists",
-  "empty",
-  "not_empty",
-  "not empty",
-]);
+const NO_VALUE_OPERATORS = new Set(["exists", "not_exists"]);
 
 const OPERATORS_BY_TYPE: Record<FieldType, string[]> = {
   string: [
     "is",
-    "is_not",
-    "contains",
-    "not_contains",
-    "starts_with",
-    "ends_with",
+    "is not",
+    "start with",
+    "end with",
+    "in",
+    "not_in",
     "exists",
     "not_exists",
-    "empty",
-    "not_empty",
   ],
-  number: [
-    "is",
-    "is_not",
-    "gt",
-    "gte",
-    "lt",
-    "lte",
-    "exists",
-    "not_exists",
-    "empty",
-    "not_empty",
-  ],
-  date: [
-    "is",
-    "is_not",
-    "before",
-    "after",
-    "exists",
-    "not_exists",
-    "empty",
-    "not_empty",
-  ],
+  number: ["=", "!=", ">", "<", ">=", "<="],
+  date: ["is", "is not", "before", "after", "exists", "not_exists"],
 };
 
 const toBoundaryNumber = (value: number | Dayjs | undefined): number | null => {
@@ -262,24 +244,16 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
     metadataFields.forEach((field) => {
       map.set(`metadata_json.${field.field_name}`, field.field_type);
     });
-    map.set("title", "string");
-    map.set("chunk_type", "string");
     return map;
   }, [metadataFields]);
 
   const fieldOptions = useMemo(
-    () => [
-      { value: "title", label: t("aidpKnowledge.ontologyRulesFieldTitle") },
-      {
-        value: "chunk_type",
-        label: t("aidpKnowledge.ontologyRulesFieldChunkType"),
-      },
-      ...metadataFields.map((field) => ({
+    () =>
+      metadataFields.map((field) => ({
         value: `metadata_json.${field.field_name}`,
         label: field.field_name,
       })),
-    ],
-    [metadataFields, t]
+    [metadataFields]
   );
 
   const scaleFieldOptions = useMemo(
@@ -309,7 +283,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
         logical_operator: "and",
         conditions: [
           {
-            field: "metadata_json.doc_type",
+            field: "",
             field_type: "string",
             operator: "is",
             value: "",
@@ -350,9 +324,22 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
     };
   }, [fieldTypeByName, rule]);
 
+  const initialValuesRef = useRef(initialValues);
+
+  useEffect(() => {
+    initialValuesRef.current = initialValues;
+  }, [initialValues]);
+
+  useEffect(() => {
+    if (!open) return;
+    form.resetFields();
+    form.setFieldsValue(initialValuesRef.current);
+  }, [form, open]);
+
   const close = () => {
     setErrorMessage(null);
     setSaving(false);
+    form.resetFields();
     onClose();
   };
 
@@ -363,6 +350,28 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
     } catch {
       return;
     }
+    const allowedFields = new Set(fieldOptions.map((option) => option.value));
+    for (const condition of values.conditions) {
+      if (!allowedFields.has(condition.field)) {
+        message.error(t("aidpKnowledge.ontologyRulesFieldInvalid"));
+        return;
+      }
+      const fieldType = fieldTypeByName.get(condition.field) ?? "string";
+      if (!OPERATORS_BY_TYPE[fieldType].includes(condition.operator)) {
+        message.error(t("aidpKnowledge.ontologyRulesOperatorInvalid"));
+        return;
+      }
+      if (
+        !NO_VALUE_OPERATORS.has(condition.operator) &&
+        (condition.value === undefined ||
+          condition.value === null ||
+          String(condition.value).trim() === "")
+      ) {
+        message.error(t("aidpKnowledge.ontologyRulesValueRequired"));
+        return;
+      }
+    }
+
     setSaving(true);
     setErrorMessage(null);
     try {
@@ -539,9 +548,15 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                                 optionFilterProp="label"
                                 options={fieldOptions}
                                 onChange={(value: string) => {
+                                  const nextType =
+                                    fieldTypeByName.get(value) ?? "string";
                                   form.setFieldValue(
                                     ["conditions", field.name, "field_type"],
-                                    fieldTypeByName.get(value) ?? "string"
+                                    nextType
+                                  );
+                                  form.setFieldValue(
+                                    ["conditions", field.name, "operator"],
+                                    OPERATORS_BY_TYPE[nextType][0]
                                   );
                                   form.setFieldValue(
                                     ["conditions", field.name, "value"],
@@ -602,7 +617,7 @@ const AidpOntologyRuleDrawer: React.FC<AidpOntologyRuleDrawerProps> = ({
                         disabled={fields.length >= CONDITION_LIMIT}
                         onClick={() =>
                           add({
-                            field: "title",
+                            field: "",
                             field_type: "string",
                             operator: "is",
                             value: "",

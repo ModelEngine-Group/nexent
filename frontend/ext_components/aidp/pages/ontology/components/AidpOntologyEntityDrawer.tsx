@@ -24,7 +24,7 @@ import {
   QuestionCircleOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import type { Dayjs } from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
@@ -140,19 +140,89 @@ const toDataType = (value: unknown): PropertyDataType =>
     ? (value as PropertyDataType)
     : "string";
 
-/** Value control follows the property data_type. */
-const PropertyValueInput: React.FC<{ name: number }> = ({ name }) => {
+interface PropertyValueInputProps {
+  name: number;
+  value?: unknown;
+  onChange?: (value: unknown) => void;
+  id?: string;
+  disabled?: boolean;
+}
+
+/** Value control follows the property data_type and forwards Form.Item props. */
+const PropertyValueInput: React.FC<PropertyValueInputProps> = ({
+  name,
+  value,
+  onChange,
+  id,
+  disabled,
+}) => {
   const dataType = Form.useWatch(["properties", name, "data_type"]) as
     PropertyDataType | undefined;
   switch (dataType) {
-    case "list[str]":
-      return <Select mode="tags" tokenSeparators={[",", "，"]} />;
+    case "list[str]": {
+      const listValue = Array.isArray(value)
+        ? value
+        : typeof value === "string" && value.trim()
+          ? value
+              .split(/[,，]/)
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : [];
+      return (
+        <Select
+          id={id}
+          disabled={disabled}
+          mode="tags"
+          tokenSeparators={[",", "，"]}
+          value={listValue}
+          onChange={onChange}
+        />
+      );
+    }
     case "datetime":
-      return <DatePicker showTime className={styles.valueControl} />;
-    case "float":
-      return <InputNumber className={styles.valueControl} precision={3} />;
+      return (
+        <DatePicker
+          id={id}
+          disabled={disabled}
+          showTime
+          className={styles.valueControl}
+          value={
+            value === null || value === undefined || value === ""
+              ? null
+              : dayjs.isDayjs(value)
+                ? value
+                : dayjs(String(value))
+          }
+          onChange={onChange}
+        />
+      );
+    case "float": {
+      const numberValue =
+        value === null || value === undefined || value === ""
+          ? undefined
+          : typeof value === "number"
+            ? value
+            : Number(value);
+      return (
+        <InputNumber
+          id={id}
+          disabled={disabled}
+          className={styles.valueControl}
+          precision={3}
+          value={Number.isFinite(numberValue) ? numberValue : undefined}
+          onChange={onChange}
+        />
+      );
+    }
     default:
-      return <Input />;
+      return (
+        <Input
+          id={id}
+          disabled={disabled}
+          value={value === null || value === undefined ? "" : String(value)}
+          onChange={onChange}
+        />
+      );
   }
 };
 
@@ -246,7 +316,8 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
       (allEntitiesQuery.data?.value ?? [])
         .filter(
           (item) =>
-            item.api_name !== entity?.api_name || item.kind !== entity?.kind
+            item.kind !== "type" &&
+            (item.api_name !== entity?.api_name || item.kind !== entity?.kind)
         )
         .map((item) => ({
           value: relationId(item.entity_id),
@@ -325,6 +396,30 @@ const AidpOntologyEntityDrawer: React.FC<AidpOntologyEntityDrawerProps> = ({
         })),
     [entity?.properties]
   );
+
+  // Reset the form on every open; the antd form store survives the Drawer remount.
+  useEffect(() => {
+    if (!open) return;
+    form.resetFields();
+    form.setFieldsValue({
+      kind: entity?.kind ?? "entity",
+      display_name: entity?.display_name ?? "",
+      api_name: entity?.api_name ?? "",
+      description: entity?.description ?? "",
+      type_id: entity?.type_id ?? undefined,
+      primary_properties: entity?.primary_properties ?? [],
+      properties: initialProperties,
+      demo_parents: (entity?.parent_entities ?? [])
+        .map(relationId)
+        .filter(Boolean),
+      demo_synonyms: (entity?.synonym_entities ?? [])
+        .map(relationName)
+        .filter(Boolean),
+      demo_children: (entity?.child_entities ?? [])
+        .map(relationId)
+        .filter(Boolean),
+    });
+  }, [entity, form, initialProperties, open]);
 
   // Fill the API name from the display name while the user has not edited it.
   // Chinese names cannot be transliterated here, so they stay manual.

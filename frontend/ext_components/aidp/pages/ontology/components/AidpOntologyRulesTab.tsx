@@ -31,6 +31,7 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -61,15 +62,6 @@ const toPayload = (rule: AidpOntologyRule): AidpOntologyRulePayload => ({
 });
 
 /** Format an AIDP rule audit value with minutes, never inventing a time. */
-const formatAuditTime = (value?: string | null): string => {
-  if (!value) return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
-};
-
 const OPERATOR_LABELS: Record<string, string> = {
   is: "等于",
   equals: "等于",
@@ -403,7 +395,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
             key: "created_at",
             width: 170,
             render: (_value: unknown, record: AidpOntologyRule) => (
-              <span>{formatAuditTime(record.created_at)}</span>
+              <span>{formatAidpDateTime(record.created_at)}</span>
             ),
           },
         ]
@@ -415,7 +407,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
             key: "updated_at",
             width: 170,
             render: (_value: unknown, record: AidpOntologyRule) => (
-              <span>{formatAuditTime(record.updated_at)}</span>
+              <span>{formatAidpDateTime(record.updated_at)}</span>
             ),
           },
         ]

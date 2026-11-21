@@ -19,6 +19,7 @@ import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -38,15 +39,6 @@ interface AidpOntologyBindingsTabProps {
 }
 
 /** Format an AIDP binding time with minutes without inventing a value. */
-const formatAuditTime = (value?: string | null): string => {
-  if (!value) return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
-};
-
 const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
   domainId,
   boundKbCount,
@@ -210,7 +202,7 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
       dataIndex: "create_time",
       key: "create_time",
       width: 170,
-      render: (value: string | null | undefined) => formatAuditTime(value),
+      render: (value: string | null | undefined) => formatAidpDateTime(value),
     },
     {
       title: t("aidpKnowledge.ontologyColumnActions"),

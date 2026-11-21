@@ -28,8 +28,8 @@ import {
 } from "@ant-design/icons";
 
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
@@ -46,23 +46,6 @@ import AidpOntologyTasksTab from "./components/AidpOntologyTasksTab";
 import styles from "./AidpOntologyDetailPage.module.css";
 
 type DetailTab = "metadata" | "entities" | "rules" | "bindings" | "tasks";
-
-/** Format an AIDP audit value with minutes without inventing a timestamp. */
-const formatDisplayDateTime = (value?: string | number | null): string => {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const milliseconds = value < 1_000_000_000_000 ? value * 1000 : value;
-    const date = new Date(milliseconds);
-    return Number.isNaN(date.getTime())
-      ? String(value)
-      : date.toISOString().slice(0, 16).replace("T", " ");
-  }
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
-};
 
 type DetailCreateAction = "entity" | "metadata";
 
@@ -81,7 +64,6 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
   const locale = (params?.locale as string) || "zh";
   const queryClient = useQueryClient();
   const scope = useAidpQueryScope();
-  const demo = useAidpOntologyDemoMode();
   const [activeTab, setActiveTab] = useState<DetailTab>(
     createAction === "metadata" ? "metadata" : "entities"
   );
@@ -230,17 +212,11 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
                           label: t("aidpKnowledge.ontologyImportJson"),
                           onClick: () => setImportOpen(true),
                         },
-                        // AIDP's export endpoint answers 500/code1001 in the
-                        // confirmed environment; keep it demo-only until fixed.
-                        ...(demo
-                          ? [
-                              {
-                                key: "export",
-                                label: t("aidpKnowledge.ontologyExportJson"),
-                                onClick: () => setExportOpen(true),
-                              },
-                            ]
-                          : []),
+                        {
+                          key: "export",
+                          label: t("aidpKnowledge.ontologyExportJson"),
+                          onClick: () => setExportOpen(true),
+                        },
                       ],
                     }}
                   >
@@ -303,7 +279,7 @@ const AidpOntologyDetailPage: React.FC<AidpOntologyDetailPageProps> = ({
                       {t("aidpKnowledge.ontologyDomainColumnUpdateTime")}
                     </span>
                     <span className={styles.statValue}>
-                      {formatDisplayDateTime(domain.update_time)}
+                      {formatAidpDateTime(domain.update_time)}
                     </span>
                   </span>
                 </div>

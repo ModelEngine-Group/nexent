@@ -28,6 +28,7 @@ import {
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
@@ -52,16 +53,6 @@ interface AidpOntologyEntityTabProps {
 const SEARCH_DEBOUNCE_MS = 300;
 const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 const DEFAULT_PAGE_SIZE = 10;
-
-/** Format an AIDP entity audit value with minutes, never inventing a time. */
-const formatAuditTime = (value?: string | null): string => {
-  if (!value) return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
-};
 
 const relationName = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -435,7 +426,7 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
             key: "create_time",
             width: 170,
             render: (_value: unknown, record: AidpOntologyEntity) => (
-              <span>{formatAuditTime(record.create_time)}</span>
+              <span>{formatAidpDateTime(record.create_time)}</span>
             ),
           },
         ]
@@ -758,6 +749,9 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
       </div>
       <AidpOntologyGapNote>
         {t("aidpKnowledge.ontologyEntitySearchGap")}
+      </AidpOntologyGapNote>
+      <AidpOntologyGapNote>
+        {t("aidpKnowledge.ontologyEntityRelationScanGap")}
       </AidpOntologyGapNote>
       {query.isError && entities.length > 0 && (
         <div className={styles.inlineError} role="alert">

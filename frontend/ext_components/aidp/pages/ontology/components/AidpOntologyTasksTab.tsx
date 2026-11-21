@@ -4,19 +4,8 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Button,
-  Input,
-  Popover,
-  Table,
-  Tooltip,
-  type TableColumnsType,
-} from "antd";
-import {
-  QuestionCircleOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-} from "@ant-design/icons";
+import { Button, Input, Popover, Table, type TableColumnsType } from "antd";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 
 import { useAidpOntologyDemoMode } from "@/ext_components/aidp/shared/hooks/useAidpOntologyDemoMode";
@@ -24,18 +13,23 @@ import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQue
 import aidpOntologyService from "@/ext_components/aidp/shared/services/aidpOntologyService";
 import type { AidpOntologyTask } from "@/ext_components/aidp/shared/types/ontology";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 import { useAidpOntologyColumnWidths } from "@/ext_components/aidp/shared/hooks/useAidpOntologyColumnWidths";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
-import AidpOntologyAsyncTaskModal, {
-  type AidpOntologyTaskState,
-} from "./AidpOntologyAsyncTaskModal";
 import styles from "./AidpOntologyTasksTab.module.css";
 
-type TaskStatus = "queued" | "running" | "success" | "failed" | "terminated";
+type TaskStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "failed"
+  | "partial_success"
+  | "terminated";
 
 interface DemoTaskRow {
   id: string;
@@ -49,19 +43,6 @@ interface DemoTaskRow {
   errorReason?: string;
 }
 
-const formatTaskTime = (value: number | string | null | undefined): string => {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "number") {
-    const date = new Date(value * 1000);
-    if (Number.isNaN(date.getTime())) return "—";
-    const pad = (input: number) => String(input).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-      date.getDate()
-    )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  }
-  return String(value);
-};
-
 const TASK_STATUS_MAP: Record<string, TaskStatus> = {
   pending: "queued",
   queued: "queued",
@@ -71,6 +52,7 @@ const TASK_STATUS_MAP: Record<string, TaskStatus> = {
   success: "success",
   succeeded: "success",
   failed: "failed",
+  partial_success: "partial_success",
   error: "failed",
   terminated: "terminated",
   canceled: "terminated",
@@ -84,8 +66,8 @@ const toTaskRow = (task: AidpOntologyTask): DemoTaskRow => ({
   description: task.description || "",
   status: TASK_STATUS_MAP[String(task.status ?? "").toLowerCase()] ?? "queued",
   progress: task.progress,
-  startTime: formatTaskTime(task.start_time),
-  endTime: task.end_time ? formatTaskTime(task.end_time) : null,
+  startTime: formatAidpDateTime(task.start_time),
+  endTime: task.end_time ? formatAidpDateTime(task.end_time) : null,
   errorReason: task.error_message || undefined,
 });
 
@@ -156,7 +138,7 @@ const DEMO_TASKS: DemoTaskRow[] = [
 const localizedTaskType = (t: (key: string) => string, raw: string): string => {
   const key = `aidpKnowledge.ontologyTaskType.${raw}`;
   const label = t(key);
-  return label === key ? raw : label;
+  return label === key ? t("aidpKnowledge.ontologyTaskType.unknown") : label;
 };
 
 const STATUS_COLOR: Record<TaskStatus, string> = {
@@ -164,6 +146,7 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
   running: "#0067d1",
   success: "#15a46e",
   failed: "#e02128",
+  partial_success: "#d97706",
   terminated: "#e02128",
 };
 
@@ -172,7 +155,6 @@ const AidpOntologyTasksTab: React.FC = () => {
   const demo = useAidpOntologyDemoMode();
   const scope = useAidpQueryScope();
   const [search, setSearch] = useState("");
-  const [activeTask, setActiveTask] = useState<DemoTaskRow | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -203,50 +185,19 @@ const AidpOntologyTasksTab: React.FC = () => {
     );
   }, [rows, search, t]);
 
-  const statusCounts = useMemo(() => {
-    const counts: Record<TaskStatus, number> = {
-      queued: 0,
-      running: 0,
-      success: 0,
-      failed: 0,
-      terminated: 0,
-    };
-    rows.forEach((task) => {
-      counts[task.status] += 1;
-    });
-    return counts;
-  }, [rows]);
-
   const columns: TableColumnsType<DemoTaskRow> = [
     {
       title: t("aidpKnowledge.ontologyTaskColumnName"),
       dataIndex: "name",
       key: "name",
       width: 140,
-      render: (value: string, record) =>
-        demo ? (
-          <button
-            type="button"
-            className={styles.nameLink}
-            onClick={() => setActiveTask(record)}
-          >
-            {taskNameLabel(value)}
-          </button>
-        ) : (
-          taskNameLabel(value)
-        ),
+      render: (value: string) => (demo ? value : taskNameLabel(value)),
     },
     {
       title: t("aidpKnowledge.ontologyTaskColumnId"),
       dataIndex: "id",
       key: "id",
       width: 120,
-    },
-    {
-      title: t("aidpKnowledge.ontologyTaskColumnDescription"),
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
     },
     {
       title: t("aidpKnowledge.ontologyTaskColumnStatus"),
@@ -337,12 +288,11 @@ const AidpOntologyTasksTab: React.FC = () => {
   const columnKeys = columns.map((column) => String(column.key));
   const { tableContainer, columnWidths, totalWidth, handleResize } =
     useAidpOntologyColumnWidths(columnKeys, {
-      name: 1.2,
+      name: 1.3,
       id: 1,
-      description: 1.5,
       status: 2.0,
-      startTime: 1.2,
-      endTime: 1.2,
+      startTime: 1.3,
+      endTime: 1.3,
       actions: 0.8,
     });
   const resizableColumns = columns.map((column, index) => {
@@ -366,13 +316,6 @@ const AidpOntologyTasksTab: React.FC = () => {
     };
   });
 
-  const modalState: AidpOntologyTaskState =
-    activeTask?.status === "success"
-      ? "success"
-      : activeTask?.status === "failed"
-        ? "failed"
-        : "running";
-
   return (
     <div className={tableStyles.tab}>
       <div className={tableStyles.toolbar}>
@@ -384,36 +327,6 @@ const AidpOntologyTasksTab: React.FC = () => {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <div className={styles.legend}>
-          <span className={styles.legendTitle}>
-            {t("aidpKnowledge.ontologyTaskWeekSummary")}
-            <Tooltip title={t("aidpKnowledge.ontologyTaskStatusHint")}>
-              <QuestionCircleOutlined className={styles.legendHelp} />
-            </Tooltip>
-          </span>
-          <span className={styles.legendItem}>
-            {t("aidpKnowledge.ontologyTaskTotal")}{" "}
-            {demo ? rows.length : (tasksQuery.data?.total_count ?? rows.length)}
-          </span>
-          {(
-            [
-              "running",
-              "failed",
-              "success",
-              "queued",
-              "terminated",
-            ] as TaskStatus[]
-          ).map((status) => (
-            <span key={status} className={styles.legendItem}>
-              <span
-                className={styles.statusDot}
-                style={{ background: STATUS_COLOR[status] }}
-                aria-hidden="true"
-              />
-              {statusLabel(status)} {statusCounts[status]}
-            </span>
-          ))}
-        </div>
         <div className={tableStyles.toolbarActions}>
           <Button
             type="text"
@@ -423,6 +336,11 @@ const AidpOntologyTasksTab: React.FC = () => {
           />
         </div>
       </div>
+      {!demo && (
+        <AidpOntologyGapNote>
+          {t("aidpKnowledge.ontologyTaskSortGap")}
+        </AidpOntologyGapNote>
+      )}
       <div className={tableStyles.tableArea} ref={tableContainer}>
         <Table<DemoTaskRow>
           rowKey="id"
@@ -457,17 +375,6 @@ const AidpOntologyTasksTab: React.FC = () => {
             setPageSize(nextSize);
             setPage(1);
           }}
-        />
-      )}
-
-      {demo && (
-        <AidpOntologyAsyncTaskModal
-          open={!!activeTask}
-          taskName={activeTask?.name ?? ""}
-          taskId={activeTask?.id ?? null}
-          demo={demo}
-          initialState={modalState}
-          onClose={() => setActiveTask(null)}
         />
       )}
     </div>

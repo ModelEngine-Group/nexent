@@ -2,6 +2,7 @@
 
 
 """Pydantic request models for ontology routes."""
+
 from __future__ import annotations
 
 import re
@@ -25,16 +26,23 @@ class EntityPropertyRequest(BaseModel):
 
     api_name: str = Field(..., min_length=1)
     display_name: str | None = None
-    data_type: str = Field("string", description="AIDP property data_type (str/string/float/datetime/list[str])")
+    data_type: str = Field(
+        "string",
+        description="AIDP property data_type (str/string/float/datetime/list[str])",
+    )
     range: str | None = Field(None, description="AIDP property range; any string")
-    value: str | None = Field("", description="Property value; empty string is the only legal blank")
+    value: str | None = Field(
+        "", description="Property value; empty string is the only legal blank"
+    )
 
 
 class OntologyDomainRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., description="Ontology domain name (<= 64 UTF-8 bytes)")
-    description: str = Field("", description="Ontology domain description (<= 512 UTF-8 bytes)")
+    description: str = Field(
+        "", description="Ontology domain description (<= 512 UTF-8 bytes)"
+    )
 
     @field_validator("name")
     @classmethod
@@ -117,7 +125,9 @@ class OntologyEntityCreateRequest(BaseModel):
         property_names = [item.api_name.strip() for item in self.properties]
         if len(set(property_names)) != len(property_names):
             raise ValueError("属性 api_name 不能重复")
-        missing = [name for name in self.primary_properties if name not in property_names]
+        missing = [
+            name for name in self.primary_properties if name not in property_names
+        ]
         if missing:
             raise ValueError("主属性必须来自已配置的属性")
         return self
@@ -161,8 +171,12 @@ class OntologyEntityUpdateRequest(BaseModel):
 class OntologyBindingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kb_id: str | None = Field(default=None, min_length=1, description="Target AIDP knowledge base ID")
-    kds_id: str | None = Field(default=None, min_length=1, description="Legacy spelling for kb_id")
+    kb_id: str | None = Field(
+        default=None, min_length=1, description="Target AIDP knowledge base ID"
+    )
+    kds_id: str | None = Field(
+        default=None, min_length=1, description="Legacy spelling for kb_id"
+    )
 
     @model_validator(mode="after")
     def require_kb_id(self):
@@ -178,7 +192,9 @@ class OntologyBindingRequest(BaseModel):
 class OntologyMetadataFieldRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    field_name: str = Field(..., description="Field name, at most 63 characters and 64 UTF-8 bytes")
+    field_name: str = Field(
+        ..., description="Field name, at most 63 characters and 64 UTF-8 bytes"
+    )
     field_type: Literal["string", "number", "date"]
 
     @field_validator("field_name")
@@ -234,7 +250,9 @@ class OntologyMetadataUnbindRequest(BaseModel):
 class OntologyMetadataFieldRenameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    new_field_name: str = Field(..., description="New field name, at most 63 characters and 64 UTF-8 bytes")
+    new_field_name: str = Field(
+        ..., description="New field name, at most 63 characters and 64 UTF-8 bytes"
+    )
 
     @field_validator("new_field_name")
     @classmethod
@@ -245,7 +263,9 @@ class OntologyMetadataFieldRenameRequest(BaseModel):
 class ChunkMetadataUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    domain_id: str = Field(..., min_length=1, description="Ontology domain that owns the fields")
+    domain_id: str = Field(
+        ..., min_length=1, description="Ontology domain that owns the fields"
+    )
     metadata: dict[str, Any] = Field(..., min_length=1)
     chunk_ids: list[int | str] = Field(..., min_length=1)
 
@@ -262,7 +282,7 @@ class OntologyExportRequest(BaseModel):
 
     include_properties: bool = True
     include_relations: bool = True
-    kind: Literal["type", "entity"] | None = None
+    kind: Literal["all", "type", "entity"] | None = None
 
 
 class OntologyImportRequest(BaseModel):
@@ -270,4 +290,3 @@ class OntologyImportRequest(BaseModel):
 
     file_name: str = Field("ontology.json", min_length=1, max_length=255)
     document: dict[str, Any] = Field(..., description="Parsed AIDP export JSON")
-

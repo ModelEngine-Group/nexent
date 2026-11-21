@@ -102,30 +102,6 @@ const AidpCreateOntologyStep: React.FC<AidpCreateOntologyStepProps> = ({
       render: (value: string) => value || "—",
     },
     {
-      title: t("aidpKnowledge.ontologyDomainColumnMetadataCount"),
-      dataIndex: "metadata_count",
-      key: "metadata_count",
-      width: 90,
-      render: (value: number | null | undefined) =>
-        value === null || value === undefined ? "—" : value,
-    },
-    {
-      title: t("aidpKnowledge.ontologyDomainColumnEntityCount"),
-      dataIndex: "entity_count",
-      key: "entity_count",
-      width: 90,
-      render: (value: number | null | undefined) =>
-        value === null || value === undefined ? "—" : value,
-    },
-    {
-      title: t("aidpKnowledge.ontologyTabRules"),
-      dataIndex: "rule_count",
-      key: "rule_count",
-      width: 100,
-      render: (value: number | null | undefined) =>
-        value === null || value === undefined ? "—" : value,
-    },
-    {
       title: t("aidpKnowledge.ontologyMetadataColumnCreateTime"),
       dataIndex: "create_time",
       key: "create_time",

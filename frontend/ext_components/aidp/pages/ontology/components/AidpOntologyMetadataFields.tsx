@@ -39,6 +39,7 @@ import {
   validateFieldName,
 } from "@/ext_components/aidp/shared/utils/aidpOntologyValidation";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
+import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
@@ -52,9 +53,6 @@ import type {
 import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import drawerStyles from "@/ext_components/aidp/shared/styles/AidpOntologyDrawer.module.css";
 import tableStyles from "@/ext_components/aidp/shared/styles/AidpOntologyTable.module.css";
-import AidpOntologyAsyncTaskModal, {
-  type AidpOntologyTaskState,
-} from "./AidpOntologyAsyncTaskModal";
 import styles from "./AidpOntologyMetadataFields.module.css";
 
 interface AidpOntologyMetadataFieldsProps {
@@ -73,14 +71,6 @@ interface CreateFormValues {
   field_type: AidpMetadataFieldType;
 }
 
-interface AsyncTaskState {
-  open: boolean;
-  taskName: string;
-  fieldNames: string[];
-  taskId: string | null;
-  initialState: AidpOntologyTaskState;
-}
-
 const MANAGER_ROLES = new Set(["SU", "ADMIN", "SPEED", "ASSET_OWNER"]);
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
@@ -92,15 +82,6 @@ const TYPE_LABEL_KEYS: Record<AidpMetadataFieldType, string> = {
 };
 
 /** Format an AIDP metadata audit value with minutes, never inventing a time. */
-const formatAuditTime = (value?: string | null): string => {
-  if (!value) return "—";
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16).replace("T", " ");
-  }
-  return text || "—";
-};
-
 const FieldLabel: React.FC<{ label: string; help: string }> = ({
   label,
   help,
@@ -146,14 +127,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     createTime: true,
     updateTime: true,
   });
-  const [task, setTask] = useState<AsyncTaskState>({
-    open: false,
-    taskName: "",
-    fieldNames: [],
-    taskId: null,
-    initialState: "running",
-  });
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const next = searchInput.trim();
@@ -309,20 +282,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
     }
   };
 
-  const openTask = (
-    taskName: string,
-    fieldNames: string[],
-    taskId: string | null
-  ) => {
-    setTask({
-      open: true,
-      taskName,
-      fieldNames,
-      taskId,
-      initialState: "running",
-    });
-  };
-
   const handleDelete = (field: AidpOntologyMetadataField) => {
     modal.confirm({
       title: t("aidpKnowledge.ontologyMetadataDeleteConfirmTitle", {
@@ -349,11 +308,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
                 taskId: result.task_id ?? "",
               }),
               8
-            );
-            openTask(
-              t("aidpKnowledge.ontologyAsyncTaskDeleteName"),
-              [field.field_name],
-              result.task_id ?? null
             );
           } else if ((result.failed_kbs ?? []).length > 0) {
             message.warning(
@@ -410,11 +364,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
                 taskId: result.task_id ?? "",
               }),
               8
-            );
-            openTask(
-              t("aidpKnowledge.ontologyMetadataUnbindTaskName"),
-              selectedFields.map((field) => field.field_name),
-              result.task_id ?? null
             );
           } else {
             message.success(t("aidpKnowledge.ontologyMetadataUnbindDone"));
@@ -490,11 +439,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
               }),
               8
             );
-            openTask(
-              t("aidpKnowledge.ontologyAsyncTaskDeleteName"),
-              acceptedNames,
-              taskId
-            );
           } else if (failed === 0) {
             message.success(t("aidpKnowledge.ontologyMetadataFieldDeleted"));
           }
@@ -556,7 +500,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             key: "create_time",
             width: 200,
             render: (_value: unknown, record: AidpOntologyMetadataField) => (
-              <span>{formatAuditTime(record.create_time)}</span>
+              <span>{formatAidpDateTime(record.create_time)}</span>
             ),
           },
         ]
@@ -568,7 +512,7 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
             key: "update_time",
             width: 200,
             render: (_value: unknown, record: AidpOntologyMetadataField) => (
-              <span>{formatAuditTime(record.update_time)}</span>
+              <span>{formatAidpDateTime(record.update_time)}</span>
             ),
           },
         ]
@@ -1050,15 +994,6 @@ const AidpOntologyMetadataFields: React.FC<AidpOntologyMetadataFieldsProps> = ({
           </div>
         )}
       </Drawer>
-
-      <AidpOntologyAsyncTaskModal
-        open={task.open}
-        taskName={task.taskName}
-        taskId={task.taskId}
-        demo={false}
-        initialState={task.initialState}
-        onClose={() => setTask((previous) => ({ ...previous, open: false }))}
-      />
     </div>
   );
 };
