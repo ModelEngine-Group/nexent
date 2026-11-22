@@ -32,6 +32,14 @@ def _object_key(value, bucket):
     return None
 
 
+def legacy_chunk_position(source):
+    metadata = source.get('metadata')
+    position = source.get('index')
+    if position is None and isinstance(metadata, dict):
+        position = metadata.get('chunk_index')
+    return position if type(position) is int and position >= 0 else None
+
+
 class LegacyVectorFileLinks:
     def __init__(self, rows, knowledge, actor):
         self.rows = {}
@@ -75,7 +83,7 @@ class LegacyVectorFileLinks:
             return LegacyVectorFileLink(status='conflict')
         raw_ids = [part['file_id'] for part in fields if part.get('file_id') is not None]
         origin = source.get('process_source')
-        parsed = type(source.get('index')) is int and source['index'] >= 0 and isinstance(origin, str) and bool(origin.strip())
+        parsed = legacy_chunk_position(source) is not None and isinstance(origin, str) and bool(origin.strip())
         if not raw_ids and not parsed:
             return LegacyVectorFileLink(status='unresolved')
         address = source.get('path_or_url')

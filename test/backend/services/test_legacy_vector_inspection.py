@@ -196,6 +196,19 @@ def test_file_row_with_disagreeing_object_namespace_is_not_attributed(inspection
     assert s.frames[0].documents[0].file_link.status == 'conflict'
 
 
+def test_old_parser_metadata_position_resolves_file_without_root_index(inspection):
+    s = inspection
+    s.row['properties'] = {
+        'path_or_url': 's3://files/docs/old.txt', 'process_source': 'UniversalImageExtractor',
+        'metadata': {'chunk_index': 5},
+    }
+    s.service.files = Mock()
+    s.service.files.files.return_value = [legacy_file()]
+    s.service.scan(1, s.actor, s.frames.append, resolve_files=True, context=context())
+    item = s.frames[0].documents[0]
+    assert item.chunk_index == 5 and item.file_link.file_id == 'b'*32
+
+
 @pytest.mark.parametrize('rows,error', [
     ([legacy_file(tenant_id='foreign')], ScopeDenied),
     ([legacy_file(version=8)], Conflict),

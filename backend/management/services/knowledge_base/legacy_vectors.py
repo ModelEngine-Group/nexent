@@ -18,7 +18,11 @@ from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
 from management.services.knowledge_base.file_reader import KnowledgeFileReader
-from management.services.knowledge_base.legacy_vector_file_links import FILE_LINK_FIELDS, LegacyVectorFileLinks
+from management.services.knowledge_base.legacy_vector_file_links import (
+    FILE_LINK_FIELDS,
+    LegacyVectorFileLinks,
+    legacy_chunk_position,
+)
 from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import PageRequest, RecordQuery
 
@@ -55,8 +59,8 @@ def _finding(row, metadata, actor):
     file_id = properties.get('file_id')
     if isinstance(file_id, str) and re.fullmatch(r'[0-9a-f]{32}', file_id): item.file_id = file_id
     else: item.issues.append('LEGACY_FILE_ID_UNRESOLVED')
-    index = properties.get('index')
-    if type(index) is int and index >= 0: item.chunk_index = index
+    index = legacy_chunk_position(properties)
+    if index is not None: item.chunk_index = index
     else: item.issues.append('CHUNK_INDEX_UNKNOWN')
     if properties.get('tenant_id') is not None and properties['tenant_id'] != actor.tenant_id:
         item.issues.append('LEGACY_DOCUMENT_TENANT_CONFLICT')
