@@ -7,7 +7,8 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Generator
+import traceback
+from collections.abc import Generator, Mapping
 from copy import deepcopy
 from datetime import datetime
 from textwrap import dedent
@@ -423,11 +424,15 @@ def _coerce_observer_arguments(arguments: Any) -> Any:
 
 def _observer_call_arguments(tool: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
     """Map positional tool values to declared input names for observer events."""
+    if _is_mcpadapt_tool(tool) and len(args) == 1 and isinstance(args[0], Mapping) and not kwargs:
+        return _coerce_observer_arguments(dict(args[0]))
     arguments = dict(kwargs)
     declared_inputs = getattr(tool, "inputs", None)
     input_names = list(declared_inputs) if isinstance(declared_inputs, dict) else []
     for index, value in enumerate(args):
         name = input_names[index] if index < len(input_names) else f"arg{index}"
+        if _is_mcpadapt_tool(tool) and name in arguments:
+            name = f"arg{index}"
         arguments.setdefault(name, value)
     return _coerce_observer_arguments(arguments)
 
@@ -521,6 +526,69 @@ def _scan_code_for_tool_calls(
     return results
 
 
+def _is_mcpadapt_tool(tool: Any) -> bool:
+    """Recognize adapter instances even after their forward method is wrapped."""
+    return any(
+        cls.__module__ == "mcpadapt.smolagents_adapter" and cls.__name__ == "MCPAdaptTool"
+        for cls in type(tool).__mro__
+    )
+
+
+def _normalize_mcp_call_arguments(tool: Any, args: tuple, kwargs: dict) -> tuple:
+    """Adapt only MCPAdapt positional values; preserve invalid calls verbatim."""
+    inputs = getattr(tool, "inputs", None)
+    if not args or not _is_mcpadapt_tool(tool) or not isinstance(inputs, dict):
+        return args, kwargs
+    if len(args) == 1 and isinstance(args[0], Mapping) and not kwargs:
+        return args, kwargs
+    names = list(inputs)[:len(args)]
+    if len(args) > len(inputs) or any(name in kwargs for name in names):
+        return args, kwargs
+    return (), {**dict(zip(names, args)), **kwargs}
+
+
+def _tool_failure_hint(error: Exception, tools: dict, lang: str) -> Optional[str]:
+    """Identify terminal tool failures without classifying ordinary Python errors."""
+    tool_name = None
+    message = str(error)
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        candidate = getattr(current, "_nexent_failed_tool", None)
+        if candidate and (current is error or message.endswith(f"{type(current).__name__}: {current}")):
+            tool_name = candidate
+            message = str(current)
+            break
+        current = current.__cause__ or current.__context__
+    message = re.sub(r"\x1b\[[0-9;]*m", "", message)
+    bridge_errors = list(re.finditer(
+        r"Local tool bridge request failed \[([A-Za-z_][A-Za-z_0-9]*)\]: ([\s\S]*)", message
+    ))
+    if bridge_errors:
+        tool_name, message = bridge_errors[-1].groups()
+    last_line = message.strip().splitlines()
+    last_line = last_line[-1] if last_line else type(error).__name__
+    tool = tools.get(tool_name)
+    if tool is None:
+        return None
+    inputs = getattr(tool, "inputs", None)
+    if not isinstance(inputs, dict):
+        return None
+    chinese = lang == "zh"
+    parameters = []
+    for name, schema in inputs.items():
+        optional = isinstance(schema, dict) and schema.get("nullable", False)
+        label = ("可选" if optional else "必填") if chinese else ("optional" if optional else "required")
+        parameters.append(f"{name} ({label})")
+    example = f"{tool_name}({', '.join(name + '=...' for name in inputs)})"
+    declared = ", ".join(parameters) or ("无" if chinese else "none")
+    if chinese:
+        return f"工具 {tool_name} 调用失败：{last_line}。该工具的参数：{declared}。请使用关键字参数重试，例如 {example}。"
+    return (f"Tool {tool_name} failed: {last_line}. Parameters: {declared}. "
+            f"Retry with keyword arguments, for example {example}.")
+
+
 def _wrap_tool_for_observer(
     tool: Any,
     observer: "MessageObserver",
@@ -537,6 +605,7 @@ def _wrap_tool_for_observer(
     tool_name = str(getattr(tool, "name", "") or "")
 
     def observed_forward(*args, **kwargs):
+        args, kwargs = _normalize_mcp_call_arguments(tool, args, kwargs)
         tool_call_id = str(uuid.uuid4())
         observer.add_message(
             agent_name or "",
@@ -547,7 +616,11 @@ def _wrap_tool_for_observer(
             tool_call_id=tool_call_id,
         )
         with observer.tool_call_context(tool_call_id):
-            return original_forward(*args, **kwargs)
+            try:
+                return original_forward(*args, **kwargs)
+            except Exception as exc:
+                exc._nexent_failed_tool = tool_name
+                raise
 
     tool.forward = observed_forward
     try:
@@ -1826,23 +1899,30 @@ Additional Args:
                     Group(Text("Execution logs:", style="bold"), Text(partial_logs)), level=LogLevel.INFO,
                 )
             error_msg, _ = self._screen_execution_output(str(e), code_action)
-            category, leaf = classify_mcp_failure(e)
-            if category:
-                # This text becomes the ReAct observation: keep it short and
-                # actionable; the full exception tree goes to the log only.
-                error_msg = mcp_failure_message(
-                    category,
-                    getattr(getattr(self, "observer", None), "lang", "en"),
-                    server=find_mcp_server_url(e),
-                    leaf=leaf,
-                )
-                logger.error(
-                    "event=mcp_code_execution_failure agent=%s step=%s category=%s",
-                    self.name,
-                    memory_step.step_number,
-                    category,
-                    exc_info=True,
-                )
+            tool_hint = _tool_failure_hint(e, getattr(self, "tools", {}), getattr(self, "lang", "en"))
+            if tool_hint is not None:
+                details, _ = self._screen_execution_output(traceback.format_exc(), code_action)
+                logger.error("Tool execution failed:\n%s", details)
+                self.observer.add_message(self.agent_name, ProcessType.EXECUTION_LOGS, details)
+                error_msg, _ = self._screen_execution_output(tool_hint, code_action)
+            else:
+                category, leaf = classify_mcp_failure(e)
+                if category:
+                    # This text becomes the ReAct observation: keep it short and
+                    # actionable; the full exception tree goes to the log only.
+                    error_msg = mcp_failure_message(
+                        category,
+                        getattr(getattr(self, "observer", None), "lang", "en"),
+                        server=find_mcp_server_url(e),
+                        leaf=leaf,
+                    )
+                    logger.error(
+                        "event=mcp_code_execution_failure agent=%s step=%s category=%s",
+                        self.name,
+                        memory_step.step_number,
+                        category,
+                        exc_info=True,
+                    )
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,

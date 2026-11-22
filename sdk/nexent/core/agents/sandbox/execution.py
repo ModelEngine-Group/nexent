@@ -1068,11 +1068,11 @@ class _ToolBridge:
             "            error_message = error_result.get('error') or str(exc)\n"
             "        except Exception:\n"
             "            error_message = str(exc)\n"
-            "        raise RuntimeError('Local tool bridge request failed: ' + error_message) from exc\n"
+            "        raise RuntimeError('Local tool bridge request failed [' + name + ']: ' + error_message) from exc\n"
             "    except Exception as exc:\n"
-            "        raise RuntimeError('Local tool bridge request failed: ' + str(exc)) from exc\n"
+            "        raise RuntimeError('Local tool bridge request failed [' + name + ']: ' + str(exc)) from exc\n"
             "    if 'error' in result:\n"
-            "        raise RuntimeError(result['error'])\n"
+            "        raise RuntimeError('Local tool bridge request failed [' + name + ']: ' + result['error'])\n"
             "    return _nexent_decode_tool_bridge_value(result.get('result'))\n\n"
             + "\n\n".join(definitions)
         )
