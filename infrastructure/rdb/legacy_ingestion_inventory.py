@@ -36,12 +36,28 @@ def bind_legacy_task_references(scope, engine):
     if not scope.system:
         raise ScopeDenied()
     files = KnowledgeFileLifecycle.__table__
-    legacy_references = sa.union_all(*(
+    task_fields = ("process_task_id", "forward_task_id", "parent_task_id")
+    live = [
         sa.select(files.c[name].label("task_id"), files.c.file_id).where(
             files.c.ingestion_request.is_(None), files.c[name].is_not(None),
         )
-        for name in ("process_task_id", "forward_task_id", "parent_task_id")
-    )).subquery()
+        for name in task_fields
+    ]
+    intent = files.c.ingestion_request
+    snapshot = intent["legacy_snapshot"]
+    archived = []
+    for name in task_fields:
+        task = snapshot["task_references"][name].as_string()
+        archived.append(sa.select(task.label("task_id"), files.c.file_id).where(
+            intent["file_id"].as_string() == files.c.file_id,
+            sa.cast(intent["knowledge_id"].as_string(), sa.String) == sa.cast(files.c.knowledge_id, sa.String),
+            snapshot["tenant_id"].as_string() == files.c.tenant_id,
+            snapshot["mode"].as_string() == "rebuild_source",
+            sa.cast(snapshot["legacy_quiesced"].as_string(), sa.String).in_(("true", "1")),
+            sa.func.length(snapshot["task_archive_sha256"].as_string()) == 64,
+            task.is_not(None),
+        ))
+    legacy_references = sa.union_all(*live, *archived).subquery()
     projection = sa.select(
         legacy_references.c.task_id,
         sa.func.count(sa.distinct(legacy_references.c.file_id)).label("count"),
