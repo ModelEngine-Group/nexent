@@ -1,5 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getAgentMonitoringSummary,
   getAgentMonitoringTrends,
@@ -13,6 +13,7 @@ export function useAgentMonitoring(
 ) {
   const queryClient = useQueryClient();
   const queryKey = ["agentMonitoring", userId, userTenant, selection] as const;
+  const fetching = useIsFetching({ queryKey }) > 0;
   const summary = useQuery({
     queryKey: [...queryKey, "summary"],
     queryFn: ({ signal }) => getAgentMonitoringSummary(selection!, signal),
@@ -26,7 +27,8 @@ export function useAgentMonitoring(
   return {
     summary,
     trends,
-    fetching: summary.isFetching || trends.isFetching,
+    fetching,
+    queryKey,
     refresh: () => queryClient.refetchQueries({ queryKey, type: "active" }),
   };
 }

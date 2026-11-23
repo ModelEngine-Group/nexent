@@ -2,6 +2,8 @@
 import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS } from "@/services/api";
 import type {
+  AgentListRequest,
+  AgentMonitoringList,
   AgentMonitoringSelection,
   AgentMonitoringSummary,
   AgentMonitoringTrends,
@@ -10,11 +12,13 @@ import type {
 async function readAgentMonitoring<T>(
   endpoint: string,
   selection: AgentMonitoringSelection,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: Record<string, string>
 ): Promise<T> {
   const params = new URLSearchParams({
     start_date: selection.startDate,
     end_date: selection.endDate,
+    ...options,
   });
   if (selection.tenantId !== null) params.set("tenant_id", selection.tenantId);
   if (selection.agentId !== null)
@@ -23,6 +27,25 @@ async function readAgentMonitoring<T>(
     params.append("group_ids", String(groupId));
   const response = await fetchWithAuth(`${endpoint}?${params}`, { signal });
   return response.json();
+}
+
+export function getAgentMonitoringList(
+  selection: AgentMonitoringSelection,
+  list: AgentListRequest,
+  signal: AbortSignal
+) {
+  return readAgentMonitoring<AgentMonitoringList>(
+    API_ENDPOINTS.operations.agentMonitoringList,
+    selection,
+    signal,
+    {
+      page: String(list.page),
+      page_size: String(list.pageSize),
+      sort_by: list.sortBy,
+      descending: String(list.descending),
+      ...(list.search ? { search: list.search } : {}),
+    }
+  );
 }
 
 export function getAgentMonitoringSummary(

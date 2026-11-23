@@ -143,3 +143,46 @@
 .tooltip p {
   margin: 2px 0;
 }
+
+.details {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.detailsHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.detailsHeader h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detailsHeader :global(.ant-input-search) {
+  max-width: 280px;
+}
+
+.detailsPagination {
+  justify-content: flex-end;
+}
+
+.detailsPagination :global(.ant-pagination-total-text) {
+  margin-inline-end: auto;
+}
+
+.rowTenant {
+  display: block;
+  color: var(--color-text-secondary);
+}
+
+.tokenValue {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

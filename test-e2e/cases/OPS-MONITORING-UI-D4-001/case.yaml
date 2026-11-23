@@ -4,8 +4,8 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-MONITORING-UI-D4-001
   feature_id: OPS-MONITORING-UI
-  requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123]
-  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02, OPS-MONITORING-UI-RULE-03]
+  requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123]
+  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02, OPS-MONITORING-UI-RULE-03, OPS-MONITORING-UI-RULE-04]
   title: Scope monitoring filters and Agent metrics in the browser
   type: E2E
   priority: P1
@@ -31,14 +31,18 @@ case:
     expected: The inventory count stays stable under group and date filtering. Summary and trend requests use the current scope. Token values preserve large integers and report usage coverage separately from publication status. Refresh repeats both reads.
   - order: 5
     action: Hold a request, change the Agent scope, release the earlier response, and exercise empty and failed reads.
-    expected: Loading, missing samples, no data, failure and true zero are distinguishable. Earlier responses cannot replace the current Agent view.
+    expected: Overview and trend loading resolve independently. Missing samples, no data, failure and true zero remain distinguishable. Earlier responses cannot replace the current Agent view.
+  - order: 6
+    action: Inspect Agent rows and publication, page and sort, search each name field, exercise list errors and empty results, and drill into an Agent from the second tenant.
+    expected: List controls read the server under the current scope. Detail rows preserve missing and zero values and exact Tokens. Drilling into a directory Agent changes the dashboard to that Agent and tenant.
   expected_results:
   - The dashboard exposes the intended filters with deterministic calendar dates and explicit unavailable statistics.
   - Tenant and MCP service transitions clear their dependent selections. MCP refresh only re-reads applicable directories.
   - Agent cards and trend match the active scope and preserve value and publication semantics.
   - Statistics requests refresh within the active range and stale responses never overwrite it.
+  - The Agent table supports server search, metric sorting, paging and tenant-qualified drilldown while preserving the list's own publication and request states.
   forbidden_side_effects:
-  - Statistics requests are limited to Agent summary and trend GETs. No forced rebuild or cross-tenant MCP tool directory request is sent.
+  - Statistics requests are limited to Agent summary, trend and detail GETs. Table controls do not refresh the cards or trend. No forced rebuild or cross-tenant MCP tool directory request is sent.
   actor: Authorized super administrator
   journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
   final_business_result:
@@ -66,4 +70,9 @@ case:
     description: Browser requests are isolated by scope and display refresh, empty and failure states.
     steps: [4, 5]
     expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: The detail table uses the active scope and server controls and opens the correct Agent even when two tenants share its numeric identifier.
+    steps: [6]
+    expected_results: [5]
     forbidden_side_effects: [1]

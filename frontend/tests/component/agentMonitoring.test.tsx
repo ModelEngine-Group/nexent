@@ -9,6 +9,7 @@ import {
 } from "@/app/ops/dashboard/agentMonitoringValues";
 import { fetchWithAuth } from "@/lib/auth";
 import {
+  getAgentMonitoringList,
   getAgentMonitoringSummary,
   getAgentMonitoringTrends,
 } from "@/services/agentMonitoringService";
@@ -90,6 +91,13 @@ describe("Agent monitoring requests", () => {
     id: 8,
     tenant_id: "a&b",
   })!;
+  const list = {
+    page: 3,
+    pageSize: 10,
+    search: "运维 & Support",
+    sortBy: "total_tokens",
+    descending: false,
+  } as const;
 
   beforeEach(() => fetch.mockReset());
 
@@ -126,5 +134,32 @@ describe("Agent monitoring requests", () => {
     await expect(getAgentMonitoringSummary(selection, signal)).rejects.toBe(
       error
     );
+  });
+
+  it("reads the list with encoded search, scope, metric sorting and pagination", async () => {
+    const payload = {
+      data: {
+        items: [{ tokens: { total_tokens: { value: "9007199254740993" } } }],
+        total: 21,
+      },
+      coverage_state: "partial",
+    };
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify(payload)));
+    await expect(
+      getAgentMonitoringList(selection, list, signal)
+    ).resolves.toEqual(payload);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/ops/v1/monitoring/agents?start_date=2026-11-17&end_date=2026-11-23&page=3&page_size=10&sort_by=total_tokens&descending=false&search=%E8%BF%90%E7%BB%B4+%26+Support&tenant_id=a%26b&agent_id=8&group_ids=12",
+      { signal }
+    );
+  });
+
+  it("omits empty search and propagates list failures", async () => {
+    const error = new Error("List unavailable");
+    fetch.mockRejectedValueOnce(error);
+    await expect(
+      getAgentMonitoringList(selection, { ...list, search: "" }, signal)
+    ).rejects.toBe(error);
+    expect(fetch.mock.calls[0]?.[0]).not.toContain("search=");
   });
 });

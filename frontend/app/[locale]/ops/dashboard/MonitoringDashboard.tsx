@@ -14,10 +14,11 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { RefreshCw } from "lucide-react";
-import { useReducer, useState } from "react";
+import { useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { hasRole } from "@/lib/roles";
+import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
 import {
@@ -197,12 +198,10 @@ function MonitoringScope({
         )
       : null;
   const agentMonitoring = useAgentMonitoring(userId, userTenant, selection);
-  const agentLoading =
-    Boolean(range && scopePending && !directories.scope.isError) ||
-    Boolean(
-      selection &&
-      (agentMonitoring.summary.isPending || agentMonitoring.trends.isPending)
-    );
+  const scopeLoading = Boolean(
+    range && scopePending && !directories.scope.isError
+  );
+  const resourceHeading = useRef<HTMLHeadingElement>(null);
   const dateControls = (
     <div className={styles.dateControls}>
       <Segmented<DatePreset>
@@ -379,7 +378,11 @@ function MonitoringScope({
         </>
       ) : (
         <>
-          <h2 className={styles.sectionHeading}>
+          <h2
+            className={styles.sectionHeading}
+            ref={resourceHeading}
+            tabIndex={-1}
+          >
             {selectedAgent
               ? selectedAgent.name || selectedAgent.id
               : (resource?.label ?? allResources)}{" "}
@@ -388,25 +391,48 @@ function MonitoringScope({
           </h2>
           {dateLabel}
           {tab === "agent" ? (
-            <AgentMonitoringPanels
-              data={agentMonitoring}
-              inventory={{
-                count: agents
-                  ? new Set(
-                      agents.map((item) => resourceKey(item.tenant_id, item.id))
-                    ).size
-                  : null,
-                loading:
-                  canReadInventory &&
-                  !agents &&
-                  (directories.inventory.isFetching ||
-                    (scopePending && !directories.scope.isError)),
-                failed: canReadInventory && directories.inventory.isError,
-              }}
-              singleAgent={Boolean(selectedAgent)}
-              loading={agentLoading}
-              hasRange={Boolean(range)}
-            />
+            <>
+              <AgentMonitoringPanels
+                data={agentMonitoring}
+                inventory={{
+                  count: agents
+                    ? new Set(
+                        agents.map((item) =>
+                          resourceKey(item.tenant_id, item.id)
+                        )
+                      ).size
+                    : null,
+                  loading:
+                    canReadInventory &&
+                    !agents &&
+                    (directories.inventory.isFetching ||
+                      (scopePending && !directories.scope.isError)),
+                  failed: canReadInventory && directories.inventory.isError,
+                }}
+                singleAgent={Boolean(selectedAgent)}
+                scopeLoading={scopeLoading}
+                hasSelection={Boolean(selection)}
+                hasRange={Boolean(range)}
+              />
+              <AgentMonitoringDetails
+                key={JSON.stringify(selection)}
+                queryKey={agentMonitoring.queryKey}
+                scopeLoading={scopeLoading}
+                hasRange={Boolean(range)}
+                selectedResource={resource?.value ?? ""}
+                tenantLabel={tenantLabel}
+                inventory={directories.inventory.data}
+                canViewStatistics={(key) =>
+                  agents?.some(
+                    (item) => resourceKey(item.tenant_id, item.id) === key
+                  ) ?? false
+                }
+                onViewStatistics={(value) => {
+                  dispatch({ type: "resource", tab: "agent", value });
+                  requestAnimationFrame(() => resourceHeading.current?.focus());
+                }}
+              />
+            </>
           ) : (
             placeholder
           )}

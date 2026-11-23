@@ -14,7 +14,9 @@ feature:
     description: A tenant change clears all dependent selections and a service change clears its tool selection. Refresh reads the active directories and connected statistics.
   - rule_id: OPS-MONITORING-UI-RULE-03
     description: Agent inventory is scoped by tenant. Execution and Token cards and daily trends use the selected tenant, Agent, group and dates. Missing values, coverage and publication state remain explicit.
+  - rule_id: OPS-MONITORING-UI-RULE-04
+    description: Agent details use scoped server search, sorting and pagination. A current Agent row can select its tenant-qualified resource in the dashboard filter.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md

@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-UI-DETAILS-20261123
+  change_type: requirement
+  requirement_id: OPS-AGENT-UI-DETAILS-20261123
+  title: Connect the scoped Agent detail table
+  description: Read the detail list from the existing Agent endpoint and display summary and trend loading independently.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MONITORING-UI-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/component/agentMonitoring.test.tsx
+    - test/backend/ops/test_agent_list_sorting.py
+    behaviors:
+    - Verify that the list read sends the scoped search, sort and pagination parameters and preserves failures and exact values.
+    - Reuse backend tests for metric ordering and null placement, and frontend value tests for missing samples and exact Token formatting.
+    reason: Focused unit tests cover the request adapter. The existing browser Case covers server interactions and the two loading states without adding a duplicate D1.
+  notes: Base 5e45a4191. The increment connects the Agent detail table and corrects the two upstream panels. The browser uses controlled API responses.

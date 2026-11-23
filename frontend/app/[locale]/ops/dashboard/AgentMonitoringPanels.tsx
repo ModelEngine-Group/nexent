@@ -39,7 +39,7 @@ const metricLabels: Record<AgentTrendMetric, string> = {
   total_tokens: "tokens",
 };
 
-function PublicationStatus({
+export function PublicationStatus({
   label,
   publication,
 }: {
@@ -69,7 +69,7 @@ function PublicationStatus({
   );
 }
 
-function TokenCoverage({ usage }: { usage: AgentTokenUsage | null }) {
+export function TokenCoverage({ usage }: { usage: AgentTokenUsage | null }) {
   const { t, i18n } = useTranslation("common");
   if (usage === null)
     return <span>{t("ops.monitoring.agent.coverageMissing")}</span>;
@@ -120,7 +120,11 @@ function AgentTrend({
   });
 
   return (
-    <section aria-labelledby={titleId} className={styles.trend}>
+    <section
+      aria-labelledby={titleId}
+      aria-busy={loading || trends.isFetching}
+      className={styles.trend}
+    >
       <header className={styles.trendHeader}>
         <div>
           <h3 id={titleId}>{t("ops.monitoring.agent.trend")}</h3>
@@ -279,13 +283,15 @@ export function AgentMonitoringPanels({
   data,
   inventory,
   singleAgent,
-  loading,
+  scopeLoading,
+  hasSelection,
   hasRange,
 }: {
   data: ReturnType<typeof useAgentMonitoring>;
   inventory: { count: number | null; loading: boolean; failed: boolean };
   singleAgent: boolean;
-  loading: boolean;
+  scopeLoading: boolean;
+  hasSelection: boolean;
   hasRange: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
@@ -294,11 +300,14 @@ export function AgentMonitoringPanels({
   const metrics = summary?.data;
   const usage = summary?.tokens.total_tokens ?? null;
   const samples = metrics ? successSampleCount(metrics) : null;
+  const summaryLoading =
+    scopeLoading || (hasSelection && data.summary.isPending);
+  const trendLoading = scopeLoading || (hasSelection && data.trends.isPending);
   const renderValue = (
     value: number | string | null,
     metric: AgentTrendMetric
   ) =>
-    loading && !summary
+    summaryLoading && !summary
       ? t("common.loading")
       : formatAgentMetric(value, metric, i18n.language);
   const cards = [
@@ -341,7 +350,7 @@ export function AgentMonitoringPanels({
       ),
       note:
         samples !== null
-          ? t("ops.monitoring.agent.completed", {
+          ? t("ops.monitoring.agent.successSamples", {
               samples: formatAgentMetric(
                 samples,
                 "execution_count",
@@ -371,6 +380,7 @@ export function AgentMonitoringPanels({
       <dl
         className={styles.cards}
         aria-label={t("ops.monitoring.agent.summary")}
+        aria-busy={summaryLoading || data.summary.isFetching}
       >
         {cards.map(({ id, title, Icon, value, unit, note }) => (
           <div className={styles.card} key={id}>
@@ -403,7 +413,7 @@ export function AgentMonitoringPanels({
       </h2>
       <AgentTrend
         trends={data.trends}
-        loading={loading && data.trends.isPending}
+        loading={trendLoading}
         hasRange={hasRange}
       />
     </section>

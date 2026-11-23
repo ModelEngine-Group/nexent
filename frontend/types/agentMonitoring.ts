@@ -52,3 +52,43 @@ export interface AgentMonitoringDay extends AgentExecutionMetrics {
 export interface AgentMonitoringTrends extends AgentMonitoringResponse {
   data: AgentMonitoringDay[];
 }
+
+export type AgentListSort =
+  | "execution_count"
+  | "total_tokens"
+  | "avg_duration_ms"
+  | "avg_ttft_ms"
+  | "success_rate";
+
+export interface AgentListRequest {
+  page: number;
+  pageSize: number;
+  search: string;
+  sortBy: AgentListSort;
+  descending: boolean;
+}
+
+export interface AgentMonitoringRow {
+  tenant_id: string;
+  agent_id: number;
+  name?: string | null;
+  display_name?: string | null;
+  model_ids?: number[] | null;
+  is_current: boolean;
+  metrics:
+    | (AgentExecutionMetrics & {
+        avg_duration_ms: number | null;
+        avg_ttft_ms: number | null;
+      })
+    | null;
+  tokens: AgentTokenMetrics;
+  token_status: AgentPublication;
+}
+
+export interface AgentMonitoringList extends AgentMonitoringResponse {
+  data: {
+    items: AgentMonitoringRow[];
+    total: number;
+    current_agent_count: number;
+  };
+}
