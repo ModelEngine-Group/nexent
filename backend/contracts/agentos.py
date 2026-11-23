@@ -748,6 +748,11 @@ class NewSkillTrial(RunSpecModel):
     arm: Literal["base", "result"]
 
 
+class MCPReplyProbe(RunSpecModel):
+    kind: Literal["text", "structured"]
+    initial_digest: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = Field(default=None, exclude_if=lambda v: v is None)
+
+
 class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 
@@ -756,6 +761,8 @@ class PreparedEvaluationRun(AgentRunSpec):
     new_skill_trial: NewSkillTrial | None = Field(default=None, exclude_if=lambda v: v is None)
     omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
+    watch_mcp_replies: dict[str, MCPReplyProbe] | None = Field(
+        default=None, min_length=1, max_length=32, exclude_if=lambda v: v is None)
     watch_skill_process: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
     watch_tool_arguments: dict[str, list[str]] | None = Field(default=None, min_length=1, max_length=32,
                                                               exclude_if=lambda v: v is None)
@@ -799,7 +806,20 @@ class SkillProcessEvidence(RunSpecModel):
     exit_code: int
 
 
+class MCPReplyEvidence(RunSpecModel):
+    before: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = Field(default=None, exclude_if=lambda v: v is None)
+    after: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = Field(default=None, exclude_if=lambda v: v is None)
+    remote: str = Field(min_length=1, max_length=256)
+    kind: Literal["text", "structured"]
+    error: bool
+    exact_fields: bool
+    inputs: str = Field(pattern=r"^[a-f0-9]{64}$")
+    content: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None
+
+
 class ToolForwardCall(RunSpecModel):
+    mcp_fixture_unready: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
+    mcp_reply: MCPReplyEvidence | None = Field(default=None, exclude_if=lambda v: v is None)
     skill_process: SkillProcessEvidence | None = Field(default=None, exclude_if=lambda v: v is None)
     name: str
     start: PositiveInt

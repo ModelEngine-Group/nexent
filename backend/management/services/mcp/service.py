@@ -28,6 +28,7 @@ from contracts.errors.exceptions import (
     McpPortConflictError,
     McpValidationError,
 )
+from management.services.mcp.permissions import catalog_permission
 from contracts.roles import has_any_role, roles_from_record
 from contracts.tool import MCPConfigRequest
 from backend.http.client import create_httpx_client
@@ -646,28 +647,7 @@ async def get_remote_mcp_server_list(
 
     for record in mcp_records:
         created_by = record.get("created_by") or record.get("user_id")
-        if user_id is None:
-            permission = PERMISSION_READ
-        else:
-            permission = (
-                PERMISSION_EDIT
-                if can_edit_all or str(created_by) == str(user_id)
-                else PERMISSION_READ
-            )
-        # Public MCPs (NULL group_ids) are editable by all users
-        if record.get("group_ids") is None:
-            permission = PERMISSION_EDIT
-        # For group-shared MCPs, respect ingroup_permission
-        if permission == PERMISSION_READ and user_groups:
-            record_group_ids = (record.get("group_ids") or "").strip()
-            if record_group_ids:
-                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
-                if any(g in allowed for g in user_groups):
-                    ingroup_perm = (
-                        record.get("ingroup_permission") or "READ_ONLY"
-                    ).upper()
-                    if ingroup_perm == "EDIT":
-                        permission = PERMISSION_EDIT
+        permission = catalog_permission(record, user_id, can_edit_all, user_groups)
 
         config_json = record.get("config_json")
         container_id = record.get("container_id")

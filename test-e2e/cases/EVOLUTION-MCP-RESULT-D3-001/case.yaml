@@ -1,0 +1,35 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-MCP-RESULT-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-05]
+  title: 从 MCP 回执和独立账本核对实际业务结果
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 同一工具均返回受理，按实际写入区分业务成功和失败。
+  preconditions: [本地能运行两个内核和 MCP HTTP 服务。]
+  test_data:
+    profile: 自建收据服务、独立状态资源和临时内存账本。
+  steps:
+  - order: 1
+    action: 用两个内核分别向本地服务提交两个单号，独立读取调用前后的账本。
+    expected: 核实真实参数和回执，写错单号判失败，写对单号判通过。
+  - order: 2
+    action: 使用不同的预期初态检查同一笔记录，再在未重置的账本尝试第三次写入。
+    expected: 初态不一致标为缺证。服务未收到第三次写入，账本仍保留前次结果。
+  expected_results: [观察到与远端账本相符的结果。, 无效初态单列。]
+  forbidden_side_effects: [运行回执不持久化原始单号或账本内容。]
+  acceptance:
+  - {id: AC-01, description: 识别真实工具结果, steps: [1], expected_results: [1], forbidden_side_effects: [1]}
+  - {id: AC-02, description: 拒绝不同初态, steps: [2], expected_results: [2]}
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary: [真实本地 MCP HTTP、两个内核适配器、证据协议与 Management 判分。]
+  observations: [服务收到的调用、回复摘要、账本摘要和评分差异。]
+  cleanup: [结束独立 HTTP 服务及其线程池。]

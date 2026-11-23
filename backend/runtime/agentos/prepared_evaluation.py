@@ -486,6 +486,12 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SCRIPT_CHECK_REQUIRES_TOOL"})
     if (payload.watch_tool_arguments or payload.tool_set_check) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_TOOL_OBSERVATION_REQUIRES_REPLAY"})
+    if payload.watch_mcp_replies:
+        observed = set(payload.watch_mcp_replies)
+        bound = {tool.parameters.get("tool_name") for tool in payload.resource.tools if tool.tool_id == "mcp" and tool.version == "1"}
+        if (not EVOLUTION_REPLAY_RUNTIME or not payload.replay_trial_id or not observed.issubset(bound)
+                or not observed.issubset(payload.watch_tool_arguments or {})):
+            raise HTTPException(status_code=422, detail={"code": "AGENTOS_MCP_REPLY_REQUIRES_TOOL"})
     if payload.replay_files is not None and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_FILE_STATE_REQUIRES_REPLAY"})
     return prepare_run_snapshot(payload, actor)
@@ -563,7 +569,8 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
             from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
             recorder = ReplayToolRecorder(info.agent_config, payload.watch_tool_arguments or {},
                                          payload.tool_set_check.removed if payload.tool_set_check else (),
-                                         watch_skill_process=bool(payload.watch_skill_process))
+                                         watch_skill_process=bool(payload.watch_skill_process), watch_mcp_replies={name: check.model_dump()
+                                             for name, check in (payload.watch_mcp_replies or {}).items()})
             info.observer.replay_tool_recorder = recorder
         if payload.replay_trial_id:
             for ref in payload.resource.skill_refs:

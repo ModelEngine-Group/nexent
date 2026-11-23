@@ -93,7 +93,11 @@ class ManagedMCPToolCollection:
         if loop is None or self._close_requested.is_set():
             raise RuntimeError("MCP session is closing")
 
-        coroutine = session.call_tool(name, arguments)
+        from nexent.core.agents.resources.replay_mcp import active_reply, call_session_tool
+        if active_reply.get() is not None and getattr(session, "_captures_protocol_reply", False) is not True:
+            coroutine = call_session_tool(session, name, arguments)
+        else:
+            coroutine = session.call_tool(name, arguments)
         try:
             call_future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except BaseException:

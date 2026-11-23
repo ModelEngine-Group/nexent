@@ -5,7 +5,7 @@ import hashlib
 import inspect
 import json
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from functools import wraps
 from threading import Lock
@@ -17,8 +17,9 @@ def argument_digest(value):
 
 
 class ReplayToolRecorder:
-    def __init__(self, root_config, watched, probe_names=(), *, watch_skill_process=False):
+    def __init__(self, root_config, watched, probe_names=(), *, watch_skill_process=False, watch_mcp_replies=None):
         self.root_config = root_config
+        self.watch_mcp_replies = watch_mcp_replies or {}
         self.watch_skill_process = watch_skill_process
         self.watched = watched
         self.requested = ContextVar("replay_requested_arguments", default=None)
@@ -130,6 +131,12 @@ class ReplayToolRecorder:
             return forward
         fields = self.watched[name]
 
+        def physical_reply(call):
+            if mapping_input and name in self.watch_mcp_replies:
+                from nexent.core.agents.resources.replay_mcp import capture_reply
+                return capture_reply(call, fields, self.watch_mcp_replies[name])
+            return nullcontext()
+
         def begin(args, kwargs):
             call = {"name": name, "arguments": {}, "outcome": "pending", "end": None}
             requested = self.requested.get()
@@ -163,7 +170,8 @@ class ReplayToolRecorder:
 
         async def wait_for_return(call, value):
             try:
-                result = await value
+                with physical_reply(call):
+                    result = await value
             except BaseException:
                 finish(call, "raised")
                 raise
@@ -174,7 +182,8 @@ class ReplayToolRecorder:
         def sync_forward(*args, **kwargs):
             call = begin(args, kwargs)
             try:
-                result = process_call(call, *args, **kwargs) if process_call else forward(*args, **kwargs)
+                with physical_reply(call):
+                    result = process_call(call, *args, **kwargs) if process_call else forward(*args, **kwargs)
             except BaseException:
                 finish(call, "raised")
                 raise

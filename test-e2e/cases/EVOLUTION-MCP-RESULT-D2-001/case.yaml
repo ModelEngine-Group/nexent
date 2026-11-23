@@ -1,0 +1,32 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-MCP-RESULT-D2-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-05]
+  title: 工具错误复现与跨资源反馈授权
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 从相同实参及相同初态的两次业务失败冻结复现题，仅交给有工具维护权限的用户。
+  preconditions: [可创建临时数据库的 PostgreSQL 测试实例。]
+  test_data:
+    profile: 业务智能体和受限的配送服务分别归属于同一租户的不同开发者。
+  steps:
+  - order: 1
+    action: 维护人和智能体编辑者分别提交证据，另将首跑编号充当复现编号。
+    expected: 仅智能体编辑者提交的独立复现有效；重试得到同一反馈编号。
+  - order: 2
+    action: 两种身份读取复现题，再给智能体编辑者管理员角色。
+    expected: 服务维护者和同租户管理员可读，单有智能体编辑权不能读取。
+  expected_results: [不同职责按资源分别授权。, 业务初态终态和回执来自两道原始题。]
+  forbidden_side_effects: [不转交会话正文、服务地址或凭据。]
+  acceptance:
+  - {id: AC-01, description: 确认复现与任务编辑权, steps: [1], expected_results: [1]}
+  - {id: AC-02, description: 核对工具维护权限, steps: [2], expected_results: [2], forbidden_side_effects: [1]}
+  contract:
+    protocol: HTTP API
+    request_expectations: [使用原生会话凭据。]
+    response_expectations: [已授权的请求取得反馈编号或复现题，越权返回 403。]

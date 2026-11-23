@@ -31,7 +31,7 @@ def test_writable_fixture_requires_a_synthetic_attempt_on_the_replay_runtime(mon
 
     monkeypatch.setattr(environment, "EVOLUTION_REPLAY_RUNTIME", enabled)
     payload = SimpleNamespace(new_skill_trial=None, omit_root_skill_candidate_id=None, observe_root_skill_choices=False,
-                              watch_skill_process=None, watch_tool_arguments=None, tool_set_check=None, replay_files={}, replay_trial_id=attempt)
+                              watch_mcp_replies=None, watch_skill_process=None, watch_tool_arguments=None, tool_set_check=None, replay_files={}, replay_trial_id=attempt)
     with pytest.raises(HTTPException) as caught:
         prepare_evaluation_run(payload,None)
     assert caught.value.detail["code"] == "AGENTOS_FILE_STATE_REQUIRES_REPLAY"
@@ -61,7 +61,7 @@ async def test_cancelled_file_trial_releases_its_directory_after_the_worker_exit
     monkeypatch.setattr(runtime, "release_prepared_run", release)
     monkeypatch.setattr(runtime, "collect_observer_output", AsyncMock(side_effect=asyncio.CancelledError()))
     payload = SimpleNamespace(new_skill_trial=None, confirmation_bucket=None, replay_trial_id="a"*32, replay_files={"a.txt":"draft"}, conversation_id=-1,
-                              watch_skill_process=None, watch_tool_arguments=None, tool_set_check=None, resource=SimpleNamespace(skill_refs=[]),
+                              watch_mcp_replies=None, watch_skill_process=None, watch_tool_arguments=None, tool_set_check=None, resource=SimpleNamespace(skill_refs=[]),
                               observe_root_skill_choices=False)
     with pytest.raises(asyncio.CancelledError):
         await runtime.execute_prepared_evaluation(payload,SimpleNamespace(user_id="u",tenant_id="t"))

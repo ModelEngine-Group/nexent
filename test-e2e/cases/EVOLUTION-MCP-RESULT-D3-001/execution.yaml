@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: EVOLUTION-MCP-RESULT-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_business_reply
+acceptance_bindings:
+  AC-01: [test_business_reply]
+  AC-02: [test_business_reply]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

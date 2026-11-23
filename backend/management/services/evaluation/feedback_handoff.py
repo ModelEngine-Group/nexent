@@ -47,10 +47,37 @@ def _require_baseline_guide(target, skill_id, candidate_id, trials):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "S2 requires observed reads of the selected baseline guide in both trials")
 
 
+def completed_baseline(tenant, eid, agent, version, digest):
+    plan = jobs.read_plan(tenant, eid, True)
+    if (not plan or plan["request"]["candidate_type"] != "baseline" or plan["snapshots"]["base"] != digest
+            or (plan["request"]["agent_id"], plan["request"]["version_no"]) != (agent, version)):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Both experiments must use the same current published baseline")
+    trials = jobs.trials(tenant, eid)
+    if any(row["status"] in {"pending", "running", "cancelled"} for row in trials):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Finish both baseline experiments before submitting feedback")
+    return plan, {r["case_id"]: r for r in trials if r["variant"] == "base"}
+
+
 def require_development_sources(tenant, agent, case_ids, plan):
     fixed = plan.get("regression_cases") or {}
     if any(str(cid) in fixed for cid in case_ids) or contains_fixed_cases(tenant, agent, case_ids, list(map(int, fixed))):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Fixed regression tasks cannot be shared with a generator")
+
+
+def invocation_issues(grade, tool, order):
+    remote_errors = {e["call"] for e in grade.get("mcp_evidence", ())
+                     if e["tool"] == tool and e["input_matches"] and e["error"]}
+    issues = []
+    for issue in grade["issues"]:
+        if issue["reason"] == "wrong_order" and tool in order:
+            issues.append(issue)
+        elif issue.get("tool") == tool:
+            if issue["reason"] in {"mcp_remote_error", "wrong_mcp_reply", "wrong_mcp_state"}:
+                continue
+            if issue["reason"] == "raised" and issue.get("call") in remote_errors:
+                continue
+            issues.append(issue)
+    return issues
 
 
 def _file_checks_for_tool(result, tool):
@@ -119,8 +146,11 @@ def _prepare_handoff(tenant, user, eid, request):
             rule = next((r for r in case["task"]["tool_use"]["rules"] if r["name"] == request.tool_name), None)
             if rule is None or evidence.get("status") not in {"pass", "fail"}:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose a tool with verified behavior on both tasks")
-            issues = [problem for problem in evidence["issues"] if problem.get("tool") == request.tool_name
-                      or problem["reason"] == "wrong_order" and request.tool_name in (case["task"]["tool_use"].get("order") or [])]
+            issues = invocation_issues(evidence, request.tool_name, case["task"]["tool_use"].get("order") or [])
+            if field == "failure" and not issues and any(
+                    e["tool"] == request.tool_name and e["input_matches"] and
+                    (not e["reply_matches"] or e["state_matches"] is False) for e in evidence.get("mcp_evidence", ())):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The remote service received the correct request; review its implementation")
             file_evidence = {}
             if request.share_file_state:
                 file_evidence["file_checks"] = _file_checks_for_tool(trial["result"], request.tool_name)
@@ -252,6 +282,8 @@ def generate_from_handoff(tenant, user, feedback_id, model_id):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Cannot verify original feedback task")
             source_ids.append(int(match[1]))
     require_development_sources(tenant, feedback["agent_id"], source_ids, {})
+    if feedback["method"] == "T4":
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Open the tool maintainer reproduction brief")
     if feedback["method"] == "S4":
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Use the script draft endpoint for maintainer review")
     if feedback["method"] == "S1":

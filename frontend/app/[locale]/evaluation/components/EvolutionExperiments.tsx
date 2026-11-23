@@ -26,6 +26,7 @@ import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRul
 import FileStateRules, { fileStateRule, type FileRule } from "./FileStateRules";
 import LocalEditFeedback from "./LocalEditFeedback";
 import NewSkillBriefForm from "./NewSkillBriefForm";
+import { ToolMaintainerBrief, ToolRepairForm } from "./ToolRepair";
 import { ScriptFeedbackForm, ScriptDraftForm } from "./SkillScriptRepair";
 import ToolMappingCandidate from "./ToolMappingCandidate";
 import ToolSetCandidates from "./ToolSetCandidates";
@@ -567,6 +568,8 @@ function Experiments({
             <ToolMappingCandidate key={report.data.experiment_id} report={development} cases={choices.cases} onSelect={id => {
               setCandidate(`tool_mapping:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
             }}/>}
+          {development && report.data.status === "finished" && baselineReport && choices && <ToolRepairForm
+            key={report.data.experiment_id} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
           {development && report.data.status === "finished" && baselineReport && choices && <ScriptFeedbackForm
             key={report.data.experiment_id} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
           {development && report.data.status === "finished" && baselineReport && choices && <NewSkillBriefForm key={report.data.experiment_id} report={development} workspace={choices}/>}
@@ -630,6 +633,13 @@ function Experiments({
                       <div>{trial.result.tool_use.sequence?.join(" → ")}</div>
                       {trial.result.tool_use.reason === "unverified_script_files" && <div>{t("evolution.scriptFilesMissing")}</div>}
                       {trial.result.tool_use.reason === "unverified_skill_process" && <div>{t("evolution.scriptMissing")}</div>}
+                      {(trial.result.tool_use.reason === "unverified_mcp_reply" || trial.result.tool_use.reason === "unverified_mcp_fixture") &&
+                        <div>{t(`evolution.issue.${trial.result.tool_use.reason}`)}</div>}
+                      {trial.result.tool_use.mcp_evidence?.map(e => <div key={e.call}>{t("evolution.mcpOutcome", {
+                        tool: e.tool, input: t(e.input_matches ? "evolution.match" : "evolution.mismatch"),
+                        reply: t(e.reply_matches ? "evolution.match" : "evolution.mismatch"),
+                        state: t(e.state_matches == null ? "evolution.notChecked" : e.state_matches ? "evolution.match" : "evolution.mismatch"),
+                      })}</div>)}
                       {trial.result.tool_use.script_evidence?.map(s => <div key={s.call}>{t("evolution.scriptOutcome", {
                         call: s.call, code: s.exit_code, input: t(s.input_matches ? "evolution.match" : "evolution.mismatch"),
                         output: t(s.stdout_matches == null ? "evolution.notChecked" : s.stdout_matches ? "evolution.match" : "evolution.mismatch"),
@@ -744,6 +754,7 @@ function AgentPicker({ viewer }: { viewer: string }) {
     <Flex vertical gap={16}>
       <ResourceCandidateGenerator />
       <ScriptDraftForm/>
+      <ToolMaintainerBrief viewer={viewer}/>
       {error instanceof Error && <Alert type="error" message={error.message} />}
       <Flex gap={8}>
         <Select

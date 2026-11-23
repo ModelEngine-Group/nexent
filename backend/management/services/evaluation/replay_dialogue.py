@@ -5,7 +5,8 @@ import json
 from collections import Counter
 from hashlib import sha256
 
-from contracts.agentos import RunHistoryMessage
+from contracts.agentos import MCPReplyProbe, RunHistoryMessage
+from nexent.core.agents.resources.replay_tools import argument_digest
 from contracts.errors.exceptions import RuntimeUpstreamError
 from management.db.evaluation.replay_cases import task_digest
 from nexent.core.agents.resources.replay_files import files_digest
@@ -71,6 +72,14 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
         current = current.model_copy(update={"history": list(history)})
         updates = {"input": current, "conversation_id": -job["trial_id"], "replay_trial_id": attempt}
         if watch:
+            replies = {}
+            for rule in watch["rules"]:
+                if expected := rule.get("expected_mcp_reply"):
+                    fixture = expected.get("fixture")
+                    replies[rule["name"]] = MCPReplyProbe(kind=expected["kind"],
+                        initial_digest=argument_digest(fixture["initial"]) if fixture else None)
+            if replies:
+                updates["watch_mcp_replies"] = replies
             if any(r.get("expected_script_stdout") is not None or r.get("expected_script_files") is not None for r in watch["rules"]):
                 updates["watch_skill_process"] = True
             updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
@@ -87,7 +96,7 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
                 body = {}
             detail = body.get("detail") if isinstance(body, dict) else None
             code = detail.get("code") if isinstance(detail, dict) else None
-            if code not in ("AGENTOS_FILE_STATE_UNSUPPORTED_BINDINGS", "AGENTOS_FILE_STATE_UNREADABLE"):
+            if code not in ("AGENTOS_FILE_STATE_UNSUPPORTED_BINDINGS", "AGENTOS_FILE_STATE_UNREADABLE", "AGENTOS_MCP_REPLY_REQUIRES_TOOL"):
                 raise
             return [], records, {"error": code.lower(), "turn": index + 1}
         receipt = observed.replay_receipt

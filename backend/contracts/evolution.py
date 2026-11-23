@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Development-only evidence and local edits for a published business prompt."""
 
+import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
@@ -59,17 +60,45 @@ class ReplayAttachmentSource(BaseModel):
         return value
 
 
+class MCPFixtureState(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    initial: dict[str, JsonValue]
+    final: dict[str, JsonValue]
+
+
+class ExpectedMCPReply(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    kind: Literal["text", "structured"]
+    value: str | dict[str, JsonValue]
+    error: bool = Field(default=False, exclude_if=lambda v: not v)
+    fixture: MCPFixtureState | None = Field(default=None, exclude_if=lambda v: v is None)
+
+    @model_validator(mode="after")
+    def matches_kind(self):
+        if (self.kind == "text") != isinstance(self.value, str):
+            raise ValueError("Provide one text response or a structured JSON object")
+        if len(json.dumps(self.model_dump(), ensure_ascii=False, allow_nan=False).encode()) > 65536:
+            raise ValueError("The expected tool response exceeds 64 KiB")
+        return self
+
+
 class ToolUseRule(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     name: str = Field(min_length=1, max_length=180, pattern=r"^\S+$")
     min_calls: int = Field(default=1, ge=0, le=512)
     max_calls: int | None = Field(default=None, ge=0, le=512)
+    expected_mcp_reply: ExpectedMCPReply | None = Field(default=None, exclude_if=lambda v: v is None)
     expected_script_files: TextFiles | None = Field(default=None, exclude_if=lambda v: v is None)
     expected_script_stdout: str | None = Field(default=None, max_length=16384, exclude_if=lambda v: v is None)
     arguments: dict[str, JsonValue] = Field(default_factory=dict, max_length=32)
 
     @model_validator(mode="after")
     def valid_bounds(self):
+        if self.expected_mcp_reply is not None:
+            from nexent.core.agents.resources.tool_user_context import USER_CONTEXT_FIELDS
+            if (self.min_calls < 1 or set(self.arguments).intersection(USER_CONTEXT_FIELDS)
+                    or self.expected_script_files is not None or self.expected_script_stdout is not None):
+                raise ValueError("An MCP reply check requires a remote tool call and business arguments")
         if self.expected_script_stdout is not None or self.expected_script_files is not None:
             import shlex
             if (self.name != "run_skill_script" or self.arguments.get("source", "skill") != "skill"

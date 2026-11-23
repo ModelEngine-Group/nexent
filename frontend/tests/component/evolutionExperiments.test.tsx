@@ -6,6 +6,7 @@ import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperimen
 import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
+import { ToolMaintainerBrief } from "@/app/evaluation/components/ToolRepair";
 import { ScriptDraftForm } from "@/app/evaluation/components/SkillScriptRepair";
 import { toolExpectation } from "@/app/evaluation/components/ToolUseRules";
 import ToolMappingCandidate from "@/app/evaluation/components/ToolMappingCandidate";
@@ -46,6 +47,7 @@ vi.mock("@/services/evolutionService", () => ({
     shareLocalEdit: vi.fn(),
     toolSetCandidates: vi.fn(),
     toolMappingCandidate: vi.fn(),
+    toolRepairBrief: vi.fn(),
     scriptDraft: vi.fn(),
     buildScript: vi.fn(),
     setFixedRegression: vi.fn(),
@@ -518,4 +520,29 @@ it("previews the maintainer's function diff without starting an experiment", asy
   await waitFor(() => expect(evolutionService.buildScript).toHaveBeenCalledWith(32,{
     replacement, draft_digest:"pinned", source_digest:"baseline",
   }));
+});
+
+it("keeps the MCP response and independent fixture in the task editor payload", () => {
+  const expected = {kind:"structured",value:{ok:true},fixture:{initial:{receipt:""},final:{receipt:"A1"}}};
+  const rule = {name:"post_receipt",min:1,max:1,args:'{"receipt":"A1"}',mcpReply:JSON.stringify(expected)};
+  expect(toolExpectation({toolRules:[rule]})?.rules[0].expected_mcp_reply).toEqual(expected);
+  expect(() => toolExpectation({toolRules:[{...rule,mcpReply:'{"kind":"structured","value":2}'}]})).toThrow();
+  expect(toolExpectation({toolRules:[{...rule,name:"run_skill_script"}]})?.rules[0].expected_mcp_reply).toBeUndefined();
+});
+
+it("opens a maintainer brief by number and clears examples when the selected number changes", async () => {
+  const example = {arguments:{receipt:"KEEP2"}, expected:{kind:"text" as const, value:"accepted"}};
+  const rule = {name:"post_receipt",min_calls:1,max_calls:1,arguments:example.arguments,expected_mcp_reply:example.expected};
+  vi.mocked(evolutionService.toolRepairBrief).mockResolvedValue({test_suite:{format:"nexent-mcp-repair-v1",failure:rule,protection:rule},tool_name:"post_receipt",goal:"Keep reference",
+    failure:{...example, arguments:{receipt:"FIX1"}},protection:example,repeat_receipt:"second-run"});
+  render(<QueryClientProvider client={new QueryClient()}><ToolMaintainerBrief viewer="maintainer"/></QueryClientProvider>);
+  fireEvent.click(screen.getByText("evolution.toolRepairBrief", {selector:"summary"}));
+  const field = screen.getByRole("spinbutton",{name:"evolution.feedbackId"});
+  fireEvent.change(field,{target:{value:"35"}});
+  fireEvent.click(screen.getByRole("button",{name:"evolution.toolRepairBrief"}));
+  expect(await screen.findByText(/FIX1/)).toBeInTheDocument();
+  expect(screen.getByText(/KEEP2/)).toBeInTheDocument();
+  expect(evolutionService.toolRepairBrief).toHaveBeenCalledWith(35);
+  fireEvent.change(field,{target:{value:"36"}});
+  expect(screen.queryByText(/FIX1/)).toBeNull();
 });

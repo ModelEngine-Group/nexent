@@ -2,17 +2,32 @@
 "use client";
 import { Button, Checkbox, Form, Input, InputNumber, Space } from "antd";
 import { useTranslation } from "react-i18next";
-import type { ToolExpectation } from "@/services/evolutionService";
+import type { ExpectedMcpReply, ToolExpectation } from "@/services/evolutionService";
 
 export interface ToolRuleFields {
-  toolRules?: { name: string; min: number; max?: number; args?: string; checkScript?: boolean; stdout?: string; fileCheck?: boolean; files?: string }[];
+  toolRules?: { name: string; min: number; max?: number; args?: string; checkScript?: boolean; stdout?: string; fileCheck?: boolean; files?: string; mcpReply?: string }[];
   toolOrder?: string;
+}
+
+function parseMcpReply(text: string): ExpectedMcpReply {
+  const data = JSON.parse(text);
+  const object = (value: unknown) => !!value && typeof value === "object" && !Array.isArray(value);
+  if (!object(data) || !["text", "structured"].includes(data.kind) ||
+      (data.kind === "text" ? typeof data.value !== "string" : !object(data.value)) ||
+      (data.error !== undefined && typeof data.error !== "boolean") ||
+      Object.keys(data).some(key => !["kind", "value", "fixture", "error"].includes(key)) ||
+      (data.fixture !== undefined && (!object(data.fixture) || !object(data.fixture.initial) ||
+        !object(data.fixture.final) || Object.keys(data.fixture).some(key => !["initial", "final"].includes(key))))) {
+    throw new Error("Invalid expected MCP result");
+  }
+  return data;
 }
 
 export function toolExpectation({ toolRules, toolOrder }: ToolRuleFields): ToolExpectation | undefined {
   if (!toolRules?.length) return undefined;
   return {
     rules: toolRules.map(r => ({
+      ...(r.name.trim() !== "run_skill_script" && r.mcpReply?.trim() ? {expected_mcp_reply: parseMcpReply(r.mcpReply)} : {}),
       ...(r.name.trim() === "run_skill_script" && r.fileCheck ? {expected_script_files: JSON.parse(r.files?.trim() || "{}")} : {}),
       ...(r.name.trim() === "run_skill_script" && r.checkScript ? { expected_script_stdout: r.stdout ?? "" } : {}),
       name: r.name.trim(), min_calls: r.min, max_calls: r.max ?? null, arguments: JSON.parse(r.args?.trim() || "{}"),
@@ -50,6 +65,14 @@ export default function ToolUseRules() {
       }]}>
         <Input.TextArea rows={2} placeholder={'{"skill_name":"meeting-action-list"}'} />
       </Form.Item>
+      {rules?.[f.name]?.name?.trim() && rules[f.name].name.trim() !== "run_skill_script" &&
+        <details><summary>{t("evolution.mcpReplyCheck")}</summary>
+          <Form.Item name={[f.name, "mcpReply"]} label={t("evolution.mcpReplySpec")} rules={[{validator: async (_, value) => {
+            if (!value?.trim()) return;
+            try { parseMcpReply(value); } catch { throw new Error(t("evolution.mcpReplySpec")); }
+          }}]}><Input.TextArea rows={4} maxLength={65536}
+            placeholder={'{"kind":"text","value":"accepted","fixture":{"initial":{"receipt":""},"final":{"receipt":"A1"}}}'}/></Form.Item>
+        </details>}
       {rules?.[f.name]?.name?.trim() === "run_skill_script" && <>
         <Form.Item name={[f.name, "checkScript"]} valuePropName="checked">
           <Checkbox>{t("evolution.checkScript")}</Checkbox>

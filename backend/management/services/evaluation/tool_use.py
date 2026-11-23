@@ -27,6 +27,7 @@ def judge_dialogue_tools(expectation, observations, *, absent=frozenset()):
     issues = []
     argument_evidence = []
     script_evidence = []
+    mcp_evidence = []
     sequence = [call.name for call in calls]
     for rule in expectation["rules"]:
         name = rule["name"]
@@ -38,6 +39,31 @@ def judge_dialogue_tools(expectation, observations, *, absent=frozenset()):
         for index, call in enumerate(calls, 1):
             if call.name != name:
                 continue
+            expected_remote_error = False
+            expected_reply = rule.get("expected_mcp_reply")
+            if expected_reply:
+                if call.mcp_fixture_unready:
+                    return {"status": "missing_evidence", "reason": "unverified_mcp_fixture", "call": index}
+                reply = call.mcp_reply
+                if reply is None or reply.kind != expected_reply["kind"] or reply.content is None:
+                    return {"status": "missing_evidence", "reason": "unverified_mcp_reply", "call": index}
+                fixture = expected_reply.get("fixture")
+                if fixture and (reply.before != argument_digest(fixture["initial"]) or reply.after is None):
+                    return {"status": "missing_evidence", "reason": "unverified_mcp_fixture", "call": index}
+                state_match = reply.after == argument_digest(fixture["final"]) if fixture else None
+                inputs_match = reply.exact_fields and reply.inputs == argument_digest(rule["arguments"])
+                error_expected = expected_reply.get("error", False)
+                content_match = reply.error == error_expected and reply.content == argument_digest(expected_reply["value"])
+                expected_remote_error = reply.error and error_expected and content_match
+                mcp_evidence.append({**reply.model_dump(), "tool": name, "call": index,
+                                     "input_matches": inputs_match, "reply_matches": content_match, "state_matches": state_match})
+                if not inputs_match:
+                    issues.append({"tool": name, "reason": "wrong_mcp_inputs", "call": index})
+                if state_match is False:
+                    issues.append({"tool": name, "reason": "wrong_mcp_state", "call": index})
+                if not content_match:
+                    issues.append({"tool": name, "reason": "mcp_remote_error" if reply.error and not error_expected else "wrong_mcp_reply",
+                                   "call": index})
             expected_stdout = rule.get("expected_script_stdout")
             expected_files = rule.get("expected_script_files")
             if expected_stdout is not None or expected_files is not None:
@@ -65,7 +91,7 @@ def judge_dialogue_tools(expectation, observations, *, absent=frozenset()):
                     effective = call.arguments.get(key)
                     argument_evidence.append({"tool": name, "field": key, "call": index, "requested": raw,
                                               "effective": effective, "expected": argument_digest(expected)})
-            if call.outcome == "raised":
+            if call.outcome == "raised" and not expected_remote_error:
                 issues.append({"tool": name, "reason": "raised", "call": index})
             wrong = [key for key, value in rule["arguments"].items() if call.arguments.get(key) != argument_digest(value)]
             if wrong:
@@ -77,6 +103,7 @@ def judge_dialogue_tools(expectation, observations, *, absent=frozenset()):
                 or any(a.end >= b.start for a, b in zip(ordered_calls, ordered_calls[1:]))):
             issues.append({"reason": "wrong_order"})
     return {"status": "fail" if issues else "pass", "checked": sorted(required), "sequence": sequence, "issues": issues,
+            **({"mcp_evidence": mcp_evidence} if mcp_evidence else {}),
             **({"script_evidence": script_evidence} if script_evidence else {}),
             **({"argument_evidence": argument_evidence} if argument_evidence else {})}
 

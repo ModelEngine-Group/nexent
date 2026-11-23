@@ -57,7 +57,9 @@ export interface Trial {
     tool_catalog?: { core: string; prompt_tools: string[]; schema_tools: string[]; executable: string[];
       model_inputs?: number; instruction_mentions?: string[]; native_definitions?: string[] };
     new_skill_trial?: {candidate_id: number; name: string; digest: string; arm: "base" | "result"};
-    tool_use?: { status: string; reason?: string; script_evidence?: {
+    tool_use?: { status: string; reason?: string; mcp_evidence?: {
+      call: number; tool: string; input_matches: boolean; reply_matches: boolean; state_matches: boolean | null;
+    }[]; script_evidence?: {
       call: number; exit_code: number; input_matches: boolean; stdout_matches: boolean | null; files_match?: boolean | null; script: string; image: string;
     }[]; argument_evidence?: {
       tool: string; field: string; call: number; requested: string | null; effective: string | null; expected: string;
@@ -214,6 +216,13 @@ export const evolutionService = {
       `${root}/agents/${agent}/versions/${version}/development-cases/${id}`),
   shareLocalEdit: (id: number, body: LocalFeedback) =>
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
+  shareToolRepair: (id: number, body: ToolRepairFeedback) =>
+    read<{feedback_id: number}>(`${root}/experiments/${id}/tool-repair-feedback`, body),
+  toolRepairBrief: (id: number) =>
+    read<{test_suite: {format: "nexent-mcp-repair-v1"; failure: ToolExpectation["rules"][number]; protection: ToolExpectation["rules"][number]};
+      tool_name: string; goal: string; failure: {arguments: Record<string, unknown>; expected: ExpectedMcpReply};
+      protection: {arguments: Record<string, unknown>; expected: ExpectedMcpReply}; repeat_receipt: string}>(
+      `${root}/feedback/${id}/tool-repair-brief`),
   shareScriptFeedback: (id: number, body: ScriptFeedback) =>
     read<{feedback_id: number}>(`${root}/experiments/${id}/skill-script-feedback`, body),
   scriptDraft: (id: number, body: {model_id: number} | {replacement: string}) =>
@@ -241,11 +250,20 @@ export const evolutionService = {
     read<ExperimentReport>(`${root}/experiments/${id}/cancel`, {}),
 };
 
+export type ExpectedMcpReply = {
+  kind: "text" | "structured"; value: string | Record<string, unknown>; error?: boolean;
+  fixture?: {initial: Record<string, unknown>; final: Record<string, unknown>};
+};
+
 export interface ToolExpectation {
-  rules: { name: string; min_calls: number; max_calls: number | null; expected_script_stdout?: string; expected_script_files?: Record<string, string>; arguments: Record<string, unknown> }[];
+  rules: { name: string; min_calls: number; max_calls: number | null; expected_mcp_reply?: ExpectedMcpReply; expected_script_stdout?: string; expected_script_files?: Record<string, string>; arguments: Record<string, unknown> }[];
   order?: string[];
 }
 
+export interface ToolRepairFeedback {
+  tool_name: string; failure_case_id: number; protection_case_id: number; repeat_experiment_id: number;
+  goal: string; share_tool_examples: true;
+}
 export interface ScriptFeedback {
   skill_id: number; failure_case_id: number; protection_case_id: number; repeat_experiment_id: number;
   function: string; goal: string; share_script_examples: boolean;

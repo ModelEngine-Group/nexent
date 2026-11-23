@@ -19,7 +19,7 @@ from management.db.evaluation import experiments as jobs
 from management.services.evaluation.evolution_access import require_business_agent_edit
 from management.services.evaluation.example_candidates import example_source_keys
 from management.services.evaluation.experiments import _io, _snapshot, snapshot_digest
-from management.services.evaluation.feedback_handoff import require_development_sources
+from management.services.evaluation.feedback_handoff import completed_baseline, require_development_sources
 from management.services.evaluation.replay_cases import get_development_case
 from management.services.evaluation.skill_candidates import _editable_skill, feedback_skill_files
 
@@ -69,17 +69,6 @@ def _script_example(case, trial, status, baseline, skill_name):
             "path": args["script_path"], "process": process, "receipt_id": trial["receipt_id"]}
 
 
-def _completed_baseline(tenant, eid, agent, version, digest):
-    plan = jobs.read_plan(tenant, eid, True)
-    if (not plan or plan["request"]["candidate_type"] != "baseline" or plan["snapshots"]["base"] != digest
-            or (plan["request"]["agent_id"], plan["request"]["version_no"]) != (agent, version)):
-        invalid("Both experiments must use the same current published baseline")
-    trials = jobs.trials(tenant, eid)
-    if any(row["status"] in {"pending", "running", "cancelled"} for row in trials):
-        invalid("Finish both baseline experiments before submitting feedback")
-    return plan, {r["case_id"]: r for r in trials if r["variant"] == "base"}
-
-
 def _freeze(tenant, user, eid, request, spec):
     agent, version = spec.resource.agent_id, spec.resource.version_no
     require_business_agent_edit(agent, tenant, user)
@@ -87,8 +76,8 @@ def _freeze(tenant, user, eid, request, spec):
     cid, guard = request.failure_case_id, request.protection_case_id
     if eid == request.repeat_experiment_id:
         invalid("Repeat the failing task in a separate baseline experiment")
-    plan, trials = _completed_baseline(tenant, eid, agent, version, baseline)
-    repeat_plan, repeat_trials = _completed_baseline(tenant, request.repeat_experiment_id, agent, version, baseline)
+    plan, trials = completed_baseline(tenant, eid, agent, version, baseline)
+    repeat_plan, repeat_trials = completed_baseline(tenant, request.repeat_experiment_id, agent, version, baseline)
     require_development_sources(tenant, agent, [cid, guard], plan)
     require_development_sources(tenant, agent, [cid], repeat_plan)
     bindings = [row for row in query_skill_instances_by_agent_id(agent, tenant, version)

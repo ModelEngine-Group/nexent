@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: EVOLUTION-MCP-RESULT-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_tool_repair_http
+acceptance_bindings:
+  AC-01: [test_tool_repair_http]
+  AC-02: [test_tool_repair_http]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

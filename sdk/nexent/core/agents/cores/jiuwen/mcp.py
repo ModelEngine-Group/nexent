@@ -181,6 +181,16 @@ class _ObservedMCPTool(MCPTool):
 class _ConfiguredNativeClient(StreamableHttpClient):
     """Preserve Nexent transport policy while retaining native Jiuwen MCP operations."""
 
+    _captures_protocol_reply = True
+
+    async def call_tool(self, tool_name, arguments, **kwargs):
+        from nexent.core.agents.resources.replay_mcp import active_reply, call_session_tool
+        if active_reply.get() is None:
+            return await super().call_tool(tool_name, arguments, **kwargs)
+        from openjiuwen.core.foundation.tool.mcp.base import extract_mcp_tool_result_content
+        response = await call_session_tool(self._session, tool_name, arguments)
+        return extract_mcp_tool_result_content(response)
+
     def __init__(self, config, http_client_factory):
         super().__init__(config)
         self._transport = config.client_type
