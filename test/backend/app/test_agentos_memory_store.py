@@ -255,7 +255,8 @@ def test_runtime_storage_honors_existing_personal_memory_policy(config):
         memory_store._require_automatic_memory(session, "user", 7)
 
 
-def test_expired_storage_worker_cannot_modify_database(monkeypatch):
+@pytest.mark.parametrize("lookup_consumes_budget", [False, True])
+def test_expired_storage_worker_cannot_modify_database(monkeypatch, lookup_consumes_budget):
     from contextlib import contextmanager
     from infrastructure.rdb import memory_store
 
@@ -269,7 +270,16 @@ def test_expired_storage_worker_cannot_modify_database(monkeypatch):
     monkeypatch.setattr(memory_store, "_lock", Mock())
     monkeypatch.setattr(memory_store, "_require_scope", Mock())
     monkeypatch.setattr(memory_store, "_require_automatic_memory", Mock())
+    clock = Mock(return_value=0 if lookup_consumes_budget else 2)
+    monkeypatch.setattr(memory_store, "time", SimpleNamespace(monotonic=clock))
+
+    def read(*args):
+        if lookup_consumes_budget:
+            clock.return_value = 2
+        return None
+
+    monkeypatch.setattr(memory_store, "_find", read)
     with pytest.raises(TimeoutError):
-        memory_store.write_agent_memory("t", "u", 7, 42, "one", "remember", "index", deadline=0)
+        memory_store.write_agent_memory("t", "u", 7, 42, "one", "remember", "index", deadline=1)
     session.add.assert_not_called()
     session.flush.assert_not_called()

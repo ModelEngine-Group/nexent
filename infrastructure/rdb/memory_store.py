@@ -95,11 +95,11 @@ def write_agent_memory(
     with get_db_session() as session:
         _lock(session, tenant_id, key)
         _require_scope(session, tenant_id, user_id, agent_id, conversation_id)
+        row = _find(session, tenant_id, key, user_id, agent_id)
         if deadline is not None:
             _require_automatic_memory(session, user_id, agent_id)
             if time.monotonic() >= deadline:
                 raise TimeoutError("Memory write budget expired")
-        row = _find(session, tenant_id, key, user_id, agent_id)
         if row is not None:
             if row.content == content:
                 return row.memory_id, "UNCHANGED"
