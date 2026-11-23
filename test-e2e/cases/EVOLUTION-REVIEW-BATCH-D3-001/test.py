@@ -11,10 +11,13 @@ from local_auth_http import native_runtime, register, runtime
 @pytest.mark.case_id("EVOLUTION-REVIEW-BATCH-D3-001")
 @pytest.mark.stage("D3")
 def test_review_batch(runtime, tmp_path, monkeypatch):
-    from infrastructure.rdb.client import db_client
+    from contracts.evolution import ReplayCaseRequest
+    from contracts.errors.exceptions import AppException
+    from infrastructure.rdb.client import db_client, get_db_session
     from infrastructure.system_configuration.runtime import load_system_configuration
     from infrastructure.trace.trajectory_store import CaptureIdentity, TrajectoryFileStore
     from management.db.conversation import evolution_review as registrar, prepared_turn
+    from management.services.evaluation.replay_cases import freeze_development_case, preview_trace_case
     from ops.db.trajectory import evolution as queue
     from ops.services.trajectory import evolution as reader
     from ops.services.trajectory.service import TrajectoryService
@@ -28,12 +31,17 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     directory = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
         for name in ("003_conversation_run_admission", "004_agent_execution", "006_prepared_conversation_turn",
-                     "011_trajectory", "015_conversation_evolution", "021_evolution_online_reviews"):
+                     "011_trajectory", "015_conversation_evolution", "018_evolution_replay_cases", "021_evolution_online_reviews"):
             cursor.execute((directory / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
         for chat in (1, 2, 3):
             conn.execute(text("""INSERT INTO nexent.conversation_record_t
                 (conversation_id,created_by,updated_by,delete_flag) VALUES (:chat,:owner,:owner,'N')"""),
                 {"chat": chat, "owner": owner})
+    with get_db_session() as session:
+        for version in (0, 1):
+            session.add(models.AgentInfo(agent_id=7, version_no=version, tenant_id=tenant,
+                name="meeting-actions", created_by=owner, updated_by=owner, delete_flag="N", ingroup_permission="PRIVATE"))
+            session.flush()
     store = TrajectoryFileStore(tmp_path / "archive", authorize=lambda _: None)
     service = TrajectoryService(store, None, None)
     monkeypatch.setattr(reader, "get_service", lambda: service)
@@ -47,8 +55,9 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
                   "run": run, "trajectory": trajectory, "ordinal": ordinal}
         with engine.begin() as conn:
             conn.execute(text("""INSERT INTO nexent.conversation_message_t
-                (message_id,conversation_id,message_role,message_content,created_by,updated_by,delete_flag)
-                VALUES (:source,:chat,'user',:query,:owner,:owner,'N'),(:reply,:chat,'assistant','',:owner,:owner,'N')"""), params)
+                (message_id,conversation_id,message_index,message_role,message_content,created_by,updated_by,delete_flag)
+                VALUES (:source,:chat,(:ordinal-1)*2,'user',:query,:owner,:owner,'N'),
+                       (:reply,:chat,(:ordinal-1)*2+1,'assistant','',:owner,:owner,'N')"""), params)
             conn.execute(text("""INSERT INTO nexent.conversation_run_admission_t (scope_sha256,tenant_id,run_id,
                 request_sha256,conversation_id,created_by,updated_by,prepared_assistant_id,evolution_source_message_id,
                 evolution_grant_epoch,evolution_valid_until,delete_flag) VALUES (:run,:tenant,:run,:run,:chat,:owner,:owner,:reply,
@@ -79,7 +88,7 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     worker = reader.EvolutionReviewWorker()
     replies = []
     for i, (chat, ordinal) in enumerate(((1, 1), (1, 2), (2, 1), (3, 1), (3, 2)), start=1):
-        replies.append(seed(chat, ordinal, correction=i == 1))
+        replies.append(seed(chat, ordinal, correction=i in (1, 5)))
         registrar.enqueue_review_batches()
         if i == 1:
             assert worker.tick()
@@ -97,6 +106,24 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     registrar.complete_review_batches()
     result_query = "SELECT result FROM nexent.evolution_review_batch_t"
     assert scalar(result_query)["reviewed"] == 5 and scalar(result_query)["missing"] == 0
+    turn = scalar("SELECT turn_id FROM nexent.evolution_review_turn_t WHERE conversation_id=2")
+    with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
+        conn.execute(text("UPDATE nexent.evolution_review_turn_t SET observation=observation-'case_outline' WHERE turn_id=:turn"),
+                     {"turn": turn})
+        cursor.execute((directory / "v2.9.0_027_evolution_trace_case_outline.sql").read_text(encoding="utf-8"))
+    assert scalar(result_query) is None and worker.tick()
+    registrar.complete_review_batches()
+    assert scalar(result_query)["reviewed"] == 5
+    draft = preview_trace_case(tenant, owner, 7, 1, turn)
+    assert draft["query"] == "整理会议待办" and draft["attachment_count"] == draft["tool_count"] == 0
+    case = ReplayCaseRequest(agent_id=7, version_no=1, family="meeting actions", query="整理以下合成材料中的待办",
+                             expected="事项、负责人和来源", trace={"turn_id":turn, "purpose":"reproduce",
+                                 "inputs_reviewed":True, "draft_digest":draft["draft_digest"]})
+    saved = freeze_development_case(case, owner, tenant)
+    assert freeze_development_case(case, owner, tenant) == saved
+    task = scalar("SELECT task FROM nexent.evolution_replay_case_t")
+    assert task["query"] == case.query and task["expected"] == case.expected
+    assert task["trace_source"]["trajectory_id"] == draft["trajectory_id"] and draft["query"] not in str(task)
     with engine.begin() as conn:
         conn.execute(text("UPDATE nexent.conversation_message_t SET opinion_flag='N' WHERE message_id=:mid"),
                      {"mid": replies[2]})
@@ -109,3 +136,23 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     final = scalar(result_query)
     assert final["reviewed"] == 4 and final["excluded"] == 1 and "negative_feedback" not in final["signals"]
     assert scalar("SELECT observation IS NULL FROM nexent.evolution_review_turn_t WHERE conversation_id=2")
+    with pytest.raises(AppException):
+        preview_trace_case(tenant, owner, 7, 1, turn)
+    with pytest.raises(AppException):
+        freeze_development_case(case, owner, tenant)
+    assert scalar("SELECT count(*) FROM nexent.evolution_replay_case_t") == 1
+    corrected_turn = scalar("SELECT max(turn_id) FROM nexent.evolution_review_turn_t WHERE conversation_id=3")
+    original = preview_trace_case(tenant, owner, 7, 1, corrected_turn, use_previous_task=True)
+    assert original["query"] == "整理会议待办" and original["correction_query"] == "你漏了一项"
+    assert original["task_turn_id"] != original["turn_id"] == corrected_turn
+    corrected = case.model_copy(update={"query":original["query"], "trace":case.trace.model_copy(update={
+        "turn_id":corrected_turn, "draft_digest":original["draft_digest"], "use_previous_task":True})})
+    confirmed = freeze_development_case(corrected, owner, tenant)
+    with engine.begin() as conn:
+        task = conn.scalar(text("SELECT task FROM nexent.evolution_replay_case_t WHERE case_id=:id"), {"id":confirmed["case_id"]})
+        assert "你漏了一项" not in str(task) and task["trace_source"]["correction_trajectory_id"] == original["correction_trajectory_id"]
+        conn.execute(text("UPDATE nexent.evolution_review_turn_t SET valid_until=now() WHERE turn_id=:id"),
+                     {"id":original["task_turn_id"]})
+    with pytest.raises(AppException):
+        freeze_development_case(corrected, owner, tenant)
+    assert preview_trace_case(tenant, owner, 7, 1, corrected_turn)["query"] == "你漏了一项"

@@ -18,4 +18,6 @@ def example_source_keys(task):
         keys.add("query:" + fingerprint(task["query"]))
     if task.get("source_group"):
         keys.add("group:" + fingerprint(task["source_group"]))
+    if task.get("trace_source"):
+        keys.add("conversation:" + task["trace_source"]["source_group"])
     return keys

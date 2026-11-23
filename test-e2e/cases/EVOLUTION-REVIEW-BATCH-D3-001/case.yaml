@@ -21,7 +21,13 @@ case:
   - order: 2
     action: 关闭一个会话后提交未授权的新轮次。对另一个会话已取走的任务撤回历史授权，然后写回迟到结果。
     expected: 新轮次不入批。撤权后旧结论清除，迟到结果被丢弃，重算后其他四轮保留。
-  expected_results: [五轮跨三个会话只产生一个批次，首轮纠正已有诊断。, 关闭后的轮次排除，撤回后跨会话批次保留四轮。]
+  - order: 3
+    action: 从已授权的第二个会话读取出题草稿，填写脱敏题面及独立预期。重复确认，撤回后再尝试读取和保存。
+    expected: 同一份已确认业务题只保存一次，仅保留批准的题面和来源标识；撤回后的草稿不可使用。
+  - order: 4
+    action: 用下一轮纠正定位紧邻的上一轮业务任务。使上一轮授权过期后重试，再单独读取仍有授权的纠正轮。
+    expected: 题面仅使用原业务问题，纠正单独供出题参考。上一轮过期阻止旧草稿提交，纠正轮自己的权限不受影响。
+  expected_results: [五轮跨三个会话只产生一个批次，首轮纠正已有诊断。, 关闭后的轮次排除，撤回后跨会话批次保留四轮。, 已确认的题去重；撤回后旧草稿无法再次提交。, 原题与纠正分开保存并分别核验授权。]
   forbidden_side_effects: [撤权后不得保存迟到的自动诊断。]
   acceptance:
   - id: AC-01
@@ -33,6 +39,14 @@ case:
     steps: [2]
     expected_results: [2]
     forbidden_side_effects: [1]
+  - id: AC-03
+    description: 从真实归档的诊断进入题库，检验业务确认与授权撤回边界。
+    steps: [3]
+    expected_results: [3]
+  - id: AC-04
+    description: 后续纠正不能泄漏给待评智能体，也不能代替上一轮任务的授权。
+    steps: [4]
+    expected_results: [4]
   execution:
     profiles:
     - name: mock

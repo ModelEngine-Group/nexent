@@ -21,7 +21,10 @@ case:
   - order: 2
     action: 编辑者读取指定版本的评测工作台，然后读取未向本人共享的智能体工作台。
     expected: 只返回所选版本已提交的建议，无编辑权时拒绝访问。
-  expected_results: [撤回立即清除相应的诊断。, 编辑者能看到提交给本版本的一条建议。]
+  - order: 3
+    action: 读取本人和他人的同版本出题草稿。缺少必要附件、工具初态待核实、确认材料齐全、撤回授权后分别提交业务题。
+    expected: 仅本人草稿返回原问题及文件名，响应禁止缓存。缺材料和初态时拒绝保存；确认后入库；撤回后不能使用旧草稿。
+  expected_results: [撤回立即清除相应的诊断。, 编辑者能看到提交给本版本的一条建议。, 题面和附件在授权范围内展示，逐项确认后才能入库。]
   forbidden_side_effects: [他人会话的授权与证据未受影响。, 工作台不泄露其他版本的建议或仅在澄清中的原话。]
   acceptance:
   - id: AC-01
@@ -34,6 +37,10 @@ case:
     steps: [2]
     expected_results: [2]
     forbidden_side_effects: [2]
+  - id: AC-03
+    description: HTTP 出题入口执行真实权限、证据和材料核对。
+    steps: [3]
+    expected_results: [3]
   contract:
     protocol: HTTP API
     request_expectations: [使用原生用户登录会话调用会话设置和评测工作台接口。]

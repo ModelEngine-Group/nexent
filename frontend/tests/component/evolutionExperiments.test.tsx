@@ -30,6 +30,8 @@ vi.mock("@/services/evolutionService", () => ({
     versions: vi.fn(),
     evaluators: vi.fn(),
     workspace: vi.fn(),
+    traceCaseDraft: vi.fn(),
+    createCase: vi.fn(),
     report: vi.fn(),
     submit: vi.fn(),
     exampleCandidates: vi.fn(),
@@ -144,6 +146,37 @@ it("selects a published scope and opens its paired results with the original sta
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
   })));
+});
+
+it("requires a business expectation before freezing a trace draft, then selects its baseline", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting agent" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({ candidates: [], cases: [], experiments: [],
+    reviews: [{turn_id: 3, batch_id: 1, state: "observed", signals: ["user_correction"]}] });
+  vi.mocked(evolutionService.traceCaseDraft).mockResolvedValue({ turn_id: 3, draft_digest: "a".repeat(64),
+    trajectory_id: "scope-run", attachment_count: 0, tool_count: 1, tools: [], signals: [], query: "Summarize the minutes." });
+  vi.mocked(evolutionService.createCase).mockResolvedValue({ case_id: 12 });
+  render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
+  await choose("agentEvaluation.agentLabel", "Meeting agent");
+  await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  fireEvent.click(await screen.findByText("evolution.recentObservations"));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.makeTraceCase" }));
+  expect(await screen.findByDisplayValue("Summarize the minutes.")).toBeInTheDocument();
+  const save = screen.getByRole("button", { name: "evolution.saveCase" });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("evolution.family"), { target: { value: "meeting" } });
+  fireEvent.change(screen.getByLabelText("evolution.query"), { target: { value: "List synthetic actions" } });
+  fireEvent.change(screen.getByLabelText("evolution.expected"), { target: { value: "Keep unassigned items" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceApproval" }));
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceStateless" }));
+  fireEvent.click(save);
+  await waitFor(() => expect(evolutionService.createCase).toHaveBeenCalledWith(expect.objectContaining({
+    query: "List synthetic actions", expected: "Keep unassigned items", agent_id: 7, version_no: 1,
+    trace: { turn_id: 3, purpose: "reproduce", draft_digest: "a".repeat(64),
+      inputs_reviewed: true, tools_require_no_reset: true, unused_attachment_slots: [], use_previous_task: false },
+  })));
+  expect(await screen.findByText("evolution.baselineSelection")).toBeInTheDocument();
 });
 
 it("combines two finished single experiments in selection order and shows the four outcomes", async () => {

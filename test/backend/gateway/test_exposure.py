@@ -65,6 +65,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     ("GET", "/api/model/list", "management"), ("POST", "/api/users/list", "management"),
     ("POST", "/api/skills/nl2skill/run", "management"),
     ("POST", "/api/agent-evolution/experiments/42/example-candidates", "management"),
+    ("GET", "/api/agent-evolution/agents/7/versions/1/reviews/3/case-draft", "management"),
     ("POST", "/api/agent/nl2agent/run", "management"),
     ("POST", "/api/agent/run", "management"), ("GET", "/api/conversation/list", "management"),
     ("GET", "/api/agent/stop/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "management"),

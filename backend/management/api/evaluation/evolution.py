@@ -4,7 +4,7 @@ import json
 from typing import Literal
 from functools import partial
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Response
 from contracts.agentos import EvaluationAgentRun
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
@@ -13,7 +13,7 @@ from management.db.evaluation.candidates import text_digest
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, resolve_prompt_candidate
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
-from management.services.evaluation.replay_cases import freeze_development_case, get_development_case
+from management.services.evaluation.replay_cases import freeze_development_case, get_development_case, preview_trace_case
 from management.services.evaluation.experiments import create_experiment, experiment_report, workspace_choices
 from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
 from management.services.evaluation.feedback_handoff import tool_sets_from_experiment
@@ -86,6 +86,16 @@ async def cancel_experiment(experiment_id: int, authorization: str | None = Head
     result = await run_blocking("cancel-experiment", partial(experiment_report, cancel=True),
                                 tenant_id, user_id, experiment_id, lane="control-io", owner="management")
     return {"data": result}
+
+
+@router.get("/agents/{agent_id}/versions/{version_no}/reviews/{turn_id}/case-draft")
+async def review_case_draft(agent_id: int, version_no: int, turn_id: int, response: Response,
+                            use_previous_task: bool = False, authorization: str | None = Header(None)):
+    user_id, tenant_id = get_current_user_id(authorization)
+    draft = await run_blocking("preview-trace-case", preview_trace_case, tenant_id, user_id, agent_id,
+                               version_no, turn_id, use_previous_task, lane="control-io", owner="management")
+    response.headers["Cache-Control"] = "private, no-store"
+    return {"data": draft}
 
 
 @router.post("/development-cases")

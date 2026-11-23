@@ -93,6 +93,25 @@ class ToolUseExpectation(BaseModel):
         return self
 
 
+class TraceCaseApproval(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    turn_id: int = Field(gt=0)
+    draft_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    purpose: Literal["reproduce", "protect"]
+    inputs_reviewed: Literal[True]
+    tools_require_no_reset: bool = False
+    use_previous_task: bool = False
+    unused_attachment_slots: list[int] = Field(default_factory=list, max_length=32)
+
+    @field_validator("unused_attachment_slots")
+    @classmethod
+    def distinct_source_slots(cls, values):
+        if any(slot < 1 for slot in values) or len(values) != len(set(values)):
+            raise ValueError("Choose distinct positive source attachment numbers")
+        return values
+
+
 class ReplayCaseRequest(BaseModel):
     """A business-approved development task. Only the query and files reach the Agent."""
 
@@ -106,6 +125,7 @@ class ReplayCaseRequest(BaseModel):
     source_group: str | None = Field(default=None, min_length=1, max_length=128)
     expected_skill_names: list[str] | None = Field(default=None, max_length=32)
     tool_use: ToolUseExpectation | None = None
+    trace: TraceCaseApproval | None = None
 
     @model_validator(mode="after")
     def check_inputs(self):

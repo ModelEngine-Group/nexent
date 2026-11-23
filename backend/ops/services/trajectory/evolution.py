@@ -34,7 +34,21 @@ def observation(message, nodes=(), coverage="missing"):
         trace, span = source.get("trace_id", ""), source.get("span_id", "")
         if re.fullmatch("[0-9a-fA-F]{32}", trace) and re.fullmatch("[0-9a-fA-F]{16}", span):
             refs.append(f"otel:{trace}:{span}")
-    return {"coverage": coverage, "signals": signals, "failed_tool_count": len(failures), "node_refs": refs}
+    facts = {"coverage": coverage, "signals": signals, "failed_tool_count": len(failures), "node_refs": refs}
+    if coverage == "complete":
+        calls = [n for n in nodes if n["kind"] == "tool"]
+        evidence = []
+        for node in calls[:32]:
+            source = node.get("source", {})
+            trace, span = source.get("trace_id", ""), source.get("span_id", "")
+            if re.fullmatch(r"[0-9a-fA-F]{32}", trace) and re.fullmatch(r"[0-9a-fA-F]{16}", span):
+                item = {"node": f"otel:{trace}:{span}"}
+                invocation = node.get("attributes", {}).get("nexent.invocation_id")
+                if isinstance(invocation, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", invocation):
+                    item["invocation_id"] = invocation
+                evidence.append(item)
+        facts["case_outline"] = {"tool_count": len(calls), "tools": evidence}
+    return facts
 
 
 def inspect_archive(job, message):

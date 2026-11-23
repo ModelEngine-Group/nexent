@@ -24,7 +24,9 @@ from management.db.evaluation.replay_cases import regression_members, task_diges
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.example_candidates import example_source_keys
-from management.services.evaluation.replay_cases import freeze_regression_members, get_development_case, remove_trial_inputs, stage_case_input
+from management.services.evaluation.replay_cases import (
+    freeze_regression_members, get_development_case, remove_trial_inputs, require_trace_baseline, stage_case_input,
+)
 from management.services.evaluation.scoring import grade_observed_case
 from management.services.evaluation.skill_candidates import pin_skill_candidate
 from management.services.evaluation.tool_use import judge_tool_use
@@ -190,11 +192,18 @@ async def create_experiment(request, tenant, user):
         fixed = await _io("freeze-fixed-regression-suite", freeze_regression_members, tenant, user,
                           request.agent_id, request.version_no)
     cases = {}
+    trace_baseline_digest = None
     development_sources, fixed_sources = set(), set()
     for case_id in dict.fromkeys([*request.case_ids, *map(int, fixed)]):
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
         sources = example_source_keys(case["task"])
+        if request.candidate_type != "baseline" and str(case_id) not in fixed and case["task"].get("trace_source"):
+            if trace_baseline_digest is None:
+                baseline = request.model_copy(update={"components": None, "candidate_id": None, "candidate_type": "baseline"})
+                trace_baseline_digest = snapshot_digest(await _snapshot(baseline, tenant, user, "base"))
+            await _io("verify-reproduced-trace-case", require_trace_baseline, tenant, request.agent_id,
+                      request.version_no, case, rule, request.language, request.judge_model_id, trace_baseline_digest)
         if excluded.intersection(sources):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
         if (request.candidate_type == "skill_discovery" and case_id in request.case_ids
@@ -466,7 +475,16 @@ async def execute_trial(job):
     status = grade["status"]
     if tool_grade and status in {"pass", "fail"} and tool_grade["status"] != "pass":
         status = tool_grade["status"]
+    trace_review = {}
+    source = case["task"].get("trace_source")
+    if request.candidate_type == "baseline" and source:
+        outcomes = {
+            ("reproduce", "fail"): "reproduced", ("reproduce", "pass"): "not_reproduced",
+            ("protect", "pass"): "protection_passed", ("protect", "fail"): "protection_failed",
+        }
+        trace_review["trace_baseline_outcome"] = outcomes.get((source["purpose"], status), "inconclusive")
     return status, {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
+                             **trace_review,
                              **({"tool_use": tool_grade} if tool_grade else {}),
                              **({"tool_catalog": catalog.model_dump()} if catalog else {}),
                              **({"guide_reads": receipt.root_guide_reads} if request.candidate_type == "baseline"

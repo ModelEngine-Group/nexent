@@ -16,7 +16,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useModelList } from "@/hooks/model/useModelList";
-import { evolutionService as api, type Trial } from "@/services/evolutionService";
+import { evolutionService as api, type Trial, type TraceCaseDraft } from "@/services/evolutionService";
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import ExampleCandidates from "./ExampleCandidates";
@@ -30,12 +30,14 @@ function CaseForm({
   agent,
   version,
   skills,
+  draft,
   close,
   saved,
 }: {
   agent: number;
   version: number;
   skills: { name: string }[];
+  draft?: TraceCaseDraft;
   close: () => void;
   saved: (id: number) => void;
 }) {
@@ -43,6 +45,10 @@ function CaseForm({
   const [files, setFiles] = useState<File[]>([]);
   const [labelSkill, setLabelSkill] = useState(false);
   const [expectedSkills, setExpectedSkills] = useState<string[]>([]);
+  const [reviewed, setReviewed] = useState(false);
+  const [stateless, setStateless] = useState(false);
+  const [unused, setUnused] = useState<number[]>([]);
+  const [purpose, setPurpose] = useState<"reproduce" | "protect">("reproduce");
   const [form] = Form.useForm<ToolRuleFields & {
     family: string;
     source_group?: string;
@@ -75,6 +81,9 @@ function CaseForm({
         version_no: version,
         attachments,
         expected_skill_names: labelSkill ? expectedSkills : undefined,
+        trace: draft && { turn_id: draft.turn_id, draft_digest: draft.draft_digest, purpose,
+          inputs_reviewed: true, tools_require_no_reset: stateless, unused_attachment_slots: unused,
+          use_previous_task: !!draft.correction_trajectory_id },
       });
     },
     onSuccess: (response) => saved(response.case_id),
@@ -86,10 +95,35 @@ function CaseForm({
       onCancel={close}
       onOk={() => mutation.mutate()}
       confirmLoading={mutation.isPending}
+      okButtonProps={{ disabled: !!draft && (!reviewed || draft.attachment_count == null ||
+        files.length + unused.length < draft.attachment_count || (draft.tool_count > 0 && !stateless)) }}
       okText={t("evolution.saveCase")}
       cancelText={t("common.cancel")}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" initialValues={{ query: draft?.query || "" }}>
+        {draft && <>
+          <p>{t("evolution.traceSource", { id: draft.trajectory_id, files: draft.attachment_count ?? "?",
+            calls: draft.tool_count })}</p>
+          {draft.query === null && <p>{t("evolution.traceRedactedBrief")}</p>}
+          {draft.correction_trajectory_id && <p>{t("evolution.traceCorrection", {
+            evidence: draft.correction_query || draft.correction_trajectory_id,
+          })}</p>}
+          {!!draft.tools.length && <details><summary>{t("evolution.traceToolRefs", {
+            count: draft.tools.length, total: draft.tool_count,
+          })}</summary><ul>{draft.tools.map(tool => <li key={tool.node}>
+            <code>{tool.node}</code>{tool.invocation_id && <> · <code>{tool.invocation_id}</code></>}
+          </li>)}</ul></details>}
+          {!!draft.attachment_count && <Form.Item label={t("evolution.unusedSourceFiles")}>
+            <Select mode="multiple" aria-label={t("evolution.unusedSourceFiles")} value={unused} onChange={setUnused}
+              options={Array.from({length: Math.min(draft.attachment_count, 32)}, (_, i) => ({
+                value: i + 1, label: `#${i + 1} ${draft.attachment_names?.[i] || ""}`,
+              }))} />
+          </Form.Item>}
+          <Select aria-label={t("evolution.tracePurpose")} value={purpose} onChange={setPurpose}
+            options={["reproduce", "protect"].map(value => ({value, label: t(`evolution.tracePurpose.${value}`)}))} />
+          {!!draft.tool_count && <p><Checkbox checked={stateless} onChange={e => setStateless(e.target.checked)}>
+            {t("evolution.traceStateless")}</Checkbox></p>}
+        </>}
         {(["family", "query", "expected"] as const).map((field) => (
           <Form.Item
             key={field}
@@ -120,6 +154,8 @@ function CaseForm({
             onChange={(e) => setFiles(Array.from(e.target.files || []))}
           />
         </Form.Item>
+        {draft && <Checkbox checked={reviewed} onChange={e => setReviewed(e.target.checked)}>
+          {t("evolution.traceApproval")}</Checkbox>}
       </Form>
       {mutation.error instanceof Error && (
         <Alert type="error" message={mutation.error.message} />
@@ -147,7 +183,13 @@ function Experiments({
   const [evaluatorId, setEvaluator] = useState<number>();
   const [judge, setJudge] = useState<number>();
   const [selected, setSelected] = useState<number>();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<boolean | number>(false);
+  const [previousTask, setPreviousTask] = useState(false);
+  const source = useQuery({
+    queryKey: ["evolution-trace-case", viewer, agent, version, adding, previousTask],
+    enabled: typeof adding === "number", retry: false, gcTime: 0,
+    queryFn: () => api.traceCaseDraft(agent, version, Number(adding), previousTask),
+  });
   const previous = useRef({ selection: "", key: "" });
   const workspace = useQuery({
     queryKey: ["evolution", viewer, agent, version],
@@ -259,6 +301,12 @@ function Experiments({
                     #{row.turn_id} · {row.batch_id ? t("evolution.batchNumber", { id: row.batch_id }) : t("evolution.waitingBatch")}
                     {" · "}{t(`evolution.observation.${row.state}`)}
                     {row.signals.map((signal) => ` · ${t(`evolution.observation.${signal}`)}`)}
+                    {row.state === "observed" && <Button type="link" onClick={() => { setPreviousTask(false); setAdding(row.turn_id); }}>
+                      {t("evolution.makeTraceCase")}</Button>}
+                    {row.state === "observed" && row.signals.includes("user_correction") && (
+                      <Button type="link" onClick={() => { setPreviousTask(true); setAdding(row.turn_id); }}>
+                        {t("evolution.makeCorrectedCase")}</Button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -487,6 +535,9 @@ function Experiments({
                 title: t("evolution.change"),
                 dataIndex: "comparison",
                 render: (value, row) => <div>{t(`evolution.state.${value}`)}
+                  {row.base?.result?.trace_baseline_outcome && <div>
+                    {t(`evolution.traceOutcome.${row.base.result.trace_baseline_outcome}`)}
+                  </div>}
                   {row.combination && <div>{t(`evolution.effect.${row.combination.effect}`)} · {t("evolution.comparedSingles", {
                     a: t(`evolution.state.${row.combination.combined_vs_a}`), b: t(`evolution.state.${row.combination.combined_vs_b}`),
                   })}</div>}
@@ -500,14 +551,26 @@ function Experiments({
           />
         </>
       )}
-      {adding && (
+      {typeof adding === "number" && source.error && <Alert type="error" message={source.error.message}
+        closable onClose={() => setAdding(false)} />}
+      {typeof adding === "number" && source.isLoading && <Typography.Text>{t("evolution.loadingDraft")}</Typography.Text>}
+      {adding && (adding === true || source.data) && (
         <CaseForm
+          key={`${adding}-${previousTask}`}
+          draft={typeof adding === "number" ? source.data : undefined}
           agent={agent}
           version={version}
           skills={choices?.skills || []}
           close={() => setAdding(false)}
           saved={(id) => {
-            setCases((current) => [...new Set([...current, id])]);
+            if (typeof adding === "number") {
+              setCandidate("baseline");
+              setSuggestion(undefined);
+              setTargetCase(undefined);
+              setCases([id]);
+            } else {
+              setCases(current => [...new Set([...current, id])]);
+            }
             setAdding(false);
             void workspace.refetch();
           }}

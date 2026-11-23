@@ -24,3 +24,15 @@ def test_five_clean_runs_have_no_improvement_signal_and_revocation_hides_previou
     summary = summarize_batch(rows)
     assert summary["signals"] == {} and summary["excluded"] == summary["missing"] == 1
     assert summary["no_signal_turn_ids"] == [0, 3, 4]
+
+
+def test_case_outline_retains_tool_identity_without_argument_or_result_bodies():
+    trace, span = "b" * 32, "a" * 16
+    node = {"kind": "tool", "status": "completed", "name": "private catalog entry",
+            "source": {"trace_id": trace, "span_id": span}, "attributes": {"nexent.invocation_id": "call-24"},
+            "_bodies": {"arguments": "private note", "output": "private result"}}
+    facts = observation({"request": "private request"}, [node], "complete")
+    assert facts["case_outline"] == {"tool_count": 1, "tools": [{"node": f"otel:{trace}:{span}", "invocation_id": "call-24"}]}
+    assert "private" not in str(facts)
+    facts = observation({}, [{**node, "attributes": {"nexent.invocation_id": "bad id with a private value"}}], "complete")
+    assert "invocation_id" not in facts["case_outline"]["tools"][0]

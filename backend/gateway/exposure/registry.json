@@ -389,6 +389,15 @@
       "credential_kinds": ["session"]
     },
     {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/reviews/{turn_id}/case-draft",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-trace-case-draft",
+      "credential_kinds": ["session"]
+    },
+    {
       "method": "POST",
       "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/development-cases/{case_id}/regression",
       "transport": "http",
