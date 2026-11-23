@@ -83,7 +83,7 @@ from management.services.model.outlet_migration import migrate_legacy_outlets
 from nexent.core.concurrency import (
     run_blocking,
 )
-from ops.api.access import router as ops_access_router
+from management.api.permission.ops_access import router as ops_access_router
 
 logger = logging.getLogger("base_app")
 

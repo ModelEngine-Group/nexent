@@ -80,17 +80,45 @@ export default function ModelList({
     new Set()
   );
 
-  const monitoringMap = useMemo(() => {
+  // A tenant may register several model configs that share the same
+  // model_name. Keying a single map by display_name/model_name lets those
+  // rows overwrite each other, so two list rows end up showing the same
+  // request count / error rate. Match by model_id first and keep the
+  // name-based maps separate for rows where model_id is not available.
+  const monitoringById = useMemo(() => {
+    const map = new Map<number, ModelMonitoringItem>();
+    for (const m of monitoringModels) {
+      if (m.model_id != null) map.set(m.model_id, m);
+    }
+    return map;
+  }, [monitoringModels]);
+
+  const monitoringByDisplayName = useMemo(() => {
     const map = new Map<string, ModelMonitoringItem>();
     for (const m of monitoringModels) {
-      map.set(m.display_name, m);
+      if (m.display_name && !map.has(m.display_name)) {
+        map.set(m.display_name, m);
+      }
+    }
+    return map;
+  }, [monitoringModels]);
+
+  const monitoringByName = useMemo(() => {
+    const map = new Map<string, ModelMonitoringItem>();
+    for (const m of monitoringModels) {
+      if (m.model_name && !map.has(m.model_name)) {
+        map.set(m.model_name, m);
+      }
     }
     return map;
   }, [monitoringModels]);
 
   const unifiedData: UnifiedModelRow[] = useMemo(() => {
     return models.map((m) => {
-      const mon = monitoringMap.get(m.displayName);
+      const mon =
+        monitoringById.get(m.id) ??
+        monitoringByDisplayName.get(m.displayName) ??
+        monitoringByName.get(m.name);
       return {
         ...m,
         request_count: mon?.request_count,
@@ -101,7 +129,7 @@ export default function ModelList({
         total_tokens: mon?.total_tokens,
       };
     });
-  }, [models, monitoringMap]);
+  }, [models, monitoringById, monitoringByDisplayName, monitoringByName]);
 
   const openCreate = () => {
     setAddDialogVisible(true);

@@ -4,7 +4,7 @@
 
 import pytest
 from management.services.permission.identity import display
-from services import skill_repository_service as service
+from management.services.skill import skill_repository as service
 
 
 @pytest.fixture

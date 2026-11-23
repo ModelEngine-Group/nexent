@@ -378,7 +378,7 @@ async def submit_repository_review(user_id, tenant_id, role, request):
             source_id, tenant_id, user_id, request.version_no, card_fields=fields
         )
     if request.resource_type == "skill":
-        from services.skill_repository_service import (
+        from management.services.skill.skill_repository import (
             create_skill_repository_listing_impl,
         )
 

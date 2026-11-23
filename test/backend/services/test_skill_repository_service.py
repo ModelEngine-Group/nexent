@@ -215,7 +215,7 @@ if not _has_duplicate_names:
 
     exceptions_module.SkillDuplicateError = SkillDuplicateError
 
-from services import skill_repository_service as srs
+from management.services.skill import skill_repository as srs
 
 from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
 

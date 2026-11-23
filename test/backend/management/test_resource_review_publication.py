@@ -57,7 +57,8 @@ async def test_submit_dispatches_validated_fields_and_authenticated_identity(ses
         return_value={"review_id": "1"},
     )
     skill = mocker.patch(
-        "services.skill_repository_service.create_skill_repository_listing_impl", return_value={"review_id": "2"}
+        "management.services.skill.skill_repository.create_skill_repository_listing_impl",
+        return_value={"review_id": "2"},
     )
     mcp = mocker.patch(
         "management.services.repository.mcp.service.publish_community_mcp_service",

@@ -4,12 +4,14 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
+from fastapi import APIRouter, Body, Header, HTTPException, Query
+from starlette.responses import JSONResponse
+
+from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, SkillException, UnauthorizedError
 from contracts.skill import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from contracts.tag import TagAssignmentFilter
-from fastapi import APIRouter, Body, Header, HTTPException, Query
-from contracts.errors.exceptions import SkillException
-from services.skill_repository_service import (
+from management.services.permission.identity.session import get_current_user_id
+from management.services.skill.skill_repository import (
     count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
     ensure_skill_repository_access,
@@ -20,8 +22,6 @@ from services.skill_repository_service import (
     list_skill_repository_tag_stats_impl,
     update_skill_repository_status_impl,
 )
-from starlette.responses import JSONResponse
-from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger(__name__)
 skill_repository_router = APIRouter(prefix="/repository/skill")

@@ -284,8 +284,8 @@ def installation_contract(fixture):
 
     from contracts.errors.exceptions import ForbiddenError
     from management.services.repository.skill_installations import get_installation_states, uninstall_repository_copy
+    from management.services.skill import skill_repository as skill_repository_service
     from management.services.skill.service import SkillService
-    from services import skill_repository_service
 
     # Only object/file storage is controlled; parsing, permissions, ORM and counters are real.
     with TemporaryDirectory() as directory:

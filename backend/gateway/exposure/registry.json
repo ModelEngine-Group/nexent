@@ -4034,7 +4034,7 @@
       "path": "/api/ops/authorization",
       "transport": "http",
       "target": "management",
-      "source": "backend/ops/api/access.py",
+      "source": "backend/management/api/permission/ops_access.py",
       "route_id": "route-5a417223a926f4c1",
       "credential_kinds": [
         "session"
@@ -4045,7 +4045,7 @@
       "path": "/api/ops/resources",
       "transport": "http",
       "target": "management",
-      "source": "backend/ops/api/access.py",
+      "source": "backend/management/api/permission/ops_access.py",
       "route_id": "route-03a5f7e7ad8f6156",
       "credential_kinds": [
         "session"
@@ -4056,7 +4056,7 @@
       "path": "/api/ops/scope",
       "transport": "http",
       "target": "management",
-      "source": "backend/ops/api/access.py",
+      "source": "backend/management/api/permission/ops_access.py",
       "route_id": "route-a1e8b5e11c48a871",
       "credential_kinds": [
         "session"
