@@ -40,8 +40,7 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - -m
-            - backend.http.ops_service
+            - backend/http/ops_service.py
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
