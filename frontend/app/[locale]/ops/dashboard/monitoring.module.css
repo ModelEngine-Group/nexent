@@ -1,0 +1,121 @@
+.dashboard {
+  padding: 24px;
+  min-width: 0;
+}
+
+.dashboard .title {
+  margin: 0 0 20px;
+  color: var(--color-text-primary);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.dashboard :global(.ant-tabs-tab:not(.ant-tabs-tab-active)) {
+  color: var(--color-text-secondary);
+}
+
+.datePreset :global(.ant-segmented-item-selected) {
+  color: var(--color-brand);
+}
+
+.filters,
+.scopeControls,
+.dateControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filters {
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 16px;
+}
+
+.scopeControls {
+  flex: 1 1 480px;
+}
+
+.select {
+  flex: 1 1 156px;
+  min-width: 0;
+  max-width: 248px;
+}
+
+.datePicker {
+  width: 318px;
+  max-width: 100%;
+}
+
+.sectionHeading {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 16px 0 12px;
+}
+
+.dateLabel {
+  margin: 10px 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.inventory {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 22px 0;
+  margin: 0;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    var(--color-brand-soft),
+    var(--color-bg-3)
+  );
+}
+
+.inventory > div {
+  padding: 0 20px;
+}
+
+.inventory > div + div {
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.inventory dt {
+  color: var(--color-text-secondary);
+}
+
+.inventory dd {
+  margin: 4px 0 0;
+  color: var(--color-text-primary);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.placeholder {
+  display: grid;
+  min-height: 200px;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.authLoading {
+  margin: 24px;
+}
+
+@media (max-width: 700px) {
+  .dashboard {
+    padding: 16px;
+  }
+
+  .inventory {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 16px;
+  }
+
+  .inventory > div:nth-child(odd) {
+    border-inline-start: 0;
+  }
+}

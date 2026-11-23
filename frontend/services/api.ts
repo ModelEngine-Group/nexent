@@ -40,6 +40,7 @@ export const API_ENDPOINTS = {
   operations: {
     authorization: `${API_BASE_URL}/ops/authorization`,
     scope: `${API_BASE_URL}/ops/scope`,
+    resources: `${API_BASE_URL}/ops/resources`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,

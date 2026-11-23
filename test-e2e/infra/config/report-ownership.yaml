@@ -114,6 +114,7 @@ feature_overrides:
   OPS-BOOTSTRAP: system
   OPS-AGENT-FACTS: agent_config
   OPS-MODEL-MONITORING: model
+  OPS-MONITORING-UI: system
   SYSTEM-CONFIGURATION: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D4
+module: OPS-PLATFORM
+case:
+  case_id: OPS-MONITORING-UI-D4-001
+  feature_id: OPS-MONITORING-UI
+  requirement_ids: [OPS-MONITORING-UI-20261123]
+  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02]
+  title: Scope monitoring filters in the browser
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the five-tab shell and dependent selections against controlled directory responses.
+  preconditions:
+  - Current source Web is available and browser-local directory routes provide an authorized SU session and two distinct tenants.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Visit the dashboard, inspect its tabs, and change the date range through both presets and a custom interval.
+    expected: Overview shows its tenant and dates; all five tabs are available and statistics explicitly show unavailable.
+  - order: 2
+    action: Select a tenant, group and Agent, visit another module, then switch tenants and return.
+    expected: Tabs share tenant, group and dates; tenant changes clear group and all resource selections while preserving custom dates. Foreign groups do not populate the menu.
+  - order: 3
+    action: Select an MCP service in the session tenant and one of its tools, then select another service and refresh.
+    expected: The tool selection clears, the new service's tool list remains scoped, and only applicable directories are queried again.
+  expected_results:
+  - The dashboard exposes the intended filters with deterministic calendar dates and explicit unavailable statistics.
+  - Tenant and MCP service transitions clear their dependent selections, and refresh only re-reads applicable directories.
+  forbidden_side_effects:
+  - No statistics endpoint, forced rebuild, or cross-tenant MCP tool directory request is sent.
+  actor: Authorized super administrator
+  journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
+  final_business_result:
+  - An operator can frame a valid monitoring scope before statistics are connected.
+  failure_evidence: [Browser control assertions and sanitized request paths]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Visible tabs, dates and unavailable states are exercised through the actual route.
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: Directory requests, dependent filters and refresh obey the tenant and service scopes.
+    steps: [2, 3]
+    expected_results: [2]
+    forbidden_side_effects: [1]

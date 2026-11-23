@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: OPS-PLATFORM
+  name: Operations platform
+feature:
+  feature_id: OPS-MONITORING-UI
+  name: Monitoring dashboard filters
+  status: active
+  description: Provide the authorized monitoring dashboard shell and tenant-scoped directory filters.
+  business_rules:
+  - rule_id: OPS-MONITORING-UI-RULE-01
+    description: The existing dashboard entry presents five tabs, with shared tenant and calendar dates and tenant-scoped group and resource choices.
+  - rule_id: OPS-MONITORING-UI-RULE-02
+    description: A tenant change clears all dependent selections and a service change clears its tool selection. A filter refresh reads only the active directories.
+  required_test_stages: [D4]
+  source:
+    requirement_ids: [OPS-MONITORING-UI-20261123]
+    spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md
