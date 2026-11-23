@@ -510,6 +510,19 @@ async def prepare_conversation_snapshot(
         )
         if transport is not None:
             snapshot = snapshot.model_copy(update={"mcp_header_metadata": transport})
+    if snapshot is not None:
+        from contracts.constants.environment import LOCAL_MCP_SERVER, OPS_MONITORING_ENABLED
+        from management.services.mcp.addressing import get_tenant_local_mcp_server
+        from management.services.agent.monitoring_catalog import prepare_tenant_monitoring_catalog
+
+        if OPS_MONITORING_ENABLED:
+            local_server_url = get_tenant_local_mcp_server(tenant_id) if LOCAL_MCP_SERVER else None
+            catalog = await run_blocking(
+                "snapshot-monitoring-catalog", prepare_tenant_monitoring_catalog,
+                tenant_id, local_server_url, lane="control-io", owner="management",
+            )
+            if catalog is not None:
+                snapshot = snapshot.model_copy(update={"monitoring_mcp_servers": catalog})
     return snapshot
 
 

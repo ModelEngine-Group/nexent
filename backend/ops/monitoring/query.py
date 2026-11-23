@@ -291,8 +291,8 @@ def mcp_server_catalog(tenant: str | None) -> list[dict]:
     The type here is a coarse container/remote split for display only; fact
     rows carry the authoritative normalized ``mcp_server_type``.
     """
-    from management.db.mcp.models import McpRecord
-    from management.services.mcp.provisioning import _is_container_record
+    from infrastructure.monitoring.catalog import is_container_record
+    from infrastructure.rdb.mcp_execution_records import McpRecord
 
     columns = (McpRecord.tenant_id, McpRecord.mcp_id, McpRecord.mcp_name, McpRecord.container_id,
                McpRecord.config_json)
@@ -302,12 +302,12 @@ def mcp_server_catalog(tenant: str | None) -> list[dict]:
     with get_db_session() as session:
         records = [dict(row) for row in session.execute(statement).mappings()]
     return [{"service_id": record["mcp_id"], "name": record["mcp_name"],
-             "type": "container" if _is_container_record(record) else "remote"} for record in records]
+             "type": "container" if is_container_record(record) else "remote"} for record in records]
 
 
 def mcp_services_by_tenant(tenant: str | None) -> list[dict]:
     """Count registered MCP servers per tenant for the platform overview card."""
-    from management.db.mcp.models import McpRecord
+    from infrastructure.rdb.mcp_execution_records import McpRecord
 
     statement = (select(McpRecord.tenant_id, func.count().label("service_count"))
                  .where(McpRecord.delete_flag == "N").group_by(McpRecord.tenant_id))

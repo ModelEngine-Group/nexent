@@ -930,13 +930,10 @@ class TestGenericHandlerAppExceptionDelegation:
         }
 
 
-class TestOpsMonitoringLifespan:
-    """Tests for ops monitoring producer lifespan wiring in create_app.
 
-    Slim service images (e.g. the Runtime image target) may ship without the
-    ops package, so an absent ops.monitoring module must degrade to the plain
-    lifespan instead of failing service startup.
-    """
+
+class TestOpsMonitoringLifespanWiring:
+    """The shared producer from infrastructure.monitoring wraps app lifespans."""
 
     @staticmethod
     def _stub_lifespan(state):
@@ -956,57 +953,13 @@ class TestOpsMonitoringLifespan:
 
         return producer_lifespan
 
-    def test_absent_ops_package_passes_lifespan_through(self, monkeypatch):
-        """A missing ops.monitoring module keeps the caller lifespan unchanged."""
-        import backend.http.server.app_factory as app_factory_module
-
-        monkeypatch.setattr(app_factory_module, "OPS_MONITORING_ENABLED", True)
-        monkeypatch.setitem(sys.modules, "ops.monitoring.runtime", None)
-
-        lifespan = self._stub_lifespan({})
-        wrapped = app_factory_module._with_ops_monitoring(lifespan)
-
-        assert wrapped is lifespan
-
-    def test_absent_ops_package_logs_degradation_warning(self, monkeypatch):
-        """A missing ops.monitoring module logs a warning instead of raising."""
-        from unittest.mock import patch
-
-        import backend.http.server.app_factory as app_factory_module
-
-        monkeypatch.setattr(app_factory_module, "OPS_MONITORING_ENABLED", True)
-        monkeypatch.setitem(sys.modules, "ops.monitoring.runtime", None)
-
-        with patch.object(app_factory_module.logger, "warning") as mock_warning:
-            lifespan = self._stub_lifespan({})
-            wrapped = app_factory_module._with_ops_monitoring(lifespan)
-
-        assert wrapped is lifespan
-        assert mock_warning.called
-
-    def test_absent_ops_package_starts_app_without_producer(self, monkeypatch):
-        """create_app starts cleanly without the producer when ops is absent."""
+    def test_enabled_combines_producer_and_lifespan(self, monkeypatch):
         import backend.http.server.app_factory as app_factory_module
 
         state = {}
-        monkeypatch.setattr(app_factory_module, "OPS_MONITORING_ENABLED", True)
-        monkeypatch.setitem(sys.modules, "ops.monitoring.runtime", None)
-
-        app = create_app(lifespan=self._stub_lifespan(state))
-        with TestClient(app):
-            pass
-
-        assert state["lifespan"] is True
-        assert "producer" not in state
-
-    def test_present_ops_package_combines_producer_and_lifespan(self, monkeypatch):
-        """The producer lifespan wraps the caller lifespan when ops is present."""
-        import backend.http.server.app_factory as app_factory_module
-        from ops.monitoring import runtime as ops_runtime
-
-        state = {}
-        monkeypatch.setattr(app_factory_module, "OPS_MONITORING_ENABLED", True)
-        monkeypatch.setattr(ops_runtime, "producer_lifespan", self._stub_producer(state))
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", True)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
 
         app = create_app(lifespan=self._stub_lifespan(state))
         with TestClient(app):
@@ -1014,3 +967,18 @@ class TestOpsMonitoringLifespan:
 
         assert state["producer"] is True
         assert state["lifespan"] is True
+
+    def test_disabled_keeps_lifespan_unwrapped(self, monkeypatch):
+        import backend.http.server.app_factory as app_factory_module
+
+        state = {}
+        monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", False)
+        monkeypatch.setattr(
+            "infrastructure.monitoring.runtime.producer_lifespan", self._stub_producer(state))
+
+        app = create_app(lifespan=self._stub_lifespan(state))
+        with TestClient(app):
+            pass
+
+        assert state["lifespan"] is True
+        assert "producer" not in state

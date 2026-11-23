@@ -3,9 +3,9 @@
 
 from types import SimpleNamespace
 
+from infrastructure.monitoring import catalog as pure_catalog
 from management.services.agent import monitoring_catalog as catalog_mod
 from management.services.agent.monitoring_catalog import (
-    _openapi_tool_names,
     build_mcp_server_catalog,
     build_run_monitoring_catalog,
 )
@@ -134,7 +134,7 @@ def test_openapi_tool_names_match_fastmcp_default_naming():
         "/spaces in path": {"get": {}},
         "/long": {"get": {"operationId": "x" * 80}},
     }}
-    names = _openapi_tool_names(spec)
+    names = pure_catalog._openapi_tool_names(spec)
     expected = {
         _fastmcp_default_name("GET", "/pets", operation_id="listPets"),
         _fastmcp_default_name("POST", "/pets", operation_id="admin__createPet"),
@@ -151,6 +151,6 @@ def test_openapi_tool_names_match_fastmcp_default_naming():
 
 
 def test_openapi_tool_names_ignores_malformed_specs():
-    assert _openapi_tool_names(None) == set()
-    assert _openapi_tool_names({"paths": None}) == set()
-    assert _openapi_tool_names({"paths": {"a": "not-a-dict", "b": {"get": "not-a-dict"}}}) == set()
+    assert pure_catalog._openapi_tool_names(None) == set()
+    assert pure_catalog._openapi_tool_names({"paths": None}) == set()
+    assert pure_catalog._openapi_tool_names({"paths": {"a": "not-a-dict", "b": {"get": "not-a-dict"}}}) == set()

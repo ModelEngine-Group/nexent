@@ -20,7 +20,7 @@ from contracts.agentos import (
     WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_AGENT_CORE,
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED, OPS_MONITORING_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
@@ -67,7 +67,6 @@ from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_langchain import materialize_langchain_tools
 from runtime.agentos.prepared_local_tool import materialize_local_tools
 from runtime.agentos.prepared_mcp import PreparedMCP
-from infrastructure.mcp_execution import get_tenant_local_mcp_server
 from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
@@ -350,32 +349,20 @@ def _restore_conversation_history(history, actor):
     }
 
 
-def _build_run_monitoring_catalog(actor: ServicePrincipal, mcp: PreparedMCP, debug: bool):
+def _build_run_monitoring_catalog(payload, mcp: PreparedMCP, debug: bool):
     """Per-run MCP server identity catalog for monitoring facts (design D-003).
 
-    Omitted when monitoring is off, for debug runs, or when no MCP tools were
-    materialized; capture failures must never interrupt the business run.
+    Management attaches the tenant catalog to the prepared payload; Runtime
+    projects it onto the URLs this run materialized. Omitted when monitoring
+    is off, for debug runs, or when no MCP tools were materialized; filtering
+    failures must never interrupt the business run.
     """
-    if not mcp.used_urls:
-        return None
-    try:
-        # Management modules are absent from the Runtime image target; degrade
-        # to an omitted catalog instead of failing run preparation.
-        from management.db.mcp.remote import get_mcp_records_by_tenant
-        from management.services.agent.monitoring_catalog import build_run_monitoring_catalog_from_db
+    from infrastructure.monitoring.catalog import filter_prepared_catalog
 
-        local_server_url = get_tenant_local_mcp_server(actor.tenant_id) if LOCAL_MCP_SERVER else None
-        return build_run_monitoring_catalog_from_db(
-            actor.tenant_id,
-            mcp.used_urls,
-            get_mcp_records_by_tenant(tenant_id=actor.tenant_id),
-            local_server_url,
-            enabled=OPS_MONITORING_ENABLED,
-            is_debug=debug,
-        )
-    except Exception as error:
-        logger.warning("event=monitoring_catalog_build_failed error=%s", type(error).__name__)
-        return None
+    return filter_prepared_catalog(
+        getattr(payload, "monitoring_mcp_servers", None), mcp.used_urls,
+        enabled=OPS_MONITORING_ENABLED, is_debug=debug,
+    )
 
 
 def prepare_run_snapshot(
@@ -451,7 +438,7 @@ def prepare_run_snapshot(
                 list(mcp.hosts.values()), header_metadata, passthrough_allowed=header_metadata is not None,
                 agent_id=payload.resource.agent_id, run_id=workspace_run_id,
             )
-            monitoring_mcp_servers = _build_run_monitoring_catalog(actor, mcp, debug)
+            monitoring_mcp_servers = _build_run_monitoring_catalog(payload, mcp, debug)
         else:
             monitoring_mcp_servers = None
         user_context = None
