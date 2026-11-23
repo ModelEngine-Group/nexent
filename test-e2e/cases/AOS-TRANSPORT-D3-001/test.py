@@ -44,6 +44,38 @@ def _local_http_client(**kwargs):
 _EVENTS = b"id: 1\ndata: first\n\nid: 2\ndata: done\n\n"
 
 
+def build_sdk_local_tool(config, *, observer=None):
+    from nexent.core.agents.resources.tools import ToolResources
+
+    resources = ToolResources()
+    resources.observer = observer
+    return resources.create_local_tool(config)
+
+
+def saved_llm_record(monkeypatch, record, *, reasoning_capability=None):
+    """Persist a synthetic LLM outlet in its current row format."""
+    from nexent.core.model_service.compatibility.legacy_outlet import build_legacy_outlet_snapshot
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+    from management.services.agent.preparation import model_bindings
+    from runtime.model import parameters as runtime_parameters
+
+    if reasoning_capability is None:
+        profile = build_legacy_outlet_snapshot(record, legacy_capability=None, migrated_at="fixture")
+    else:
+        from model_controls.profiles import frozen_fixture_profile
+
+        profile = frozen_fixture_profile(record, reasoning_capability)
+    saved = {**record, **encode_resolved_model_profile(profile, registered_references=model_service_references())}
+    monkeypatch.setattr(
+        model_bindings, "get_model_by_model_id",
+        lambda model_id, tenant: saved if (model_id, tenant) == (record["model_id"], record["tenant_id"]) else None,
+    )
+    monkeypatch.setattr(model_bindings, "read_agent_model_overrides", lambda *_: {})
+    monkeypatch.setattr(runtime_parameters, "read_agent_model_overrides", lambda *_: {})
+    return saved
+
+
 @contextmanager
 def serve(app):
     with socket.socket() as listener:
@@ -241,7 +273,6 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     from management.services.agent.preparation import evaluation_snapshot, local_tool
     from management.services.agent.preparation.run import apply_root_generation_overlay
     from nexent.core.agents.contracts.config import AgentConfig
-    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from runtime.agentos import prepared_evaluation, prepared_local_tool, prepared_run
     from runtime.executions import LocalExecutionRegistry
 
@@ -270,7 +301,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     async def retrieve(request: Request):
         payload = await request.json()
         searches.append((request.headers.get("authorization"), payload["kds_list"]))
-        retrieval_options.append((payload["search_method"], payload["top_k"]))
+        retrieval_options.append((payload["search_method"], payload["topk"]))
         return {"result": []}
 
     observed_whitelists = []
@@ -279,7 +310,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         configured, = info.agent_config.tools
         expected = ["group-kb"] if groups else []
         assert configured.metadata["allowed_kds_set"] == expected
-        tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), configured)
+        tool = build_sdk_local_tool(configured)
         result = await asyncio.to_thread(tool.forward, "fixture query", ["Private", "Allowed"])
         assert "Private" in result
         observed_whitelists.append(expected)
@@ -299,11 +330,11 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
                         lambda user, tenant: groups if (user, tenant) == ("user-a", "tenant-a") else [])
     monkeypatch.setattr(aidp_permission_db, "list_all_permissions_by_tenant",
                         lambda tenant_id: acl if tenant_id == "tenant-a" else [])
-    model = {
+    model = saved_llm_record(monkeypatch, {
         "model_id": 49, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm",
         "model_name": "fixture-model", "model_repo": None, "display_name": "eval_llm",
         "api_key": "runtime-llm", "base_url": "https://fixture.invalid/v1", "update_time": "revision-1",
-    }
+    })
     monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda _model, _tenant: model)
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [model])
     row = {
@@ -383,7 +414,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     assert observed_whitelists == [["group-kb"], [], ["group-kb"], []]
     assert catalog_calls == ["Bearer synthetic-shared-aidp-key"]
     assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])] * 2
-    assert retrieval_options == [("hybrid_search", 10), ("full_text_search", 7)]
+    assert retrieval_options == [("vector_search|full_text_search|graph_search", 10), ("full_text_search", 7)]
     assert len(scoped_runs) == 2 and all(events[-1]["content"] == "done" for events in scoped_runs)
 
 
@@ -420,11 +451,12 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
     from runtime.executions import LocalExecutionRegistry
 
     system_name = "tenant_" + system_class.removesuffix("Tool").lower() if system_class else None
-    model_record = {
+    model_record = saved_llm_record(monkeypatch, {
         "model_id": 18, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm",
         "model_name": "fixture-model", "model_repo": None, "display_name": "eval_llm",
         "api_key": "local-llm", "base_url": "https://provider.invalid/v1", "update_time": "revision-1",
-    }
+        "extra_params": {"__custom__": {"provider_setting": "local-private-model-body"}},
+    })
     provider = FastAPI()
     calls = []
     aidp_calls = []
@@ -465,13 +497,6 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
     original_plugin = plugin.read_bytes()
     monkeypatch.setattr(langchain_plugins, "LANGCHAIN_PLUGIN_DIRECTORY", plugin_dir)
     tool_workspace = tmp_path / "configured-file-tool"
-    model_overrides = {"18": {"extra_params": {"__custom__": {"provider_setting": "local-private-model-body"}}}}
-
-    def read_model_override(agent_id, version_no, tenant_id):
-        assert (agent_id, version_no, tenant_id) == (8, 4, "tenant-a")
-        return model_overrides
-
-    monkeypatch.setattr(prepared_evaluation, "read_agent_model_overrides", read_model_override)
 
     async def run(info, thread_manager):
         dify_config, plugin_config, aidp_config, workspace_config, *system_configs = info.agent_config.tools
@@ -481,7 +506,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
         if system_class:
             config, = system_configs
             assert config.name == system_name and config.class_name == system_class
-            system_tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), config)
+            system_tool = build_sdk_local_tool(config)
             if system_class in {"StoreMemoryTool", "SearchMemoryTool"}:
                 assert system_tool.memory_service is None
                 assert (system_tool.user_id, system_tool.tenant_id) == ("", "")
@@ -499,17 +524,19 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
                         system_tool._validate_path("../denied")
         else:
             assert not system_configs
-        assert info.model_config_list[0].extra_body == {"provider_setting": "local-private-model-body"}
-        create_file = NexentAgent.create_local_tool(SimpleNamespace(observer=None), workspace_config)
+        assert info.model_config_list[0].resolved_profile.extra_api_parameters == [
+            {"path": "/provider_setting", "value": "local-private-model-body"},
+        ]
+        create_file = build_sdk_local_tool(workspace_config)
         create_file.forward("agentos.txt", "workspace tool")
         assert (tool_workspace / "agentos.txt").read_text(encoding="utf-8") == "workspace tool"
         assert NexentAgent.create_langchain_tool(None, plugin_config).forward(value=7) == 14
-        tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), dify_config)
+        tool = build_sdk_local_tool(dify_config)
         assert tool.name == "dify_search"
         answer = await asyncio.to_thread(tool.forward, "fixture query")
         assert "scoped Dify result" in answer
         observer = SimpleNamespace(add_message=capture_picture)
-        aidp = NexentAgent.create_local_tool(SimpleNamespace(observer=observer), aidp_config)
+        aidp = build_sdk_local_tool(aidp_config, observer=observer)
         aidp_answer = await asyncio.to_thread(aidp.forward, "fixture query")
         assert "scoped AIDP result" in aidp_answer and "/__aidp_image__/" in aidp_answer
         yield json.dumps({"type": "thought", "content": "lookup"})
@@ -595,9 +622,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
 
         for module in (evaluation_snapshot, prepared_local_tool):
             monkeypatch.setattr(module, "read_bound_local_tools", read_tools)
-        model = create_model_config_from_record(model_record).model_copy(update={
-            "extra_body": {"provider_setting": "local-private-model-body"},
-        })
+        model = create_model_config_from_record(model_record)
         agent = AgentConfig(
             agent_id=8, version_no=4, name="eval", description="Scoped tool",
             prompt_templates={"system_prompt": "Evaluate the search"}, model_name=model.cite_name,
@@ -609,7 +634,6 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
         )
         prepared = evaluation_snapshot.export_snapshot(
             agent, [model], "question", None, tenant_id="tenant-a", conversation_id=-60, language="en",
-            agent_model_overrides=model_overrides,
         )
         assert isinstance(prepared, PreparedEvaluationRun)
         search = next(tool for tool in prepared.resource.tools if tool.tool_id == (catalog_name if catalog_name == "dify_search" else "sdk_local:" + catalog_name))
@@ -649,13 +673,12 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
         assert changed_workspace.value.status_code == 409
         assert "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH" in changed_workspace.value.content.decode()
         file_row["instance_params"].clear()
-        body = model_overrides["18"]["extra_params"]["__custom__"]
-        body["provider_setting"] = "changed-provider-body"
+        model_record["update_time"] = "revision-2"
         with pytest.raises(RuntimeUpstreamError) as changed_body:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
         assert changed_body.value.status_code == 409
-        assert "AGENTOS_MODEL_BODY_REVISION_MISMATCH" in changed_body.value.content.decode()
-        body["provider_setting"] = "local-private-model-body"
+        assert json.loads(changed_body.value.content)["detail"]["code"] == "MODEL_REVISION_MISMATCH"
+        model_record["update_time"] = "revision-1"
         row["instance_params"]["top_k"] = 9
         with pytest.raises(RuntimeUpstreamError) as changed:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
@@ -953,7 +976,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
             "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", knowledge_name,
             analysis_name, "dify_search", "ind_aidp_search",
         ]
-        parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
+        parallel = build_sdk_local_tool(by_name["parallel_executor"])
         assert parallel.default_timeout_seconds == 47
         assert parallel.inputs["timeout"]["default"] == 47
         assert parallel.forward([]) == []
@@ -966,7 +989,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         ):
             mcp = NexentAgent.create_tool(sdk, by_name[name])
             assert mcp.forward(scope="model-value", limit=1) == expected
-        knowledge = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name[knowledge_name])
+        knowledge = build_sdk_local_tool(by_name[knowledge_name])
         assert knowledge.name == "knowledge_base_search"
         result = knowledge.forward("facts", ["Blocked"])
         assert "authorized-document" in result and "secret-document" not in result
@@ -993,14 +1016,14 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         assert knowledge_queries == original_queries == [{
             "index_names": ["kb-open"], "query_text": "facts", "top_k": original.top_k,
         }]
-        image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name[analysis_name])
+        image = build_sdk_local_tool(by_name[analysis_name])
         assert image.name == "analyze_image"
         assert image.selected_model_id == 93 and image.vlm_model is media_adapter
-        skill_search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["dify_search"])
+        skill_search = build_sdk_local_tool(by_name["dify_search"])
         assert (skill_search.api_key, skill_search.dataset_ids, skill_search.top_k) == (
             "private-skill-local-key", ["derived-private-dataset"], 3,
         )
-        aidp_tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["ind_aidp_search"])
+        aidp_tool = build_sdk_local_tool(by_name["ind_aidp_search"])
         image_ref = aidp_tool.image_url_builder("derived-image-kb/p.png").rsplit("/", 1)[-1]
         image_payload = independent_aidp_proxy._decode_image_ref(image_ref)
         assert image_payload["skill_revision"]
@@ -1048,6 +1071,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_evaluation_router())
 
+    record = saved_llm_record(monkeypatch, record)
     model = create_model_config_from_record(record).model_copy(update={"temperature": 0.17})
     agent = AgentConfig(
         agent_id=7, version_no=2, name="evaluation_agent", description="Prepared evaluation",
@@ -1465,11 +1489,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         admissions.append(identity)
 
     class Journal:
-        def __init__(self, tenant_id, user_id, conversation_id, run_id):
+        def __init__(self, tenant_id, user_id, conversation_id, run_id, *, retain_for_projection=False):
             assert owns(conversation_id, user_id=user_id, tenant_id=tenant_id)
             assert run_id == reference.run_id
+            self.retain_for_projection = retain_for_projection
+
+        def acknowledge_projection(self):
+            assert len(persisted) == 1
 
         def start(self):
+            assert self.retain_for_projection
             journal_events.append((START, {"kind": "start"}))
 
         def append(self, index, data):
@@ -1486,13 +1515,13 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     async def control_io(_task, function, *args, lane=None, owner=None, **kwargs):
         return function(*args, **kwargs)
 
-    model_record = {
+    model_record = saved_llm_record(monkeypatch, {
         "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "test-model", "model_name": "test-model", "model_repo": None,
         "base_url": "http://provider.test/v1", "api_key": "synthetic-provider-secret",
         "update_time": "2026-11-10T00:00:00",
         "extra_params": {"enable_thinking": True, "__custom__": {"temperature": 0.1}},
-    }
+    })
 
     async def read_models(tenant_id, *, versions):
         assert tenant_id == actor.tenant_id
@@ -1518,6 +1547,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         if owns(conversation_id, user_id=user_id, tenant_id=tenant_id):
             return {
                 "runtime_metadata": {"project": "demo"}, "runtime_metadata_version": 4,
+                "model_parameter_preferences": {"11": {"temperature": 0.45}},
                 "knowledge_scope": {"local": {"mode": "disabled"}, "aidp": {"mode": "disabled"}},
             }
         return None
@@ -1552,11 +1582,18 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     monkeypatch.setattr("management.db.agent.repository.search_agent_info_by_agent_id", lambda **_: {"model_ids": [11]})
-    monkeypatch.setattr("management.services.model.run_controls.get_model_by_model_id", lambda *_: model_record)
+    monkeypatch.setattr(
+        "management.services.model.run_controls.get_model_by_model_id",
+        lambda model_id, tenant_id: model_record if (model_id, tenant_id) == (11, actor.tenant_id) else None,
+    )
+    monkeypatch.setattr(
+        "management.db.model.outlets.get_resolved_model_record",
+        lambda model_id, tenant_id, **_: create_model_config_from_record(model_record).resolved_profile
+        if (model_id, tenant_id) == (11, actor.tenant_id) else None,
+    )
     request = await evaluation_snapshot.prepare_conversation_snapshot(
         AgentRequest(
             query="question", conversation_id=42, agent_id=7, version_no=3, enable_automation_tool=False,
-            generation_config={"temperature": 0.45},
         ),
         reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
     )
@@ -1574,10 +1611,10 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     async def runner(info, **_kwargs):
         assert info.runtime_metadata == {"project": "demo"} and info.runtime_metadata_version == 4
         assert info.model_config_list[0].api_key == "synthetic-provider-secret"
-        assert info.model_config_list[0].temperature == 0.45
-        assert info.model_config_list[0].explicit_sampling == ["temperature"]
-        assert info.model_config_list[0].enable_thinking is True
-        assert "temperature" not in info.model_config_list[0].extra_body
+        profile = info.model_config_list[0].resolved_profile
+        assert profile.parameter_values["temperature"] == 0.45
+        assert profile.parameter_values["enable_thinking"] is True
+        assert all(entry["path"] != "/temperature" for entry in profile.extra_api_parameters)
         assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
         memory_item = next(item for item in info.context_input.items if item.id == "memory:0")
         assert memory_item.content["memory"] == "authorized preference"
@@ -1733,8 +1770,11 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         monkeypatch.setattr(automation, "_agentos_client", lambda: agentos)
         monkeypatch.setattr(automation, "prepare_conversation_snapshot", prepare_automation)
         monkeypatch.setattr(automation, "validate_bindings_available", AsyncMock(return_value={"available": True}))
-        monkeypatch.setattr(automation.automation_conversation_adapter, "append_run_prompt",
-                            lambda *_: {"user_message_id": 23, "history": [], "assistant_message_index": 1})
+        def append_prompt(conversation_id, prompt, user_id, tenant_id, *, run_id):
+            assert (conversation_id, prompt, user_id, tenant_id, run_id) == (42, "question", actor.user_id, actor.tenant_id, 51)
+            return {"user_message_id": 23, "history": [], "assistant_message_index": 1}
+
+        monkeypatch.setattr(automation.automation_conversation_adapter, "append_run_prompt", append_prompt)
         monkeypatch.setattr(automation.agent_automation_db, "update_run", record)
         submission = await automation.AgentAutomationRunner()._execute_active_run(stored_run.copy(), task)
         assert submission["status"] == "RUNNING" and stored_run["projection_message_index"] == 1
@@ -1853,21 +1893,20 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     from unittest.mock import Mock
 
     from infrastructure.agent_model_config import model_record_revision
-    from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
     from runtime.agentos import prepared_run
 
     principal = ServicePrincipal("planning-user", "planning-tenant")
     reference = AgentRunReference(conversation_id=47, run_id="a" * 32)
-    model = {
+    model = saved_llm_record(monkeypatch, {
         "model_id": 11, "tenant_id": principal.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
         "base_url": "http://provider.invalid/v1", "api_key": "synthetic", "update_time": "2026-11-10T00:00:00",
-    }
+    })
     payload = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "plan a test"}, "language": "en",
         "resource": {
-            "agent_id": 7, "version_no": 3, "name": "planning_agent", "description": "planning",
+            "agent_id": 7, "version_no": 3, "name": "planning_agent", "description": "planning", "model_alias": "demo",
             "prompt_templates": {"system_prompt": "Plan before acting"},
             "tools": [{"tool_id": name, "version": "1"} for name in ("create_plan", "update_plan_step")],
         },
@@ -1889,8 +1928,7 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
         assert signed == payload and actor == principal
         info = prepared_evaluation.prepare_run_snapshot(signed, actor)
         assert info.redis_client is redis and info.agent_config.enable_planning
-        executor = SimpleNamespace(observer=info.observer)
-        create, update = [NexentAgent.create_local_tool(executor, tool) for tool in info.agent_config.tools]
+        create, update = [build_sdk_local_tool(tool, observer=info.observer) for tool in info.agent_config.tools]
         state = State()
         repo = PlanRepo(redis_client=info.redis_client)
         for tool in (create, update):
@@ -2036,11 +2074,11 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
     )
     versions = {binding.tool_id: binding.version for binding in resource.tools}
     assert (versions["deepseek_search"], versions["mcp"], versions["langchain"]) == ("4", "3", "3")
-    model = {
+    model = saved_llm_record(monkeypatch, {
         "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
         "base_url": "http://provider.invalid/v1", "api_key": "synthetic", "update_time": "2026-11-10T00:00:00",
-    }
+    })
     payload = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "use skill"}, "language": "en",
         "workbench_config_version": 4, "resource": resource,
@@ -2077,13 +2115,13 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
             config = NexentAgent.create_builtin_tool(None, tools["read_skill_config"])
             assert json.loads(config.forward("mounted")) == effective
             assert tools["run_skill_script"].params["publish_file_artifacts"]
-            search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), tools["deepseek_search"])
+            search = build_sdk_local_tool(tools["deepseek_search"])
             assert search._api_key == effective["value"] and search.language == "en"
             assert tools["mounted_mcp"].params == effective
             assert info.mcp_host[0]["headers"]["Authorization"] == "private-mcp-header"
             assert info.mcp_host[0]["allowed_tools"] == {"upstream_mcp": "mounted_mcp"}
             assert tools["mounted_plugin"].metadata.invoke({"value": "local"}) == "local"
-            private_search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), tools["ind_aidp_search"])
+            private_search = build_sdk_local_tool(tools["ind_aidp_search"])
             image_paths.append(private_search.image_url_builder("kb-a/p.png"))
         finally:
             prepared_evaluation._remove_skill_files(info.workspace_path)
@@ -2206,7 +2244,8 @@ async def _assert_public_prepared_turn_over_signed_http(
         "aidp": {"mode": "disabled"},
     } if use_knowledge_scope else None
     config = WorkbenchSessionConfig(
-        mode="generic_chat", generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
+        mode="generic_chat", knowledge_scope=knowledge_scope,
+        requested_output_tokens=256 if use_workbench else None,
         skill_mounts=[{"skill_id": 45}] if use_root_skill else [],
     )
     native_scope = use_knowledge_scope and not use_workbench
@@ -2222,7 +2261,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         })
     llm = {"model_id": 11, "alias": "demo", "revision": "revision"}
     if use_workbench:
-        llm["root_generation"] = config.generation_config.model_dump(mode="json")
+        llm["conversation_parameters"] = {"temperature": 0.4}
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "zh" if raw_new else "en",
         **({"memory_enabled": True} if use_memory else {}),
@@ -2281,7 +2320,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                     "index_names": ["kb-one"], "document_paths": ["report.txt"],
                 }
             assert turn["automation"] == {
-                "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": automation_params,
+                "agent_id": 7, "agent_version_no": 2, "model_id": 11 if use_workbench else None,
+                "tool_params": automation_params,
                 "has_attachments": False,
             }
         calls.append("stage")
@@ -2302,7 +2342,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         return 81
 
     def close(turn):
-        assert turn is confirmed and calls[-1] == "project"
+        assert turn is confirmed and calls[-1] == "acknowledge"
         calls.append("close")
 
     async def start(payload, signed_actor):
@@ -2321,6 +2361,9 @@ async def _assert_public_prepared_turn_over_signed_http(
         def __init__(self, tenant_id, user_id, cid, run_id):
             assert owned(cid, user_id=user_id, tenant_id=tenant_id) and run_id == reference.run_id
             assert "confirm" in calls
+
+        def acknowledge_projection(self):
+            calls.append("acknowledge")
 
         def replay(self, anchor):
             assert anchor == START
@@ -2437,11 +2480,11 @@ async def _assert_public_prepared_turn_over_signed_http(
                 denied = await caller.dispatch_conversation(body, actor.user_id, "foreign")
                 denied_body = b"".join([chunk async for chunk in denied.body_iterator])
                 assert denied.status_code == 404 and b"AGENTOS_RUN_NOT_FOUND" in denied_body
-            assert calls == ["stage", "start", "confirm", "project", "close"]
+            assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
             return
         if northbound:
             await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata)
-            assert calls == ["stage", "start", "confirm", "project", "close"]
+            assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
             return
 
         request = {"query": "test", "agent_id": 7}
@@ -2472,7 +2515,7 @@ async def _assert_public_prepared_turn_over_signed_http(
                 def read_terminal(conversation_id, user_id, tenant_id):
                     if (conversation_id, user_id, tenant_id) != (reference.conversation_id, actor.user_id, actor.tenant_id):
                         raise AdmissionScopeError
-                    assert calls == ["stage", "start", "confirm", "project", "close"]
+                    assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
                     return "completed"
 
                 def deny_runtime_http(**_options):
@@ -2505,7 +2548,7 @@ async def _assert_public_prepared_turn_over_signed_http(
             prefix = f"data: {json.dumps(scope_event, separators=(',', ':'))}\n\n" + prefix
         if use_workbench:
             event = {"type": "workbench_config_resolved", "content": {
-                "config_version": 4, "schema_version": 3, "mode": "generic_chat", "agent_mounts": [],
+                "config_version": 4, "schema_version": config.schema_version, "mode": "generic_chat", "agent_mounts": [],
             }}
             prefix = f"data: {json.dumps(event, separators=(',', ':'))}\n\n" + prefix
             assert first.headers["X-Workbench-Config-Version"] == "4"
@@ -2516,7 +2559,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id
         assert retry.json()["conversation_id"] == reference.conversation_id
         assert denied.status_code == 404
-    assert calls == ["stage", "start", "confirm", "project", "close"]
+    assert calls == ["stage", "start", "confirm", "project", "acknowledge", "close"]
 
 
 async def _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata):
@@ -2588,10 +2631,9 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
     if metadata is not None:
         assert response.headers["X-Runtime-Metadata-Version"] == "6"
     created = {"type": "conversation_created", "content": {"conversation_id": reference.conversation_id}}
-    assert response.text == (
-        f"data: {json.dumps(created)}\n\n"
-        'data: {"type":"final_answer","content":"answer"}\n\n'
-    )
+    assert [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")] == [
+        created, {"type": "final_answer", "content": "answer", "unit_index": 0, "answer_phase": "complete"},
+    ]
     claim_external.assert_awaited_once_with("external-key")
     legacy_write.assert_not_called()
     legacy_dispatch.assert_not_awaited()
@@ -2620,8 +2662,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     from management.services.agent import agentos_events, authorization, runtime_client
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from management.services.model import run_controls
-    from nexent.core.agents import run_agent as sdk_runner
-    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.orchestration import entry as sdk_runner
     from nexent.core.agents.cores.smolagents.plan_repo import PlanRepo
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.monitor import get_agent_monitoring_context
@@ -2631,11 +2672,11 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
 
     actor = ServicePrincipal("ephemeral-user", "ephemeral-tenant")
     run_id = "d" * 32
-    model = {
+    model = saved_llm_record(monkeypatch, {
         "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
         "base_url": "http://provider.invalid/v1", "api_key": "synthetic", "update_time": "revision",
-    }
+    })
     redis = Mock(side_effect=AssertionError("Debug planning accessed shared Redis"))
     monkeypatch.setattr(prepared_evaluation, "get_redis_client", redis)
     monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_: model)
@@ -2643,7 +2684,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     template = PreparedEphemeralRun.model_validate({
         "run_id": run_id, "mode": "nexent", "input": {"query": "finish"}, "runtime_metadata": {"ticket": "42"},
-        "resource": {"agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {}},
+        "resource": {"agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {}, "model_alias": "demo"},
         "models": {"llm": {"model_id": 11, "alias": "demo", "revision": "revision"}},
     })
     object_name = f"workspace/{actor.user_id}/{run_id}/outputs/report.txt"
@@ -2733,9 +2774,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
         assert context.conversation_id is None
         if getattr(getattr(info, "agent_config", None), "enable_planning", False):
             assert permit_plan.wait(4), "Management did not publish scope before SDK execution"
-            create, update = [NexentAgent.create_local_tool(
-                SimpleNamespace(observer=info.observer), tool,
-            ) for tool in info.agent_config.tools]
+            create, update = [build_sdk_local_tool(tool, observer=info.observer) for tool in info.agent_config.tools]
             class PlanState:
                 current_plan = None
 
@@ -3031,15 +3070,18 @@ async def _assert_automation_proposal_callback(monkeypatch):
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
 @pytest.mark.asyncio
 async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from contracts.agent import SystemAgentRef
     from management.api.skill import creation
     from management.services.agent import runtime_client
-    from management.services.conversation import creation_history
+    from management.services.conversation import creator_checkpoints, creator_execution, model_preferences
     from management.services.skill import creation as skill_service
     from management.services.model import creator_snapshot
-    from nexent.core.agents import run_agent as sdk_runner
+    from nexent.core.agents.orchestration import entry as sdk_runner
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.core.utils.observer import ProcessType
-    from runtime.agentos import ephemeral
+    from runtime.agentos import creator_definition, ephemeral
 
     actor = ServicePrincipal("skill-owner", "skill-tenant")
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-skill-transport-secret")
@@ -3049,21 +3091,36 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     def owns(conversation_id, *, user_id, tenant_id):
         return (conversation_id, user_id, tenant_id) == (42, actor.user_id, actor.tenant_id)
 
-    monkeypatch.setattr(creation, "conversation_belongs_to", owns)
-    monkeypatch.setattr(creation, "prepare_creation_history", lambda **kwargs: (42, 1))
-    writes = []
+    starts, checkpoints = [], []
 
     def save(request, **scope):
-        writes.append((request, scope))
+        starts.append((request, scope))
         return 43
 
-    monkeypatch.setattr(creation_history, "save_message", save)
-    monkeypatch.setattr(creation_history, "save_message_unit", lambda **_: None)
-    record = {
+    ref = SystemAgentRef("shared", "nl2skill_main", 77, 0)
+    monkeypatch.setattr(creator_execution.system_agent_provider, "get_creator_ref", lambda *_: ref)
+    monkeypatch.setattr(creator_execution, "get_conversation_history", lambda cid, user: (
+        {"agent_id": ref.agent_id, "message_records": []} if owns(cid, user_id=user, tenant_id=actor.tenant_id) else None
+    ))
+    monkeypatch.setattr(creator_execution, "prepare_creation_history", lambda **_: (42, 1))
+    monkeypatch.setattr(creator_execution, "save_message", save)
+    monkeypatch.setattr(model_preferences, "read_model_preferences", lambda *_: {
+        "model_parameter_preferences": {"11": {"temperature": 0.3}},
+    })
+    monkeypatch.setattr(creator_execution, "claim_creator", AsyncMock(return_value="reservation"))
+    monkeypatch.setattr(creator_execution, "CreatorControl", lambda: SimpleNamespace(
+        generation="skill-test-run", admit=AsyncMock(), cancel=Mock(), guard_preparation=lambda *_: None,
+    ))
+    monkeypatch.setattr(creator_execution, "launch_creator", AsyncMock(side_effect=lambda stream, **_: stream))
+    monkeypatch.setattr(creator_checkpoints, "checkpoint_creator_message", lambda *args: checkpoints.append(args))
+    monkeypatch.setattr(creator_definition, "read_system_creator", lambda agent, version, key: (
+        {"agent_id": agent, "version_no": version, "max_steps": 5} if (agent, version, key) == (77, 0, "nl2skill_main") else None
+    ))
+    record = saved_llm_record(monkeypatch, {
         "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "creator", "model_name": "demo", "model_repo": None,
         "base_url": "http://provider.invalid/v1", "api_key": "synthetic-private-model-key", "update_time": "2026-11-10T00:00:00",
-    }
+    })
 
     def read_model(model_id, tenant_id):
         return record if (model_id, tenant_id) == (11, actor.tenant_id) else None
@@ -3080,7 +3137,7 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
         calls.append(info)
         assert info.agent_config.output_protocol == "final_envelope" and not info.agent_config.tools
         assert info.conversation_id is None and info.sandbox_config is None
-        assert info.model_config_list[0].temperature == 0.3
+        assert info.model_config_list[0].resolved_profile.parameter_values["temperature"] == 0.3
         assert info.model_config_list[0].api_key == record["api_key"]
         if "failing request" in info.query:
             info.observer.add_message("", ProcessType.FINAL_ANSWER, "private provider details")
@@ -3099,8 +3156,8 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     async def blocking(_name, function, *args, lane=None, owner=None, **kwargs):
         return await asyncio.to_thread(function, *args, **kwargs)
 
-    monkeypatch.setattr(creation, "run_blocking", blocking)
-    monkeypatch.setattr(prepared_evaluation, "run_blocking", blocking)
+    for module in (creation, prepared_evaluation, creator_execution, creator_checkpoints):
+        monkeypatch.setattr(module, "run_blocking", blocking)
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(ephemeral.create_ephemeral_run_router())
@@ -3109,7 +3166,7 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     management.dependency_overrides[creation.require_skill_create_permission] = lambda: None
 
     body = {"query": 'Update <use_script path="scripts/run.py" />', "model_id": 11,
-            "generation_config": {"temperature": 0.3}, "conversation_id": 42, "persist_history": True,
+            "conversation_id": 42, "persist_history": True,
             "draft_snapshot": {"files": [{"path": "scripts/run.py", "content": "old"}]}}
     path = "/api/skills/nl2skill/run"
     manager.start()
@@ -3128,19 +3185,24 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
                 _ = [chunk async for chunk in foreign_model.body_iterator]
                 assert not calls
                 foreign = await http.post(public + path, json={**body, "conversation_id": 99})
-                assert foreign.status_code == 400 and not calls and not writes
+                assert foreign.status_code == 400 and not calls and not starts
                 response = await http.post(public + path, json=body)
                 assert response.status_code == 200 and response.headers["conversation_id"] == "42", response.text
                 events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
                 assert events[0]["paths"] == ["scripts/run.py"] and events[-1]["type"] == "done"
                 assert any(item["type"] == "file_content" and item["path"] == "scripts/run.py" for item in events)
-                assert writes[0][0].conversation_id == 42 and writes[0][0].role == "assistant"
-                assert writes[0][1] == {"user_id": actor.user_id, "tenant_id": actor.tenant_id, "status": "completed"}
+                message, scope = starts[0]
+                assert message.conversation_id == 42 and message.role == "assistant"
+                assert scope == {"user_id": actor.user_id, "tenant_id": actor.tenant_id,
+                                 "status": "streaming", "streaming_owner": "management"}
+                assert checkpoints[-1][:3] == (43, 42, actor.user_id)
+                assert checkpoints[-1][-1] == "completed"
                 failure = await http.post(public + path, json={**body, "query": "failing request"})
                 assert "NL2Skill execution failed." in failure.text and "private provider details" not in failure.text
-                assert '"type": "done"' not in failure.text and writes[-1][1]["status"] == "failed"
+                assert '"type": "done"' not in failure.text and checkpoints[-1][-1] == "failed"
                 async with http.stream("POST", public + path, json={
                     **body, "query": "wait for disconnect", "persist_history": False,
+                    "conversation_id": None, "model_parameter_preferences": {"11": {"temperature": 0.3}},
                 }) as streaming:
                     async for line in streaming.aiter_lines():
                         if line.startswith("data: "):
@@ -3161,7 +3223,7 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
     from management.api.agent import creator, nl2agent_callback as callback_api
     from management.services.agent import creator_run, nl2agent_callback, nl2agent, runtime_client
     from management.services.model import creator_snapshot
-    from nexent.core.agents import run_agent as sdk_runner
+    from nexent.core.agents.orchestration import entry as sdk_runner
     from nexent.core.agents.cores.smolagents.agent import NexentAgent
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.core.utils.observer import ProcessType
@@ -3192,11 +3254,11 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
         return SimpleNamespace(content={"text": "Verified editable draft"})
 
     monkeypatch.setattr(creator_run, "_build_verified_bound_resources_context", verified)
-    record = {
+    record = saved_llm_record(monkeypatch, {
         "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "creator", "model_name": "demo", "model_repo": None,
         "base_url": "http://provider.invalid/v1", "api_key": "synthetic-model-key", "update_time": "2026-11-10T00:00:00",
-    }
+    })
     monkeypatch.setattr(creator_snapshot, "preflight_turn_controls", lambda *_: None)
     monkeypatch.setattr(creator_snapshot, "get_model_by_model_id", lambda *_: record)
     monkeypatch.setattr(creator_snapshot, "_resolve_input_budget", lambda _: (8192, {}, None))
@@ -3265,7 +3327,7 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
             monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
             monkeypatch.setattr(prepared_agent_creator, "MANAGEMENT_AGENTOS_URL", public)
             async with httpx.AsyncClient(trust_env=False, timeout=8) as http:
-                body = {"agent_id": 7, "model_id": 11}
+                body = {"agent_id": 7, "model_id": 11, "persist_history": False}
                 path = public + "/api/agent/nl2agent/run"
                 response = await http.post(path, json={**body, "query": "Update the draft"})
                 assert response.status_code == 200 and "saved" in response.text, response.text
@@ -3538,12 +3600,12 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
     from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, PreparedEphemeralRun
     from infrastructure import agent_model_config
     from infrastructure.agent_model_config import create_model_config_from_record
-    from infrastructure.agent_model_overrides import overlay_root_model
     from management.services.agent import tool_identity
     from management.services.agent.preparation import run as preparation, evaluation_snapshot
     from management.services.model import run_controls
     from nexent.core.agents.contracts.config import AgentConfig
     from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.model_service.profiles.runtime_parameters import merge_runtime_parameters
 
     actor = ServicePrincipal("profile-user", "profile-tenant")
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-profile-key")
@@ -3570,9 +3632,6 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
             yield "data: [DONE]\n\n"
         return StreamingResponse(chunks(), media_type="text/event-stream")
 
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("Exportable model profile used legacy execution")
-
     async def control(_name, function, *args, **kwargs):
         kwargs.pop("lane", None)
         kwargs.pop("owner", None)
@@ -3584,13 +3643,19 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
     monkeypatch.setattr(preparation, "search_agent_info_by_agent_id", lambda *_args, **_kwargs: {"model_params_override": {}})
     monkeypatch.setattr(tool_identity, "resolve_tool_user_context", lambda *_args: {})
     with serve(provider) as provider_url:
-        record = {
+        record = saved_llm_record(monkeypatch, {
             "model_id": 11, "tenant_id": actor.tenant_id, "delete_flag": "N", "model_type": "llm",
             "model_name": "provider-model", "model_repo": None, "display_name": "model-a", "model_factory": "OpenAI-API-Compatible",
             "api_key": "synthetic-runtime-key", "base_url": provider_url + "/v1", "update_time": "revision-1",
             "temperature": 0.8, "top_p": 0.9, "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
-        }
+        }, reasoning_capability={"status": "supported", "control": "effort", "levels": ["low", "high"]})
         base = create_model_config_from_record(record)
+        preferences = {"reasoning_effort": "high"}
+        if sampling:
+            preferences.update(temperature=0.3, top_p=0.7)
+        expected = base.model_copy(update={
+            "resolved_profile": merge_runtime_parameters(base.resolved_profile, {}, preferences),
+        })
 
         async def models(tenant, *, versions):
             assert tenant == actor.tenant_id
@@ -3618,14 +3683,11 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
             assert record["api_key"] not in payload.model_dump_json()
             snapshots.append(payload)
             info = prepared_evaluation.prepare_run_snapshot(payload, actor)
-            settings = {"temperature": 0.3, "top_p": 0.7} if sampling else {}
-            expected = overlay_root_model(base, settings, base.cite_name)
-            expected = overlay_root_model(expected, {"thinking_effort": "high"}, expected.cite_name)
             by_alias = {model.cite_name: model for model in info.model_config_list}
             root = by_alias[info.agent_config.model_name]
             child = by_alias[info.agent_config.worker_agents[0].model_name]
             assert root.model_copy(update={"cite_name": expected.cite_name}) == expected
-            assert child == (base if sampling else expected)
+            assert child == base
             assert info.agent_config.worker_agents[0].sandbox_policy == (
                 {"level": child_level, "auto_sync_outputs": False} if child_level else None
             )
@@ -3634,13 +3696,10 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
             def call(config, role):
                 sdk = NexentAgent(info.observer, [config], info.stop_event, tenant_id=actor.tenant_id)
                 model = sdk.create_model(config.cite_name)
-                try:
-                    return model([{"role": "user", "content": role}]).content
-                finally:
-                    model.client.close()
+                return model([{"role": "user", "content": role}]).content
 
             try:
-                for original, restored, role in [(expected, root, "root"), (base if sampling else expected, child, "child")]:
+                for original, restored, role in [(expected, root, "root"), (base, child, "child")]:
                     assert await asyncio.to_thread(call, original, role) == "answer"
                     assert await asyncio.to_thread(call, restored, role) == "answer"
             finally:
@@ -3653,9 +3712,7 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
             compiled = await preparation.create_agent_run_info(
                 agent_id=7, minio_files=None, query="hello", history=None,
                 tenant_id=actor.tenant_id, user_id=actor.user_id, is_debug=True, override_version_no=0,
-                allow_memory_search=False, reasoning_effort="high",
-                runtime_generation_config={"temperature":0.3,"top_p":0.7} if sampling else None,
-                turn_generation=TurnModelGeneration(settings={"temperature":0.3,"top_p":0.7}, reasoning_effort="high") if sampling else None,
+                allow_memory_search=False, model_parameter_preferences={"11": preferences},
             )
             payload = PreparedEphemeralRun(**compiled.model_dump(exclude={"conversation_id"}), run_id="f"*32, debug=True)
             response = await client.run_ephemeral(payload, actor.user_id, actor.tenant_id)
@@ -3665,7 +3722,7 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
     assert requests[0] == requests[1] and requests[2] == requests[3]
     assert requests[1]["temperature"] == (0.3 if sampling else 0.8)
     assert requests[3]["temperature"] == 0.8
-    assert requests[1]["reasoning_effort"] == "high" and requests[3]["reasoning_effort"] == ("low" if sampling else "high")
+    assert requests[1]["reasoning_effort"] == "high" and requests[3]["reasoning_effort"] == "low"
 
 
 @pytest.mark.stage("D3")

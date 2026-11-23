@@ -64,12 +64,12 @@ from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
 @pytest.fixture
 def skill_repository(monkeypatch):
     """Provide the listing boundary without initializing repository mutations."""
-    import services
+    from management.services import skill
 
-    module = types.ModuleType("services.skill_repository_service")
+    module = types.ModuleType("management.services.skill.skill_repository")
     module.list_skill_repository_listings_impl = MagicMock()
     monkeypatch.setitem(sys.modules, module.__name__, module)
-    monkeypatch.setattr(services, "skill_repository_service", module, raising=False)
+    monkeypatch.setattr(skill, "skill_repository", module, raising=False)
     return module
 
 
@@ -984,7 +984,7 @@ async def test_search_internal_uninstalled_resources_aggregates_sources_and_excl
         ],
     )
     mocker.patch(
-        "services.skill_repository_service.list_skill_repository_listings_impl",
+        "management.services.skill.skill_repository.list_skill_repository_listings_impl",
         return_value={
             "items": [
                 {
@@ -1157,7 +1157,7 @@ async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker,
         ],
     )
     list_skills = mocker.patch(
-        "services.skill_repository_service.list_skill_repository_listings_impl",
+        "management.services.skill.skill_repository.list_skill_repository_listings_impl",
         side_effect=[
             {
                 "items": [

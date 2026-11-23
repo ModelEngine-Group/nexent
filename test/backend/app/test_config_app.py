@@ -149,7 +149,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.conversation.conversation_share": {"router": APIRouter()},
             "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
-            "ops.api.access": {"router": APIRouter()},
+            "management.api.permission.ops_access": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
             "management.api.prompt.prompt": {"router": APIRouter()},

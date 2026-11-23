@@ -325,6 +325,8 @@ get_nexent_images() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MANAGEMENT_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_RUNTIME_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_SERVICE_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_OPS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_GATEWAY_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_WEB_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_DOCKER_IMAGE"

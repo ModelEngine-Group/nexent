@@ -206,8 +206,15 @@ db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
 db_models_mod.UserTenant = MagicMock(name="UserTenant")
 
-sys.modules["management.db.models"] = db_models_mod
-sys.modules["management.db.models"] = db_models_mod
+for model_module in (
+    "management.db.agent.models",
+    "management.db.automation.models",
+    "management.db.conversation.models",
+    "management.db.identity.models",
+    "management.db.knowledge_base.models",
+    "management.db.models",
+):
+    sys.modules[model_module] = db_models_mod
 
 
 # Stub management.utils.audit_fields with the tracking helpers used by conversation_db

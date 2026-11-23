@@ -103,7 +103,7 @@ class NexentOutputAdapter:
         if kind == "step_count":
             run["step"] = event.get("step_id") or f"{identity}:step:{event.get('content', '')}"
             return [_converted(event, kind, step_id=run["step"])]
-        if kind in {"model_output", "model_output_deep_thinking"}:
+        if kind in {"model_output", "model_output_thinking", "model_output_deep_thinking"}:
             block = event.get("block_id") or event.get("step_id") or run["step"]
             first = block not in run["blocks"]
             step = run["blocks"].setdefault(block, event.get("step_id") or block)
