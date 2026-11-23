@@ -12,6 +12,7 @@ from contracts.errors.exceptions import AppException
 from contracts.evolution import ReplayCaseRequest
 from infrastructure.object_storage.client import minio_client
 from management.db.evaluation.replay_cases import read_replay_case, save_replay_case
+from infrastructure.rdb.skill_execution_records import read_bound_skills
 from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 
@@ -43,6 +44,10 @@ def _write(key, data):
 def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id: str):
     require_business_agent_edit(request.agent_id, tenant_id, user_id)
     published_business_agent(tenant_id, request.agent_id, request.version_no)
+    if request.expected_skill_names:
+        names = {row["name"] for row in read_bound_skills(request.agent_id, request.version_no, tenant_id)}
+        if not set(request.expected_skill_names) <= names:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Expected Skill must be enabled on this Agent version")
     for file in request.attachments:
         if not file.object_name.startswith(f"attachments/{user_id}/"):
             raise AppException(ErrorCode.COMMON_FORBIDDEN, "Submit an approved copy of your own attachment")
@@ -55,6 +60,8 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
         _write(_archive_key(tenant_id, request.agent_id, digest), data)
         manifest.append({"name": file.name, "sha256": digest, "size": len(data)})
     task = {"family": request.family, "query": request.query, "expected": request.expected, "attachments": manifest}
+    if request.expected_skill_names is not None:
+        task["expected_skill_names"] = sorted(request.expected_skill_names)
     if request.source_group is not None:
         if not request.source_group.strip():
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide a non-empty source group")

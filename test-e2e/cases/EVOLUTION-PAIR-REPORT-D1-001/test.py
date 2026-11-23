@@ -40,3 +40,11 @@ def test_grade_and_compare(monkeypatch):
     assert report["valid_pairs"] == 4 and report["valid_triplets"] == 3 and report["verified_guide_pairs"] == 2
     assert report["pairs"][1]["skill_vs_absent"] == {"base":"both_fail", "result":"improved"}
     assert report["pairs"][3]["skill_vs_absent"] == {"base":"inconclusive", "result":"inconclusive"}
+    rows[:] = [dict(case_id=i, variant="base", status=status,
+                    result={"selection": service.judge_skill_selection(["guide"], reads)})
+               for i, (status, reads) in enumerate([("pass", {}), ("pass", {"guide": 1}),
+                                                     ("invalid", {"other": 1})], 1)]
+    report = service.experiment_report("tenant", "editor", 8)
+    assert report["total_tasks"] == 3 and report["valid_baselines"] == 2
+    assert report["valid_pairs"] == report["total_pairs"] == 0
+    assert report["selection_counts"] == {"base": {"missed": 1, "hit": 1}}

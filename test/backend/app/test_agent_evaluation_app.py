@@ -22,6 +22,7 @@ _MODULE_ROOTS = (
     "botocore",
     "consts",
     "database",
+    "management",
     "middleware",
     "services",
     "utils",

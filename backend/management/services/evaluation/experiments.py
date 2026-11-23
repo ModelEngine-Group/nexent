@@ -15,6 +15,7 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest
 from infrastructure.agentos_client import AgentOSClient
+from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
 from management.db.conversation.evolution_review import recent_reviews
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import prompt_example_sources
@@ -58,7 +59,7 @@ async def _io(name, fn, *args):
 
 async def _snapshot(request, tenant, user, variant):
     options = {}
-    if request.candidate_type == "skill_step":
+    if request.candidate_type in {"skill_step", "skill_discovery"}:
         options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
     elif variant == "result":
         options = {"prompt_candidate_id": request.candidate_id}
@@ -67,6 +68,8 @@ async def _snapshot(request, tenant, user, variant):
         language=request.language, **options)
     if variant == "no_skill":
         spec = spec.model_copy(update={"omit_root_skill_candidate_id": request.candidate_id})
+    if request.candidate_type in {"baseline", "skill_discovery"}:
+        spec = spec.model_copy(update={"observe_root_skill_choices": True})
     return spec
 
 
@@ -92,15 +95,24 @@ async def create_experiment(request, tenant, user):
     if rule["evaluator_type"] != "code" and request.judge_model_id is None:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Select a judge model for this evaluator")
     excluded = await _excluded_sources(request, tenant)
+    if request.candidate_type in {"skill_step", "skill_discovery"}:
+        bound = await _io("verify-skill-method", read_bound_skill_candidate, tenant, request.agent_id,
+                          request.version_no, request.candidate_id)
+        method = "S1" if request.candidate_type == "skill_discovery" else "S2"
+        if not bound or bound["method"] != method:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose the experiment matching the Skill candidate")
     cases = {}
     for case_id in request.case_ids:
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
         if excluded.intersection(example_source_keys(case["task"])):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
+        if request.candidate_type in {"baseline", "skill_discovery"} and case["task"].get("expected_skill_names") is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Label the acceptable Skill choices for each task")
         cases[str(case_id)] = case["digest"]
     snapshots = {}
-    arms = ("base", "result", "no_skill") if request.candidate_type == "skill_step" else ("base", "result")
+    arms = {"baseline": ("base",), "skill_step": ("base", "result", "no_skill")}.get(
+        request.candidate_type, ("base", "result"))
     for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
@@ -123,7 +135,17 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     labels = {("fail", "pass"): "improved", ("pass", "fail"): "regressed",
               ("pass", "pass"): "both_pass", ("fail", "fail"): "both_fail"}
     valid_triplets = verified_guide_pairs = 0
+    valid_baselines = 0
+    selection_counts = {}
     for pair in pairs.values():
+        for arm, row in pair.items():
+            selection = (row.get("result") or {}).get("selection")
+            if selection and row["status"] in {"pass", "fail"}:
+                selection_counts.setdefault(arm, Counter())[selection["outcome"]] += 1
+        if "result" not in pair:
+            valid_baselines += int(pair["base"]["status"] in {"pass", "fail"})
+            pair["comparison"] = "baseline_only"
+            continue
         outcome = labels.get((pair["base"]["status"], pair["result"]["status"]), "inconclusive")
         counts[outcome] += 1
         pair["comparison"] = outcome
@@ -144,10 +166,12 @@ def experiment_report(tenant, user, eid, *, cancel=False):
         status = "running"
     else:
         status = "cancelled" if "cancelled" in states else "finished"
-    return {"experiment_id": eid, **scope, "status": status, "total_pairs": len(pairs),
+    pair_count = sum("result" in p for p in pairs.values())
+    return {"experiment_id": eid, **scope, "status": status, "total_pairs": pair_count,
+            "total_tasks": len(pairs), "valid_baselines": valid_baselines, "selection_counts": selection_counts,
             **({"valid_triplets": valid_triplets, "verified_guide_pairs": verified_guide_pairs}
                if any("no_skill" in p for p in pairs.values()) else {}),
-            "valid_pairs": len(pairs) - counts["inconclusive"], "counts": dict(counts), "pairs": pairs}
+            "valid_pairs": pair_count - counts["inconclusive"], "counts": dict(counts), "pairs": pairs}
 
 
 def workspace_choices(tenant, user, agent_id, version):
@@ -196,6 +220,17 @@ def reported_step_input_tokens(events):
     return sum(counts.values()) if counts else None
 
 
+def judge_skill_selection(expected, reads):
+    unexpected = sorted(set(reads).difference(expected))
+    if unexpected:
+        outcome = "wrong"
+    elif reads:
+        outcome = "hit"
+    else:
+        outcome = "missed" if expected else "correct_skip"
+    return {"expected": expected, "reads": reads, "unexpected": unexpected, "outcome": outcome}
+
+
 async def execute_trial(job):
     request = DevelopmentExperimentRequest.model_validate(job["plan"]["request"])
     tenant, user = job["tenant_id"], job["created_by"]
@@ -229,18 +264,28 @@ async def execute_trial(job):
     if receipt.outcome != "completed":
         return "invalid", {"error": "unsuccessful_runtime", "runtime_outcome": receipt.outcome}
     skill = receipt.skill
-    if "no_skill" in job["plan"]["snapshots"]:
+    if "no_skill" in job["plan"]["snapshots"] or request.candidate_type == "skill_discovery":
         target = next((ref for ref in spec.resource.skill_refs if ref.package_candidate_id == request.candidate_id), None)
         omitted = job["variant"] == "no_skill"
         if (not target or not skill or skill.candidate_id != request.candidate_id or skill.instance_id != target.instance_id
                 or skill.variant != job["variant"] or skill.mounted_revision != (None if omitted else target.revision)
                 or omitted and (skill.listed or skill.guide_reads)):
             return "invalid", {"error": "skill_observation_mismatch"}
+    selection = None
+    if request.candidate_type in {"baseline", "skill_discovery"}:
+        reads = receipt.root_guide_reads
+        listed = {item["content"]["name"] for item in (spec.resource.evaluation_options.context_items or [])
+                  if item.get("type") == "skill"}
+        expected = case["task"].get("expected_skill_names")
+        if reads is None or expected is None or not listed.issuperset(set(reads).union(expected)):
+            return "invalid", {"error": "invalid_skill_choice_receipt"}
+        selection = judge_skill_selection(expected, reads)
     await _io("recheck-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
     grade = await run_blocking("grade-development-trial", _grade, request, job, case["task"], observed,
                                lane="evaluation", owner="management")
     return grade["status"], {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
                              **({"skill": skill.model_dump()} if skill else {}),
+                             **({"selection": selection} if selection else {}),
                              "reported_step_input_tokens": reported_step_input_tokens(observed.events),
                              "events_digest": task_digest(observed.events), "case_digest": case["digest"],
                              "snapshot_digest": digest, "evaluator_version": job["plan"]["evaluator"]["version_no"]}

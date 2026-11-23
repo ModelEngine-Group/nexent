@@ -4,7 +4,7 @@
 import asyncio
 import logging
 import shutil
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack
 from functools import partial
 from hmac import compare_digest
 from uuid import uuid4
@@ -69,7 +69,9 @@ from runtime.agentos.prepared_mcp import PreparedMCP
 from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
-from runtime.agentos.prepared_skills import materialize_skill_tools, root_without_target_skill, skill_stage_path, skill_trial_observation
+from runtime.agentos.prepared_skills import (
+    materialize_skill_tools, observe_trial_guide_choices, root_without_target_skill, skill_stage_path, skill_trial_observation,
+)
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
@@ -467,7 +469,7 @@ def prepare_run_snapshot(
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
 
-    if payload.omit_root_skill_candidate_id is not None and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
+    if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
     return prepare_run_snapshot(payload, actor)
 
@@ -521,22 +523,20 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
 
     status = "failed"
     try:
-        skill = None
-        observation = nullcontext()
+        skill, path = None, None
         if payload.replay_trial_id and any(ref.package_candidate_id for ref in payload.resource.skill_refs):
-            from nexent.core.tools.read_skill_md_tool import observe_guide_reads
-
             skill, path = await run_blocking("observe-trial-skill", skill_trial_observation, payload, info, actor,
                                              lane="control-io", owner="runtime")
-            observation = observe_guide_reads(path)
-        with observation as reads:
+        with observe_trial_guide_choices(info, actor.tenant_id, path, payload.observe_root_skill_choices) as (reads, all_reads):
             result = await collect_observer_output(info, agent_run, runtime_thread_manager)
         status = info.attempt_outcome or "completed"
         if payload.replay_trial_id is not None:
             if skill:
-                skill.guide_reads = reads.count
+                skill.guide_reads = reads.count if reads is not None else 0
             result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id,
-                                                  outcome=info.attempt_outcome or "unconfirmed", skill=skill)
+                outcome=info.attempt_outcome or "unconfirmed", skill=skill,
+                root_guide_reads={name: read.count for name, read in all_reads.items() if read.count}
+                if payload.observe_root_skill_choices else None)
         return result
     except asyncio.CancelledError:
         status = "stopped"

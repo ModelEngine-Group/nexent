@@ -40,7 +40,7 @@ export default function ExampleCandidates({
     .map(([id]) => ({ value: Number(id), label: label(id) }));
   const passed = pairs.flatMap(([id, pair]) =>
     (["base", "result"] as const)
-      .filter((v) => pair[v].status === "pass")
+      .filter((v) => pair[v]?.status === "pass")
       .map((v) => ({
         value: `${id}:${v}`,
         label: `${label(id)} · ${t(`evolution.${v}`)}`,

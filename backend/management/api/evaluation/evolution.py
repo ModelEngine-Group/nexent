@@ -8,7 +8,7 @@ from fastapi import APIRouter, Header
 from contracts.agentos import EvaluationAgentRun
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
-from contracts.evolution import ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
+from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
 from management.db.evaluation.candidates import text_digest
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, resolve_prompt_candidate
@@ -32,7 +32,8 @@ async def read_workspace(agent_id: int, version_no: int, authorization: str | No
 
 
 @router.post("/experiments/{experiment_id}/feedback")
-async def share_feedback(experiment_id: int, request: FeedbackHandoffRequest, authorization: str | None = Header(None)):
+async def share_feedback(experiment_id: int, request: FeedbackHandoffRequest | DiscoveryHandoffRequest,
+                         authorization: str | None = Header(None)):
     user_id, tenant_id = get_current_user_id(authorization)
     fid = await handoff(tenant_id, user_id, experiment_id, request)
     return {"data": {"feedback_id": fid}}

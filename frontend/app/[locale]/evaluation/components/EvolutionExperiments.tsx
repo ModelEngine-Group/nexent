@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Checkbox,
   Flex,
   Form,
   Input,
@@ -19,20 +20,25 @@ import { evolutionService as api, type Trial } from "@/services/evolutionService
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import ExampleCandidates from "./ExampleCandidates";
+import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedback";
 
 function CaseForm({
   agent,
   version,
+  skills,
   close,
   saved,
 }: {
   agent: number;
   version: number;
+  skills: { name: string }[];
   close: () => void;
   saved: (id: number) => void;
 }) {
   const { t } = useTranslation("common");
   const [files, setFiles] = useState<File[]>([]);
+  const [labelSkill, setLabelSkill] = useState(false);
+  const [expectedSkills, setExpectedSkills] = useState<string[]>([]);
   const [form] = Form.useForm<{
     family: string;
     source_group?: string;
@@ -62,6 +68,7 @@ function CaseForm({
         agent_id: agent,
         version_no: version,
         attachments,
+        expected_skill_names: labelSkill ? expectedSkills : undefined,
       });
     },
     onSuccess: (response) => saved(response.case_id),
@@ -94,6 +101,11 @@ function CaseForm({
         <Form.Item label={t("evolution.sourceGroup")} name="source_group">
           <Input maxLength={128} />
         </Form.Item>
+        <Checkbox checked={labelSkill} onChange={e => setLabelSkill(e.target.checked)}>{t("evolution.labelSkill")}</Checkbox>
+        {labelSkill && <Form.Item label={t("evolution.acceptableSkills")}>
+          <Select mode="multiple" value={expectedSkills} onChange={setExpectedSkills}
+            options={skills.map(s => ({ value: s.name, label: s.name }))} />
+        </Form.Item>}
         <Form.Item label={t("evolution.attachments")}>
           <input
             type="file"
@@ -158,7 +170,7 @@ function Experiments({
         agent_id: agent,
         version_no: version,
         candidate_type: kind,
-        candidate_id: Number(id),
+        candidate_id: id ? Number(id) : undefined,
         suggestion_id: suggestion,
         suggestion_target_case_id: suggestion ? targetCase : undefined,
         case_ids: caseIds,
@@ -184,6 +196,8 @@ function Experiments({
     },
   });
   const choices = workspace.data;
+  const discoveryRun = candidate === "baseline" || candidate?.startsWith("skill_discovery:");
+  const baselineReport = report.data?.total_pairs === 0;
   const active = ["pending", "running"].includes(report.data?.status || "");
   const error =
     workspace.error ||
@@ -235,10 +249,10 @@ function Experiments({
               style={{ minWidth: 220 }}
               value={candidate}
               onChange={setCandidate}
-              options={choices.candidates.map((c) => ({
+              options={[{ value: "baseline", label: t("evolution.baselineSelection") }, ...choices.candidates.map((c) => ({
                 value: `${c.kind}:${c.candidate_id}`,
                 label: `#${c.candidate_id} · ${c.name}`,
-              }))}
+              }))]}
             />
             <Select
               mode="multiple"
@@ -247,7 +261,7 @@ function Experiments({
               style={{ minWidth: 260 }}
               value={caseIds}
               onChange={setCases}
-              options={choices.cases.map((c) => ({
+              options={choices.cases.filter(c => !discoveryRun || c.expected_skill_names != null).map((c) => ({
                 value: c.case_id,
                 label: `${c.family} · ${c.query}`,
               }))}
@@ -296,6 +310,8 @@ function Experiments({
               type="primary"
               disabled={
                 !candidate ||
+                (candidate === "baseline" && !!suggestion) ||
+                (discoveryRun && caseIds.some(id => choices.cases.find(c => c.case_id === id)?.expected_skill_names == null)) ||
                 caseIds.length < (suggestion ? 2 : 1) ||
                 (!!suggestion && !caseIds.includes(targetCase ?? 0)) ||
                 !evaluatorId ||
@@ -324,9 +340,9 @@ function Experiments({
         <>
           <Flex gap={12} align="center">
             <Typography.Text>
-              {t("evolution.coverage", {
-                valid: report.data.valid_pairs,
-                total: report.data.total_pairs,
+              {t(baselineReport ? "evolution.baselineCoverage" : "evolution.coverage", {
+                valid: baselineReport ? report.data.valid_baselines : report.data.valid_pairs,
+                total: baselineReport ? report.data.total_tasks : report.data.total_pairs,
               })}
             </Typography.Text>
             {report.data.valid_triplets !== undefined && <Typography.Text>{t("evolution.skillCoverage", {
@@ -341,7 +357,7 @@ function Experiments({
               </Button>
             )}
           </Flex>
-          {report.data.status === "finished" && (
+          {report.data.status === "finished" && !baselineReport && (
             <ExampleCandidates key={report.data.experiment_id} report={report.data} cases={choices?.cases || []}
               onGenerated={(id) => {
                 setCandidate(`prompt:${id}`);
@@ -351,6 +367,8 @@ function Experiments({
               }}
             />
           )}
+          {report.data.status === "finished" && choices && Object.values(report.data.pairs).some(p => p.base.result?.selection) &&
+            <DiscoveryFeedback key={report.data.experiment_id} report={report.data} workspace={choices} />}
           <Table
             pagination={false}
             rowKey="id"
@@ -366,7 +384,7 @@ function Experiments({
                   choices?.cases.find((c) => String(c.case_id) === id)
                     ?.family || id,
               },
-              ...(report.data.valid_triplets === undefined ? ["base", "result"] : ["no_skill", "base", "result"]).map((key) => ({
+              ...(baselineReport ? ["base"] : report.data.valid_triplets === undefined ? ["base", "result"] : ["no_skill", "base", "result"]).map((key) => ({
                 title: t(`evolution.${key}`),
                 dataIndex: key,
                 render: (trial?: Trial) => trial && (
@@ -384,6 +402,10 @@ function Experiments({
                         reads: trial.result.skill.guide_reads,
                       })}
                     </div>}
+                    {trial.result?.selection && <div>{t("evolution.skillChoice", {
+                      expected: trial.result.selection.expected.join(", ") || "∅",
+                      reads: Object.keys(trial.result.selection.reads).join(", ") || "∅",
+                    })}</div>}
                   </div>
                 ),
               })),
@@ -405,6 +427,7 @@ function Experiments({
         <CaseForm
           agent={agent}
           version={version}
+          skills={choices?.skills || []}
           close={() => setAdding(false)}
           saved={(id) => {
             setCases((current) => [...new Set([...current, id])]);
@@ -440,6 +463,7 @@ function AgentPicker({ viewer }: { viewer: string }) {
   const error = agents.error || versions.error;
   return (
     <Flex vertical gap={16}>
+      <ResourceCandidateGenerator />
       {error instanceof Error && <Alert type="error" message={error.message} />}
       <Flex gap={8}>
         <Select

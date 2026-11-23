@@ -158,6 +158,12 @@ def read_plan(tenant, eid):
 def workspace_choices(tenant, agent_id, version):
     params = dict(tenant=tenant, agent=agent_id, version=version)
     queries = {
+        "skills": """
+            SELECT s.skill_id, s.skill_name AS name FROM nexent.ag_skill_instance_t i
+            JOIN nexent.ag_skill_info_t s ON s.skill_id=i.skill_id AND s.tenant_id=i.tenant_id
+            WHERE i.tenant_id=:tenant AND i.agent_id=:agent AND i.version_no=:version
+                AND i.enabled AND i.delete_flag='N' AND s.delete_flag='N' ORDER BY s.skill_name
+        """,
         "suggestions": """
             SELECT s.suggestion_id, s.expected_behavior, s.skill_id, s.experiment_id FROM nexent.evolution_suggestion_t s
             JOIN nexent.conversation_record_t c ON c.conversation_id=s.conversation_id AND c.created_by=s.submitter_id
@@ -166,7 +172,8 @@ def workspace_choices(tenant, agent_id, version):
             ORDER BY suggestion_id DESC LIMIT 100
         """,
         "cases": """
-            SELECT case_id, task->>'family' AS family, left(task->>'query', 160) AS query
+            SELECT case_id, task->>'family' AS family, left(task->>'query', 160) AS query,
+                task->'expected_skill_names' AS expected_skill_names
             FROM nexent.evolution_replay_case_t WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version
             ORDER BY case_id DESC LIMIT 200
         """,
@@ -175,7 +182,8 @@ def workspace_choices(tenant, agent_id, version):
             FROM nexent.evolution_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.base_version_no=:version
             UNION ALL
-            SELECT s.candidate_id, 'skill_step', s.skill_name, s.create_time FROM nexent.evolution_skill_candidate_t s
+            SELECT s.candidate_id, CASE s.feedback->>'method' WHEN 'S1' THEN 'skill_discovery' ELSE 'skill_step' END,
+                s.skill_name, s.create_time FROM nexent.evolution_skill_candidate_t s
             WHERE s.tenant_id=:tenant AND EXISTS (
                 SELECT 1 FROM nexent.ag_skill_instance_t i WHERE i.skill_id=s.skill_id AND i.tenant_id=:tenant
                 AND i.agent_id=:agent AND i.version_no=:version AND i.enabled AND i.delete_flag='N')

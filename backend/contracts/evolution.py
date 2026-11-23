@@ -67,9 +67,14 @@ class ReplayCaseRequest(BaseModel):
     expected: str = Field(min_length=1, max_length=16000)
     attachments: list[ReplayAttachmentSource] = Field(default_factory=list, max_length=32)
     source_group: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_skill_names: list[str] | None = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
     def check_inputs(self):
+        if self.expected_skill_names is not None and (
+                len(set(self.expected_skill_names)) != len(self.expected_skill_names)
+                or any(not name.strip() or len(name) > 100 for name in self.expected_skill_names)):
+            raise ValueError("Expected Skill names must be distinct catalog names")
         names = [file.name.casefold() for file in self.attachments]
         if len(set(names)) != len(names):
             raise ValueError("Each attachment must have a distinct filename")
@@ -119,8 +124,8 @@ class DevelopmentExperimentRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
-    candidate_type: Literal["prompt", "skill_step"]
-    candidate_id: int = Field(gt=0)
+    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "baseline"]
+    candidate_id: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
     case_ids: list[int] = Field(min_length=1, max_length=100)
     evaluator_id: int = Field(gt=0)
     judge_model_id: int | None = Field(default=None, gt=0)
@@ -136,6 +141,10 @@ class DevelopmentExperimentRequest(BaseModel):
 
     @model_validator(mode="after")
     def check_suggestion_cases(self):
+        if (self.candidate_type == "baseline") != (self.candidate_id is None):
+            raise ValueError("Select a candidate only when comparing a change")
+        if self.candidate_type == "baseline" and self.suggestion_id is not None:
+            raise ValueError("A suggestion trial requires a candidate")
         if self.suggestion_id is not None and len(self.case_ids) < 2:
             raise ValueError("Include the target and a protection task for a Skill suggestion")
         if self.suggestion_target_case_id is not None and (
@@ -172,3 +181,25 @@ class FeedbackHandoffRequest(BaseModel):
 class GenerateFromFeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     model_id: int = Field(gt=0)
+
+
+class DiscoveryExample(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    case_id: int = Field(gt=0)
+    query_excerpt: str = Field(min_length=1, max_length=1500)
+
+
+class DiscoveryHandoffRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    method: Literal["S1"]
+    skill_id: int = Field(gt=0)
+    goal: str = Field(min_length=1, max_length=1500)
+    missed: DiscoveryExample
+    overused: DiscoveryExample
+    correct: DiscoveryExample
+
+    @model_validator(mode="after")
+    def distinct_cases(self):
+        if len({self.missed.case_id, self.overused.case_id, self.correct.case_id}) != 3:
+            raise ValueError("Select three distinct development tasks")
+        return self

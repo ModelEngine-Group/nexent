@@ -3,6 +3,7 @@
 
 from hmac import compare_digest
 from pathlib import Path
+from contextlib import ExitStack, contextmanager
 from tempfile import TemporaryDirectory
 from threading import Lock
 from uuid import uuid4
@@ -76,6 +77,28 @@ def skill_trial_observation(payload, info, actor):
                                 mounted_revision=None if omitted else ref.revision, guide_reads=0), path
 
 
+@contextmanager
+def observe_trial_guide_choices(info, tenant, target_path, track_all):
+    from nexent.core.tools.read_skill_md_tool import observe_guide_reads
+
+    with ExitStack() as stack:
+        all_reads = {}
+        by_path = {}
+        if track_all:
+            reader = next((tool for tool in info.agent_config.tools if tool.name == EvaluationSkillTool.GUIDE), None)
+            if reader is not None:
+                root = Path(reader.params["local_skills_dir"]) / skill_path_segment(tenant)
+                for name in reader.params["authorized_skill_names"]:
+                    path = root / skill_path_segment(name) / "SKILL.md"
+                    if not path.is_file():
+                        raise ValueError("Missing guide for an authorized Skill")
+                    by_path[path] = all_reads[name] = stack.enter_context(observe_guide_reads(path))
+        target = by_path.get(target_path)
+        if target is None and target_path is not None:
+            target = stack.enter_context(observe_guide_reads(target_path))
+        yield target, all_reads
+
+
 def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | None:
     """Keep verified skill files outside the workspace copied or mounted into sandboxes."""
     global _stage_directory
@@ -138,7 +161,6 @@ def materialize_skill_tools(
 
     if len({row["name"] for row in rows.values()}) != len(rows):
         raise ValueError("Duplicate evaluation skill name")
-    validate_skill_context(context_items, rows.values())
     stage_root = skill_stage_path(workspace_path, create=True)
     stage = stage_root / uuid4().hex
     configs = {}
@@ -158,6 +180,8 @@ def materialize_skill_tools(
                 bound = skill_candidate_records.read_bound_skill_candidate(tenant, resource.agent_id, resource.version_no, candidate)
                 if not bound or bound["instance_id"] != ref.instance_id:
                     raise ValueError("Skill candidate is outside the Agent binding")
+                revision_row = skill_candidate_records.candidate_skill_row(revision_row, bound, ref.package_variant)
+                rows[ref.instance_id] = revision_row
                 files = load_skill_package(tenant, bound["skill_id"], bound[ref.package_variant + "_digest"])
             revision = skill_execution_revision(tenant, resource.agent_id, resource.version_no, revision_row, files)
         except (KeyError, OSError, TypeError, ValueError) as exc:
@@ -171,6 +195,7 @@ def materialize_skill_tools(
             path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             path.write_bytes(contents)
 
+    validate_skill_context(context_items, rows.values())
     metadata = {"agent_id": resource.agent_id, "version_no": resource.version_no, "tenant_id": tenant}
     params = {"local_skills_dir": str(stage), "isolated_skills_root": True, "authorized_skill_names": sorted(configs)}
     tools = {}

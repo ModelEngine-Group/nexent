@@ -20,10 +20,11 @@ interface Rule {
   status: string;
 }
 export interface Workspace {
+  skills?: { skill_id: number; name: string }[];
   suggestions?: { suggestion_id: number; expected_behavior: string; skill_id: number; experiment_id: number | null }[];
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[] }[];
   candidates: { candidate_id: number; kind: string; name: string }[];
-  cases: { case_id: number; family: string; query: string }[];
+  cases: { case_id: number; family: string; query: string; expected_skill_names?: string[] | null }[];
   experiments: { experiment_id: number; create_time: string }[];
 }
 export interface Trial {
@@ -32,6 +33,7 @@ export interface Trial {
     answer?: string;
     reported_step_input_tokens?: number | null;
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
+    selection?: { expected: string[]; reads: Record<string, number>; outcome: string };
     error?: string;
     judgment?: { score?: number; reason?: string };
   };
@@ -41,9 +43,11 @@ export interface ExperimentReport {
   status: string;
   valid_pairs: number;
   total_pairs: number;
+  valid_baselines?: number;
+  total_tasks?: number;
   valid_triplets?: number;
   verified_guide_pairs?: number;
-  pairs: Record<string, { base: Trial; result: Trial; no_skill?: Trial; comparison: string;
+  pairs: Record<string, { base: Trial; result?: Trial; no_skill?: Trial; comparison: string;
     skill_vs_absent?: { base: string; result: string } }>;
 }
 
@@ -89,6 +93,7 @@ export const evolutionService = {
     source_group?: string;
     query: string;
     expected: string;
+    expected_skill_names?: string[];
     attachments: { name: string; object_name: string }[];
   }) => read<{ case_id: number }>(`${root}/development-cases`, body),
   submit: (body: {
@@ -98,13 +103,19 @@ export const evolutionService = {
     agent_id: number;
     version_no: number;
     candidate_type: string;
-    candidate_id: number;
+    candidate_id?: number;
     case_ids: number[];
     evaluator_id: number;
     judge_model_id?: number;
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  shareDiscovery: (id: number, body: { method: "S1"; skill_id: number; goal: string } &
+    Record<"missed" | "overused" | "correct", { case_id: number; query_excerpt: string }>) =>
+    read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
+  fromFeedback: (id: number, model_id: number) =>
+    read<{ candidate_id: number; method: string; edit: { old: string; new: string } }>(
+      `${root}/feedback/${id}/candidates`, { model_id }),
   exampleCandidates: (id: number, body: {
     target_case_id: number;
     target_behavior: string;

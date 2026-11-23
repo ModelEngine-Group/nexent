@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperiments";
+import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import { evolutionService } from "@/services/evolutionService";
 
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
@@ -25,6 +26,7 @@ vi.mock("@/services/evolutionService", () => ({
     report: vi.fn(),
     submit: vi.fn(),
     exampleCandidates: vi.fn(),
+    shareDiscovery: vi.fn(),
   },
 }));
 
@@ -131,4 +133,37 @@ it("selects a published scope and opens its paired results with the original sta
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
   })));
+});
+
+it("shares only the three approved request excerpts for a discovery rewrite", async () => {
+  const groups = ["missed", "overused", "correct"];
+  const tasks = groups.map((name, i) => ({ case_id: i + 1, family: name, query: name + " meeting" }));
+  const reads: Record<string, number>[] = [{}, { meeting: 1 }, { meeting: 1 }];
+  const report = {
+    experiment_id: 23, status: "finished", valid_pairs: 0, total_pairs: 0,
+    pairs: Object.fromEntries(tasks.map((c, i) => [String(c.case_id), {
+      comparison: "baseline_only", base: { status: "pass", result: {
+        answer: "private answer", selection: { expected: i === 1 ? [] : ["meeting"],
+          reads: reads[i], outcome: ["missed", "wrong", "hit"][i] },
+      } },
+    }])),
+  };
+  vi.mocked(evolutionService.shareDiscovery).mockResolvedValue({ feedback_id: 27 });
+  render(<QueryClientProvider client={new QueryClient()}><DiscoveryFeedback report={report}
+    workspace={{ skills: [{ name: "meeting", skill_id: 12 }], cases: tasks, candidates: [], experiments: [] }} />
+    </QueryClientProvider>);
+  fireEvent.click(screen.getByText("evolution.discoveryFeedback"));
+  await choose("evolution.targetSkill", "meeting");
+  fireEvent.change(screen.getByLabelText("evolution.discoveryGoal"), { target: { value: "change trigger" } });
+  for (const [i, group] of groups.entries()) {
+    await choose(`evolution.group.${group}`, tasks[i].query);
+  }
+  fireEvent.change(screen.getAllByLabelText("evolution.approvedExcerpt")[0], { target: { value: "missed" } });
+  fireEvent.click(screen.getByRole("button", { name: "evolution.shareFeedback" }));
+  await waitFor(() => expect(evolutionService.shareDiscovery).toHaveBeenCalledWith(23, {
+    method: "S1", skill_id: 12, goal: "change trigger",
+    missed: { case_id: 1, query_excerpt: "missed" },
+    overused: { case_id: 2, query_excerpt: "overused meeting" },
+    correct: { case_id: 3, query_excerpt: "correct meeting" },
+  }));
 });
