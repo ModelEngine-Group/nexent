@@ -56,6 +56,7 @@ COPY sdk/pyproject.toml /opt/sdk/pyproject.toml
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv sync --no-default-groups --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR") && \
     uv export --locked --only-group management --no-emit-project --no-hashes \
+        $(test -n "$MIRROR" && echo "-i $MIRROR") \
         -o /opt/backend/management-requirements.txt
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
     /opt/backend/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
