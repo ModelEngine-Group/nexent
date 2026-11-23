@@ -104,6 +104,29 @@ async def test_nonzero_after_one_delete_is_not_complete_or_retried(deletion):
     s.vectors.delete.assert_called_once()
 
 
+async def test_file_cleanup_confirms_native_and_managed_counts_before_terminal_state(deletion, mocker):
+    s, _, _, lookup, worker = deletion
+    generations = {"a" * 32: 0}
+    mocker.patch.object(s.policy, "native_cleanup_generations", return_value=generations)
+    worker.native_cleanup = mocker.Mock(return_value=2)
+    final = await worker.process(lookup, s.actor, owner_id="owner", context=s.context)
+    assert final.status == "deleted" and final.processed_chunks == 3
+    actor, grant, supplied = worker.native_cleanup.call_args.args
+    assert actor == s.actor and grant.file_id == lookup.file_id and supplied == generations
+
+
+async def test_uncertain_native_cleanup_is_not_replayed_or_published(deletion, mocker):
+    s, _, _, lookup, worker = deletion
+    mocker.patch.object(s.policy, "native_cleanup_generations", return_value={"a" * 32: 0})
+    worker.native_cleanup = mocker.Mock(side_effect=OutcomeUnknown())
+    with pytest.raises(OutcomeUnknown):
+        await worker.process(lookup, s.actor, owner_id="owner", context=s.context)
+    state = await worker.process(lookup, s.actor, owner_id="other", context=s.context)
+    assert state.status == "cleanup_pending" and state.reconcile_required
+    assert not state.physical_cleanup_complete
+    worker.native_cleanup.assert_called_once()
+
+
 async def test_total_deadline_cancels_authorization_without_storage_or_retry(deletion, caplog):
     s, _, _, lookup, worker = deletion
     cancelled = []

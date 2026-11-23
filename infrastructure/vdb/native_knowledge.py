@@ -48,6 +48,10 @@ IMAGE_PROCESS_SOURCE = "UniversalImageExtractor"
 _PRIVATE_FIELDS = frozenset({"embedding", "multi_embedding", INGEST_GENERATION, INGEST_IMAGE})
 
 
+def native_file_document_id(file_id, version, generation, position):
+    return f"{file_id}-{version}-{generation}-{position}"
+
+
 def _published_generations(actor, resource, *, engine, context):
     scope = StorageScope("runtime", resource.resource_tenant_id, actor.user_id, {FILES})
     with closing(bind_knowledge_manifest(scope, resource.knowledge_id, engine)) as records:
@@ -579,7 +583,7 @@ class NativeFileGenerationWriter(NativeDocumentCreation):
             if (not isinstance(generation, str) or not re.fullmatch(r"[0-9a-f]{32}", generation)
                 or type(position) is not int or position < 0 or location.get("path_or_url") != self.grant.source.key):
                 raise InvalidInput()
-            identity = f"{self.grant.file_id}-{self.grant.file_version}-{generation}-{position}"
+            identity = native_file_document_id(self.grant.file_id, self.grant.file_version, generation, position)
             if identity in ids:
                 raise InvalidInput()
             ids.add(identity)

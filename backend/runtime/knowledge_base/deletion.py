@@ -31,16 +31,18 @@ from runtime.knowledge_base.worker import (
 )
 
 from infrastructure.knowledge_runtime import knowledge_deletion_ports
+from infrastructure.vdb.native_file_cleanup import delete_native_file_generations
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeDeleteWorker:
     def __init__(self, authorization_client, *, jobs=knowledge_jobs,
-                 ports=knowledge_deletion_ports, operation_seconds=300):
+                 ports=knowledge_deletion_ports, native_cleanup=delete_native_file_generations, operation_seconds=300):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 3600:
             raise InvalidInput()
         self.client, self.jobs, self.ports = authorization_client, jobs, ports
+        self.native_cleanup = native_cleanup
         self.operation_seconds = operation_seconds
 
     async def _blocking(self, action, *args, **kwargs):
@@ -108,8 +110,13 @@ class KnowledgeDeleteWorker:
                                          owner_id=owner_id, context=context)
                 if handle is None:
                     return await self._job(actor, grant, "inspect", lookup, context=context)
+                generations = await self._job(actor, grant, "native_cleanup_generations", handle, context=context)
                 with self.ports(actor, grant, context=context) as vectors:
                     deleted_count = await self._blocking(self._remove, vectors, grant, request, context)
+                if generations:
+                    if await self._grant(request, actor) != grant:
+                        raise Conflict()
+                    deleted_count += await self._blocking(self.native_cleanup, actor, grant, generations, context=context)
                 if await self._grant(request, actor) != grant:
                     raise Conflict()
                 return await self._job(actor, grant, "finish_delete", handle,

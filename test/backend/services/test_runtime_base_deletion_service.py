@@ -60,7 +60,8 @@ async def setup(sqlite_threads, journal):  # noqa: F811
             records.close()
             counts['close'] += 1
 
-    service = KnowledgeBaseDeletionService(client, ports=ports)
+    native = Mock(return_value=True)
+    service = KnowledgeBaseDeletionService(client, ports=ports, native_absent=native)
     try:
         yield SimpleNamespace(**locals())
     finally:
@@ -78,6 +79,8 @@ async def test_success_is_durable_and_repeated_delete_does_not_touch_vectors(set
     assert await s.service.inspect(lookup, s.s.actor) == state
     s.vectors.delete_empty_collection.assert_called_once()
     s.vectors.collection_exists.assert_not_called()
+    s.native.assert_called_once()
+    assert s.native.call_args.kwargs["remove"] is True
 
 
 async def test_uncertain_drop_only_observes_and_never_replays(setup):
@@ -93,6 +96,21 @@ async def test_uncertain_drop_only_observes_and_never_replays(setup):
     assert state.status == 'deleted'
     assert s.vectors.delete_empty_collection.call_count == 1
     assert s.vectors.collection_exists.call_count == 2
+    s.native.assert_called_once()
+    assert s.native.call_args.kwargs["remove"] is False
+
+
+async def test_uncertain_native_drop_waits_for_exact_absence_without_replay(setup):
+    s = setup
+    s.native.side_effect = [OutcomeUnknown(), False, True]
+    with pytest.raises(OutcomeUnknown):
+        await s.service.delete(s.s.request, s.s.actor)
+    state = await s.service.delete(s.s.request, s.s.actor)
+    assert state.status == 'cleanup_pending'
+    lookup = KnowledgeBaseDeleteLookup(knowledge_id=1, job_id=state.job_id)
+    assert (await s.service.inspect(lookup, s.s.actor)).physical_cleanup_complete
+    assert [call.kwargs["remove"] for call in s.native.call_args_list] == [True, False, False]
+    s.vectors.delete_empty_collection.assert_called_once()
 
 
 async def test_changed_grant_cannot_commit_terminal(setup):

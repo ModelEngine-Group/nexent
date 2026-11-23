@@ -25,16 +25,21 @@ from nexent.storage.models import DeleteReceipt, OperationContext, WriteOutcome
 from runtime.knowledge_base.base_deletion import KnowledgeBaseDeletionJournal
 from runtime.knowledge_base.worker import cancellable_context
 
-from infrastructure.knowledge_base_deletion import knowledge_base_deletion_ports
+from infrastructure.knowledge_base_deletion import (
+    knowledge_base_deletion_ports,
+    native_collection_absent,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeBaseDeletionService:
-    def __init__(self, client, *, ports=knowledge_base_deletion_ports, operation_seconds=10):
+    def __init__(self, client, *, ports=knowledge_base_deletion_ports,
+                 native_absent=native_collection_absent, operation_seconds=10):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 30:
             raise InvalidInput()
         self.client, self.ports, self.seconds = client, ports, operation_seconds
+        self.native_absent = native_absent
 
     async def delete(self, request, actor, *, context=None):
         if not isinstance(request, KnowledgeBaseDelete):
@@ -78,6 +83,9 @@ class KnowledgeBaseDeletionService:
                 raise OutcomeUnknown(operation_id=context.operation_id)
             return not exists
 
+    def _original_absent(self, actor, grant, owner, context):
+        return self.native_absent(actor, grant, remove=owner, context=context)
+
     def _finish(self, row, actor, grant, context):
         with self.ports(actor, grant, context=context) as (records, _):
             return KnowledgeBaseDeletionJournal(records, actor, grant).finish(
@@ -95,6 +103,10 @@ class KnowledgeBaseDeletionService:
                     return KnowledgeBaseDeletionJournal.state(row)
                 absent = await self._blocking(self._physical, row, owner, actor, grant, context)
                 if not absent:
+                    return KnowledgeBaseDeletionJournal.state(row)
+                if owner and await self._grant(request, actor) != grant:
+                    raise Conflict()
+                if not await self._blocking(self._original_absent, actor, grant, owner, context):
                     return KnowledgeBaseDeletionJournal.state(row)
                 if await self._grant(request, actor) != grant:
                     raise Conflict()

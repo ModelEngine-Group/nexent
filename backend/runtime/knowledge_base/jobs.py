@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -596,6 +597,36 @@ class KnowledgeJobs:
                     context,
                 )
         return job_state(row)
+
+    def native_cleanup_generations(self, handle, *, context):
+        """Resolve exact native upload attempts covered by the owned file tombstone."""
+        lookup = _lookup(handle)
+        self.authorize(lookup, context=context)
+        with self.records.transaction(context=context) as tx:
+            manifest = lock_file_manifest(tx, lookup, context)
+            row = self._job(tx, lookup, context)
+            if (row["operation"] != "delete" or row["status"] != "cleanup_pending"
+                or not row["write_started"] or not row["reconcile_required"]
+                or manifest["tombstone_version"] < lookup.file_version
+                or any(not row[name] or row[name] != handle.get(name) for name in ("owner_id", "attempt_id"))
+                or self._writers_active(tx, lookup, context)):
+                raise Conflict()
+            where = _all(self._covered(lookup), Comparison("operation", "eq", "upload"),
+                         Comparison("write_started", "eq", True))
+            query = RecordQuery(where=where, fields=("attempt_id", "file_version", "request_payload"))
+            cursor, generations = None, {}
+            while True:
+                page = tx.query(JOBS, query, PageRequest(limit=500, cursor=cursor), context=context)
+                for upload in page.items:
+                    if upload["request_payload"].get("native_documents") is not True:
+                        continue
+                    generation = upload["attempt_id"]
+                    if not isinstance(generation, str) or not re.fullmatch(r"[0-9a-f]{32}", generation) or generation in generations:
+                        raise Conflict()
+                    generations[generation] = upload["file_version"]
+                cursor = page.next_cursor
+                if cursor is None:
+                    return generations
 
     def is_visible(self, reference, generation, *, context):
         # Search authorizes its knowledge scope before applying this authoritative final filter.

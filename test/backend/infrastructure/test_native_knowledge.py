@@ -10,6 +10,7 @@ from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext, Revision, VectorKey, VectorRecord
 
 from infrastructure.vdb import native_knowledge
+from infrastructure.vdb.native_file_cleanup import _delete, _native_target
 
 
 @pytest.fixture
@@ -228,3 +229,33 @@ def test_historical_document_cannot_supply_native_image_ticket_context(fixture):
         "_source": {"content": "historical", native_knowledge.INGEST_IMAGE: {"image_ref": "forged"}}}]}}
     result = reader.exec_query("kb", {"query": {"match_all": {}}})
     assert result[0]["document"] == {"id": "historical", "content": "historical"}
+
+
+def test_native_file_cleanup_uses_generation_scope_and_per_document_revision(fixture):
+    es, actor, grant, context = fixture
+    generation = "a" * 32
+    grant.file_id = "f" * 32
+    identity = native_knowledge.native_file_document_id(grant.file_id, 2, generation, 0)
+    marker = native_knowledge.INGEST_GENERATION
+    es.indices.get_mapping.return_value["kb"]["mappings"]["properties"][marker] = {"type": "keyword"}
+    es.open_point_in_time.return_value = {"id": "pit"}
+    es.search.side_effect = [{"hits": {"hits": [{"_index": "kb", "_id": identity, "_seq_no": 2, "_primary_term": 1,
+        "_source": {marker: generation, "id": identity, "index": 0}, "sort": [0]}]}}, {"hits": {"hits": []}}]
+    es.bulk.return_value = {"items": [{"delete": {"_index": "kb", "status": 200}}]}
+    es.count.return_value = {"count": 0, "_shards": {"failed": 0}}
+    assert _delete(es, grant, actor.tenant_id, {generation: 2}, context=context) == 1
+    assert es.count.call_args.kwargs["query"] == {"terms": {marker: [generation]}}
+    assert es.bulk.call_args.kwargs["operations"] == [
+        {"delete": {"_index": "kb", "_id": identity, "if_seq_no": 2, "if_primary_term": 1}},
+    ]
+
+
+def test_native_file_cleanup_rejects_other_identity_even_with_matching_generation(fixture):
+    _, actor, grant, _ = fixture
+    generation = "a" * 32
+    grant.file_id = "f" * 32
+    identity = native_knowledge.native_file_document_id("b" * 32, 2, generation, 0)
+    with pytest.raises(ScopeDenied):
+        _native_target({"_index": "kb", "_id": identity, "_source": {
+            native_knowledge.INGEST_GENERATION: generation, "id": identity, "index": 0,
+        }}, grant, actor.tenant_id, {generation: 2})

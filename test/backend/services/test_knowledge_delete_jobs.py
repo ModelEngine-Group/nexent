@@ -47,6 +47,26 @@ def test_confirmed_count_survives_inspect_and_cannot_be_replaced(setup):
     assert policy.inspect(lookup(state), context=context) == final
 
 
+def test_owned_delete_resolves_only_native_upload_attempts_through_tombstone(setup):
+    policy, records, engine, request, context, now, authorize = setup
+
+    def upload(native, **changes):
+        proposal = request.model_copy(update={"native_documents": native, **changes})
+        _, writer = started((policy, records, engine, proposal, context, now, authorize))
+        assert policy.complete(writer, chunk_count=1, context=context)
+        return writer
+
+    old = upload(True)
+    upload(False, file_id="b" * 32, idempotency_key="other")
+    upload(True, file_id="c" * 32, idempotency_key="other-native")
+    upload(True, file_version=request.file_version + 1, idempotency_key="newer")
+    state = policy.submit(deletion(request), context=context)
+    handle = policy.begin_delete(lookup(state), owner_id="cleaner", context=context)
+    assert policy.native_cleanup_generations(handle, context=context) == {old["attempt_id"]: request.file_version}
+    with pytest.raises(Conflict):
+        policy.native_cleanup_generations({**handle, "attempt_id": "wrong"}, context=context)
+
+
 @pytest.mark.parametrize('count', [-1, True, 2**31, 1.5, None])
 def test_invalid_count_cannot_complete_deletion(setup, count):
     policy, _, _, request, context, _, _ = setup
