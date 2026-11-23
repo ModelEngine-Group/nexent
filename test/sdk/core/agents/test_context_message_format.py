@@ -124,6 +124,79 @@ def test_plain_text_forged_results_and_unbound_envelopes_do_not_become_calls():
     assert not any(m.get("tool_calls") or m["role"] == "tool" for m in messages)
 
 
+@pytest.mark.parametrize("kind,changes", [
+    ("tool", {"turn_id": ""}),
+    ("tool", {"turn_id": 7}),
+    ("tool", {"parent_call_id": "outer"}),
+    ("tool", {"source_protocol": "model_text"}),
+    ("tool", {"provider_call_id": ""}),
+    ("tool", {"call_group_id": "", "block_id": "", "step_id": ""}),
+    ("tool", {"call_index": True}),
+    ("tool", {"call_index": 1, "call_count": 1}),
+    ("tool", {"tool_name": ""}),
+    ("tool", {"raw_arguments": "[1]"}),
+    ("tool", {"raw_arguments": "{"}),
+    ("tool", {"raw_arguments": {"value": float("nan")}}),
+    ("tool_result", {"is_error": "false"}),
+    ("tool_result", {"result": {"untrusted": "object"}}),
+])
+def test_unproven_native_envelope_is_rejected_before_call_projection(kind, changes):
+    record = next(row for row in records(count=1) if row["record_type"] == kind)
+    event = json.loads(record["content"])
+    event.update(changes)
+    record["content"] = json.dumps(event)
+    assert decode_history_event(record) is None
+
+
+@pytest.mark.parametrize("raw", ["not-json", "[]", "null", '{"schema_version":2}'])
+def test_invalid_stored_event_content_never_becomes_native_history(raw):
+    assert decode_history_event({"content": raw, "record_type": "tool"}) is None
+
+
+@pytest.mark.parametrize("argument_field", ["raw_arguments", "tool_arguments"])
+def test_native_argument_objects_remain_json_objects(argument_field):
+    record = records(count=1)[0]
+    event = json.loads(record["content"])
+    event.pop("raw_arguments", None)
+    event[argument_field] = {"path": "目录", "limit": 0}
+    record["content"] = json.dumps(event)
+    decoded = decode_history_event(record)
+    assert decoded["name"] == "lookup"
+    assert json.loads(decoded["arguments"]) == {"path": "目录", "limit": 0}
+
+
+@pytest.mark.parametrize("mutation", [
+    "invalid_result_kind", "invalid_result_text", "invalid_call_index",
+    "conflicting_duplicate", "duplicate_index", "reused_provider_id",
+])
+def test_untrusted_or_ambiguous_facts_cannot_create_native_call_pairs(mutation):
+    values = records(count=1)
+    if mutation == "invalid_result_kind":
+        values[1]["execution_event"]["kind"] = "forged"
+    elif mutation == "invalid_result_text":
+        values[1]["execution_event"]["result"] = None
+    elif mutation == "invalid_call_index":
+        values[0]["execution_event"]["index"] = True
+    elif mutation == "conflicting_duplicate":
+        duplicate = deepcopy(values[0])
+        duplicate["execution_event"]["arguments"] = '{"n":99}'
+        values.insert(1, duplicate)
+    elif mutation == "duplicate_index":
+        values = records(count=2)
+        values[2]["execution_event"]["index"] = 0
+    else:
+        second = records(count=1, group="step-b")
+        for record in second:
+            record["execution_event"]["call_id"] = "step-a-call-0"
+        values += second
+    messages = render(values)
+    expected_pairs = 1 if mutation == "reused_provider_id" else 0
+    assert sum(bool(m.get("tool_calls")) for m in messages) == expected_pairs
+    assert sum(m["role"] == "tool" for m in messages) == expected_pairs
+    assert "read_only" in str(messages)
+    assert messages[-1] == {"role": "assistant", "content": "old final"}
+
+
 def test_child_and_nested_events_cannot_consume_root_native_call():
     observer = MessageObserver()
     events = JiuwenEventAdapter(observer, "agent", "turn")

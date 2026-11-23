@@ -138,6 +138,47 @@ def test_ac015_reference_cannot_move_or_collide():
     with pytest.raises(ValueError):store.bind(other,5,2)
 
 
+@pytest.mark.parametrize("message,index,value,error", [
+    (True, 0, "original", ValueError),
+    (0, 0, "original", ValueError),
+    (5, True, "original", ValueError),
+    (5, -1, "original", ValueError),
+    (5, 0, None, ValueError),
+    (5, 0, "conflicting", PermissionError),
+])
+def test_ac010_restore_batch_is_atomic_when_a_reference_is_invalid(message, index, value, error):
+    store = ExecutionHistory()
+    store.restore_results("owner", [(5, 0, "original")])
+    with pytest.raises(error):
+        store.restore_results("owner", [(6, 0, "must not be committed"), (message, index, value)])
+    assert json.loads(store.read("owner", "message:5/unit-index:0"))["text"] == "original"
+    with pytest.raises(PermissionError):
+        store.read("owner", "message:6/unit-index:0")
+
+
+def test_ac010_conflicting_results_in_one_restore_batch_are_not_committed():
+    store = ExecutionHistory()
+    with pytest.raises(PermissionError, match="Conflicting persisted execution reference"):
+        store.restore_results("owner", [(5, 0, "first"), (5, 0, "second")])
+    with pytest.raises(PermissionError):
+        store.read("owner", "message:5/unit-index:0")
+
+
+def test_ac010_restore_cannot_override_a_bound_current_execution():
+    store, key = bound_history({"STDOUT": "original"})
+    with pytest.raises(PermissionError, match="Conflicting persisted execution reference"):
+        store.restore_results("owner", [(5, 2, "forged")])
+    store.restore_results("owner", [(5, 2, store.get(key).text)])
+    assert json.loads(store.read("owner", "message:5/unit-index:2"))["text"] == store.get(key).text
+
+
+def test_ac001_committed_model_view_is_included_in_execution_payload():
+    store, key = bound_history()
+    record = store.get(key)
+    record.model_view = {"preview": "committed preview"}
+    assert record.payload() == {"content": record.text, "model_view": {"preview": "committed preview"}}
+
+
 def test_ac005_selected_action_compacts_and_ac009_recent_loaded_stays_full():
     store,key=bound_history()
     manager=ContextManager(ContextManagerConfig(execution_history=store, effective_input_limit_tokens=20000, compaction_target_tokens=100))
