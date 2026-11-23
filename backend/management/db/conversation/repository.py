@@ -36,7 +36,6 @@ from contracts.errors.exceptions import AppException, ConversationNotFoundError,
 from contracts.agentos import RUN_ID_PATTERN
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
-from management.db.models import KnowledgeRecord
 
 from infrastructure.rdb.orm import as_dict
 from contracts.errors.exceptions import (
@@ -55,16 +54,16 @@ from management.db.conversation.classification import (
     is_workbench_history,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.db.models import (
-    AgentAutomationProposal,
+from management.db.automation.models import AgentAutomationProposal
+from management.db.conversation.models import (
     ConversationMessage,
     ConversationMessageUnit,
     ConversationRecord,
     ConversationSourceImage,
     ConversationSourceSearch,
-    KnowledgeRecord,
-    UserTenant,
 )
+from management.db.identity.models import UserTenant
+from management.db.knowledge_base.models import KnowledgeRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 from infrastructure.rdb.orm import as_dict
 

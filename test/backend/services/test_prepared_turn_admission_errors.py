@@ -83,14 +83,17 @@ async def test_authorized_workbench_stages_skill_root(flow, mocker):
     mocker.patch.object(prepared_turn, "_prepare_workbench", return_value=plan)
     compile_snapshot.return_value.resource = SimpleNamespace(
         agent_id=7, version_no=4, workbench_skill_refs=[{"skill_id": 8}],
+        tools=[ToolBinding(tool_id=prepared_turn.AUTOMATION_PROPOSAL_TOOL, version="1")],
     )
+    compile_snapshot.return_value.models = SimpleNamespace(llm=SimpleNamespace(model_id=11))
     request = AgentRequest(
-        query="question", conversation_id=42, entrypoint="workbench", workbench=config, enable_automation_tool=False,
+        query="question", conversation_id=42, entrypoint="workbench", workbench=config, enable_automation_tool=True,
     )
     response = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, runtime)
     assert response.headers["X-Workbench-Config-Version"] == "3"
     turn = prepared_turn.store.stage_turn.call_args.args[5]
     assert turn["workbench_skill_root"] == {"agent_id": 7, "version_no": 4}
+    assert turn["automation"]["model_id"] == 11
     assert turn["workbench_update"] == {"config": config.model_dump(mode="json"), "expected_version": 2, "version": 3}
 
 

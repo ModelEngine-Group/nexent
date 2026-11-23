@@ -13,7 +13,9 @@ from contracts.errors.trajectory import QueryError
 from infrastructure.rdb.client import get_db_session
 from management.db.conversation.classification import is_workbench_history
 from management.db.conversation.models import ConversationMessage, ConversationRecord
-from management.db.models import AgentInfo, TenantConfig, UserAccount, UserTenant
+from management.db.agent.models import AgentInfo
+from management.db.configuration.models import TenantConfig
+from management.db.identity.models import UserAccount, UserTenant
 
 
 @contextmanager
