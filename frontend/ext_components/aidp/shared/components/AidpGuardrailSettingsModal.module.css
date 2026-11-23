@@ -1,0 +1,28 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.guardrailModal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0 4px;
+}
+
+.guardrailModalControl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.guardrailModalLabel {
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.guardrailModalHint {
+  margin: 0;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}

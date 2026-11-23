@@ -22,7 +22,7 @@ import { useAidpKnowledgeDetail } from "@/ext_components/aidp/pages/knowledge-fi
 import AidpSensitiveWordDrawer from "@/ext_components/aidp/pages/sensitive-words/AidpSensitiveWordDrawer";
 import AidpSensitiveWordsTable from "@/ext_components/aidp/pages/sensitive-words/components/AidpSensitiveWordsTable";
 import AidpSensitiveWordsToolbar from "@/ext_components/aidp/pages/sensitive-words/components/AidpSensitiveWordsToolbar";
-import AidpGuardrailSettingsModal from "@/ext_components/aidp/pages/sensitive-words/components/AidpGuardrailSettingsModal";
+import AidpGuardrailSettingsModal from "@/ext_components/aidp/shared/components/AidpGuardrailSettingsModal";
 import {
   useAidpSensitiveWordList,
   useDeleteAidpSensitiveWords,

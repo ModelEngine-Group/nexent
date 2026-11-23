@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import { Modal, Switch } from "antd";
 
-import styles from "../AidpSensitiveWords.module.css";
+import styles from "./AidpGuardrailSettingsModal.module.css";
 
 interface AidpGuardrailSettingsModalProps {
   open: boolean;
