@@ -40,7 +40,7 @@ async def deletion(setup):
 
     @contextmanager
     def ports(actor, value, *, context):
-        assert actor == s.actor and value == grant
+        assert actor == s.actor and value.model_copy(update={"legacy_sources": []}) == grant
         try:
             yield s.vectors
         finally:
@@ -125,6 +125,19 @@ async def test_uncertain_native_cleanup_is_not_replayed_or_published(deletion, m
     assert state.status == "cleanup_pending" and state.reconcile_required
     assert not state.physical_cleanup_complete
     worker.native_cleanup.assert_called_once()
+
+
+async def test_legacy_grant_triggers_cleanup_without_any_runtime_upload_generation(deletion, mocker):
+    s, _, _, lookup, worker = deletion
+    grant = s.client.authorize_knowledge.return_value.model_copy(update={"legacy_sources": ["files/legacy.txt"]})
+    s.client.authorize_knowledge.return_value = grant
+    s.vectors.count.side_effect = None
+    s.vectors.count.return_value = 0
+    worker.native_cleanup = mocker.Mock(return_value=3)
+    state = await worker.process(lookup, s.actor, owner_id="owner", context=s.context)
+    assert state.status == "deleted" and state.processed_chunks == 3
+    assert worker.native_cleanup.call_args.args == (s.actor, grant, {})
+    s.vectors.delete.assert_not_called()
 
 
 async def test_total_deadline_cancels_authorization_without_storage_or_retry(deletion, caplog):

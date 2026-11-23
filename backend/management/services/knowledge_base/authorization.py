@@ -7,13 +7,17 @@ from contracts.agentos_knowledge import (
     KnowledgeFileSourceDisplay,
     ObjectReference,
 )
+from contracts.constants import environment
 from contracts.knowledge_cleanse import knowledge_artifact_prefix, parse_cleanse_request
 from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
+from management.services.knowledge_base.legacy_vector_file_links import (
+    legacy_source_addresses,
+)
 from management.services.knowledge_base.owner_cleanup import has_cleanup_authority
-from nexent.storage.errors import ScopeDenied
+from nexent.storage.errors import Conflict, ScopeDenied
 from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from pydantic import ValidationError
 
@@ -51,6 +55,8 @@ class KnowledgeAuthorization:
             except ValueError:
                 raise ScopeDenied() from None
             self._artifact(request, source, context)
+        legacy_sources = (self._legacy_sources(file, knowledge, request, context)
+                         if request.action == "delete" and environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED else [])
         return KnowledgeFileGrant(
             action=request.action,
             knowledge_id=request.knowledge_id,
@@ -63,7 +69,26 @@ class KnowledgeAuthorization:
             embedding_model_id=knowledge.get("embedding_model_id"),
             artifact=request.artifact,
             parser_version=request.parser_version,
+            legacy_sources=legacy_sources,
         )
+
+    def _legacy_sources(self, file, knowledge, request, context):
+        self._require_cleanup_inspection(file, knowledge, request)
+        addresses = legacy_source_addresses(file, strict=True)
+        if not addresses:
+            return []
+        # Include retired rows: reusing a name does not transfer its historical vectors.
+        cursor = None
+        query = RecordQuery(where=Comparison("knowledge_id", "eq", request.knowledge_id),
+                            fields=("file_id", "bucket_name", "source_key", "object_name", "local_source_path"))
+        while True:
+            page = self.resources.records.query("knowledge_file_history", query, PageRequest(limit=500, cursor=cursor),
+                                                context=context)
+            if any(row["file_id"] != request.file_id and addresses & legacy_source_addresses(row) for row in page.items):
+                raise Conflict()
+            cursor = page.next_cursor
+            if cursor is None:
+                return sorted(addresses)
 
     def _require_cleanup_inspection(self, file, knowledge, request):
         try:

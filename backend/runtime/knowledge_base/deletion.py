@@ -113,7 +113,7 @@ class KnowledgeDeleteWorker:
                 generations = await self._job(actor, grant, "native_cleanup_generations", handle, context=context)
                 with self.ports(actor, grant, context=context) as vectors:
                     deleted_count = await self._blocking(self._remove, vectors, grant, request, context)
-                if generations:
+                if generations or grant.legacy_sources:
                     if await self._grant(request, actor) != grant:
                         raise Conflict()
                     deleted_count += await self._blocking(self.native_cleanup, actor, grant, generations, context=context)

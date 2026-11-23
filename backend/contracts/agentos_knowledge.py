@@ -191,10 +191,21 @@ class KnowledgeFileGrant(KnowledgeAuthorizationRequest):
     filename: str = Field(min_length=1, max_length=1024)
     collection: str = Field(min_length=1, max_length=100)
     embedding_model_id: int | None = Field(default=None, gt=0)
+    legacy_sources: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_serializer(mode="wrap")
+    def serialize_file_grant(self, handler):
+        result = handler(self)
+        if not self.legacy_sources:
+            result.pop("legacy_sources", None)
+        return result
 
     @model_validator(mode='after')
     def source_scope(self):
         execution = self.action in {'upload','execute'}
+        if self.legacy_sources and (self.action != "delete" or len(set(self.legacy_sources)) != len(self.legacy_sources)
+            or any(not 0 < len(value) <= 2048 for value in self.legacy_sources)):
+            raise ValueError("Legacy sources require exact, distinct deletion addresses")
         if execution and (self.source is None or self.source_display is None):
             raise ValueError('Execution requires source identity and display')
         if not execution and (self.source is not None or self.source_display is not None):

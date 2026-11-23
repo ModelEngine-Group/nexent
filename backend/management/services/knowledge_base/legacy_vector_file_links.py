@@ -27,6 +27,8 @@ def _object_key(value, bucket):
             or value != f's3://{bucket}{parsed.path}'):
             return None
         value = parsed.path[1:]
+    elif bucket and value.startswith(f"/{bucket}/"):
+        value = value[len(bucket) + 2:]
     if value and not value.startswith('/') and not any(part in {'', '.', '..'} for part in value.split('/')):
         return value
     return None
@@ -38,6 +40,24 @@ def legacy_chunk_position(source):
     if position is None and isinstance(metadata, dict):
         position = metadata.get('chunk_index')
     return position if type(position) is int and position >= 0 else None
+
+
+def legacy_source_addresses(row, *, strict=False):
+    """Enumerate the exact historical spellings of one recorded source."""
+    bucket = row["bucket_name"]
+    objects = {_object_key(row[name], bucket) for name in ("object_name", "source_key")}
+    result = {key for key in objects if key}
+    local = row["local_source_path"]
+    if strict and (len(result) > 1 or any(
+            row[name] and row[name] != local and _object_key(row[name], bucket) is None for name in ("object_name", "source_key")
+        )):
+        raise Conflict()
+    if bucket:
+        for key in tuple(result):
+            result.update((f"s3://{bucket}/{key}", f"/{bucket}/{key}"))
+    if local:
+        result.add(local)
+    return result
 
 
 class LegacyVectorFileLinks:

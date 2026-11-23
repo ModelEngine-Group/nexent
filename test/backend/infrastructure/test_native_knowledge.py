@@ -10,7 +10,12 @@ from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext, Revision, VectorKey, VectorRecord
 
 from infrastructure.vdb import native_knowledge
-from infrastructure.vdb.native_file_cleanup import _delete, _native_target
+from infrastructure.vdb.native_file_cleanup import (
+    _delete,
+    _delete_legacy,
+    _legacy_target,
+    _native_target,
+)
 
 
 @pytest.fixture
@@ -293,3 +298,33 @@ def test_native_file_cleanup_rejects_other_identity_even_with_matching_generatio
         _native_target({"_index": "kb", "_id": identity, "_source": {
             native_knowledge.INGEST_GENERATION: generation, "id": identity, "index": 0,
         }}, grant, actor.tenant_id, {generation: 2})
+
+
+def test_legacy_source_delete_excludes_new_generations_and_checks_exact_absence(fixture):
+    es, actor, grant, context = fixture
+    grant.file_id, grant.file_version, grant.legacy_sources = "a" * 32, 3, ["files/old.txt"]
+    es.indices.get_mapping.return_value["kb"]["mappings"]["properties"]["path_or_url"] = {"type": "keyword"}
+    es.open_point_in_time.return_value = {"id": "pit"}
+    es.search.side_effect = [{"hits": {"hits": [{"_index": "kb", "_id": "legacy", "_seq_no": 2, "_primary_term": 1,
+        "_source": {"path_or_url": "files/old.txt"}, "sort": [0]}]}}, {"hits": {"hits": []}}]
+    es.bulk.return_value = {"items": [{"delete": {"_index": "kb", "status": 200}}]}
+    es.count.return_value = {"count": 0, "_shards": {"failed": 0}}
+    assert _delete_legacy(es, grant, actor.tenant_id, context=context) == 1
+    assert es.count.call_args.kwargs["query"]["bool"]["filter"] == [
+        native_knowledge.legacy_document_filter(), {"terms": {"path_or_url": ["files/old.txt"]}},
+    ]
+    assert es.bulk.call_args.kwargs["operations"] == [
+        {"delete": {"_index": "kb", "_id": "legacy", "if_seq_no": 2, "if_primary_term": 1}},
+    ]
+
+
+@pytest.mark.parametrize(("extra", "error"), [
+    ({native_knowledge.INGEST_GENERATION: "b" * 32}, ScopeDenied),
+    ({"metadata": {"file_id": "c" * 32}}, ScopeDenied),
+    ({"file_version": 4}, Conflict),
+])
+def test_legacy_source_delete_rejects_conflicting_lineage(fixture, extra, error):
+    _, actor, grant, _ = fixture
+    grant.file_id, grant.file_version, grant.legacy_sources = "a" * 32, 3, ["files/old.txt"]
+    with pytest.raises(error):
+        _legacy_target({"_index": "kb", "_source": {"path_or_url": "files/old.txt", **extra}}, grant, actor.tenant_id)

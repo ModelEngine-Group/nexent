@@ -3,9 +3,10 @@
 
 import pytest
 from contracts.agentos_knowledge import KnowledgeAuthorizationRequest, ObjectReference
+from contracts.knowledge_deletion import KnowledgeDeletionIntent
 from management.services.file.cleanse_jobs import CleanseJobs
 from management.services.knowledge_base.authorization import KnowledgeAuthorization
-from nexent.storage.errors import ScopeDenied
+from nexent.storage.errors import Conflict, ScopeDenied
 from nexent.storage.models import (
     Comparison,
     FieldPatch,
@@ -126,6 +127,34 @@ def test_delete_can_authorize_history_without_reenabling_cleansing(setup):
     assert policy.authorize(delete, context=context()).source is None
     with pytest.raises(ScopeDenied):
         cleanse.authorize(knowledge_request(), context=context())
+
+
+@pytest.mark.parametrize("reused", [False, True])
+def test_legacy_delete_requires_unique_source_across_file_history(setup, resources, monkeypatch, reused):
+    from contracts.constants import environment
+
+    policy, payload, update, _, _ = setup
+    _, _, engine, tables = resources
+    monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", True)
+    source = knowledge_request().source
+    intent = KnowledgeDeletionIntent(knowledge_id=1, file_id=payload.file_id, file_version=0, user_id="user-a",
+        scope="full", index_name="kb-one", filename="source.txt", object_name=f"/bucket/{source.key}", source=source)
+    update("cleanse_files", status="DELETE_REQUESTED", stage="DELETE_RUNTIME_PENDING", bucket_name="bucket",
+           object_name=intent.object_name, deletion_request=intent.model_dump(mode="json"))
+    request = KnowledgeAuthorizationRequest(knowledge_id=1, file_id=payload.file_id, file_version=0, action="delete")
+    if reused:
+        with engine.begin() as connection:
+            connection.execute(tables["cleanse_files"].insert().values(
+                file_id="c" * 32, tenant_id="tenant-a", knowledge_id=1, status="DELETED", delete_flag="Y",
+                original_filename="retired.txt", source_generation=0, bucket_name="bucket",
+                object_name=f"s3://bucket/{source.key}",
+            ))
+        with pytest.raises(Conflict):
+            policy.authorize(request, context=context())
+    else:
+        grant = policy.authorize(request, context=context())
+        assert grant.source is None
+        assert set(grant.legacy_sources) == {source.key, f"/bucket/{source.key}", f"s3://bucket/{source.key}"}
 
 
 def test_revoked_membership_stops_grant_even_with_completed_artifact(setup):
