@@ -60,7 +60,7 @@ def test_resource_completion_forwards_matched_provider_identity(adapter, mocker,
         with adapter._observe_tool("local", arguments):
             adapter._resource_result("actual result")
     callback = adapter.context_bridge.completed_tool.call_args
-    assert callback.kwargs == {"provider_call_id": "provider-second"}
+    assert callback.kwargs == {"provider_call_id": "provider-second", "parent_call_id": None}
     assert callback.args[0] == "local"
     assert callback.args[1] == ("Resource failed" if failed else "actual result")
     assert callback.args[2]

@@ -205,7 +205,8 @@ class JiuwenAdapter(AgentCoreAdapter):
         parent = self._active_resource.get()
         provider_id = self.events.tool_call(name, arguments, call_id, parent_call_id=parent[0] if parent else None)
         source = self._resource_source(name)
-        token = self._active_resource.set((call_id, provider_id, name, source))
+        parent_call_id = parent[0] if parent else None
+        token = self._active_resource.set((call_id, provider_id, name, source, parent_call_id))
         try:
             with self.run_info.observer.tool_call_context(call_id), tool_execution_trace(
                 get_monitoring_manager, name, self.run_info.agent_config.name, {
@@ -225,11 +226,12 @@ class JiuwenAdapter(AgentCoreAdapter):
                         call_id, provider_id,
                         (public_error(diagnostic, self.run_info.observer.lang).safe_message
                          if diagnostic else "Cancelled"),
-                        is_error=diagnostic is not None, error=diagnostic,
+                        is_error=diagnostic is not None, error=diagnostic, parent_call_id=parent_call_id,
                     )
                     if self.context_bridge is not None:
                         self.context_bridge.completed_tool(
-                            name, "Resource failed", call_id, provider_call_id=provider_id)
+                            name, "Resource failed", call_id, provider_call_id=provider_id,
+                            parent_call_id=parent_call_id)
                     raise
         finally:
             self._active_resource.reset(token)
@@ -307,10 +309,10 @@ class JiuwenAdapter(AgentCoreAdapter):
                 self._resource_failure(RuntimeError("Resource returned failure"), active[3], active[2])
                 if is_error else None
             )
-            self.events.tool_result(*active[:2], rendered, is_error, error=diagnostic)
+            self.events.tool_result(*active[:2], rendered, is_error, error=diagnostic, parent_call_id=active[4])
             if self.context_bridge is not None:
                 self.context_bridge.completed_tool(
-                    active[2], rendered, active[0], provider_call_id=active[1])
+                    active[2], rendered, active[0], provider_call_id=active[1], parent_call_id=active[4])
         # Keep legacy side channels for artifacts and existing consumers.
         log_text = str(result)
         if getattr(self.run_info.agent_config, "response_mode", "chat") == "python_workflow":

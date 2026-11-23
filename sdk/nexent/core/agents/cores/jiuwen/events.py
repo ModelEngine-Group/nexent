@@ -168,9 +168,10 @@ class JiuwenEventAdapter:
                         **{"raw_arguments": json.dumps(arguments, ensure_ascii=False), **metadata})
         return provider_id
 
-    def tool_result(self, call_id, provider_id, result, is_error=False, error=None):
+    def tool_result(self, call_id, provider_id, result, is_error=False, error=None, *, parent_call_id=None):
         self.output(ProcessType.TOOL_RESULT, str(result), local_call_id=call_id,
-                    tool_call_id=call_id, provider_call_id=provider_id, result=str(result), is_error=is_error,
+                    tool_call_id=call_id, provider_call_id=provider_id, parent_call_id=parent_call_id,
+                    result=str(result), is_error=is_error,
                     **({"error_code": error.category, "retryable": error.retryable} if error else {}))
 
     def emit(self, chunk):

@@ -220,12 +220,13 @@ class JiuwenContextBridge:
         if not self._pending_calls:
             self._schedule_maintenance()
 
-    def completed_tool(self, name, result, local_id, *, provider_call_id=None):
+    def completed_tool(self, name, result, local_id, *, provider_call_id=None, parent_call_id=None):
         """Nested business calls cannot close an unrelated native tool transaction."""
-        if self.scope.cancelled or local_id in self._completed_tool_ids:
+        if (self.scope.cancelled or local_id in self._completed_tool_ids or parent_call_id is not None
+                or not isinstance(provider_call_id, str) or not provider_call_id):
             return
         matches = [call for call in self._pending_calls if call.name == name
-                   and (provider_call_id is None or call.id == provider_call_id)]
+                   and call.id == provider_call_id]
         if len(matches) != 1:
             return
         call = matches[0]

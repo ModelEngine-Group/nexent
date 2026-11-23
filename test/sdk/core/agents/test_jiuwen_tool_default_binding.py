@@ -188,3 +188,49 @@ def test_actual_nested_schema_defaults_need_complete_declared_provenance(adapter
     found = adapter.events.tool_call("local", actual, "local")
     assert found == (original.provider_call_id if difference is None else None)
     assert provided["items"][0] == {"key": "a"}
+
+
+@pytest.mark.parametrize("outcome", ["success", "structured_error", "exception"])
+def test_nested_same_name_result_waits_for_actual_top_level_result(adapter, outcome):
+    from test_jiuwen_context import execute_pending_maintenance, make_bridge
+
+    bridge, info = make_bridge()
+    bridge._assemble([{"role": "user", "content": info.query}], [])
+    adapter.context_bridge = bridge
+    arguments = {"skill_name": "fixture_skill"}
+    calls = [SimpleNamespace(id="outer-provider", name="parallel_executor", arguments="{}"),
+             SimpleNamespace(id="direct-provider", name="read_skill_md", arguments=json.dumps(arguments))]
+    adapter.events.calls = [ToolCall(provider_call_id=call.id, index=index, name=call.name,
+                                    raw_arguments=call.arguments, parsed_arguments=json.loads(call.arguments))
+                            for index, call in enumerate(calls)]
+    execute_pending_maintenance(bridge, calls=calls)
+    with adapter._observe_tool("parallel_executor", {}):
+        outer_local_id = adapter._active_resource.get()[0]
+        if outcome == "exception":
+            with pytest.raises(ValueError, match="nested failure"):
+                with adapter._observe_tool("read_skill_md", arguments):
+                    raise ValueError("nested failure")
+        else:
+            with adapter._observe_tool("read_skill_md", arguments):
+                adapter._resource_result({"success": False} if outcome == "structured_error" else "nested-short")
+        assert [call.id for call in bridge._pending_calls] == ["outer-provider", "direct-provider"]
+        bridge.manager.submit.assert_not_called()
+        adapter._resource_result("outer-result")
+    assert [call.id for call in bridge._pending_calls] == ["direct-provider"]
+    bridge.manager.submit.assert_not_called()
+    direct_result = "DIRECT_LONG_RESULT " * 300
+    with adapter._observe_tool("read_skill_md", arguments):
+        adapter._resource_result(direct_result)
+    bridge._maintenance_execution.future.result()
+    bridge.manager.submit.assert_called_once()
+    results = [message for item in bridge._current_items for message in item.content.get("messages", [])
+               if message["role"] == "tool"]
+    assert results == [{"role": "tool", "tool_call_id": "outer-provider", "content": "outer-result"},
+                       {"role": "tool", "tool_call_id": "direct-provider", "content": direct_result}]
+    events = [event for event in emitted(adapter) if event["type"] == "tool_result"]
+    nested, outer, direct = events
+    assert nested["provider_call_id"] is None
+    assert nested["parent_call_id"] == outer_local_id
+    assert nested["is_error"] == (outcome != "success")
+    assert outer["provider_call_id"] == "outer-provider" and outer["parent_call_id"] is None
+    assert direct["provider_call_id"] == "direct-provider" and direct["parent_call_id"] is None

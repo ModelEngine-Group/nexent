@@ -53,6 +53,8 @@ change:
         existing deadlines off the tool worker, with cancellation, busy errors and unchanged hard capacity checks.
       - Read summary-covered CodeAgent/native originals through a backend-bound conversation reader with unchanged
         pagination/budgets; reject foreign/deleted/non-result units and never authorize reads from summary references.
+      - Close native context transactions only for parentless results with an exact provider ID; nested same-name
+        successes, structured failures and exceptions cannot consume a pending top-level call or start maintenance early.
     reason: Reuse targeted UT and existing self-contained Case preparation/cleanup; preserve all prior variants and D1
       contracts without a new test framework.
     test_selectors:
@@ -73,6 +75,8 @@ change:
       - test/sdk/core/agents/test_context_scope_reduction.py
       - test/sdk/core/agents/test_execution_owner_lifecycle.py
       - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+      - test/sdk/core/agents/test_jiuwen_context.py
+      - test/sdk/core/agents/test_jiuwen_errors.py
       - test/sdk/core/agents/test_jiuwen_context_admission.py
       - test/sdk/core/agents/test_history_context_runtime.py
       - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
@@ -81,5 +85,6 @@ change:
       - test/sdk/core/agents/test_post_response_context.py
   notes: SPEC10 Scope Reduction defines retained behavior; SPEC09 retains original failure evidence. Recovery/catalog
     extensions and independent Ops fixes remain withdrawn. Raw journal/DB/context history and current mapper contracts
-    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02 in the current technical design
-    cover bounded maintenance admission and backend-authorized originals after summaries; existing D3 preparation is reused.
+    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03 in the current technical design
+    cover bounded maintenance admission, backend-authorized originals after summaries and exact root native-result
+    correlation; existing D3 preparation is reused.

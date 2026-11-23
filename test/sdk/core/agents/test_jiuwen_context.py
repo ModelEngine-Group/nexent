@@ -216,11 +216,11 @@ def test_closed_tool_step_starts_maintenance_once_and_keeps_original_source():
     bridge, info = make_bridge("passthrough", [turn()])
     bridge._assemble([{"role":"user", "content":info.query}], [])
     execute_pending_maintenance(bridge, calls=[SimpleNamespace(name="native_tool", id="provider-call", arguments="{}")])
-    bridge.completed_tool("native_tool", "actual result", "local")
+    bridge.completed_tool("native_tool", "actual result", "local", provider_call_id="provider-call")
     bridge._maintenance_execution.future.result()
     assert bridge.usage_baseline.actual_input_tokens == 3000
     assert bridge.manager.submit.call_count == 1
-    bridge.completed_tool("native_tool", "duplicate", "local")
+    bridge.completed_tool("native_tool", "duplicate", "local", provider_call_id="provider-call")
     assert bridge.manager.submit.call_count == 1
     assert "actual result" in str(bridge._current_items)
     assert len(bridge.run_context.items) == 1
@@ -259,15 +259,19 @@ def test_same_name_reverse_completion_matches_provider_call_id():
     assert bridge.manager.submit.call_count == 1
 
 
-@pytest.mark.parametrize("provider_id", [None, "foreign-call"])
-def test_ambiguous_or_foreign_completion_cannot_consume_pending_call(provider_id):
+@pytest.mark.parametrize("provider_id,parent_id", [(None, None), ("", None), (123, None),
+                                                    ("foreign-call", None), ("call-a", "parent")])
+@pytest.mark.parametrize("count", [1, 2])
+def test_ambiguous_or_foreign_completion_cannot_consume_pending_call(provider_id, parent_id, count):
     """FIX-JW-02: absent correlation never guesses which result completed."""
     bridge, info = make_bridge()
     bridge._assemble([{"role": "user", "content": info.query}], [])
     calls = [SimpleNamespace(id="call-a", name="lookup", arguments="{}"),
              SimpleNamespace(id="call-b", name="lookup", arguments="{}")]
+    calls = calls[:count]
     execute_pending_maintenance(bridge, calls=calls)
-    bridge.completed_tool("lookup", "unattributed result", "unknown-local", provider_call_id=provider_id)
+    bridge.completed_tool("lookup", "unattributed result", "unknown-local",
+                          provider_call_id=provider_id, parent_call_id=parent_id)
     assert bridge._pending_calls == calls
     assert bridge._completed_tool_ids == set()
     assert bridge._maintenance_execution is None
