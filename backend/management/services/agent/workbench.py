@@ -16,7 +16,7 @@ from contracts.errors.exceptions import RuntimeMetadataVersionConflict, Validati
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
-from infrastructure.workbench_skill_execution import resolve_skill_config
+from infrastructure.workbench_skill_execution import resolve_skill_config, select_workbench_skill_ids
 from contracts.agent import WorkbenchSessionConfig
 from contracts.constants.constants import (
     ASSET_OWNER_TENANT_ID,
@@ -188,65 +188,45 @@ def _resolve_skill_mounts(
 ) -> Tuple[ResolvedSkillMount, ...]:
     if not mounts and not published_instances:
         return ()
-    runtime_mounts = {int(mount["skill_id"]): mount for mount in mounts}
-    explicit_skill_ids = set(runtime_mounts)
-    effective_mounts: list[Mapping[str, Any]] = []
-    seen_skill_ids: set[int] = set()
+    runtime_mounts = {int(mount["skill_id"]): mount.get("config_values") or {} for mount in mounts}
+    published = {}
     for instance in published_instances:
-        skill_id = int(instance["skill_id"])
-        if skill_id in seen_skill_ids:
-            continue
-        seen_skill_ids.add(skill_id)
-        effective_mounts.append(
-            runtime_mounts.pop(
-                skill_id,
-                {"skill_id": skill_id, "config_values": {}},
-            )
-        )
-    effective_mounts.extend(runtime_mounts.values())
+        published.setdefault(int(instance["skill_id"]), instance.get("config_values") or {})
 
-    # Runtime prompts, configuration and files share the Skill name namespace.
-    # Select complete resources before capturing files or resolving dependencies.
-    selected_by_name: Dict[str, tuple[int, Mapping[str, Any], Dict[str, Any], str]] = {}
+    candidates: Dict[int, tuple[Dict[str, Any], str]] = {}
     role = _get_user_role(user_id) if user_id else None
     groups = set(query_group_ids_by_user(user_id) or []) if user_id else set()
-    for mount in effective_mounts:
-        skill_id = int(mount["skill_id"])
-        resource_owner = published_tenant_id if skill_id in seen_skill_ids and published_tenant_id else tenant_id
+    for skill_id in dict.fromkeys([*published, *runtime_mounts]):
+        resource_owner = (published_tenant_id or tenant_id) if skill_id in published else tenant_id
         skill = skill_db.get_skill_by_id(skill_id, resource_owner)
         if skill is None:
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
-        if resource_owner != ASSET_OWNER_TENANT_ID and user_id and not can_view_skill(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups):
+        platform_default = skill_id in published and resource_owner == ASSET_OWNER_TENANT_ID
+        if not platform_default and user_id and not can_view_skill(
+            skill=skill, user_id=user_id, user_role=role, user_group_ids=groups,
+        ):
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
-        skill_name = str(skill.get("name") or skill_id)
-        previous = selected_by_name.get(skill_name)
-        if previous is not None and previous[0] != skill_id:
-            previous_is_explicit = previous[0] in explicit_skill_ids
-            current_is_explicit = skill_id in explicit_skill_ids
-            if previous_is_explicit == current_is_explicit:
-                raise WorkbenchError("RUNTIME_SKILL_NAME_CONFLICT")
-            if previous_is_explicit:
-                continue
-        selected_by_name[skill_name] = (skill_id, mount, skill, resource_owner)
+        candidates[skill_id] = skill, resource_owner
 
+    names = {skill_id: str(skill.get("name") or skill_id) for skill_id, (skill, _) in candidates.items()}
     resolved = []
-    for skill_id, mount, skill, resource_owner in selected_by_name.values():
-        instance = next((item for item in published_instances if item.get("skill_id") == skill_id), {})
+    for skill_id in select_workbench_skill_ids(names, runtime_mounts):
+        skill, resource_owner = candidates[skill_id]
         config_values = resolve_skill_config(
             skill.get("config_schemas") or [],
             skill.get("config_values") or {},
-            instance.get("config_values") or {},
-            mount.get("config_values") or {},
+            published.get(skill_id, {}),
+            runtime_mounts.get(skill_id, {}),
         )
         resolved.append(
             ResolvedSkillMount(
                 skill_id=skill_id,
-                name=str(skill.get("name") or skill_id),
+                name=names[skill_id],
                 description=str(skill.get("description") or ""),
                 tool_ids=tuple(int(value) for value in (skill.get("tool_ids") or [])),
                 config_values=config_values,
                 files=_capture_skill_file_snapshot(
-                    str(skill.get("name") or skill_id),
+                    names[skill_id],
                     resource_owner,
                 ),
             )
