@@ -2,6 +2,7 @@
 
 """Helpers for keeping agent-owned reasoning settings independent from models."""
 
+import logging
 from copy import deepcopy
 from typing import Optional
 
@@ -21,6 +22,32 @@ REASONING_EFFORT_VALUES = {
     "max",
 }
 COMMON_REASONING_LEVELS = {"low", "medium", "high"}
+
+logger = logging.getLogger(__name__)
+
+
+def _drop_unsupported_saved_parameters(model_key: str, profile, entry: dict) -> dict:
+    """Drop persisted values the model profile no longer declares.
+
+    Legacy agent snapshots can carry parameters such as ``enable_thinking``
+    for outlets whose profile only exposes another reasoning control. Keeping
+    them would make the agent impossible to save, so they are removed and the
+    next save rewrites a snapshot the current profile accepts.
+    """
+    declared = {rule.get("key") for rule in profile.parameter_rules}
+    values = entry.get("parameter_values") or {}
+    unknown = [key for key in values if key not in declared]
+    if not unknown:
+        return entry
+    logger.warning(
+        "Dropping unsupported persisted agent parameters %s for model %s",
+        unknown,
+        model_key,
+    )
+    return {
+        **entry,
+        "parameter_values": {key: value for key, value in values.items() if key in declared},
+    }
 
 
 def _resolve_model_reasoning_capability(model_info: Optional[dict]) -> Optional[dict]:
@@ -153,10 +180,29 @@ def snapshot_agent_reasoning_config(
             if not entry:
                 continue
             from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
+            from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
             profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
             entry = read_agent_parameter_entry(entry, profile=profile)
+            if requested_overrides is None:
+                # Nothing was submitted for this model, so this entry is a
+                # historical snapshot: repair it instead of rejecting the save.
+                entry = _drop_unsupported_saved_parameters(model_key, profile, entry)
+                if (not entry["parameter_values"]
+                        and entry.get("context_window_tokens") is None
+                        and entry.get("custom_overrides") is None):
+                    override_map.pop(model_key, None)
+                    continue
             if entry["parameter_values"] or entry.get("context_window_tokens") is not None or entry.get("custom_overrides") is not None:
-                merge_agent_model_parameters(profile, entry)
+                try:
+                    merge_agent_model_parameters(profile, entry)
+                except ParameterValidationError:
+                    if requested_overrides is not None:
+                        raise
+                    logger.warning(
+                        "Dropping invalid persisted agent parameters for model %s", model_key
+                    )
+                    override_map.pop(model_key, None)
+                    continue
             override_map[model_key] = entry
             continue
         capability = _resolve_model_reasoning_capability(model_info)
