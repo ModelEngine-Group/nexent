@@ -5,12 +5,14 @@ import hashlib
 import json
 import re
 from contextlib import closing, contextmanager
+from functools import partial
 from time import monotonic
 from types import SimpleNamespace
 
 from contracts.knowledge_chunk_projection import public_chunk_source
 from contracts.knowledge_maintenance import LEGACY_INDEX_OWNER
 from nexent.storage.errors import (
+    CapabilityUnsupported,
     Conflict,
     InvalidInput,
     NotFound,
@@ -19,8 +21,12 @@ from nexent.storage.errors import (
     Unavailable,
 )
 from nexent.storage.models import (
+    Comparison,
     OperationContext,
+    PageRequest,
+    RecordQuery,
     StorageScope,
+    VectorCollectionInfo,
     VectorGroup,
     WriteReceipt,
 )
@@ -29,10 +35,65 @@ from nexent.vector_database.utils import extract_highlight_terms
 
 from infrastructure.knowledge_vectors import _configured_client, vector_binding
 from infrastructure.rdb.composition import close_owned, record_engine
+from infrastructure.rdb.knowledge_jobs import FILES, bind_knowledge_manifest
 from infrastructure.rdb.legacy_index_owner import bind_legacy_index_owner
 from infrastructure.vdb.vector_schema import vector
 from infrastructure.vdb.vector_statistics import _complete, _integer
 from infrastructure.vdb.vector_store import ElasticsearchVectorStore
+
+INGEST_GENERATION = "nexent_ingest_generation"
+
+
+def _published_generations(actor, resource, *, engine, context):
+    scope = StorageScope("runtime", resource.resource_tenant_id, actor.user_id, {FILES})
+    with closing(bind_knowledge_manifest(scope, resource.knowledge_id, engine)) as records:
+        cursor, visible = None, set()
+        query = RecordQuery(where=Comparison("visible_generation", "is_null", False),
+                            fields=("visible_generation", "visible_version", "tombstone_version"))
+        while True:
+            page = records.query(FILES, query, PageRequest(limit=500, cursor=cursor), context=context)
+            for row in page.items:
+                generation = row["visible_generation"]
+                if row["visible_version"] <= row["tombstone_version"] or not re.fullmatch(r"[0-9a-f]{32}", generation):
+                    raise Conflict()
+                visible.add(generation)
+            cursor = page.next_cursor
+            if cursor is None:
+                return frozenset(visible)
+
+
+def _generation_snapshot(mappings, actor, resources, *, engine, context):
+    result = {}
+    for resource in resources:
+        marker = mappings[resource.collection].get(INGEST_GENERATION)
+        if marker is None:
+            result[resource.collection] = frozenset()
+            continue
+        if marker.get("type") != "keyword" or marker.get("index", True) is not True:
+            raise Conflict()
+        result[resource.collection] = _published_generations(actor, resource, engine=engine, context=context)
+    return result
+
+
+def legacy_document_filter():
+    return {"bool": {"must_not": {"exists": {"field": INGEST_GENERATION}}}}
+
+
+def _generation_filter(generations):
+    visible = [legacy_document_filter()]
+    for index, values in generations.items():
+        if values:
+            visible.append({"bool": {"filter": [
+                {"term": {"_index": index}}, {"terms": {INGEST_GENERATION: sorted(values)}},
+            ]}})
+    return {"bool": {"should": visible, "minimum_should_match": 1}}
+
+
+def _visible_generation(source, generations):
+    if INGEST_GENERATION not in source:
+        return True
+    generation = source[INGEST_GENERATION]
+    return isinstance(generation, str) and generation in generations
 
 
 def require_index_owner(actor, resource, *, context, engine):
@@ -50,6 +111,7 @@ class _NativeHybrid(ElasticSearchCore):
         super().__init__(host=None, api_key=None, client=client)
         self.owners, self.context = owners, context
         self.mappings = {}
+        self.generations = {}
 
     def identities(self):
         settings = ElasticsearchVectorStore._call(
@@ -77,12 +139,17 @@ class _NativeHybrid(ElasticSearchCore):
         if index_pattern != ",".join(self.owners):
             raise ScopeDenied()
         targets = tuple(self.owners)
+        search_query = dict(search_query)
+        visible = _generation_filter(self.generations)
         if knn := search_query.get("knn"):
             targets = tuple(name for name in targets if _searchable_vector(
                 self.mappings[name].get(knn["field"], {}), len(knn["query_vector"]),
             ))
             if not targets:
                 return []
+            search_query["knn"] = {**knn, "filter": [filter_ for filter_ in (knn.get("filter"), visible) if filter_]}
+        else:
+            search_query["query"] = {"bool": {"must": search_query.get("query", {"match_all": {}}), "filter": visible}}
         response = ElasticsearchVectorStore._call(
             self.client, "search", self.context, index=",".join(targets), body=search_query,
             allow_partial_search_results=False, allow_no_indices=False, ignore_unavailable=False,
@@ -95,8 +162,10 @@ class _NativeHybrid(ElasticSearchCore):
             tenant = self.owners.get(index)
             if index not in targets or not _owns_source(source, tenant):
                 raise ScopeDenied()
+            if not _visible_generation(source, self.generations.get(index, ())):
+                raise Conflict()
             source.setdefault("id", hit["_id"])
-            for field in ("embedding", "multi_embedding"):
+            for field in ("embedding", "multi_embedding", INGEST_GENERATION):
                 source.pop(field, None)
             results.append({"score": hit["_score"], "document": source, "index": index,
                             "highlight_terms": extract_highlight_terms(hit.get("highlight", {}))})
@@ -134,19 +203,25 @@ def native_source_groups(actor, resource, limit, *, context):
                 identity = reader.identities()
             except NotFound:
                 return False, ()
+            reader.read_mappings()
+            generations = _generation_snapshot(reader.mappings, actor, (resource,), engine=engine, context=context)
             runtime_mappings, query = _tenant_filter(tenant)
             result = ElasticsearchVectorStore._call(
-                client, "search", context, index=index, size=0, query=query,
+                client, "search", context, index=index, size=0,
+                query={"bool": {"filter": [query, _generation_filter(generations)]}},
                 allow_partial_search_results=False, allow_no_indices=False, ignore_unavailable=False,
                 runtime_mappings=runtime_mappings,
                 aggregations={"sources": {
                     "terms": {"field": "path_or_url", "size": limit, "order": [{"_count": "desc"}, {"_key": "asc"}]},
-                    "aggs": {"sample": {"top_hits": {"size": 1, "_source": [*fields.values(), "tenant_id", "metadata.tenant_id"]}}},
+                    "aggs": {"sample": {"top_hits": {"size": 1,
+                        "_source": [*fields.values(), "tenant_id", "metadata.tenant_id", INGEST_GENERATION]}}},
                 }},
             )
             _complete(result, context, search=True)
-            groups = _native_groups(result, index, tenant, fields, limit, context)
-            if reader.identities() != identity:
+            groups = _native_groups(result, index, tenant, fields, limit, generations[index], context)
+            if reader.identities() != identity or (
+                _generation_snapshot(reader.mappings, actor, (resource,), engine=engine, context=context) != generations
+            ):
                 raise Conflict()
         require_index_owner(actor, resource, context=context, engine=engine)
     finally:
@@ -154,7 +229,7 @@ def native_source_groups(actor, resource, limit, *, context):
     return True, groups
 
 
-def _native_groups(result, index, tenant, fields, limit, context):
+def _native_groups(result, index, tenant, fields, limit, generations, context):
     try:
         buckets = result["aggregations"]["sources"]["buckets"]
         if not isinstance(buckets, list) or len(buckets) > limit:
@@ -168,6 +243,8 @@ def _native_groups(result, index, tenant, fields, limit, context):
             source = hits[0]["_source"]
             if hits[0]["_index"] != index or not _owns_source(source, tenant):
                 raise ScopeDenied()
+            if not _visible_generation(source, generations):
+                raise Conflict()
             sample = {name: source[field] for name, field in fields.items() if field in source}
             sample["path"] = key
             groups.append(VectorGroup(index, key, count, sample))
@@ -214,11 +291,21 @@ def native_chunk_window(actor, resource, path, offset, limit, expected_revision,
         require_index_owner(actor, resource, context=context, engine=engine)
         with closing(_configured_client(context.remaining())) as client:
             index_revision = _index_revision(client, resource, context)
-            revision = index_revision or hashlib.sha256(f"{resource.revision}:missing".encode()).hexdigest()
+            reader = _NativeHybrid(client, {resource.collection: resource.resource_tenant_id}, context)
+            if index_revision:
+                reader.read_mappings()
+            else:
+                reader.mappings = {resource.collection: {}}
+            generations = _generation_snapshot(reader.mappings, actor, (resource,), engine=engine, context=context)
+            visible = generations[resource.collection]
+            revision = hashlib.sha256(json.dumps([resource.revision, index_revision, sorted(visible)]).encode()).hexdigest()
             if expected_revision is not None and expected_revision != revision:
                 raise Conflict()
-            total, rows = _native_window(client, resource, path, offset, limit, context) if index_revision else (0, [])
-            if _index_revision(client, resource, context) != index_revision:
+            total, rows = (_native_window(client, resource, path, offset, limit, context, generations=visible)
+                           if index_revision else (0, []))
+            if _index_revision(client, resource, context) != index_revision or (
+                _generation_snapshot(reader.mappings, actor, (resource,), engine=engine, context=context) != generations
+            ):
                 raise Conflict()
         require_index_owner(actor, resource, context=context, engine=engine)
     finally:
@@ -226,7 +313,7 @@ def native_chunk_window(actor, resource, path, offset, limit, expected_revision,
     return revision, total, rows
 
 
-def _native_window(client, resource, path, offset, limit, context):
+def _native_window(client, resource, path, offset, limit, context, *, generations=frozenset()):
     call = ElasticsearchVectorStore._call
     opened = call(client, "open_point_in_time", context, index=resource.collection, keep_alive="15s",
                   preference="native-knowledge-chunks", allow_partial_search_results=False)
@@ -234,7 +321,9 @@ def _native_window(client, resource, path, offset, limit, context):
     if not isinstance(pit, str) or not pit:
         raise Unavailable()
     runtime_mappings, owned = _tenant_filter(resource.resource_tenant_id)
-    filters = [owned] + ([{"term": {"path_or_url": path}}] if path else [])
+    filters = [owned, _generation_filter({resource.collection: generations})]
+    if path:
+        filters.append({"term": {"path_or_url": path}})
     options = {"query": {"bool": {"filter": filters}}, "runtime_mappings": runtime_mappings,
                "track_total_hits": True, "sort": ["_seq_no", "_shard_doc"],
                "source_excludes": ["embedding", "multi_embedding"]}
@@ -251,7 +340,7 @@ def _native_window(client, resource, path, offset, limit, context):
                 raise Unavailable(operation_id=context.operation_id)
             if not hits:
                 break
-            rows.extend(_native_chunk(hit, resource) for hit in hits[max(0, offset - position):])
+            rows.extend(_native_chunk(hit, resource, generations) for hit in hits[max(0, offset - position):])
             position += len(hits)
             if offset >= total or position >= total:
                 break
@@ -274,11 +363,13 @@ def _chunk_hits(result, size):
         raise Unavailable() from None
 
 
-def _native_chunk(hit, resource):
+def _native_chunk(hit, resource, generations):
     source = hit["_source"]
     if hit["_index"] != resource.collection or not _owns_source(source, resource.resource_tenant_id):
         raise ScopeDenied()
-    source = {key: value for key, value in source.items() if key not in {"embedding", "multi_embedding"}}
+    if not _visible_generation(source, generations):
+        raise Conflict()
+    source = {key: value for key, value in source.items() if key not in {"embedding", "multi_embedding", INGEST_GENERATION}}
     source.setdefault("id", hit["_id"])
     return hit["_id"], source
 
@@ -297,17 +388,21 @@ def search_native_knowledge(actor, resources, query, query_vector, top_k, weight
             search = _NativeHybrid(client, owners, context)
             identities = search.identities()
             search.read_mappings()
+            search.generations = _generation_snapshot(search.mappings, actor, resources, engine=engine, context=context)
             hits = search.hybrid_search(list(owners), query, top_k=top_k, weight_accurate=weight_accurate,
                 query_embedding=list(query_vector),
                 embedding_model=SimpleNamespace(model_type="multimodal" if multimodal else "embedding"))
-            if search.identities() != identities:
+            if search.identities() != identities or (
+                _generation_snapshot(search.mappings, actor, resources, engine=engine, context=context) != search.generations
+            ):
                 raise Conflict()
         for resource in resources:
             require_index_owner(actor, resource, context=context, engine=engine)
     finally:
         close_owned(context, [engine.dispose])
     revisions = {resource.knowledge_id: hashlib.sha256(json.dumps(
-        [resource.revision, identities[resource.collection]], separators=(",", ":")).encode()).hexdigest()
+        [resource.revision, identities[resource.collection], sorted(search.generations[resource.collection])],
+        separators=(",", ":")).encode()).hexdigest()
         for resource in resources}
     return hits, revisions
 
@@ -319,6 +414,21 @@ def native_document_creation_ports(actor, resource, dimensions, *, context):
         require_index_owner(actor, resource, context=context, engine=engine)
         with closing(_configured_client(context.remaining())) as client:
             yield NativeDocumentCreation(client, actor, resource, dimensions)
+    finally:
+        close_owned(context, [engine.dispose])
+
+
+@contextmanager
+def native_generation_ports(actor, grant, dimensions, *, context):
+    if grant.action != "execute":
+        raise ScopeDenied()
+    resource = SimpleNamespace(knowledge_id=grant.knowledge_id, collection=grant.collection,
+                               resource_tenant_id=actor.tenant_id)
+    engine = record_engine(context)
+    try:
+        with closing(_configured_client(context.remaining())) as client:
+            authorize = partial(require_index_owner, actor, resource, engine=engine)
+            yield NativeFileGenerationWriter(client, actor, resource, dimensions, grant, authorize=authorize)
     finally:
         close_owned(context, [engine.dispose])
 
@@ -368,7 +478,7 @@ class NativeDocumentCreation:
         if not _searchable_vector(vector_mapping, self.dimensions):
             raise Conflict()
         binding = vector_binding(self.scope.tenant_id, self.resource.collection, self.dimensions)
-        source = {key: value for key, value in source.items() if key not in {"embedding", "multi_embedding"}}
+        source = {key: value for key, value in source.items() if key not in {"embedding", "multi_embedding", INGEST_GENERATION}}
         if not _owns_source(source, self.scope.tenant_id):
             raise ScopeDenied()
         source[field] = vector(binding, record.vector)
@@ -377,3 +487,77 @@ class NativeDocumentCreation:
         if result.get("result") != "created" or result.get("_index") != self.resource.collection:
             raise OutcomeUnknown(operation_id=context.operation_id)
         return WriteReceipt(context.operation_id, True)
+
+
+class NativeFileGenerationWriter(NativeDocumentCreation):
+    """Write bounded text batches to the original index before publishing the manifest."""
+
+    def __init__(self, client, actor, resource, dimensions, grant, *, authorize):
+        super().__init__(client, actor, resource, dimensions)
+        self.grant, self.authorize = grant, authorize
+
+    def _mapping(self, context):
+        self.authorize(context=context)
+        return super()._mapping(context)
+
+    def ensure_collection(self, collection, *, context):
+        if collection != self.resource.collection:
+            raise ScopeDenied()
+        mapping = self._mapping(context)
+        embedding = mapping.get("embedding", {})
+        if not _searchable_vector(embedding, self.dimensions) or embedding.get("similarity", "cosine") != "cosine":
+            raise Conflict()
+        marker = mapping.get(INGEST_GENERATION)
+        if marker is None:
+            result = self._call("indices.put_mapping", context, write=True, properties={INGEST_GENERATION: {"type": "keyword"}})
+            if result.get("acknowledged") is not True:
+                raise OutcomeUnknown(operation_id=context.operation_id)
+        elif marker.get("type") != "keyword" or marker.get("index", True) is not True:
+            raise Conflict()
+
+    def upsert(self, records, *, context):
+        if not isinstance(records, tuple) or len(records) > 1000:
+            raise InvalidInput()
+        if not records:
+            return ()
+        self.ensure_collection(self.resource.collection, context=context)
+        binding = vector_binding(self.scope.tenant_id, self.resource.collection, self.dimensions)
+        operations, ids = [], set()
+        for record in records:
+            if record.key.collection != self.resource.collection or any(
+                record.payload.get(field) != getattr(self.grant, field) for field in ("knowledge_id", "file_id", "file_version")
+            ):
+                raise ScopeDenied()
+            if record.payload.get("media_kind") != "text":
+                raise CapabilityUnsupported()
+            generation = record.generation.value if record.generation is not None else None
+            location = record.payload["location"]
+            position = record.payload.get("chunk_index")
+            if (not isinstance(generation, str) or not re.fullmatch(r"[0-9a-f]{32}", generation)
+                or type(position) is not int or position < 0 or location.get("path_or_url") != self.grant.source.key):
+                raise InvalidInput()
+            identity = f"{self.grant.file_id}-{self.grant.file_version}-{generation}-{position}"
+            if identity in ids:
+                raise InvalidInput()
+            ids.add(identity)
+            document = {field: location[field] for field in ("file_size", "create_time", "language", "title", "author", "date")
+                        if location.get(field) is not None}
+            document.update(id=identity, path_or_url=self.grant.source.key, filename=self.grant.filename,
+                            content=record.payload["content"], source_type="minio", index=position,
+                            process_source=location.get("process_source") or "Unstructured",
+                            embedding=vector(binding, record.vector))
+            document[INGEST_GENERATION] = generation
+            operations += [{"index": {"_index": self.resource.collection, "_id": identity}}, document]
+        return ElasticsearchVectorStore._bulk(self.client, operations, context, len(records),
+                                              expected_index=self.resource.collection)
+
+    def describe_collection(self, collection, *, context):
+        if collection != self.resource.collection:
+            raise ScopeDenied()
+        mapping = self._mapping(context)
+        embedding = mapping.get("embedding", {})
+        marker = mapping.get(INGEST_GENERATION, {})
+        if (not _searchable_vector(embedding, self.dimensions) or embedding.get("similarity", "cosine") != "cosine"
+            or marker.get("type") != "keyword" or marker.get("index", True) is not True):
+            raise Conflict()
+        return VectorCollectionInfo(collection, self.dimensions, "cosine")

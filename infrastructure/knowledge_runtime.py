@@ -19,6 +19,7 @@ from infrastructure.rdb.knowledge_jobs import (
     bind_knowledge_manifest,
 )
 from infrastructure.rdb.knowledge_lifecycle import bind_knowledge_lifecycle
+from infrastructure.vdb.native_knowledge import native_generation_ports
 
 
 @contextmanager
@@ -68,6 +69,16 @@ def knowledge_execution_ports(actor, grant, dimensions, *, context):
             [vectors.close] if vectors is not None else []
         )
         close_owned(context, callbacks)
+
+
+@contextmanager
+def knowledge_native_execution_ports(actor, grant, dimensions, *, context):
+    with native_generation_ports(actor, grant, dimensions, context=context) as vectors:
+        objects = bind_knowledge_objects(actor, grant, context=context)
+        try:
+            yield objects, vectors
+        finally:
+            close_owned(context, [objects.close])
 
 
 @contextmanager

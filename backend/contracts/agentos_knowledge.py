@@ -129,6 +129,14 @@ class KnowledgeFileUpload(KnowledgeFileReference):
     embedding_model: ModelVersion
     rerank_model: ModelVersion | None = None
     chunking_strategy: Literal["basic", "by_title", "none"] = "basic"
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_upload(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        return result
 
 
 class KnowledgeFileDelete(KnowledgeFileReference):

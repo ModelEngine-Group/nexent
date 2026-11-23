@@ -60,7 +60,8 @@ from infrastructure.rdb.knowledge_jobs import (
 
 
 @pytest.fixture
-async def setup(mocker):
+async def setup(mocker, request):
+    native_selection = getattr(request, "param", False)
     manager = ThreadManager(
         service_name="kb-worker-unit",
         lane_policies={
@@ -135,6 +136,7 @@ async def setup(mocker):
         idempotency_key="upload",
         embedding_model={"model_id": 2, "revision": "v1"},
         chunking_strategy="none",
+        native_documents=native_selection,
     )
     context = OperationContext("worker", monotonic() + 5)
     state = await db(policy.submit, request, context=context)
@@ -206,6 +208,7 @@ async def setup(mocker):
         models,
         jobs=job_ports,
         ports=execution_ports,
+        native_ports=mocker.Mock(side_effect=execution_ports),
         max_artifact_bytes=10000,
         max_source_bytes=10000,
     )
@@ -258,6 +261,31 @@ async def test_unknown_upsert_never_publishes_or_marks_writer_ended(setup):
     )
     assert s.closed == [True] and s.vectors.upsert.call_count == 1
     assert row["processed_chunks"] == 0 and row["total_chunks"] == 1
+
+
+@pytest.mark.parametrize("setup", [True], indirect=True)
+async def test_native_worker_commits_publication_only_after_generation_has_been_written(setup):
+    from infrastructure.vdb.native_knowledge import _published_generations
+
+    s = setup
+    resource = SimpleNamespace(knowledge_id=1, resource_tenant_id=s.actor.tenant_id)
+
+    def write(records, *, context):
+        generation = records[0].generation.value
+        assert not s.policy.is_visible(s.lookup, generation, context=context)
+        assert not _published_generations(s.actor, resource, engine=s.engine, context=context)
+        return (WriteReceipt("native", True),)
+
+    s.vectors.upsert.side_effect = write
+    result = await s.worker.process(s.lookup, s.actor, owner_id="native", context=s.context)
+    persisted = await s.db(s.records.get, JOBS, s.state.job_id, context=s.context)
+    assert result.status == "completed" and persisted["request_payload"]["native_documents"]
+    assert await s.db(s.policy.is_visible, s.lookup, persisted["attempt_id"], context=s.context)
+    assert await s.db(_published_generations, s.actor, resource, engine=s.engine, context=s.context) == {
+        persisted["attempt_id"],
+    }
+    s.worker.native_ports.assert_called_once()
+    assert s.closed == [True] and s.vectors.upsert.call_count == 1
 
 
 async def test_delete_during_model_call_blocks_vector_write_and_final_publication(

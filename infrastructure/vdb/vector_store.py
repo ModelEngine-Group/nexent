@@ -300,8 +300,9 @@ class ElasticsearchVectorStore:
             terms.append({"exists": {"field": "embedding"}})
         return {"bool": {"filter": terms}}
 
-    def _bulk(self, client, operations, context, count, *, delete=False):
-        result = self._call(
+    @staticmethod
+    def _bulk(client, operations, context, count, *, delete=False, expected_index=None):
+        result = ElasticsearchVectorStore._call(
             client,
             "bulk",
             context,
@@ -317,6 +318,8 @@ class ElasticsearchVectorStore:
             data = item.get("delete" if delete else "index", {})
             status = data.get("status", 0)
             if type(status) is not int or not 100 <= status <= 599:
+                raise OutcomeUnknown(operation_id=context.operation_id)
+            if expected_index is not None and data.get("_index") != expected_index:
                 raise OutcomeUnknown(operation_id=context.operation_id)
             success = 200 <= status < 300 or delete and status == 404
             outcome = WriteOutcome.CONFIRMED if success else WriteOutcome.FAILED

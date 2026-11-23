@@ -142,6 +142,7 @@ async def test_first_index_invoke_is_pinned_and_existing_retrieval_projection_is
     s.vectors.hybrid_search.assert_called_once_with(
         index_names=["kb", "shared"], query_text=query, query_embedding=[.2, .3],
         top_k=5, weight_accurate=expected, embedding_model=SimpleNamespace(model_type="multimodal"),
+        filter={"bool": {"must_not": {"exists": {"field": "nexent_ingest_generation"}}}},
     )
     assert result["total"] == 2 and result["query_time_ms"] >= 0
     assert result["results"] == [

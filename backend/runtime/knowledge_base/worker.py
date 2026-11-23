@@ -33,6 +33,7 @@ from runtime.knowledge_base.jobs import job_state
 from infrastructure.knowledge_objects import bind_knowledge_image_objects
 from infrastructure.knowledge_runtime import (
     knowledge_execution_ports,
+    knowledge_native_execution_ports,
     knowledge_runtime_ports,
 )
 
@@ -97,6 +98,7 @@ class KnowledgeUploadWorker:
         max_source_bytes,
         jobs=knowledge_jobs,
         ports=knowledge_execution_ports,
+        native_ports=knowledge_native_execution_ports,
         operation_seconds=300,
     ):
         if (
@@ -114,6 +116,7 @@ class KnowledgeUploadWorker:
             jobs,
             ports,
         )
+        self.native_ports = native_ports
         self.max_artifact_bytes, self.max_source_bytes = (
             max_artifact_bytes,
             max_source_bytes,
@@ -209,7 +212,8 @@ class KnowledgeUploadWorker:
                     ):
                         raise OperationCancelled(operation_id=context.operation_id)
 
-                with self.ports(actor, grant, dimensions, context=context) as (
+                ports = self.native_ports if request.native_documents else self.ports
+                with ports(actor, grant, dimensions, context=context) as (
                     objects,
                     vectors,
                 ):

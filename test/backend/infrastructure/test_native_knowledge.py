@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
-from nexent.storage.errors import Conflict, ScopeDenied
+from nexent.storage.errors import CapabilityUnsupported, Conflict, ScopeDenied
 from nexent.storage.models import OperationContext, Revision, VectorKey, VectorRecord
 
 from infrastructure.vdb import native_knowledge
@@ -104,7 +104,8 @@ def test_native_source_groups_protect_aggregation_and_omit_bodies(monkeypatch, f
     assert groups[0].sample == {"path": "files/old.pdf", "filename": "old.pdf", "size": 10}
     options = es.search.call_args.kwargs
     assert options["index"] == "kb" and options["size"] == 0
-    assert options["query"] == {"term": {"nexent_read_owned": True}}
+    assert {"term": {"nexent_read_owned": True}} in options["query"]["bool"]["filter"]
+    assert native_knowledge.legacy_document_filter() in options["query"]["bool"]["filter"][1]["bool"]["should"]
     assert options["runtime_mappings"]["nexent_read_owned"]["script"]["params"] == {"tenant": "tenant"}
     aggregation = options["aggregations"]["sources"]
     assert aggregation["terms"]["field"] == "path_or_url"
@@ -145,3 +146,45 @@ def test_native_chunk_window_skips_a_full_page_without_loading_chunk_bodies(fixt
     first, second = es.search.call_args_list
     assert first.kwargs["source"] is False
     assert second.kwargs["source"] is True and second.kwargs["search_after"] == [999, 999]
+
+
+def test_native_staged_generation_is_scoped_to_original_index_and_does_not_look_published(fixture):
+    es, actor, grant, context = fixture
+    values = es.indices.get_mapping.return_value["kb"]["mappings"]["properties"]
+    values[native_knowledge.INGEST_GENERATION] = {"type": "keyword"}
+    grant.file_id, grant.file_version, grant.filename = "f" * 32, 2, "source.txt"
+    grant.source = SimpleNamespace(key="files/source.txt")
+    generation = "a" * 32
+    authorize = Mock()
+    writer = native_knowledge.NativeFileGenerationWriter(es, actor, grant, 2, grant, authorize=authorize)
+    record = VectorRecord(VectorKey("kb", "logical"), (1., 0.1), {
+        "knowledge_id": 1, "file_id": grant.file_id, "file_version": 2, "chunk_index": 0, "media_kind": "text",
+        "content": "body", "location": {"path_or_url": grant.source.key, "file_size": 17},
+    }, Revision(generation))
+    es.bulk.return_value = {"items": [{"index": {"status": 201, "_index": "kb"}}]}
+    assert writer.upsert((record,), context=context)[0].matched
+    action, source = es.bulk.call_args.kwargs["operations"]
+    assert action["index"]["_index"] == "kb"
+    assert source["id"] == action["index"]["_id"] and source["path_or_url"] == "files/source.txt"
+    assert source["content"] == "body" and source["embedding"] == (1., 0.1)
+    authorize.assert_called_once_with(context=context)
+    assert not native_knowledge._visible_generation(source, ())
+    assert native_knowledge._visible_generation(source, {generation})
+    assert native_knowledge._visible_generation({"content": "historical"}, ())
+    es.indices.put_mapping.assert_not_called()
+    record.payload["media_kind"] = "image"
+    with pytest.raises(CapabilityUnsupported):
+        writer.upsert((record,), context=context)
+    es.bulk.assert_called_once()
+
+
+def test_native_generation_filter_pins_each_published_batch_to_its_index(fixture):
+    es, _, _, context = fixture
+    reader = native_knowledge._NativeHybrid(es, {"kb": "tenant", "other": "tenant"}, context)
+    reader.generations = {"kb": frozenset({"a" * 32}), "other": frozenset()}
+    es.search.return_value = {"hits": {"hits": [{"_index": "other", "_id": "leaked", "_score": 1.0,
+        "_source": {native_knowledge.INGEST_GENERATION: "a" * 32}}]}}
+    with pytest.raises(Conflict):
+        reader.exec_query("kb,other", {"query": {"match_all": {}}})
+    filter_ = es.search.call_args.kwargs["body"]["query"]["bool"]["filter"]["bool"]["should"]
+    assert filter_[1]["bool"]["filter"][0] == {"term": {"_index": "kb"}}

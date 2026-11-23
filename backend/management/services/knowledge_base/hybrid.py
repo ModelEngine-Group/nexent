@@ -26,6 +26,7 @@ from nexent.storage.models import OperationContext
 from backend.http.client import create_httpx_client
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.knowledge_search import knowledge_search_revision
+from infrastructure.vdb.native_knowledge import legacy_document_filter
 
 
 def project_retrieved_image(hit, actor, *, northbound=False):
@@ -112,6 +113,7 @@ async def search_public_hybrid(
                 "public-hybrid-search", vdb_core.hybrid_search,
                 index_names=index_names, query_text=query, query_embedding=vector, top_k=top_k,
                 weight_accurate=weight_accurate,
+                filter=legacy_document_filter(),
                 embedding_model=SimpleNamespace(
                     model_type="multimodal" if model.model_type == "multi_embedding" else "embedding"
                 ),
