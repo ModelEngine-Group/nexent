@@ -23,6 +23,7 @@ from infrastructure.rdb.conversation_record import ConversationMessage, Conversa
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.models import ConversationMessageUnit
 from management.db.conversation.suggestions import record_intent
+from management.db.agent.session_versions import confirm_chat_version, discard_unstarted_binding
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from management.db.conversation.repository import (
     _assert_workbench_topology, _enforce_conversation_turn_limit, _lock_conversation_limit_scope,
@@ -453,6 +454,12 @@ def stage_turn(
         ).with_for_update())
         if row is None or row.conversation_id is not None:
             raise AdmissionScopeError
+        if (selection := user_turn.get("chat_version")) is not None:
+            created_binding = confirm_chat_version(session, tenant_id, user_turn["agent_id"], reference.conversation_id,
+                                                   user_id, selection["requested"], selection["compiled"])
+            user_turn = {key: value for key, value in user_turn.items() if key != "chat_version"}
+            if created_binding:
+                user_turn["first_bound_version"] = selection["compiled"]
         if initial_title is not None:
             if message_index != 0 and not omitted_user:
                 raise PreparedTurnConflict
@@ -665,6 +672,10 @@ def close_turn(turn: PreparedTurn, *, failure_status: str | None = None) -> None
         if row is None:
             return
         if row.prepared_assistant_id is None:
+            state = row.prepared_user_turn or {}
+            if state.get("first_bound_version") is not None:
+                discard_unstarted_binding(session,turn.tenant_id,turn.user_id,conversation_id,turn.reference.run_id,
+                                         state["agent_id"],state["first_bound_version"])
             row.status = "rejected"
             row.journal_available = False
             if (conversation is not None and (row.prepared_user_turn or {}).get("new_conversation")

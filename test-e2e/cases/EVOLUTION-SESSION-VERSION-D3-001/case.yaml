@@ -1,0 +1,43 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-SESSION-VERSION-D3-001
+  feature_id: AGENT-EVOLUTION-RELEASE
+  business_rule_ids: [AGENT-EVOLUTION-RELEASE-RULE-01]
+  title: 默认版本变化时按会话保留实际运行版本
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 在真实数据库跨事务验证首次选择、发送前核对及既有版本保留。
+  preconditions: [可创建临时数据库的 PostgreSQL 测试实例。]
+  test_data:
+    profile: 一个业务智能体，三个版本，两名会话所有者及带运行回执的历史会话。
+  steps:
+  - order: 1
+    action: 启用前后读取默认版本，登记首轮，把默认版本从二切到三再退回二。分别续聊和新开会话。
+    expected: 已绑定的版本不变。新会话跟随默认值，即使客户端携带旧值。
+  - order: 2
+    action: 在选版与提交之间切换默认版本，并发提交同一首轮。检查旧会话的执行回执和无回执分支。
+    expected: 拒绝过时编译，重复提交只有一条绑定，已知旧版按实际执行恢复，缺失证据时保留原选版路径。
+  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。]
+  forbidden_side_effects: [其他租户不能读取版本绑定；普通会话选版不能更改编辑草稿。]
+  acceptance:
+  - id: AC-01
+    description: 跨发布和回退验证新旧会话。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 验证提交前核对、历史来源、并发和所有权。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - Management 普通会话选版和提交时使用真实 PostgreSQL。用预设版本模拟默认指针切换，本用例单独验证会话行为。
+  observations: [服务端版本读取、提交冲突和绑定记录。]
+  cleanup: [销毁临时数据库。]

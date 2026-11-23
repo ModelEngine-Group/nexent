@@ -18,7 +18,7 @@ async def test_presentation_survives_prepared_admission(mocker, flow, complete_a
     operations, compile_snapshot, client, _ = flow
     snapshot = compile_snapshot.return_value
     snapshot.memory_enabled = memory_enabled
-    snapshot.resource = SimpleNamespace(agent_id=7)
+    snapshot.resource = SimpleNamespace(agent_id=7, version_no=1)
     present = mocker.patch.object(prepared_turn, "present_public_resume")
     request = AgentRequest.model_validate(PAYLOAD.request)
 

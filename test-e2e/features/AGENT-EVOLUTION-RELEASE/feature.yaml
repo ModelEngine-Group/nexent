@@ -1,0 +1,13 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: AGENT-EVOLUTION-RELEASE
+  name: 自演进候选发布与回退
+  status: active
+  description: 独立确认后的候选按业务智能体发布，新会话采用当前版本，已有会话保留实际版本。
+  business_rules:
+  - rule_id: AGENT-EVOLUTION-RELEASE-RULE-01
+    description: 会话首次提交与服务端选版一致，切换默认版本后续聊和重试沿用已绑定版本。
+  required_test_stages: [D3]

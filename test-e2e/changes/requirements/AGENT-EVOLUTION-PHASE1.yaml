@@ -7,12 +7,12 @@ change:
   description: 根据授权轨迹和业务评测反馈生成资源候选，同题评测、独立确认后按业务范围发布和回退。
   affected_features:
     existing: []
-    added: [AGENT-EVOLUTION-REPLAY, AGENT-EVOLUTION-ONLINE]
+    added: [AGENT-EVOLUTION-REPLAY, AGENT-EVOLUTION-ONLINE, AGENT-EVOLUTION-RELEASE]
     modified: [V5-PW-EVAL-RUN-01]
     retired: []
   affected_cases:
     existing: []
-    added: [EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001]
+    added: [EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
     modified: []
     retired: []
   traditional_ut:
@@ -42,6 +42,7 @@ change:
     - frontend/tests/component/evolutionExperiments.test.tsx
     - test/backend/services/test_evolution_screening.py
     - test/backend/services/test_evolution_confirmation.py
+    - test/backend/services/test_prepared_public_turn.py
     behaviors:
     - 会话授权按原始请求生效，重试沿用原授权。
     - 撤回或到期后重试不能沿用旧授权，缺证轮次与没有发现问题的轮次分别统计。
@@ -61,5 +62,6 @@ change:
     - 独立评测人在私有目录核验材料，只登记题目与来源摘要。业务开发题和独立题按租户、智能体互斥，版本变化、并发登记和迁移前的业务题均需核对。
     - 编辑者提交通过筛选的候选。独立评测人锁定题集与门槛，同源任务只用于这一轮确认。资源或判据漂移不能复用开发结果。
     - 独立执行按题配对，核对回执、有效覆盖和预设门槛。开发侧可查看进度和汇总，不能取回独立题。撤权阻止写入，重试复用已完成的结论。
+    - 新会话采用当前发布版本；已有会话按实际版本续跑。提交时重新核对，竞争导致的旧编译不能启动。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
   notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。随开发增量登记其余 AC 的证明边界。

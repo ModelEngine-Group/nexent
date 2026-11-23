@@ -33,7 +33,8 @@ def flow(mocker):
     }
     staged = SimpleNamespace(**identity, assistant_message_id=None)
     confirmed = SimpleNamespace(**identity, assistant_message_id=61)
-    snapshot = SimpleNamespace(runtime_metadata_version=2, memory_enabled=None)
+    snapshot = SimpleNamespace(runtime_metadata_version=2, memory_enabled=None,
+                               resource=SimpleNamespace(agent_id=7, version_no=1, origin="PERSISTED"))
 
     async def inline(_name, fn, *args, lane, owner, **kwargs):
         return fn(*args, **kwargs)
@@ -41,6 +42,7 @@ def flow(mocker):
     mocker.patch.object(prepared_turn, "run_blocking", side_effect=inline)
     mocker.patch.object(prepared_turn.store, "next_message_index", return_value=8)
     mocker.patch.object(prepared_turn, "get_conversation", return_value={})
+    mocker.patch.object(prepared_turn, "select_chat_version", return_value=None)
     compile_snapshot = mocker.patch.object(prepared_turn, "prepare_conversation_snapshot", return_value=snapshot)
     mocker.patch.object(prepared_turn.store, "stage_turn", side_effect=lambda *_args, **_kwargs: operations.append("stage") or staged)
     mocker.patch.object(prepared_turn.store, "confirm_turn", side_effect=lambda *_: operations.append("confirm") or confirmed)
@@ -64,6 +66,18 @@ def flow(mocker):
 
 
 @pytest.mark.asyncio
+async def test_published_chat_uses_selected_version_and_rechecks_before_dispatch(flow):
+    operations, compile_snapshot, client, _ = flow
+    prepared_turn.select_chat_version.return_value = 2
+    compile_snapshot.return_value.resource.version_no = 2
+    request = AgentRequest.model_validate({**PAYLOAD.request,"version_no":1})
+    await prepared_turn.start_turn(PAYLOAD,request,*ACTOR,client)
+    assert compile_snapshot.await_args.args[0].version_no == 2
+    assert prepared_turn.store.stage_turn.call_args.args[5]["chat_version"] == {"requested":1,"compiled":2}
+    assert operations == ["stage","start","confirm"]
+
+
+@pytest.mark.asyncio
 async def test_public_prepared_stages_confirms_and_uses_signed_journal(flow):
     operations, compile_snapshot, client, _ = flow
     result = await prepared_turn.start_turn(PAYLOAD, AgentRequest.model_validate(PAYLOAD.request), *ACTOR, client)
@@ -79,7 +93,7 @@ async def test_public_prepared_stages_confirms_and_uses_signed_journal(flow):
 async def test_public_memory_pins_the_snapshot_agent(flow):
     _, compile_snapshot, client, _ = flow
     compile_snapshot.return_value.memory_enabled = True
-    compile_snapshot.return_value.resource = SimpleNamespace(agent_id=7)
+    compile_snapshot.return_value.resource = SimpleNamespace(agent_id=7, version_no=1)
     await prepared_turn.start_turn(PAYLOAD, AgentRequest.model_validate(PAYLOAD.request), *ACTOR, client)
     assert prepared_turn.store.stage_turn.call_args.args[5]["memory_agent_id"] == 7
 

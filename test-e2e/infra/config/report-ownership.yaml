@@ -160,6 +160,7 @@ feature_overrides:
   V5-PERF-05: task
   AGENT-EVOLUTION-REPLAY: evaluation
   AGENT-EVOLUTION-ONLINE: evaluation
+  AGENT-EVOLUTION-RELEASE: evaluation
   V5-PERF-06: evaluation
   V5-PERF-07: context
   V5-PERF-08: mcp

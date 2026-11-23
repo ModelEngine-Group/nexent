@@ -28,6 +28,7 @@ from management.services.agent.agentos_events import knowledge_scope_event_conte
 from management.services.agent.context import strip_current_time_prefix
 from management.utils.suggestion_intent import intent as suggestion_intent
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
+from management.db.agent.session_versions import select_chat_version, ReleaseVersionConflict
 from management.services.agent.prepared_projection import acknowledge_projection, resume_assistant_projection
 from nexent.core.concurrency import run_blocking
 
@@ -136,12 +137,6 @@ async def start_turn(
                 raise _not_owned()
             if isinstance(native_conversation.get("workbench_config"), dict):
                 raise HTTPException(status_code=403, detail="Conversation belongs to a different chat entrypoint")
-        previous_scope = native_conversation.get("knowledge_scope") if native_conversation is not None else None
-        native_knowledge = None
-        if workbench is None and (request.knowledge_scope is not None or isinstance(previous_scope, dict)):
-            native_knowledge = await _io(
-                "prepared-native-knowledge", prepare_native_knowledge, request, native_conversation, user_id, tenant_id,
-            )
         if conversation_id is None:
             conversation_id = await _io("prepared-turn-sequence", store.allocate_conversation_id)
             request = request.model_copy(update={"conversation_id": conversation_id})
@@ -160,6 +155,21 @@ async def start_turn(
                 options = {"current_user_message_id": saved_user.message_id}
             if native_conversation is not None:
                 options["owned_conversation"] = native_conversation
+        previous_scope = native_conversation.get("knowledge_scope") if native_conversation is not None else None
+        native_knowledge = None
+        native_chat = (not request.entrypoint and not request.is_debug and request.agent_id is not None
+                       and not omitted_user and (saved_user is None or saved_user.message_source == "CHAT"))
+        requested_version = request.version_no
+        selected_version = None
+        if native_chat:
+            selected_version = await _io("prepared-chat-version", select_chat_version,
+                                         tenant_id, request.agent_id, conversation_id, user_id, requested_version)
+            if selected_version is not None:
+                request = request.model_copy(update={"version_no": selected_version})
+        if workbench is None and (request.knowledge_scope is not None or isinstance(previous_scope, dict)):
+            native_knowledge = await _io(
+                "prepared-native-knowledge", prepare_native_knowledge, request, native_conversation, user_id, tenant_id,
+            )
         if metadata_from_northbound:
             options["metadata_from_northbound"] = True
         if workbench is not None:
@@ -171,6 +181,8 @@ async def start_turn(
             request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
         )
         if snapshot is None:
+            if selected_version is not None:
+                raise ReleaseVersionConflict("Cannot load the selected conversation version")
             return None
         if (initial_title is None
                 and await client.find_active_run(reference.conversation_id, user_id, tenant_id) is not None):
@@ -206,6 +218,8 @@ async def start_turn(
             "agent_id": snapshot.resource.agent_id if workbench is not None else request.agent_id,
             "automation": automation,
         }
+        if native_chat:
+            user_turn["chat_version"] = {"requested": requested_version, "compiled": snapshot.resource.version_no}
         if (not omitted_user and not request.is_debug and workbench is None
                 and (saved_user is None or saved_user.message_source == "CHAT")
                 and suggestion_intent(user_turn["query"]) and snapshot.resource.origin == "PERSISTED"
@@ -249,6 +263,8 @@ async def start_turn(
             raise _not_owned() from exc
         if isinstance(exc, store.PreparedTurnConflict):
             raise active_turn_conflict() from exc
+        if isinstance(exc, ReleaseVersionConflict):
+            raise HTTPException(status_code=409, detail={"code": "CHAT_RELEASE_VERSION_CHANGED"}) from exc
         if isinstance(exc, RuntimeMetadataVersionConflict):
             raise _metadata_conflict(exc) from exc
         if isinstance(exc, WorkbenchConfigVersionConflict):
