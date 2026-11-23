@@ -169,7 +169,7 @@ async def search_runtime_hybrid(
                     if hit.knowledge_id not in collections:
                         raise ScopeDenied()
                     document = (project_retrieved_image(hit, actor, northbound=northbound)
-                                if images else hit.public_document)
+                                if images or hit.image_ref is not None else hit.public_document)
                     if document is None:
                         raise ScopeDenied()
                     scores = dict(hit.score_details)

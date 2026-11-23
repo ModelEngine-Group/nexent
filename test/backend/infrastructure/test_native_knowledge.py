@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
-from nexent.storage.errors import CapabilityUnsupported, Conflict, ScopeDenied
+from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext, Revision, VectorKey, VectorRecord
 
 from infrastructure.vdb import native_knowledge
@@ -173,9 +173,40 @@ def test_native_staged_generation_is_scoped_to_original_index_and_does_not_look_
     assert native_knowledge._visible_generation({"content": "historical"}, ())
     es.indices.put_mapping.assert_not_called()
     record.payload["media_kind"] = "image"
-    with pytest.raises(CapabilityUnsupported):
+    with pytest.raises(InvalidInput):
         writer.upsert((record,), context=context)
     es.bulk.assert_called_once()
+
+
+def test_native_image_uses_image_vector_and_keeps_reference_out_of_public_chunks(fixture):
+    es, actor, grant, context = fixture
+    props = es.indices.get_mapping.return_value["kb"]["mappings"]["properties"]
+    props[native_knowledge.INGEST_GENERATION] = {"type": "keyword"}
+    grant.file_id, grant.file_version, grant.filename = "f" * 32, 3, "slides.pdf"
+    grant.source = SimpleNamespace(key="files/slides.pdf")
+    image_ref = {"key": "cleanse/private/slide.png", "space": "files", "version": "etag:v1", "sha256": "a" * 64}
+    writer = native_knowledge.NativeFileGenerationWriter(es, actor, grant, 2, grant, authorize=Mock())
+    es.bulk.return_value = {"items": [{"index": {"status": 201, "_index": "kb"}}]}
+    es.indices.put_mapping.return_value = {"acknowledged": True}
+    generation = "b" * 32
+    record = VectorRecord(VectorKey("kb", "image"), (1., 0.1), {
+        "knowledge_id": 1, "file_id": grant.file_id, "file_version": 3, "chunk_index": 2, "media_kind": "image",
+        "content": "raw reference is not projected",
+        "location": {"path_or_url": grant.source.key, "image_ref": image_ref, "page_number": 7},
+    }, Revision(generation))
+    assert writer.upsert((record,), context=context)[0].matched
+    source = es.bulk.call_args.kwargs["operations"][1]
+    assert source["multi_embedding"] == (1., 0.1) and "embedding" not in source
+    assert source["process_source"] == "UniversalImageExtractor"
+    assert image_ref["key"] not in source["content"]
+    assert es.indices.put_mapping.call_args.kwargs["properties"] == {
+        native_knowledge.INGEST_IMAGE: {"type": "object", "enabled": False},
+    }
+    image = native_knowledge._native_image(source[native_knowledge.INGEST_IMAGE], grant.knowledge_id, source)
+    assert image["image_ref"].model_dump() == image_ref and image["file_version"] == 3
+    assert image["location"] == {"page_number": 7, "chunk_index": 2}
+    _, public = native_knowledge._native_chunk({"_id": source["id"], "_index": "kb", "_source": source}, grant, {generation})
+    assert native_knowledge.INGEST_IMAGE not in public and "multi_embedding" not in public
 
 
 def test_native_generation_filter_pins_each_published_batch_to_its_index(fixture):
@@ -188,3 +219,12 @@ def test_native_generation_filter_pins_each_published_batch_to_its_index(fixture
         reader.exec_query("kb,other", {"query": {"match_all": {}}})
     filter_ = es.search.call_args.kwargs["body"]["query"]["bool"]["filter"]["bool"]["should"]
     assert filter_[1]["bool"]["filter"][0] == {"term": {"_index": "kb"}}
+
+
+def test_historical_document_cannot_supply_native_image_ticket_context(fixture):
+    es, _, _, context = fixture
+    reader = native_knowledge._NativeHybrid(es, {"kb": "tenant"}, context)
+    es.search.return_value = {"hits": {"hits": [{"_index": "kb", "_id": "historical", "_score": 1.0,
+        "_source": {"content": "historical", native_knowledge.INGEST_IMAGE: {"image_ref": "forged"}}}]}}
+    result = reader.exec_query("kb", {"query": {"match_all": {}}})
+    assert result[0]["document"] == {"id": "historical", "content": "historical"}

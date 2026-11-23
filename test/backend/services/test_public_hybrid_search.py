@@ -2,13 +2,19 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from contracts.agentos import ModelMetadata, ModelResult
-from contracts.agentos_knowledge import KnowledgeSearchHit, KnowledgeSearchResult
+from contracts.agentos_knowledge import (
+    KnowledgeSearchHit,
+    KnowledgeSearchResult,
+    ObjectReference,
+)
 from contracts.errors.exceptions import RuntimeUpstreamError
 from management.services.knowledge_base import hybrid
 from management.services.knowledge_base.common import KnowledgeBaseNeedsModelConfigError
+from management.services.knowledge_base.image_ticket import open_image_ticket
 from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
 
 from infrastructure.agentos_identity import ServicePrincipal
@@ -82,6 +88,28 @@ async def test_runtime_hybrid_preserves_envelope_and_query_authority(runtime_sea
     assert result["total"] == 2 and result["query_time_ms"] >= 0
     s.client.invoke_model.assert_not_awaited()
     s.vectors.hybrid_search.assert_not_called()
+
+
+@pytest.mark.parametrize("northbound", [False, True])
+async def test_native_image_uses_reader_bound_ticket_without_disclosing_storage_reference(runtime_search, monkeypatch, northbound):
+    from contracts.constants import environment
+
+    s = runtime_search
+    monkeypatch.setattr(environment, "JWT_SECRET", "test-image-ticket-secret")
+    monkeypatch.setattr(environment, "NORTHBOUND_EXTERNAL_URL", "https://gateway.example")
+    image = s.client.search_knowledge.return_value.image_hits[0]
+    image.file_id, image.file_version = "f" * 32, 4
+    image.image_ref = ObjectReference(space="files", key="cleanse/private/photo.png", version="etag:v2", sha256="a" * 64)
+    result = await hybrid.search_runtime_hybrid(["kb", "shared"], "picture", s.actor, top_k=5,
+        weight_accurate=None, reader=s.reader, client=s.client, northbound=northbound)
+    document = result["results"][1]
+    url = document["metadata"]["image_url"]
+    assert image.image_ref.key not in str(document)
+    token = parse_qs(urlsplit(url).query)["presigned_url" if northbound else "ticket"][0]
+    claims = open_image_ticket(token, s.actor, northbound=northbound)
+    assert claims.image_ref == image.image_ref and claims.file_id == image.file_id
+    with pytest.raises(ScopeDenied):
+        open_image_ticket(token, ServicePrincipal("other", s.actor.tenant_id), northbound=northbound)
 
 
 async def test_runtime_hybrid_uses_first_model_for_mixed_collections(runtime_search):

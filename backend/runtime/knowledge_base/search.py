@@ -194,6 +194,7 @@ class KnowledgeSearchService:
                 knowledge_id=by_collection[hit["index"]], chunk_id=str(document["id"]),
                 content=document.get("content", ""), filename=document.get("filename", ""),
                 score=hit["score"], score_kind="legacy.hybrid", score_details=scores, public_document=document,
+                **hit.get("image", {}),
             )
             target = image_hits if image_hits is not None and document.get("process_source") == "UniversalImageExtractor" else text_hits
             target.append(projected)

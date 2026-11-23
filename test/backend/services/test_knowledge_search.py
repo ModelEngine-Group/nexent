@@ -88,8 +88,12 @@ async def test_modes_use_model_invoke_and_return_only_authoritative_generation(s
 
 async def test_native_public_search_reads_historical_document_after_current_grant(search, mocker):
     s, request, _, _, service = search
+    image_ref = {"space": "files", "key": "cleanse/private/photo.png", "version": "etag:v1", "sha256": "a" * 64}
     provider = mocker.patch("runtime.knowledge_base.search.search_native_knowledge", return_value=(
-        [{"index": "kb", "score": 0.8, "document": {"id": "original", "content": "legacy content"}}], {1: "b" * 64}
+        [{"index": "kb", "score": 0.8, "document": {"id": "original", "content": "legacy content"}},
+         {"index": "kb", "score": 0.7, "document": {"id": "new-image", "process_source": "UniversalImageExtractor"},
+          "image": {"image_ref": image_ref, "file_id": "f" * 32, "file_version": 3, "location": {"page_number": 2}}}],
+        {1: "b" * 64}
     ))
     request = KnowledgeSearch.model_validate(request.model_dump() | {
         "search_mode": "hybrid", "global_hybrid_candidates": True, "include_public_document": True,
@@ -98,6 +102,8 @@ async def test_native_public_search_reads_historical_document_after_current_gran
     result = await service.search(request, s.actor)
     assert result.hits[0].public_document == {"id": "original", "content": "legacy content"}
     assert result.hits[0].file_id is None and result.data_revisions == {1: "b" * 64}
+    assert result.hits[1].image_ref.model_dump() == image_ref and result.hits[1].file_version == 3
+    assert image_ref["key"] not in str(result.hits[1].public_document)
     assert provider.call_args.args[3] == (1.0, 0.5)
     assert not s.closed
     assert s.client.authorize_knowledge_search.await_count == 2

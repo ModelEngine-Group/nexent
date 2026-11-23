@@ -9,10 +9,10 @@ from functools import partial
 from time import monotonic
 from types import SimpleNamespace
 
+from contracts.agentos_knowledge import KnowledgeContentRequest
 from contracts.knowledge_chunk_projection import public_chunk_source
 from contracts.knowledge_maintenance import LEGACY_INDEX_OWNER
 from nexent.storage.errors import (
-    CapabilityUnsupported,
     Conflict,
     InvalidInput,
     NotFound,
@@ -32,6 +32,7 @@ from nexent.storage.models import (
 )
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.utils import extract_highlight_terms
+from pydantic import ValidationError
 
 from infrastructure.knowledge_vectors import _configured_client, vector_binding
 from infrastructure.rdb.composition import close_owned, record_engine
@@ -42,6 +43,9 @@ from infrastructure.vdb.vector_statistics import _complete, _integer
 from infrastructure.vdb.vector_store import ElasticsearchVectorStore
 
 INGEST_GENERATION = "nexent_ingest_generation"
+INGEST_IMAGE = "nexent_ingest_image"
+IMAGE_PROCESS_SOURCE = "UniversalImageExtractor"
+_PRIVATE_FIELDS = frozenset({"embedding", "multi_embedding", INGEST_GENERATION, INGEST_IMAGE})
 
 
 def _published_generations(actor, resource, *, engine, context):
@@ -164,6 +168,8 @@ class _NativeHybrid(ElasticSearchCore):
                 raise ScopeDenied()
             if not _visible_generation(source, self.generations.get(index, ())):
                 raise Conflict()
+            if INGEST_GENERATION not in source:
+                source.pop(INGEST_IMAGE, None)
             source.setdefault("id", hit["_id"])
             for field in ("embedding", "multi_embedding", INGEST_GENERATION):
                 source.pop(field, None)
@@ -369,7 +375,7 @@ def _native_chunk(hit, resource, generations):
         raise ScopeDenied()
     if not _visible_generation(source, generations):
         raise Conflict()
-    source = {key: value for key, value in source.items() if key not in {"embedding", "multi_embedding", INGEST_GENERATION}}
+    source = {key: value for key, value in source.items() if key not in _PRIVATE_FIELDS}
     source.setdefault("id", hit["_id"])
     return hit["_id"], source
 
@@ -392,6 +398,12 @@ def search_native_knowledge(actor, resources, query, query_vector, top_k, weight
             hits = search.hybrid_search(list(owners), query, top_k=top_k, weight_accurate=weight_accurate,
                 query_embedding=list(query_vector),
                 embedding_model=SimpleNamespace(model_type="multimodal" if multimodal else "embedding"))
+            knowledge_ids = {resource.collection: resource.knowledge_id for resource in resources}
+            for hit in hits:
+                document = hit["document"]
+                image = document.pop(INGEST_IMAGE, None)
+                if image is not None:
+                    hit["image"] = _native_image(image, knowledge_ids[hit["index"]], document)
             if search.identities() != identities or (
                 _generation_snapshot(search.mappings, actor, resources, engine=engine, context=context) != search.generations
             ):
@@ -405,6 +417,20 @@ def search_native_knowledge(actor, resources, query, query_vector, top_k, weight
         separators=(",", ":")).encode()).hexdigest()
         for resource in resources}
     return hits, revisions
+
+
+def _native_image(image, knowledge_id, document):
+    try:
+        if document.get("process_source") != IMAGE_PROCESS_SOURCE or not isinstance(image["location"], dict):
+            raise ValueError("Invalid native image")
+        request = KnowledgeContentRequest(knowledge_id=knowledge_id, file_id=image["file_id"],
+                                          file_version=image["file_version"], image_ref=image["image_ref"])
+        if request.image_ref is None or request.image_ref.space != "files":
+            raise ValueError("Invalid native image reference")
+        return {"file_id": request.file_id, "file_version": request.file_version, "image_ref": request.image_ref,
+                "location": image["location"]}
+    except (KeyError, TypeError, ValueError):
+        raise Conflict() from None
 
 
 @contextmanager
@@ -478,7 +504,7 @@ class NativeDocumentCreation:
         if not _searchable_vector(vector_mapping, self.dimensions):
             raise Conflict()
         binding = vector_binding(self.scope.tenant_id, self.resource.collection, self.dimensions)
-        source = {key: value for key, value in source.items() if key not in {"embedding", "multi_embedding", INGEST_GENERATION}}
+        source = {key: value for key, value in source.items() if key not in _PRIVATE_FIELDS}
         if not _owns_source(source, self.scope.tenant_id):
             raise ScopeDenied()
         source[field] = vector(binding, record.vector)
@@ -490,7 +516,7 @@ class NativeDocumentCreation:
 
 
 class NativeFileGenerationWriter(NativeDocumentCreation):
-    """Write bounded text batches to the original index before publishing the manifest."""
+    """Write bounded file batches to the original index before publishing the manifest."""
 
     def __init__(self, client, actor, resource, dimensions, grant, *, authorize):
         super().__init__(client, actor, resource, dimensions)
@@ -501,6 +527,9 @@ class NativeFileGenerationWriter(NativeDocumentCreation):
         return super()._mapping(context)
 
     def ensure_collection(self, collection, *, context):
+        self._ensure_mapping(collection, image=False, context=context)
+
+    def _ensure_mapping(self, collection, *, image, context):
         if collection != self.resource.collection:
             raise ScopeDenied()
         mapping = self._mapping(context)
@@ -508,28 +537,42 @@ class NativeFileGenerationWriter(NativeDocumentCreation):
         if not _searchable_vector(embedding, self.dimensions) or embedding.get("similarity", "cosine") != "cosine":
             raise Conflict()
         marker = mapping.get(INGEST_GENERATION)
+        additions = {}
         if marker is None:
-            result = self._call("indices.put_mapping", context, write=True, properties={INGEST_GENERATION: {"type": "keyword"}})
-            if result.get("acknowledged") is not True:
-                raise OutcomeUnknown(operation_id=context.operation_id)
+            additions[INGEST_GENERATION] = {"type": "keyword"}
         elif marker.get("type") != "keyword" or marker.get("index", True) is not True:
             raise Conflict()
+        if image:
+            image_vector, image_context = mapping.get("multi_embedding"), mapping.get(INGEST_IMAGE)
+            if image_vector is None:
+                additions["multi_embedding"] = {"type": "dense_vector", "dims": self.dimensions,
+                                                "index": True, "similarity": "cosine"}
+            elif not _searchable_vector(image_vector, self.dimensions):
+                raise Conflict()
+            if image_context is None:
+                additions[INGEST_IMAGE] = {"type": "object", "enabled": False}
+            elif image_context.get("type") != "object" or image_context.get("enabled") is not False:
+                raise Conflict()
+        if additions:
+            result = self._call("indices.put_mapping", context, write=True, properties=additions)
+            if result.get("acknowledged") is not True:
+                raise OutcomeUnknown(operation_id=context.operation_id)
 
     def upsert(self, records, *, context):
         if not isinstance(records, tuple) or len(records) > 1000:
             raise InvalidInput()
         if not records:
             return ()
-        self.ensure_collection(self.resource.collection, context=context)
         binding = vector_binding(self.scope.tenant_id, self.resource.collection, self.dimensions)
-        operations, ids = [], set()
+        operations, ids, images = [], set(), False
         for record in records:
             if record.key.collection != self.resource.collection or any(
                 record.payload.get(field) != getattr(self.grant, field) for field in ("knowledge_id", "file_id", "file_version")
             ):
                 raise ScopeDenied()
-            if record.payload.get("media_kind") != "text":
-                raise CapabilityUnsupported()
+            kind = record.payload.get("media_kind")
+            if kind not in {"text", "image"}:
+                raise InvalidInput()
             generation = record.generation.value if record.generation is not None else None
             location = record.payload["location"]
             position = record.payload.get("chunk_index")
@@ -543,13 +586,32 @@ class NativeFileGenerationWriter(NativeDocumentCreation):
             document = {field: location[field] for field in ("file_size", "create_time", "language", "title", "author", "date")
                         if location.get(field) is not None}
             document.update(id=identity, path_or_url=self.grant.source.key, filename=self.grant.filename,
-                            content=record.payload["content"], source_type="minio", index=position,
-                            process_source=location.get("process_source") or "Unstructured",
-                            embedding=vector(binding, record.vector))
+                            source_type="minio", index=position)
+            if kind == "image":
+                self._add_image(document, location, position, vector(binding, record.vector))
+                images = True
+            else:
+                document.update(content=record.payload["content"], process_source="Unstructured",
+                                embedding=vector(binding, record.vector))
             document[INGEST_GENERATION] = generation
             operations += [{"index": {"_index": self.resource.collection, "_id": identity}}, document]
+        self._ensure_mapping(self.resource.collection, image=images, context=context)
         return ElasticsearchVectorStore._bulk(self.client, operations, context, len(records),
                                               expected_index=self.resource.collection)
+
+    def _add_image(self, document, location, position, embedding):
+        try:
+            request = KnowledgeContentRequest(knowledge_id=self.grant.knowledge_id, file_id=self.grant.file_id,
+                file_version=self.grant.file_version, image_ref=location.get("image_ref"))
+        except ValidationError:
+            raise InvalidInput() from None
+        if request.image_ref is None or request.image_ref.space != "files":
+            raise InvalidInput()
+        placement = {name: location[name] for name in ("page_number", "sheet_name", "coordinates") if name in location}
+        document[INGEST_IMAGE] = {"file_id": request.file_id, "file_version": request.file_version,
+                                 "image_ref": request.image_ref.model_dump(), "location": {**placement, "chunk_index": position}}
+        document.update(process_source=IMAGE_PROCESS_SOURCE, multi_embedding=embedding,
+                        content=json.dumps({"source_file": self.grant.filename, "position": placement}, ensure_ascii=False))
 
     def describe_collection(self, collection, *, context):
         if collection != self.resource.collection:
