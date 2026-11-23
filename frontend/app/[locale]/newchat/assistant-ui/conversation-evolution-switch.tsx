@@ -3,7 +3,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Switch } from "antd";
+import { Button, Popconfirm, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { conversationService } from "@/services/conversationService";
@@ -19,7 +19,7 @@ export function ConversationEvolutionSwitch({ id }: { id: number }) {
     enabled: Boolean(user),
   });
   const update = useMutation({
-    mutationFn: (enabled: boolean) => conversationService.evolutionSetting(id, enabled),
+    mutationFn: (action: boolean | "revoke") => conversationService.evolutionSetting(id, action),
     onSuccess: (enabled) => client.setQueryData(key, enabled),
     onSettled: () => client.invalidateQueries({ queryKey: key }),
   });
@@ -37,6 +37,15 @@ export function ConversationEvolutionSwitch({ id }: { id: number }) {
         disabled={!setting.isSuccess || update.isPending}
         onChange={(enabled) => update.mutate(enabled)}
       />
+      <Popconfirm
+        title={t("chat.evolution.withdrawConfirm")}
+        onConfirm={() => update.mutate("revoke")}
+        disabled={!setting.isSuccess || update.isPending}
+      >
+        <Button type="link" size="small" disabled={!setting.isSuccess || update.isPending}>
+          {t("chat.evolution.withdraw")}
+        </Button>
+      </Popconfirm>
     </div>
   );
 }

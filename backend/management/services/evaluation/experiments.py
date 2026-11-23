@@ -14,6 +14,7 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest
 from infrastructure.agentos_client import AgentOSClient
+from management.db.conversation.evolution_review import recent_reviews
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.evaluator import get_evaluator
 from management.db.evaluation.replay_cases import task_digest
@@ -120,7 +121,8 @@ def experiment_report(tenant, user, eid, *, cancel=False):
 def workspace_choices(tenant, user, agent_id, version):
     require_business_agent_edit(agent_id, tenant, user)
     published_business_agent(tenant, agent_id, version)
-    return jobs.workspace_choices(tenant, agent_id, version)
+    return {**jobs.workspace_choices(tenant, agent_id, version),
+            "reviews": recent_reviews(tenant, agent_id, version)}
 
 
 def _grade(request, job, task, observed):

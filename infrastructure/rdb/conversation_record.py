@@ -27,6 +27,8 @@ class ConversationRecord(TableBase):
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
     evolution_tenant_id = Column(String(100), comment="Tenant authorized by the owner for future automatic evolution analysis; NULL when disabled.")
     evolution_setting_time = Column(TIMESTAMP(timezone=True), comment="Time of the latest change to the conversation analysis setting.")
+    evolution_grant_epoch = Column(Integer, nullable=False, server_default=text("0"),
+                                   comment="Automatic evidence generation, advanced when the owner withdraws access.")
     target = Column(JSONB, nullable=True,
                     comment="Creator operation target: type agent or skill and positive resource id; NULL before creation")
     chat_mode = Column(

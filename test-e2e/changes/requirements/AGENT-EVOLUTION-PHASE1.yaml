@@ -19,6 +19,7 @@ change:
     decision: add
     test_selectors:
     - test/backend/database/test_evolution_consent.py
+    - test/backend/ops/test_evolution_review.py
     - test/backend/services/test_evolution_observation.py
     - test/backend/services/test_evolution_prompt_candidates.py
     - test/backend/services/test_evolution_skill_package.py
@@ -29,6 +30,7 @@ change:
     - frontend/tests/component/evolutionExperiments.test.tsx
     behaviors:
     - 会话授权按原始请求生效，重试沿用原授权。
+    - 撤回或到期后重试不能沿用旧授权，缺证轮次与没有发现问题的轮次分别统计。
     - 判据缺证或裁判故障时不能把样本判为业务失败。
     - 提示词局部改写保留占位符及相近成功例，权限变化时丢弃生成结果。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。

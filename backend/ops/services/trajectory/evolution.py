@@ -1,0 +1,88 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Extract bounded, attributable signals without storing conversation or tool bodies."""
+
+import logging
+import re
+
+from contracts.errors.trajectory import QueryError
+from infrastructure.trace.trajectory_reader import JSONReader
+from ops.db.trajectory import evolution as queue
+
+from .nodes import build_nodes
+from .runtime import get_service
+
+logger = logging.getLogger(__name__)
+CORRECTION = re.compile(r"(?:刚才|上次|你给的|这份结果|你的回答).{0,16}(?:不对|漏了|有误|错了)|你漏了|you (?:missed|omitted)", re.I)
+FILE_REQUEST = re.compile(r"(?:请|帮我|需要)(?:生成|导出|提供|创建).{0,12}(?:文件|附件|表格|xlsx|pdf)|(?:export|generate) (?:a |an )?(?:pdf|xlsx|file)", re.I)
+
+
+def observation(message, nodes=(), coverage="missing"):
+    signals = []
+    request = message.get("request") or ""
+    if CORRECTION.search(request):
+        signals.append("user_correction")
+    if message.get("opinion_flag") == "N":
+        signals.append("negative_feedback")
+    if FILE_REQUEST.search(request) and not message.get("file_receipt"):
+        signals.append("file_receipt_missing")
+    failures = [n for n in nodes if n["kind"] == "tool" and n["status"] in {"failed", "interrupted"}]
+    if failures:
+        signals.append("tool_error")
+    refs = []
+    for node in failures[:16]:
+        source = node.get("source", {})
+        trace, span = source.get("trace_id", ""), source.get("span_id", "")
+        if re.fullmatch("[0-9a-fA-F]{32}", trace) and re.fullmatch("[0-9a-fA-F]{16}", span):
+            refs.append(f"otel:{trace}:{span}")
+    return {"coverage": coverage, "signals": signals, "failed_tool_count": len(failures), "node_refs": refs}
+
+
+def inspect_archive(job, message):
+    service = get_service()
+    budget = service.budget()
+    identity = {**job, "conversation_id": str(job["conversation_id"]), "agent_id": str(job["agent_id"])}
+    with service.archive.opened(identity, job["trajectory_id"], budget) as (fd, _, run):
+        if (run.get("root_agent_id"), run.get("root_agent_version_no"), run.get("source_message_id")) != (
+            identity["agent_id"], job["agent_version_no"], str(job["source_message_id"]),
+        ):
+            return observation(message)
+        reader = JSONReader(fd, run["confirmed_bytes"], check=budget.check)
+        nodes, _, coverage = build_nodes(reader.requests(), conversation_id=identity["conversation_id"],
+                                         complete=run["capture_state"] == "ready", check=budget.check)
+        complete = coverage["complete"] and not coverage["capture_gap"]
+        return observation(message, nodes, "complete" if complete else "partial")
+
+
+class EvolutionReviewWorker:
+    def __init__(self):
+        self.stopping = False
+
+    def request_stop(self):
+        self.stopping = True
+
+    def run(self, cancel_event):
+        while not self.stopping and not cancel_event.is_set():
+            try:
+                busy = self.tick()
+            except Exception as error:
+                logger.warning("evolution.review.deferred exception_type=%s", type(error).__name__)
+                busy = False
+            cancel_event.wait(0.1 if busy else 3)
+
+    def tick(self):
+        job = queue.claim()
+        if job is None:
+            return False
+        message = queue.messages(job)
+        if message is None or job["attempts"] > 3:
+            queue.finish(job, observation(message or {}))
+            return True
+        try:
+            facts = inspect_archive(job, message)
+        except QueryError as error:
+            queue.finish(job, observation(message), retry=error.status >= 500 or error.code == "trajectory_unarchived")
+        except (OSError, ValueError, TypeError, RecursionError, KeyError):
+            queue.finish(job, observation(message), retry=True)
+        else:
+            queue.finish(job, facts)
+        return True

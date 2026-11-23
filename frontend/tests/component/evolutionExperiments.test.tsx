@@ -51,6 +51,7 @@ it("selects a published scope and opens its paired results with the original sta
     candidates: [],
     cases: [{ case_id: 9, family: "Owners", query: "List" }],
     experiments: [{ experiment_id: 42, create_time: "2026-11-23T00:00:00Z" }],
+    reviews: [{ turn_id: 3, batch_id: null, state: "observed", signals: ["tool_error"] }],
   });
   vi.mocked(evolutionService.report).mockResolvedValue({
     experiment_id: 42,
@@ -76,6 +77,8 @@ it("selects a published scope and opens its paired results with the original sta
   );
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  fireEvent.click(await screen.findByText("evolution.recentObservations"));
+  expect(screen.getByText(/evolution.observation.tool_error/)).toBeInTheDocument();
   await choose(
     "evolution.history",
     "#42 · " + new Date("2026-11-23T00:00:00Z").toLocaleString()

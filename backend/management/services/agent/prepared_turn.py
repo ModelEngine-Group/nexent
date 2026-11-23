@@ -532,11 +532,12 @@ async def _recover_pending_turns():
 
 
 async def _register_evolution_turns():
-    from management.db.conversation.evolution_review import enqueue_review_batches
+    from management.db.conversation.evolution_review import complete_review_batches, enqueue_review_batches
 
     while True:
         try:
             await _io("evolution-register-completed-turns", enqueue_review_batches)
+            await _io("evolution-complete-five-turn-reviews", complete_review_batches)
         except Exception:
             logger.exception("Failed to register completed turns for evolution review")
         await asyncio.sleep(10)

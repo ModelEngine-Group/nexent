@@ -19,7 +19,7 @@ vi.mock("react-i18next", () => ({
 it("reads the saved setting and applies changes to the selected conversation", async () => {
   let saved = false;
   vi.mocked(conversationService.evolutionSetting).mockImplementation(async (_, enabled) => {
-    saved = enabled ?? saved;
+    saved = enabled === "revoke" ? false : enabled ?? saved;
     return saved;
   });
   render(
@@ -33,4 +33,8 @@ it("reads the saved setting and applies changes to the selected conversation", a
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
   expect(conversationService.evolutionSetting).toHaveBeenCalledWith(42, true);
+  fireEvent.click(screen.getByText("chat.evolution.withdraw"));
+  fireEvent.click(await screen.findByText("OK"));
+  await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+  expect(conversationService.evolutionSetting).toHaveBeenCalledWith(42, "revoke");
 });

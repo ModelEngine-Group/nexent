@@ -1538,6 +1538,17 @@
       ]
     },
     {
+      "method": "DELETE",
+      "path": "/api/conversation/{conversation_id}/evolution-setting",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-evolution-setting-withdraw",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/api/conversation/{conversation_id}/creation_mode_responses",
       "transport": "http",

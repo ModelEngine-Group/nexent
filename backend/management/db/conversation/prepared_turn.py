@@ -4,13 +4,13 @@
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
 
 from contracts.agent import WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, WorkbenchSkillLookup, WorkbenchSkillMounts
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, TRAJECTORY_RETENTION_DAYS
 from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
@@ -86,14 +86,18 @@ def _next_index(session, conversation_id):
     return 0 if last is None else 2 * (last // 2 + 1)
 
 
-def evolution_setting(conversation_id: int, user_id: str, tenant_id: str, enabled: bool | None = None) -> dict:
+def evolution_setting(conversation_id: int, user_id: str, tenant_id: str, enabled: bool | None = None,
+                      *, revoke: bool = False) -> dict:
     """Read or update consent under the same ownership lock used to admit a turn."""
     with get_db_session() as session:
-        record = _owned(session, conversation_id, user_id, tenant_id, lock=enabled is not None)
+        record = _owned(session, conversation_id, user_id, tenant_id, lock=enabled is not None or revoke)
         if record is None:
             raise AdmissionScopeError
         current = record.evolution_tenant_id == tenant_id
-        if enabled is not None and enabled != current:
+        if revoke:
+            record.evolution_grant_epoch += 1
+            enabled = False
+        if revoke or (enabled is not None and enabled != current):
             record.evolution_tenant_id = tenant_id if enabled else None
             record.evolution_setting_time = datetime.now(timezone.utc)
             record.updated_by = user_id
@@ -468,13 +472,20 @@ def stage_turn(
         }
         if initial_title is None and not omitted_user and not background_run and conversation.evolution_tenant_id == tenant_id:
             # A retry cannot extend today's authorization to a previously unconsented message.
-            eligible = saved_user is None or (
-                saved_user.message_source == "CHAT" and session.scalar(select(admission.run_id).where(
+            now = datetime.now(timezone.utc)
+            expires = now + timedelta(days=TRAJECTORY_RETENTION_DAYS)
+            if saved_user is not None:
+                expires = session.scalar(select(func.min(admission.evolution_valid_until)).where(
                     admission.tenant_id == tenant_id, admission.conversation_id == reference.conversation_id,
                     admission.evolution_source_message_id == saved_user.message_id,
+                    admission.evolution_grant_epoch == conversation.evolution_grant_epoch,
+                    admission.evolution_valid_until > now,
                     admission.created_by == user_id, admission.delete_flag == "N",
-                ).limit(1)) is not None
-            )
+                )) if saved_user.message_source == "CHAT" else None
+            eligible = expires is not None
+            if eligible:
+                row.evolution_grant_epoch = conversation.evolution_grant_epoch
+                row.evolution_valid_until = expires
             row.prepared_user_turn = {**row.prepared_user_turn, "evolution_eligible": eligible}
         if omitted_user:
             row.prepared_user_turn = {**row.prepared_user_turn, "omitted_user": True}

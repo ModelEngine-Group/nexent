@@ -42,13 +42,14 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
-  async evolutionSetting(id: number, enabled?: boolean): Promise<boolean> {
+  async evolutionSetting(id: number, enabled?: boolean | "revoke"): Promise<boolean> {
+    const changingSwitch = typeof enabled === "boolean";
     const response = await fetchWithErrorHandling(
       API_ENDPOINTS.conversation.evolutionSetting(id),
       {
-        method: enabled === undefined ? "GET" : "PUT",
+        method: changingSwitch ? "PUT" : enabled === "revoke" ? "DELETE" : "GET",
         headers: getAuthHeaders(),
-        body: enabled === undefined ? undefined : JSON.stringify({ enabled }),
+        body: changingSwitch ? JSON.stringify({ enabled }) : undefined,
       }
     );
     const payload = await response.json();

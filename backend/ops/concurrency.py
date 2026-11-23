@@ -23,6 +23,6 @@ def create_thread_manager():
             "trajectory-read": lane("trajectory-read", 4, 8),
             "trajectory-cleanup": lane("trajectory-cleanup", 1, 0, 0),
             "control-io": lane("control-io", 2, 4),
-            "background-service": lane("background-service", 3, 0, 0),
+            "background-service": lane("background-service", 4, 0, 0),
         },
     )

@@ -188,6 +188,20 @@ function Experiments({
       )}
       {choices && (
         <>
+          {!!choices.reviews?.length && (
+            <details>
+              <summary>{t("evolution.recentObservations")}</summary>
+              <ul>
+                {choices.reviews.map((row) => (
+                  <li key={row.turn_id}>
+                    #{row.turn_id} · {row.batch_id ? t("evolution.batchNumber", { id: row.batch_id }) : t("evolution.waitingBatch")}
+                    {" · "}{t(`evolution.observation.${row.state}`)}
+                    {row.signals.map((signal) => ` · ${t(`evolution.observation.${signal}`)}`)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           <Flex gap={8} wrap align="center">
             <Select
               aria-label={t("evolution.candidate")}

@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise consent and source-message retention through the real admission transaction."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import delete
 
@@ -28,6 +30,26 @@ def test_retry_cannot_backfill_message_when_enabled_later(database):
     store.close_turn(accepted)
     with database.sessions() as session:
         assert session.get(ConversationRunAdmission, "scope").evolution_source_message_id is None
+
+
+@pytest.mark.parametrize("withdrawn,expired,eligible", [(False, False, True), (True, False, False), (False, True, False)])
+def test_retry_respects_original_grant_and_deadline(database, withdrawn, expired, eligible):
+    store.evolution_setting(42, "actor", "tenant", True)
+    until = datetime.now(timezone.utc) + timedelta(days=-1 if expired else 1)
+    with database.sessions() as session:
+        session.add(ConversationRunAdmission(
+            scope_sha256="original", run_id="b" * 32, request_sha256="c" * 64, tenant_id="tenant",
+            conversation_id=42, created_by="actor", updated_by="actor", delete_flag="N",
+            evolution_source_message_id=23, evolution_grant_epoch=0, evolution_valid_until=until,
+        ))
+    store.evolution_setting(42, "actor", "tenant", False, revoke=withdrawn)
+    store.evolution_setting(42, "actor", "tenant", True)
+    store.close_turn(store.confirm_turn(stage(saved())))
+    with database.sessions() as session:
+        retry = session.get(ConversationRunAdmission, "scope")
+        assert retry.evolution_source_message_id == (23 if eligible else None)
+        if eligible:
+            assert retry.evolution_valid_until.replace(tzinfo=timezone.utc) == until
 
 
 def test_setting_is_captured_when_turn_is_staged(database, monkeypatch):

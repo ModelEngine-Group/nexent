@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, Integer, String, func, select, text, update
+from sqlalchemy import TIMESTAMP, Boolean, Column, Integer, String, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 
 from infrastructure.rdb.base import SCHEMA, TableBase
@@ -28,6 +28,8 @@ class ConversationRunAdmission(TableBase):
     prepared_user_turn = Column(JSONB(none_as_null=True), doc="Pending turn settings and retained prompt scope for assistant-only Memory work.")
     prepared_message_index = Column(Integer, doc="Assistant message index while Management projection is outstanding.")
     evolution_source_message_id = Column(Integer, comment="Original user message eligible for evolution analysis in this admitted run.")
+    evolution_grant_epoch = Column(Integer, comment="Conversation evidence generation at admission.")
+    evolution_valid_until = Column(TIMESTAMP(timezone=True), comment="Last instant this automatic grant may be consumed.")
     prepared_assistant_id = Column(Integer, doc="Assistant message reserved by Management for the admitted run.")
     prepared_automation_context = Column(JSONB(none_as_null=True), doc="Authorized proposal settings for the pending run.")
 

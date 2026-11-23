@@ -173,6 +173,7 @@ async def test_workers_register_maintenance_and_projections_in_ops_manager(mocke
     manager.register_service.side_effect = [
         SimpleNamespace(execution_id="summary"),
         SimpleNamespace(execution_id="statistics"),
+        SimpleNamespace(execution_id="evolution"),
     ]
     workers = lifecycle.TrajectoryWorkers()
     workers.start(manager)
@@ -182,10 +183,12 @@ async def test_workers_register_maintenance_and_projections_in_ops_manager(mocke
     assert [spec.task_name for spec in specs] == [
         "trajectory-summary-compensation",
         "trajectory-statistics-refresh",
+        "evolution-online-observations",
     ]
     assert [call.args[0] for call in manager.start_service.call_args_list] == [
         "summary",
         "statistics",
+        "evolution",
     ]
     await workers.stop(manager)
     summary.request_stop.assert_called_once()

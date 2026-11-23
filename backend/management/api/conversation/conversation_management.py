@@ -42,10 +42,10 @@ from management.services.conversation.creation_mode import confirm_creation_mode
 router = APIRouter(prefix="/conversation")
 
 
-def _conversation_evolution_setting(conversation_id, authorization, enabled=None):
+def _conversation_evolution_setting(conversation_id, authorization, enabled=None, *, revoke=False):
     user_id, tenant_id = get_current_user_id(authorization)
     try:
-        data = evolution_setting(conversation_id, user_id, tenant_id, enabled)
+        data = evolution_setting(conversation_id, user_id, tenant_id, enabled, revoke=revoke)
     except AdmissionScopeError:
         raise HTTPException(status_code=404, detail="CONVERSATION_NOT_FOUND") from None
     return ConversationResponse(code=0, message="success", data=data)
@@ -60,6 +60,11 @@ def read_evolution_setting(conversation_id: int, authorization: Optional[str] = 
 def set_evolution_setting(conversation_id: int, request: ConversationEvolutionSetting,
                           authorization: Optional[str] = Header(None)):
     return _conversation_evolution_setting(conversation_id, authorization, request.enabled)
+
+
+@router.delete("/{conversation_id}/evolution-setting", response_model=ConversationResponse)
+def revoke_automatic_evidence(conversation_id: int, authorization: Optional[str] = Header(None)):
+    return _conversation_evolution_setting(conversation_id, authorization, revoke=True)
 
 
 @router.post("/{conversation_id}/creation_mode_responses", response_model=ConversationResponse)
