@@ -100,6 +100,41 @@ def test_is_runtime_auth_window_matches_only_token_expired_401():
     assert runtime_client._is_runtime_auth_window(RuntimeError("unrelated")) is False
 
 
+def test_upstream_body_text_decodes_bytes_and_stringifies_other_content():
+    assert runtime_client._upstream_body_text(
+        RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+    ) == '{"code":"TOKEN_EXPIRED"}'
+    assert runtime_client._upstream_body_text(
+        RuntimeUpstreamError(401, '{"code":"TOKEN_EXPIRED"}', {})
+    ) == '{"code":"TOKEN_EXPIRED"}'
+    assert runtime_client._upstream_body_text(RuntimeUpstreamError(401, None, {})) == ""
+    assert runtime_client._upstream_body_text(RuntimeUpstreamError(401, b"", {})) == ""
+
+
+@pytest.mark.asyncio
+async def test_auth_window_with_string_content_still_retries(monkeypatch):
+    # Non-bytes upstream content (some transports surface strings) must still
+    # be recognized as an auth window and retried.
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(runtime_client.asyncio, "sleep", fake_sleep)
+    client = MagicMock()
+    client.run_prepared_evaluation = AsyncMock(
+        side_effect=[
+            RuntimeUpstreamError(401, '{"code":"TOKEN_EXPIRED"}', {}),
+            "result",
+        ]
+    )
+    result = await runtime_client._run_prepared_evaluation_with_auth_retry(
+        client, "prepared", "u1", "t1"
+    )
+    assert result == "result"
+    assert sleeps == [1.0]
+
+
 @pytest.mark.asyncio
 async def test_forward_evaluation_case_uses_retry_wrapper(monkeypatch):
     """The public forwarder routes through the retry wrapper with a live client."""

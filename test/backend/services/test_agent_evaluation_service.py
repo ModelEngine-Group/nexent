@@ -2347,6 +2347,29 @@ class TestEvaluateQuery:
 
 
 class TestCasePassStatusHelpers:
+    def test_runtime_upstream_detail_handles_bytes_and_strings(self, service_module):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+        from management.services.evaluation.execution import _runtime_upstream_detail
+
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+        ) == 'HTTP 401: {"code":"TOKEN_EXPIRED"}'
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(500, '{"code":"X"}', {})
+        ) == 'HTTP 500: {"code":"X"}'
+        assert _runtime_upstream_detail(
+            RuntimeUpstreamError(503, None, {})
+        ) == "HTTP 503:"
+
+    def test_friendly_error_message_surfaces_runtime_upstream_detail(self, service_module):
+        from contracts.errors.exceptions import RuntimeUpstreamError
+
+        exc = RuntimeUpstreamError(401, b'{"code":"TOKEN_EXPIRED"}', {})
+        message = service_module._generate_friendly_error_message(
+            exc, "default msg", model_id=99, tenant_id="t1", user_id="u1"
+        )
+        assert message == 'Runtime call failed: HTTP 401: {"code":"TOKEN_EXPIRED"}'
+
     def test_determine_case_pass_status(self, service_module):
         assert (
             service_module._determine_case_pass_status(1, {})
