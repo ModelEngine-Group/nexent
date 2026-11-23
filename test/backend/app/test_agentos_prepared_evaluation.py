@@ -618,92 +618,75 @@ def test_runtime_rejects_invalid_prepared_planning_before_model_lookup(mocker, s
     read.assert_not_called()
 
 
-def test_monitoring_catalog_omitted_without_used_urls(monkeypatch):
-    """Runs without MCP URLs skip catalog work entirely, including Management imports."""
-    import sys
+def test_monitoring_catalog_projects_prepared_payload_onto_used_urls(monkeypatch):
+    """Runtime keeps only the prepared catalog entries whose URLs this run materialized."""
     from types import SimpleNamespace
 
     from runtime.agentos import prepared_evaluation
 
-    fake_management = MagicMock()
-    monkeypatch.setitem(sys.modules, "management.db.mcp.remote", fake_management)
-    monkeypatch.setitem(sys.modules, "management.services.agent.monitoring_catalog", fake_management)
-
-    result = prepared_evaluation._build_run_monitoring_catalog(
-        ServicePrincipal("user-a", "tenant-a"), SimpleNamespace(used_urls=[]), debug=False,
-    )
-
-    assert result is None
-    fake_management.build_run_monitoring_catalog_from_db.assert_not_called()
-
-
-def test_monitoring_catalog_degrades_when_management_modules_absent(monkeypatch):
-    """Runtime-image installs without Management modules omit the catalog instead of failing."""
-    import sys
-    from types import SimpleNamespace
-
-    from runtime.agentos import prepared_evaluation
-
-    monkeypatch.setitem(sys.modules, "management.db.mcp.remote", None)
-    monkeypatch.setitem(sys.modules, "management.services.agent.monitoring_catalog", None)
-
-    result = prepared_evaluation._build_run_monitoring_catalog(
-        ServicePrincipal("user-a", "tenant-a"),
-        SimpleNamespace(used_urls=["https://mcp.example/mcp"]), debug=False,
-    )
-
-    assert result is None
-
-
-def test_monitoring_catalog_degrades_on_tenant_lookup_failure(monkeypatch):
-    """Tenant MCP record lookup failures keep run preparation intact."""
-    from types import SimpleNamespace
-
-    from runtime.agentos import prepared_evaluation
-
-    def raise_db_error(tenant_id):
-        raise RuntimeError("db unavailable")
-
-    monkeypatch.setattr(prepared_evaluation, "LOCAL_MCP_SERVER", False)
-    monkeypatch.setattr("management.db.mcp.remote.get_mcp_records_by_tenant", raise_db_error)
-
-    result = prepared_evaluation._build_run_monitoring_catalog(
-        ServicePrincipal("user-a", "tenant-a"),
-        SimpleNamespace(used_urls=["https://mcp.example/mcp"]), debug=False,
-    )
-
-    assert result is None
-
-
-def test_monitoring_catalog_builds_from_management_records(monkeypatch):
-    """The adapter receives tenant identity, used URLs, records and forwarding flags."""
-    from types import SimpleNamespace
-
-    from runtime.agentos import prepared_evaluation
-
-    captured = {}
-
-    def fake_adapter(tenant_id, used_urls, rows, local_server_url, *, enabled, is_debug):
-        captured.update(tenant_id=tenant_id, used_urls=used_urls, rows=rows,
-                        local_server_url=local_server_url, enabled=enabled, is_debug=is_debug)
-        return [{"url": used_urls[0], "mcp_server_id": 5}]
-
-    monkeypatch.setattr(prepared_evaluation, "LOCAL_MCP_SERVER", True)
     monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
-    monkeypatch.setattr(
-        prepared_evaluation, "get_tenant_local_mcp_server", lambda tenant_id: "http://local-mcp.example")
-    monkeypatch.setattr(
-        "management.db.mcp.remote.get_mcp_records_by_tenant", lambda tenant_id: [{"mcp_id": 5}])
-    monkeypatch.setattr(
-        "management.services.agent.monitoring_catalog.build_run_monitoring_catalog_from_db", fake_adapter)
+    payload = SimpleNamespace(monitoring_mcp_servers=[
+        {"url": "https://a.example/mcp", "mcp_server_id": 1},
+        {"url": "https://b.example/mcp", "mcp_server_id": 2},
+        {"url": "https://c.example/mcp", "mcp_server_id": 3},
+    ])
 
     catalog = prepared_evaluation._build_run_monitoring_catalog(
-        ServicePrincipal("user-a", "tenant-a"),
-        SimpleNamespace(used_urls=["https://mcp.example/mcp"]), debug=False,
+        payload, SimpleNamespace(used_urls=["https://c.example/mcp", "https://b.example/mcp"]), debug=False,
     )
 
-    assert catalog == [{"url": "https://mcp.example/mcp", "mcp_server_id": 5}]
-    assert captured == {
-        "tenant_id": "tenant-a", "used_urls": ["https://mcp.example/mcp"], "rows": [{"mcp_id": 5}],
-        "local_server_url": "http://local-mcp.example", "enabled": True, "is_debug": False,
-    }
+    assert catalog == [
+        {"url": "https://b.example/mcp", "mcp_server_id": 2},
+        {"url": "https://c.example/mcp", "mcp_server_id": 3},
+    ]
+    # A payload catalog with no URL intersection stays omitted.
+    assert prepared_evaluation._build_run_monitoring_catalog(
+        payload, SimpleNamespace(used_urls=["https://other.example/mcp"]), debug=False,
+    ) is None
+
+
+def test_monitoring_catalog_omitted_without_used_urls(monkeypatch):
+    """Runs without MCP URLs skip catalog projection entirely."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+    payload = SimpleNamespace(monitoring_mcp_servers=[{"url": "https://a.example/mcp", "mcp_server_id": 1}])
+
+    result = prepared_evaluation._build_run_monitoring_catalog(
+        payload, SimpleNamespace(used_urls=[]), debug=False,
+    )
+
+    assert result is None
+
+
+def test_monitoring_catalog_omitted_without_prepared_catalog(monkeypatch):
+    """Payloads without a prepared catalog stay omitted; run preparation is unaffected."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+
+    result = prepared_evaluation._build_run_monitoring_catalog(
+        SimpleNamespace(), SimpleNamespace(used_urls=["https://mcp.example/mcp"]), debug=False,
+    )
+
+    assert result is None
+
+
+def test_monitoring_catalog_skips_debug_and_disabled_runs(monkeypatch):
+    """Debug runs and monitoring-disabled deployments never carry a catalog."""
+    from types import SimpleNamespace
+
+    from runtime.agentos import prepared_evaluation
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", True)
+    payload = SimpleNamespace(monitoring_mcp_servers=[{"url": "https://a.example/mcp", "mcp_server_id": 1}])
+    mcp = SimpleNamespace(used_urls=["https://a.example/mcp"])
+
+    assert prepared_evaluation._build_run_monitoring_catalog(payload, mcp, debug=True) is None
+
+    monkeypatch.setattr(prepared_evaluation, "OPS_MONITORING_ENABLED", False)
+    assert prepared_evaluation._build_run_monitoring_catalog(payload, mcp, debug=False) is None
