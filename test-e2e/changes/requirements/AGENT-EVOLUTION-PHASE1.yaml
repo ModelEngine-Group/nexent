@@ -41,6 +41,7 @@ change:
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
     - test/backend/services/test_evolution_screening.py
+    - test/backend/services/test_evolution_confirmation.py
     behaviors:
     - 会话授权按原始请求生效，重试沿用原授权。
     - 撤回或到期后重试不能沿用旧授权，缺证轮次与没有发现问题的轮次分别统计。
@@ -57,5 +58,6 @@ change:
     - 多轮按用户请求顺序重放，各组只承接自己的回答，附件按轮开放；核对各轮回执，按整题检查工具调用、Skill 使用和交付结果。
     - 读写文本文件的任务按组重置真实文件工具的独立目录，每轮读取实际内容，另核对受保护文件的写入。
     - 实验开始前冻结目标题和主指标。回执与冻结版本相符、目标达标且所有保护题与固定回归通过，才能提交独立确认。禁止写入单列原因。
+    - 独立评测人在私有目录核验材料，只登记题目与来源摘要。业务开发题和独立题按租户、智能体互斥，版本变化、并发登记和迁移前的业务题均需核对。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
   notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。随开发增量登记其余 AC 的证明边界。

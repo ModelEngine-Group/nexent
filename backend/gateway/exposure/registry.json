@@ -336,6 +336,24 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent-evolution/confirmation-suites",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-confirmation-seal",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent-evolution/agents/{agent_id}/confirmation-curators",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-confirmation-curator",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-evolution/experiments",
       "transport": "http",
       "target": "management",

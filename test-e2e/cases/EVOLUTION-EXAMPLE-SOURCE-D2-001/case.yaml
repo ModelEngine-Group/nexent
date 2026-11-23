@@ -24,7 +24,10 @@ case:
   - order: 3
     action: 使用受控资源快照提交两个单项实验。分别在单项未完成、提供错误候选号、单项有效且候选号吻合时提交组合，再重复提交。
     expected: 前两次被拒。有效组合只创建一次，数据库中每题有原版、A、B、A+B 四条待执行记录。
-  expected_results: [原题和同源改写题均被拦截。, 固定题按智能体复用、自动纳入对比且历史分区受保护。, 仅有效的单项实验可组合，重复请求复用同一次四组试跑。]
+  - order: 4
+    action: 管理员指定独立评测人。评测人在独立目录生成题集摘要并重复登记；用同源材料跨版本建开发题，再用历史开发题封存。撤销评测人授权，并发登记同源材料到两区。
+    expected: 仅指定评测人可登记，重试返回原编号。两种方向的同源材料均被拒，管理员的开发页面无法取回独立题，撤权即时生效。并发时恰好一个分区登记成功。
+  expected_results: [原题和同源改写题均被拦截。, 固定题按智能体复用、自动纳入对比且历史分区受保护。, 仅有效的单项实验可组合，重复请求复用同一次四组试跑。, 独立题只登记摘要，两区互斥且按智能体授权。]
   forbidden_side_effects: [拒绝的请求均未创建任何实验或试跑作业。]
   acceptance:
   - id: AC-01
@@ -41,6 +44,11 @@ case:
     description: 通过 HTTP 及真实数据库校验单项来源、组合去重和四组任务创建。
     steps: [3]
     expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: 独立题离线封存、授权登记、旧数据隔离及并发防串题。
+    steps: [4]
+    expected_results: [4]
     forbidden_side_effects: [1]
   contract:
     protocol: HTTP API

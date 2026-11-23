@@ -31,7 +31,8 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     directory = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
         for name in ("003_conversation_run_admission", "004_agent_execution", "006_prepared_conversation_turn",
-                     "011_trajectory", "015_conversation_evolution", "018_evolution_replay_cases", "021_evolution_online_reviews"):
+                     "011_trajectory", "015_conversation_evolution", "018_evolution_replay_cases", "021_evolution_online_reviews",
+                     "028_evolution_confirmation_suites"):
             cursor.execute((directory / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
         for chat in (1, 2, 3, 4):
             conn.execute(text("""INSERT INTO nexent.conversation_record_t

@@ -10,6 +10,11 @@ def normalized_text(value):
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+def task_digest(task):
+    content = json.dumps(task, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return sha256(content.encode()).hexdigest()
+
+
 def example_source_keys(task):
     def fingerprint(value):
         return sha256(normalized_text(value).encode("utf-8")).hexdigest()

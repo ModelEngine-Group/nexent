@@ -12,7 +12,7 @@ from local_auth_http import bearer, native_runtime, register, runtime
 
 @pytest.mark.case_id("EVOLUTION-EXAMPLE-SOURCE-D2-001")
 @pytest.mark.stage("D2")
-def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
+def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_path):
     from backend.http.server.exception_handlers import register_exception_handlers
     from types import SimpleNamespace
     from infrastructure.rdb.client import db_client, get_db_session
@@ -36,8 +36,10 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
     models.TableBase.metadata.create_all(db_client.engine)
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
-        for name in ("016_evolution_candidates", "018_evolution_replay_cases", "019_evolution_experiments",
-                     "025_evolution_regression_cases", "026_evolution_combination"):
+        for name in ("003_conversation_run_admission", "006_prepared_conversation_turn", "011_trajectory",
+                     "015_conversation_evolution", "016_evolution_candidates", "017_evolution_skill_candidates",
+                     "018_evolution_replay_cases", "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
+                     "025_evolution_regression_cases", "026_evolution_combination", "028_evolution_confirmation_suites"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for version in (0, 1, 2):
@@ -179,6 +181,85 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
             assert 400 <= response.status_code < 500 and "single experiments" in response.text, response.text
             with get_db_session() as session:
                 assert session.scalar(text("SELECT count(*) FROM nexent.evolution_experiment_t")) == 3
+            check_confirmation_space(client, identity, headers, user, tenant, tmp_path)
     finally:
         clear_default_thread_manager(config_thread_manager)
         asyncio.run(config_thread_manager.shutdown(timeout=5))
+
+
+def check_confirmation_space(client, identity, editor, editor_id, tenant, private_dir):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from contracts.errors.exceptions import AppException
+    from contracts.evolution_sources import task_digest
+    from infrastructure.rdb.client import get_db_session
+    from local_auth_http import seed_membership_roles
+    from management.cli.confirmation_manifest import compile_private_suite
+    from management.db.evaluation.confirmation import register_suite
+    from management.db.evaluation.replay_cases import save_replay_case
+
+    login = identity.post("/api/user/signup",json={"email":"curator@example.com","password":"Password123",
+        "invite_code":"NATIVE-INVITE","auto_login":True}).json()["data"]
+    curator_id = login["user"]["id"]
+    curator = bearer(login["session"]["access_token"])
+    root = "/api/agent-evolution"
+    grant_url = root + "/agents/7/confirmation-curators"
+    seal_url = root + "/confirmation-suites"
+    grant = {"user_id":curator_id,"enabled":True}
+    pack = private_dir / "suite.json"
+    def compile_case(query, group):
+        pack.write_text(json.dumps([{"agent_id":7,"version_no":1,"family":"meeting","query":query,
+            "source_group":group,"expected":"PRIVATE ANSWER — customer seven"}]),encoding="utf-8")
+        return compile_private_suite(pack)
+
+    manifest = compile_case("Private confirmation query", "minutes-Q3")
+    assert client.post(seal_url,headers=curator,json=manifest.canonical()).status_code == 403
+    assert client.put(grant_url,headers=editor,json=grant).status_code == 403
+    seed_membership_roles(editor_id, ["ADMIN"])
+    assert client.put(grant_url,headers=editor,json=grant).is_success
+    assert client.post(seal_url,headers=editor,json=manifest.canonical()).status_code == 403
+    sealed = client.post(seal_url,headers=curator,json=manifest.canonical())
+    assert sealed.is_success, sealed.text
+    receipt = sealed.json()["data"]
+    assert receipt["digest"] == task_digest(manifest.canonical())
+    assert client.post(seal_url,headers=curator,json=manifest.canonical()).json()["data"] == receipt
+    other_version = {"agent_id":7,"version_no":2,"query":"Different words","family":"meeting",
+                     "expected":"done","source_group":"MINUTES-q3"}
+    rejected = client.post(root + "/development-cases",headers=editor,json=other_version)
+    assert rejected.status_code == 400 and "partition" in rejected.text
+    prior = compile_case("A previously registered business case reworded", "minutes-51")
+    rejected = client.post(seal_url,headers=curator,json=prior.canonical())
+    assert rejected.status_code == 400 and "partition" in rejected.text
+    with get_db_session() as session:
+        stored = session.scalar(text("SELECT manifest FROM nexent.evolution_confirmation_suite_t WHERE suite_id=:id"),
+                                {"id":receipt["suite_id"]})
+        assert stored == manifest.canonical()
+        # A release predating source reservations still has to protect its development cases.
+        legacy = {"attachments":[],"query":"Original legacy report","family":"fixture","expected":"done"}
+        session.execute(text("""INSERT INTO nexent.evolution_replay_case_t
+            (tenant_id,agent_id,version_no,digest,task,created_by) VALUES (:t,7,2,:d,CAST(:j AS jsonb),:u)"""),
+            {"t":tenant,"d":task_digest(legacy),"j":json.dumps(legacy),"u":editor_id})
+    old = compile_case("original LEGACY report","unregistered-group")
+    assert client.post(seal_url,headers=curator,json=old.canonical()).status_code == 400
+    workspace = client.get(root + "/agents/7/versions/1/workspace",headers=editor)
+    assert workspace.is_success and "Private confirmation query" not in workspace.text
+    guessed = client.get(root + f"/agents/7/versions/1/development-cases/{receipt['suite_id']}",headers=editor)
+    assert guessed.status_code in {200,404} and "PRIVATE ANSWER" not in guessed.text
+    race = compile_case("race on held material", "same-family")
+    barrier = Barrier(2)
+    def compete(seal):
+        barrier.wait(timeout=10)
+        try:
+            if seal:
+                register_suite(tenant, curator_id, race)
+            else:
+                save_replay_case(tenant,7,2,editor_id,{"query":"other phrasing","source_group":"same-family","attachments":[]})
+        except AppException as exc:
+            assert "partition" in str(exc)
+            return False
+        return True
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(compete,[False,True])) == [False,True]
+    assert client.put(grant_url,headers=editor,json={**grant,"enabled":False}).is_success
+    assert client.post(seal_url,headers=curator,json=manifest.canonical()).status_code == 403

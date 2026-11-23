@@ -1,17 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 from contextlib import nullcontext
-from hashlib import sha256
 
 from sqlalchemy import text
-from contracts.evolution_sources import example_source_keys
+from contracts.evolution_sources import example_source_keys, task_digest
 
 from infrastructure.rdb.client import get_db_session
-
-
-def task_digest(task):
-    content = json.dumps(task, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    return sha256(content.encode()).hexdigest()
+from management.db.evaluation.confirmation import require_development_partition
 
 
 def save_replay_case(tenant_id, agent_id, version_no, user_id, task, *, transaction=None):
@@ -19,9 +14,10 @@ def save_replay_case(tenant_id, agent_id, version_no, user_id, task, *, transact
     params = dict(tenant=tenant_id, agent=agent_id, version=version_no, digest=digest,
                   creator=user_id, task=json.dumps(task, ensure_ascii=False))
     with (get_db_session() if transaction is None else nullcontext(transaction)) as session:
+        require_development_partition(session, tenant_id, agent_id, task)
         case_id = session.scalar(text("""
-            INSERT INTO nexent.evolution_replay_case_t (tenant_id, agent_id, version_no, digest, task, created_by)
-            VALUES (:tenant, :agent, :version, :digest, CAST(:task AS jsonb), :creator)
+            INSERT INTO nexent.evolution_replay_case_t (tenant_id, agent_id, version_no, digest, task, created_by, source_partitioned)
+            VALUES (:tenant, :agent, :version, :digest, CAST(:task AS jsonb), :creator, true)
             ON CONFLICT DO NOTHING RETURNING case_id
         """), params)
         if case_id is None:
