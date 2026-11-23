@@ -85,6 +85,21 @@ async def test_explicit_batch_never_reads_tenant_setting(append):
     assert a.events == ["model", "put", "put"]
 
 
+async def test_native_append_uses_authorized_collection_and_preserves_journal(append, mocker):
+    a = append
+    native = mocker.patch.object(module, "native_document_creation_ports", return_value=None)
+    native.side_effect = lambda actor, grant, dimensions, *, context: a.s.ports(
+        actor, grant.collection, dimensions, context=context
+    )
+    request = a.request.model_copy(update={"native_documents": True})
+    assert "native_documents" not in a.request.model_dump(mode="json")
+    assert request.model_dump(mode="json")["native_documents"] is True
+    result = await a.service.append(request, a.s.s.actor, context=context())
+    assert result.total_indexed == 2 and set(result.chunk_ids) == set(a.rows)
+    assert native.call_count == 4
+    assert all(call.args[1].collection == "collection" for call in native.call_args_list)
+
+
 async def test_pinned_model_changed_after_management_preparation_never_starts_inference(append):
     from contracts.agentos_knowledge import ModelVersion
 

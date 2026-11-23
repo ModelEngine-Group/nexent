@@ -52,6 +52,8 @@ class ElasticSearchCore(VectorDatabaseCore):
         api_key: Optional[str],
         verify_certs: bool = False,
         ssl_show_warn: bool = False,
+        *,
+        client: Optional[Elasticsearch] = None,
     ):
         """
         Initialize ElasticSearchCore with Elasticsearch client and JinaEmbedding model.
@@ -67,7 +69,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         self.api_key = api_key
 
         # Initialize Elasticsearch client with HTTPS support
-        self.client = Elasticsearch(
+        self.client = client if client is not None else Elasticsearch(
             self.host,
             api_key=self.api_key,
             verify_certs=verify_certs,

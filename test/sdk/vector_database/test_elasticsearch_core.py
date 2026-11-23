@@ -1109,6 +1109,7 @@ def test_vectorize_documents_large_batch(elasticsearch_core_instance):
     ]
 
     with patch.object(elasticsearch_core_instance.client, 'bulk') as mock_bulk, \
+            patch.object(elasticsearch_core_instance.client.indices, 'put_settings'), \
             patch.object(elasticsearch_core_instance, '_force_refresh_with_retry') as mock_refresh, \
             patch('time.strftime') as mock_strftime, \
             patch('time.time') as mock_time, \

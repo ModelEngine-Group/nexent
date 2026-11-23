@@ -36,6 +36,7 @@ from runtime.knowledge_base.jobs import KnowledgeJobs
 
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.knowledge_runtime import knowledge_search_ports
+from infrastructure.vdb.native_knowledge import search_native_knowledge
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,30 @@ class KnowledgeSearchService:
         if normalize_model_revision(result.revision) != normalize_model_revision(payload.expected_revision):
             raise Conflict()
         return result.output
+
+    async def _native_search(self, request, actor, grant, query_vector, *, context):
+        hits, revisions = await self._blocking(
+            search_native_knowledge, actor, grant.knowledge_bases, request.query, query_vector,
+            request.top_k, request.weight_accurate, request.split_multimodal_candidates, context=context,
+        )
+        if await self._grant(request, actor) != grant:
+            raise Conflict()
+        by_collection = {resource.collection: resource.knowledge_id for resource in grant.knowledge_bases}
+        text_hits, image_hits = [], [] if request.split_multimodal_candidates else None
+        for hit in hits:
+            document = hit["document"]
+            scores = dict(hit.get("scores", {}))
+            if hit.get("highlight_terms"):
+                scores["retrieval_highlight_terms"] = hit["highlight_terms"]
+            projected = KnowledgeSearchHit(
+                knowledge_id=by_collection[hit["index"]], chunk_id=str(document["id"]),
+                content=document.get("content", ""), filename=document.get("filename", ""),
+                score=hit["score"], score_kind="legacy.hybrid", score_details=scores, public_document=document,
+            )
+            target = image_hits if image_hits is not None and document.get("process_source") == "UniversalImageExtractor" else text_hits
+            target.append(projected)
+        return KnowledgeSearchResult(hits=text_hits, image_hits=image_hits, data_revisions=revisions,
+                                     embedding_model=request.embedding_model)
 
     @staticmethod
     def _dto(hit, *, include_public_document=False):
@@ -339,6 +364,8 @@ class KnowledgeSearchService:
                         model_id=request.embedding_model.model_id, expected_revision=request.embedding_model.revision,
                         input=[request.query]), actor)
                     query_vector = embedding_vectors(output, 1, dimensions)[0]
+                if request.native_documents:
+                    return await self._native_search(request, actor, grant, query_vector, context=context)
                 limit = request.top_k * (RERANK_OVERSEARCH_MULTIPLIER if request.rerank_model else 1)
                 # Public hybrid search can read collections with different mappings using the first query vector.
                 collection_dimensions = None if request.first_collection_embedding else dimensions

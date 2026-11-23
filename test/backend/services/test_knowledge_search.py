@@ -86,6 +86,23 @@ async def test_modes_use_model_invoke_and_return_only_authoritative_generation(s
     assert all(c.args[1:] == ("user", "tenant") for c in s.client.authorize_knowledge_search.call_args_list)
 
 
+async def test_native_public_search_reads_historical_document_after_current_grant(search, mocker):
+    s, request, _, _, service = search
+    provider = mocker.patch("runtime.knowledge_base.search.search_native_knowledge", return_value=(
+        [{"index": "kb", "score": 0.8, "document": {"id": "original", "content": "legacy content"}}], {1: "b" * 64}
+    ))
+    request = KnowledgeSearch.model_validate(request.model_dump() | {
+        "search_mode": "hybrid", "global_hybrid_candidates": True, "include_public_document": True,
+        "native_documents": True, "expected_revisions": {1: "a" * 64},
+    })
+    result = await service.search(request, s.actor)
+    assert result.hits[0].public_document == {"id": "original", "content": "legacy content"}
+    assert result.hits[0].file_id is None and result.data_revisions == {1: "b" * 64}
+    assert provider.call_args.args[3] == (1.0, 0.5)
+    assert not s.closed
+    assert s.client.authorize_knowledge_search.await_count == 2
+
+
 @pytest.mark.parametrize("options", [{"global_hybrid_candidates": False}, {"include_public_document": False},
                                      {"expected_revisions": {}}])
 def test_first_collection_embedding_requires_pinned_public_hybrid(options):

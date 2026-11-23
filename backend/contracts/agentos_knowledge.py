@@ -265,6 +265,7 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     split_multimodal_candidates: bool = False
     merge_display_ids: bool = False
     include_public_document: bool = False
+    native_documents: bool = False
     first_collection_embedding: bool = False
     top_k: int = Field(default=10, ge=1, le=100)
     embedding_model: ModelVersion
@@ -275,6 +276,11 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
 
     @model_validator(mode="after")
     def pinned_resources(self):
+        if self.native_documents and not (
+            self.global_hybrid_candidates and self.include_public_document and self.expected_revisions
+            and not self.file_ids and not self.file_versions
+        ):
+            raise ValueError("Native documents require pinned collection-wide public hybrid search")
         if self.global_hybrid_candidates and (self.search_mode != "hybrid" or self.rerank_model is not None):
             raise ValueError("Global candidates require hybrid search without reranking")
         if self.split_multimodal_candidates and not self.global_hybrid_candidates:
@@ -309,6 +315,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
             result.pop("merge_display_ids", None)
         if not self.include_public_document:
             result.pop("include_public_document", None)
+        if not self.native_documents:
+            result.pop("native_documents", None)
         if not self.first_collection_embedding:
             result.pop("first_collection_embedding", None)
         return result

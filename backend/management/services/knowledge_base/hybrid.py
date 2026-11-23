@@ -150,6 +150,7 @@ async def search_runtime_hybrid(
                 knowledge_ids=list(collections), query=query, search_mode="hybrid", top_k=top_k,
                 weight_accurate=weight, global_hybrid_candidates=True, merge_display_ids=True,
                 split_multimodal_candidates=model.model_type == "multi_embedding", include_public_document=True,
+                native_documents=True,
                 first_collection_embedding=any(row["embedding_model_id"] != model_id for row in resources[1:]),
                 embedding_model=ModelVersion(model_id=model.model_id, revision=model.revision),
                 expected_revisions={row["knowledge_id"]: knowledge_search_revision(row) for row in resources},

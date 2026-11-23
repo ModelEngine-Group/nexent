@@ -72,7 +72,7 @@ async def test_runtime_hybrid_preserves_envelope_and_query_authority(runtime_sea
     assert request.knowledge_ids == [1, 2] and set(request.expected_revisions) == {1, 2}
     assert request.embedding_model.revision == "r2" and request.weight_accurate == .7
     assert request.top_k == 5 and request.split_multimodal_candidates and request.merge_display_ids
-    assert request.global_hybrid_candidates and request.include_public_document
+    assert request.global_hybrid_candidates and request.include_public_document and request.native_documents
     assert (user, tenant) == (s.actor.user_id, s.actor.tenant_id)
     assert result["results"] == [
         {"id": "display-id", "index": "kb", "content": "text", "score": .9,

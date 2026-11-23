@@ -3,7 +3,7 @@
 
 from contracts.agentos import ModelReference
 from contracts.agentos_knowledge import Contract, ModelVersion, ObjectReference
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue, model_serializer, model_validator
 
 
 class KnowledgeDocument(Contract):
@@ -24,6 +24,14 @@ class KnowledgeDocumentsAppend(Contract):
     embedding_model: ModelVersion | ModelReference
     documents: list[KnowledgeDocument] = Field(min_length=1, max_length=64)
     embedding_batch_size: int | None = Field(default=None, ge=1, le=64)
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_append(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        return result
 
 
 class KnowledgeDocumentsAppended(Contract):

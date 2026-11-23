@@ -34,6 +34,7 @@ from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.file_processing.image_sources import read_pinned_object_image
 from infrastructure.object_storage.read_access import validate_s3_url_access
 from infrastructure.rdb.document_embedding_batch import read_document_embedding_batch
+from infrastructure.vdb.native_knowledge import native_document_creation_ports
 
 logger = logging.getLogger(__name__)
 
@@ -133,10 +134,17 @@ class KnowledgeDocumentAppender:
                         total_submitted=len(request.documents), total_indexed=0,
                         total_skipped=len(request.documents), chunk_ids=[])
                 namespace = {} if grant.resource_tenant_id == actor.tenant_id else {"resource_tenant_id": grant.resource_tenant_id}
+                ports = self.mutations.creation_ports
+                if request.native_documents:
+                    def ports(principal, collection, dimensions, *, context, resource_tenant_id=None):
+                        if collection != grant.collection or (resource_tenant_id or principal.tenant_id) != grant.resource_tenant_id:
+                            raise ScopeDenied()
+                        return native_document_creation_ports(principal, grant, dimensions, context=context)
+
                 with self.mutations.records(actor, context=context, **namespace) as records:
                     journal = ChunkMutationAdmission(records, request.knowledge_id)
                     executor = ChunkCreationExecutor(journal, self.mutations.models, actor, grant.collection,
-                                                     ports=self.mutations.creation_ports)
+                                                     ports=ports)
                     keys = []
                     for index, ((document, _, is_image), source, vector) in enumerate(zip(inputs, prepared, vectors, strict=True)):
                         key = "document-" + uuid4().hex
