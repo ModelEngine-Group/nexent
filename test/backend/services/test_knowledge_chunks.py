@@ -30,6 +30,7 @@ from test.backend.services.test_knowledge_sample import (
     {'offset': -1}, {'limit': 0}, {'limit': 1001},
     {'file_ids': ['invalid']},
     {'file_ids': ['a' * 32] * 2},
+    {'native_documents': True, 'file_ids': []},
 ])
 def test_chunk_request_rejects_invalid_windows_and_file_scope(updates):
     from contracts.agentos_knowledge import KnowledgeChunks
@@ -72,6 +73,23 @@ async def test_window_beyond_total_does_not_scan_physical_vectors(browse):
     s,request,_,_,service = browse
     result = await service.chunks(request.model_copy(update={'offset':10}),s.actor)
     assert result.total==1 and result.chunks==[]
+    s.vectors.scan.assert_not_called()
+
+
+async def test_native_window_keeps_physical_id_and_no_fabricated_manifest(browse, mocker):
+    from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
+
+    s, request, grant, _, service = browse
+    storage = mocker.patch("runtime.knowledge_base.chunks.native_chunk_window", return_value=(
+        "b" * 64, 2, [("physical", {"id": "display", "path_or_url": "old.txt", "content": "old"})],
+    ))
+    request = request.model_copy(update={"native_documents": True, "standalone_path": "old.txt"})
+    result = await service.chunks(request, s.actor)
+    assert result.next_offset == 1 and result.data_revision == "b" * 64
+    assert result.chunks[0].chunk_id == "physical" and result.chunks[0].file_id is None
+    assert result.chunks[0].location[PUBLIC_CHUNK_SOURCE_KEY]["id"] == "display"
+    assert storage.call_args.args == (s.actor, grant, "old.txt", 0, 1, None)
+    assert s.client.authorize_knowledge_chunks.await_count == 2
     s.vectors.scan.assert_not_called()
 
 

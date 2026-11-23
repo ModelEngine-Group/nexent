@@ -81,7 +81,7 @@ class KnowledgeFileListing:
             owner="management.knowledge_base",
         )
 
-    async def list(self, index_name, actor):
+    async def list(self, index_name, actor, *, native_documents=False):
         cancelled = Event()
         context = OperationContext(
             "knowledge-file-list-" + uuid4().hex,
@@ -116,6 +116,7 @@ class KnowledgeFileListing:
                         KnowledgeSources(
                             knowledge_id=resource.knowledge_id,
                             expected_revision=resource.revision,
+                            native_documents=native_documents,
                         ),
                         actor.user_id,
                         actor.tenant_id,

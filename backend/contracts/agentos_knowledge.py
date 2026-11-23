@@ -494,6 +494,20 @@ class KnowledgeChunks(KnowledgeChunksAuthorization):
     standalone_path: str | None = None
     offset: int = Field(default=0, ge=0, le=2**31-1)
     limit: int = Field(default=100, ge=1, le=1000)
+    native_documents: bool = False
+
+    @model_validator(mode="after")
+    def native_scope(self):
+        if self.native_documents and self.file_ids is not None:
+            raise ValueError("Native chunks can only be scoped by their source path")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_chunks(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        return result
 
     @field_validator('file_ids')
     @classmethod

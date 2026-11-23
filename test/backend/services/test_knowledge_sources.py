@@ -120,6 +120,19 @@ async def test_missing_collection_is_empty_without_group_query(boundary):
     s.vectors.group.assert_not_called()
 
 
+async def test_native_sources_use_current_agentos_grant(boundary, mocker):
+    s = boundary
+    native = mocker.patch("runtime.knowledge_base.sources.native_source_groups",
+                          return_value=(True, s.vectors.group.return_value))
+    assert "native_documents" not in s.request.model_dump()
+    result = await s.service.list_sources(s.request.model_copy(update={"native_documents": True}), s.actor)
+    assert result.sources[0].path_or_url == "one"
+    assert result.sources[0].chunk_count == 3
+    assert native.call_args.args == (s.actor, s.grant, 2)
+    assert s.client.authorize_knowledge_chunks.await_count == 2
+    assert not s.opened
+
+
 async def test_stale_resource_never_opens_provider(boundary):
     s = boundary
     with pytest.raises(Conflict):

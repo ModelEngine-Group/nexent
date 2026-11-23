@@ -2,12 +2,20 @@
 """Body-free physical source summaries for Management file projections."""
 
 from contracts.agentos_knowledge import Contract, KnowledgeChunksAuthorization
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue, model_serializer, model_validator
 
 
 class KnowledgeSources(KnowledgeChunksAuthorization):
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     limit: int = Field(default=1000, ge=1, le=1000)
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_sources(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        return result
 
 
 class KnowledgeSourceSummary(Contract):

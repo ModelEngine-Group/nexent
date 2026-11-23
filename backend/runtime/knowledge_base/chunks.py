@@ -7,6 +7,7 @@ from time import monotonic
 from uuid import uuid4
 
 from contracts.agentos_knowledge import (
+    KnowledgeChunk,
     KnowledgeChunks,
     KnowledgeChunksAuthorization,
     KnowledgeChunksResult,
@@ -25,6 +26,7 @@ from runtime.knowledge_base.publication import published_files, published_job
 from runtime.knowledge_base.sample import PublishedKnowledgeReader
 
 from infrastructure.knowledge_runtime import knowledge_chunks_ports
+from infrastructure.vdb.native_knowledge import native_chunk_window
 
 logger = logging.getLogger(__name__)
 
@@ -84,17 +86,33 @@ class KnowledgeChunksService(PublishedKnowledgeReader):
                                                             actor.user_id, actor.tenant_id)
         if grant.knowledge_id != request.knowledge_id:
             raise ScopeDenied()
+        if grant.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}:
+            raise ScopeDenied()
         if grant.revision != request.expected_revision:
             raise Conflict()
         return grant
 
     async def chunks(self, request, actor, *, context=None):
         if not isinstance(request, KnowledgeChunks): raise InvalidInput()
+        request = KnowledgeChunks.model_validate(request.model_dump())
         context = context or OperationContext('knowledge-chunks-'+uuid4().hex,monotonic()+self.operation_seconds)
         threshold = context.remaining()
         try:
             async with asyncio.timeout(threshold):
                 resource = await self._grant(request,actor)
+                if request.native_documents:
+                    revision, total, rows = await self._blocking(
+                        native_chunk_window, actor, resource, request.standalone_path,
+                        request.offset, request.limit, request.expected_data_revision, context=context,
+                    )
+                    if await self._grant(request, actor) != resource:
+                        raise Conflict()
+                    chunks = [KnowledgeChunk(knowledge_id=request.knowledge_id, chunk_id=key,
+                              content=source.get("content"), filename=source.get("filename"),
+                              location={PUBLIC_CHUNK_SOURCE_KEY: source}) for key, source in rows]
+                    next_offset = request.offset + len(chunks) if request.offset + len(chunks) < total else None
+                    return KnowledgeChunksResult(knowledge_id=request.knowledge_id, knowledge_revision=resource.revision,
+                        data_revision=revision, total=total, chunks=chunks, next_offset=next_offset)
                 with self.ports(actor,resource,context=context) as (records,vectors):
                     _scope(records,actor,resource); _scope(vectors,actor,resource)
                     revision = await self._blocking(knowledge_data_revision,records,request.knowledge_id,context=context)

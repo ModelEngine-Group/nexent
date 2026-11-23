@@ -10,6 +10,7 @@ from contracts.agentos_knowledge import (
     KnowledgeChunksAuthorization,
     KnowledgeChunksGrant,
 )
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import RuntimeServiceTimeoutError
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
 from contracts.knowledge_sources import (
@@ -35,6 +36,7 @@ from nexent.storage.models import (
 from runtime.knowledge_base.worker import cancellable_context
 
 from infrastructure.knowledge_sources import knowledge_source_ports
+from infrastructure.vdb.native_knowledge import native_source_groups
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,7 @@ class KnowledgeSourcesService:
         if (
             not isinstance(grant, KnowledgeChunksGrant)
             or grant.knowledge_id != request.knowledge_id
+            or grant.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID}
         ):
             raise ScopeDenied()
         grant = KnowledgeChunksGrant.model_validate(grant.model_dump())
@@ -84,7 +87,7 @@ class KnowledgeSourcesService:
             raise Conflict()
         return grant
 
-    def _read(self, request, actor, grant, *, context):
+    def _managed_groups(self, request, actor, grant, *, context):
         context.remaining()
         with self.ports(actor, grant, context=context) as vectors:
             scope = vectors.scope
@@ -110,43 +113,50 @@ class KnowledgeSourcesService:
                 if present
                 else ()
             )
-            try:
-                if not isinstance(values, tuple) or len(values) > request.limit:
-                    raise ValueError("Invalid source groups")
-                sources = []
-                for value in values:
-                    if not isinstance(value, VectorGroup):
-                        raise TypeError("Invalid source group")
-                    if value.collection != grant.collection:
-                        raise ScopeDenied()
-                    data = value.sample
-                    if not isinstance(data, dict) or not data.keys() <= {
-                        "path",
-                        "filename",
-                        "size",
-                        "created",
-                    }:
-                        raise ValueError("Invalid sample")
-                    sources.append(
-                        KnowledgeSourceSummary(
-                            source_key=value.key,
-                            path_or_url=data["path"],
-                            filename=data.get("filename", ""),
-                            file_size=data.get("size", 0),
-                            create_time=data.get("created"),
-                            chunk_count=value.count,
-                        )
+            return present, values
+
+    def _read(self, request, actor, grant, *, context):
+        if request.native_documents:
+            present, values = native_source_groups(actor, grant, request.limit, context=context)
+        else:
+            present, values = self._managed_groups(request, actor, grant, context=context)
+        try:
+            if not isinstance(values, tuple) or len(values) > request.limit:
+                raise ValueError("Invalid source groups")
+            sources = []
+            for value in values:
+                if not isinstance(value, VectorGroup):
+                    raise TypeError("Invalid source group")
+                if value.collection != grant.collection:
+                    raise ScopeDenied()
+                data = value.sample
+                if not isinstance(data, dict) or not data.keys() <= {
+                    "path",
+                    "filename",
+                    "size",
+                    "created",
+                }:
+                    raise ValueError("Invalid sample")
+                sources.append(
+                    KnowledgeSourceSummary(
+                        source_key=value.key,
+                        path_or_url=data["path"],
+                        filename=data.get("filename", ""),
+                        file_size=data.get("size", 0),
+                        create_time=data.get("created"),
+                        chunk_count=value.count,
                     )
-                result = KnowledgeSourcesResult(
-                    knowledge_id=request.knowledge_id,
-                    revision=grant.revision,
-                    present=present,
-                    sources=sources,
                 )
-            except (KeyError, TypeError, ValueError):
-                raise Unavailable(operation_id=context.operation_id) from None
-            context.remaining()
-            return result
+            result = KnowledgeSourcesResult(
+                knowledge_id=request.knowledge_id,
+                revision=grant.revision,
+                present=present,
+                sources=sources,
+            )
+        except (KeyError, TypeError, ValueError):
+            raise Unavailable(operation_id=context.operation_id) from None
+        context.remaining()
+        return result
 
     async def list_sources(self, request, actor, *, context=None):
         if not isinstance(request, KnowledgeSources):

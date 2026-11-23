@@ -85,3 +85,63 @@ def test_write_refuses_alias(fixture):
     with pytest.raises(ScopeDenied):
         writes.ensure_collection("kb", context=context)
     es.index.assert_not_called()
+
+
+def test_native_source_groups_protect_aggregation_and_omit_bodies(monkeypatch, fixture):
+    es, actor, grant, context = fixture
+    engine, owner = Mock(), Mock()
+    monkeypatch.setattr(native_knowledge, "_configured_client", lambda _: es)
+    monkeypatch.setattr(native_knowledge, "record_engine", lambda _: engine)
+    monkeypatch.setattr(native_knowledge, "bind_legacy_index_owner", owner)
+    owner.return_value.get.return_value = {"owner_count": 1, "selected_owner_count": 1}
+    source = {"path_or_url": "files/old.pdf", "filename": "old.pdf", "file_size": 10}
+    es.search.return_value = {"timed_out": False, "_shards": {"failed": 0}, "aggregations": {"sources": {"buckets": [
+        {"key": "files/old.pdf", "doc_count": 3,
+         "sample": {"hits": {"hits": [{"_index": "kb", "_source": source}]}}},
+    ]}}}
+    present, groups = native_knowledge.native_source_groups(actor, grant, 2, context=context)
+    assert present and groups[0].count == 3
+    assert groups[0].sample == {"path": "files/old.pdf", "filename": "old.pdf", "size": 10}
+    options = es.search.call_args.kwargs
+    assert options["index"] == "kb" and options["size"] == 0
+    assert options["query"] == {"term": {"nexent_read_owned": True}}
+    assert options["runtime_mappings"]["nexent_read_owned"]["script"]["params"] == {"tenant": "tenant"}
+    aggregation = options["aggregations"]["sources"]
+    assert aggregation["terms"]["field"] == "path_or_url"
+    assert "content" not in aggregation["aggs"]["sample"]["top_hits"]["_source"]
+    assert owner.call_count == 2
+    source["metadata"] = {"tenant_id": "other"}
+    with pytest.raises(ScopeDenied):
+        native_knowledge.native_source_groups(actor, grant, 2, context=context)
+
+
+def test_native_chunk_window_closes_latest_pit_and_projects_only_requested_rows(fixture):
+    es, _, grant, context = fixture
+    es.open_point_in_time.return_value = {"id": "pit-1"}
+    es.search.return_value = {"timed_out": False, "_shards": {"failed": 0}, "pit_id": "pit-2",
+        "hits": {"total": {"relation": "eq", "value": 2}, "hits": [
+            {"_index": "kb", "_id": "first", "_source": {}, "sort": [0, 0]},
+            {"_index": "kb", "_id": "second", "_source": {"content": "old", "embedding": [1, 0]}, "sort": [1, 1]},
+        ]}}
+    total, rows = native_knowledge._native_window(es, grant, "source", 1, 1, context)
+    assert total == 2 and rows == [("second", {"id": "second", "content": "old"})]
+    assert {"term": {"path_or_url": "source"}} in es.search.call_args.kwargs["query"]["bool"]["filter"]
+    es.close_point_in_time.assert_called_once_with(id="pit-2")
+
+
+def test_native_chunk_window_skips_a_full_page_without_loading_chunk_bodies(fixture):
+    es, _, grant, context = fixture
+    es.open_point_in_time.return_value = {"id": "pit"}
+    response = {"timed_out": False, "_shards": {"failed": 0}}
+    total = {"relation": "eq", "value": 1001}
+    es.search.side_effect = [
+        response | {"hits": {"total": total, "hits": [{"sort": [i, i]} for i in range(1000)]}},
+        response | {"hits": {"total": total, "hits": [
+            {"_index": "kb", "_id": "kept", "_source": {"content": "visible"}, "sort": [1000, 1000]},
+        ]}},
+    ]
+    total, rows = native_knowledge._native_window(es, grant, None, 1000, 1, context)
+    assert total == 1001 and rows[0][0] == "kept"
+    first, second = es.search.call_args_list
+    assert first.kwargs["source"] is False
+    assert second.kwargs["source"] is True and second.kwargs["search_after"] == [999, 999]

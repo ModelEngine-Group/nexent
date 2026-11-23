@@ -66,7 +66,7 @@ class KnowledgeChunkBrowser:
             result['create_time'] = file['create_time']
         return result
 
-    async def browse(self, index_name, actor, *, page=None, page_size=None, path_or_url=None):
+    async def browse(self, index_name, actor, *, page=None, page_size=None, path_or_url=None, native_documents=False):
         cancelled = Event()
         context = OperationContext('knowledge-chunk-browse-' + uuid4().hex, monotonic() + self.operation_seconds, cancelled=cancelled)
         threshold = context.remaining()
@@ -76,13 +76,14 @@ class KnowledgeChunkBrowser:
             async with asyncio.timeout(threshold):
                 resource, files = await self._snapshot(index_name, actor, context=context)
                 mapping = {file['file_id']: file for file in files}
-                selected = None if not path_or_url else [file['file_id'] for file in files
+                selected = None if not path_or_url or native_documents else [file['file_id'] for file in files
                     if path_or_url in (file['object_name'], file['local_source_path'])]
                 chunks, seen, revision, total = [], set(), None, None
                 while True:
                     limit = 1000 if wanted is None else min(wanted-len(chunks), 1000)
                     request = KnowledgeChunks(knowledge_id=resource.knowledge_id, expected_revision=resource.revision,
-                        expected_data_revision=revision, offset=offset, limit=limit, file_ids=selected, standalone_path=path_or_url or None)
+                        expected_data_revision=revision, offset=offset, limit=limit, file_ids=selected,
+                        standalone_path=path_or_url or None, native_documents=native_documents)
                     result = await self.client.knowledge_chunks(request, actor.user_id, actor.tenant_id)
                     if not isinstance(result, KnowledgeChunksResult) or result.knowledge_id != resource.knowledge_id:
                         raise ScopeDenied()
