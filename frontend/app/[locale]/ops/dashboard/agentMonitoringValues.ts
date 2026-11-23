@@ -2,13 +2,18 @@
 import type {
   AgentExecutionMetrics,
   AgentMonitoringDay,
+  AgentMonitoringMetric,
   AgentMonitoringSelection,
+  AgentRankingRow,
 } from "@/types/agentMonitoring";
 import type { OperationsResource } from "@/types/operations";
 import type { MonitoringRange } from "./monitoringFilters";
 
-export type AgentTrendMetric =
-  "execution_count" | "success_rate" | "total_tokens";
+export const agentMetricLabels: Record<AgentMonitoringMetric, string> = {
+  execution_count: "execution",
+  success_rate: "success",
+  total_tokens: "tokens",
+};
 
 export function agentMonitoringSelection(
   tenantId: string | null | undefined,
@@ -38,9 +43,31 @@ export function getAgentSuccessRate(metrics: AgentExecutionMetrics) {
   return samples ? metrics.success_rate : null;
 }
 
+export function getAgentOutcomeDistribution(metrics: AgentExecutionMetrics) {
+  const { succeeded_count: succeeded, failed_count: failed } = metrics;
+  if (succeeded === null || failed === null) return null;
+  const samples = succeeded + failed;
+  if (samples === 0) return null;
+  return {
+    samples,
+    succeeded,
+    failed,
+    succeededShare: succeeded / samples,
+    failedShare: failed / samples,
+  };
+}
+
+export function getAgentRankingValue(
+  row: AgentRankingRow,
+  metric: AgentMonitoringMetric
+) {
+  if (metric === "total_tokens") return row.tokens?.total_tokens?.value ?? null;
+  return row.metrics?.[metric] ?? null;
+}
+
 export function getAgentTrendValue(
   day: AgentMonitoringDay,
-  metric: AgentTrendMetric
+  metric: AgentMonitoringMetric
 ) {
   switch (metric) {
     case "total_tokens":
@@ -54,7 +81,7 @@ export function getAgentTrendValue(
 
 export function formatAgentMetric(
   value: number | string | null,
-  metric: AgentTrendMetric,
+  metric: AgentMonitoringMetric,
   language: string
 ): string {
   if (value === null) return "—";

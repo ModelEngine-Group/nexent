@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agentMonitoringSelection,
   formatAgentMetric,
+  getAgentOutcomeDistribution,
+  getAgentRankingValue,
   getAgentSuccessRate,
   getAgentTrendValue,
   successSampleCount,
@@ -10,6 +12,7 @@ import {
 import { fetchWithAuth } from "@/lib/auth";
 import {
   getAgentMonitoringList,
+  getAgentMonitoringRankings,
   getAgentMonitoringSummary,
   getAgentMonitoringTrends,
 } from "@/services/agentMonitoringService";
@@ -81,6 +84,63 @@ describe("Agent monitoring values", () => {
     expect(successSampleCount(failed)).toBe(2);
     expect(getAgentTrendValue(failed, "success_rate")).toBe(0);
     expect(formatAgentMetric(0, "success_rate", "en")).toBe("0%");
+  });
+
+  it("uses only success and failure counts for outcome shares", () => {
+    expect(
+      getAgentOutcomeDistribution({
+        ...noExecutions,
+        execution_count: 10,
+        succeeded_count: 3,
+        failed_count: 1,
+        success_rate: null,
+      })
+    ).toEqual({
+      samples: 4,
+      succeeded: 3,
+      failed: 1,
+      succeededShare: 0.75,
+      failedShare: 0.25,
+    });
+    expect(
+      getAgentOutcomeDistribution({ ...noExecutions, failed_count: 2 })
+    ).toMatchObject({
+      succeededShare: 0,
+      failedShare: 1,
+    });
+    expect(getAgentOutcomeDistribution(noExecutions)).toBeNull();
+    expect(
+      getAgentOutcomeDistribution({
+        ...noExecutions,
+        succeeded_count: 3,
+        failed_count: null,
+      })
+    ).toBeNull();
+  });
+
+  it("preserves historical Token-only ranking rows and known zero", () => {
+    const row = {
+      tenant_id: "a",
+      agent_id: 2,
+      is_current: false,
+      metrics: null,
+      tokens: {
+        total_tokens: {
+          value: "9007199254740993",
+          known_count: 1,
+          eligible_count: 1,
+          coverage_rate: 1,
+        },
+      },
+    };
+    expect(getAgentRankingValue(row, "total_tokens")).toBe("9007199254740993");
+    expect(getAgentRankingValue(row, "execution_count")).toBeNull();
+    expect(
+      getAgentRankingValue({ ...row, metrics: noExecutions }, "execution_count")
+    ).toBe(0);
+    expect(
+      getAgentRankingValue({ ...row, tokens: undefined }, "total_tokens")
+    ).toBeNull();
   });
 });
 
@@ -161,5 +221,26 @@ describe("Agent monitoring requests", () => {
       getAgentMonitoringList(selection, { ...list, search: "" }, signal)
     ).rejects.toBe(error);
     expect(fetch.mock.calls[0]?.[0]).not.toContain("search=");
+  });
+
+  it("uses the ranking endpoint with the active metric, repeated groups and cancellation", async () => {
+    const payload = {
+      data: [{ agent_id: 4 }, { agent_id: 2 }],
+      coverage_state: "partial",
+    };
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify(payload)));
+    const scope = { ...selection, agentId: null, groupIds: [12, 14] };
+    await expect(
+      getAgentMonitoringRankings(scope, "success_rate", signal)
+    ).resolves.toEqual(payload);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/ops/v1/monitoring/agents/rankings?start_date=2026-11-17&end_date=2026-11-23&metric=success_rate&tenant_id=a%26b&group_ids=12&group_ids=14",
+      { signal }
+    );
+    const error = new Error("Rankings unavailable");
+    fetch.mockRejectedValueOnce(error);
+    await expect(
+      getAgentMonitoringRankings(scope, "total_tokens", signal)
+    ).rejects.toBe(error);
   });
 });

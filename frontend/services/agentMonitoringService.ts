@@ -4,6 +4,8 @@ import { API_ENDPOINTS } from "@/services/api";
 import type {
   AgentListRequest,
   AgentMonitoringList,
+  AgentMonitoringMetric,
+  AgentMonitoringRankings,
   AgentMonitoringSelection,
   AgentMonitoringSummary,
   AgentMonitoringTrends,
@@ -67,5 +69,18 @@ export function getAgentMonitoringTrends(
     API_ENDPOINTS.operations.agentMonitoringTrends,
     selection,
     signal
+  );
+}
+
+export function getAgentMonitoringRankings(
+  selection: AgentMonitoringSelection,
+  metric: AgentMonitoringMetric,
+  signal: AbortSignal
+) {
+  return readAgentMonitoring<AgentMonitoringRankings>(
+    API_ENDPOINTS.operations.agentMonitoringRankings,
+    selection,
+    signal,
+    { metric }
   );
 }

@@ -53,12 +53,11 @@ export interface AgentMonitoringTrends extends AgentMonitoringResponse {
   data: AgentMonitoringDay[];
 }
 
+export type AgentMonitoringMetric =
+  "execution_count" | "total_tokens" | "success_rate";
+
 export type AgentListSort =
-  | "execution_count"
-  | "total_tokens"
-  | "avg_duration_ms"
-  | "avg_ttft_ms"
-  | "success_rate";
+  AgentMonitoringMetric | "avg_duration_ms" | "avg_ttft_ms";
 
 export interface AgentListRequest {
   page: number;
@@ -91,4 +90,18 @@ export interface AgentMonitoringList extends AgentMonitoringResponse {
     total: number;
     current_agent_count: number;
   };
+}
+
+export interface AgentRankingRow extends Omit<
+  AgentMonitoringRow,
+  "metrics" | "tokens" | "token_status"
+> {
+  metrics: (AgentExecutionMetrics & { success_sample_count?: number }) | null;
+  tokens?: AgentTokenMetrics;
+  token_status?: AgentPublication;
+}
+
+export interface AgentMonitoringRankings extends AgentPublication {
+  data: AgentRankingRow[];
+  token_status?: AgentPublication;
 }

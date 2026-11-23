@@ -15,8 +15,10 @@ feature:
   - rule_id: OPS-MONITORING-UI-RULE-03
     description: Agent inventory is scoped by tenant. Execution and Token cards and daily trends use the selected tenant, Agent, group and dates. Missing values, coverage and publication state remain explicit.
   - rule_id: OPS-MONITORING-UI-RULE-04
-    description: Agent details use scoped server search, sorting and pagination. A current Agent row can select its tenant-qualified resource in the dashboard filter.
+    description: Agent details use scoped server search, sorting and pagination. Date and group changes reset only the page within the same tenant and Agent. A current Agent row can select its tenant-qualified resource.
+  - rule_id: OPS-MONITORING-UI-RULE-05
+    description: All Agents show the server's Top 5 for the active metric and authorized scope. A single Agent shows success and failure shares from the summary and the call total separately.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123, OPS-AGENT-UI-DETAILS-20261123, OPS-AGENT-UI-CHARTS-20261123]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md

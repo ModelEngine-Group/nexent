@@ -1,6 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { Alert, Empty, Segmented, Spin } from "antd";
-import dayjs from "dayjs";
 import {
   Activity,
   Bot,
@@ -19,75 +18,21 @@ import {
   YAxis,
 } from "recharts";
 import type {
+  AgentMonitoringMetric,
   AgentMonitoringTrends,
-  AgentPublication,
-  AgentTokenUsage,
 } from "@/types/agentMonitoring";
+import { AgentOutcomeDistribution } from "./AgentOutcomeDistribution";
+import { AgentRankings } from "./AgentRankings";
+import { PublicationStatus, TokenCoverage } from "./AgentMonitoringStatus";
 import {
+  agentMetricLabels,
   formatAgentMetric,
   getAgentSuccessRate,
   getAgentTrendValue,
   successSampleCount,
-  type AgentTrendMetric,
 } from "./agentMonitoringValues";
 import type { useAgentMonitoring } from "./useAgentMonitoring";
 import styles from "./agentMonitoring.module.css";
-
-const metricLabels: Record<AgentTrendMetric, string> = {
-  execution_count: "execution",
-  success_rate: "success",
-  total_tokens: "tokens",
-};
-
-export function PublicationStatus({
-  label,
-  publication,
-}: {
-  label: string;
-  publication: AgentPublication;
-}) {
-  const { t } = useTranslation("common");
-  return (
-    <p className={styles.publication}>
-      <strong>{label}</strong>
-      <span>
-        {t(`ops.monitoring.agent.coverage.${publication.coverage_state}`)}
-      </span>
-      {publication.is_stale && (
-        <span className={styles.stale}>{t("ops.monitoring.agent.stale")}</span>
-      )}
-      <span>
-        {t("ops.monitoring.agent.publishedAt", {
-          date: publication.data_as_of
-            ? dayjs
-                .utc(publication.data_as_of)
-                .format("YYYY-MM-DD HH:mm:ss [UTC]")
-            : "—",
-        })}
-      </span>
-    </p>
-  );
-}
-
-export function TokenCoverage({ usage }: { usage: AgentTokenUsage | null }) {
-  const { t, i18n } = useTranslation("common");
-  if (usage === null)
-    return <span>{t("ops.monitoring.agent.coverageMissing")}</span>;
-  const number = new Intl.NumberFormat(i18n.language);
-  return (
-    <span>
-      {t("ops.monitoring.agent.requestCoverage", {
-        known: number.format(usage.known_count),
-        eligible: number.format(usage.eligible_count),
-        rate: formatAgentMetric(
-          usage.coverage_rate,
-          "success_rate",
-          i18n.language
-        ),
-      })}
-    </span>
-  );
-}
 
 function AgentTrend({
   trends,
@@ -99,12 +44,12 @@ function AgentTrend({
   hasRange: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
-  const [metric, setMetric] = useState<AgentTrendMetric>("total_tokens");
+  const [metric, setMetric] = useState<AgentMonitoringMetric>("total_tokens");
   const titleId = useId();
   const gradientId = useId();
   const response: AgentMonitoringTrends | undefined = trends.data;
   const isToken = metric === "total_tokens";
-  const metricLabel = t(`ops.monitoring.agent.${metricLabels[metric]}`);
+  const metricLabel = t(`ops.monitoring.agent.${agentMetricLabels[metric]}`);
   const chartData = response?.data.map((day) => {
     const exact = getAgentTrendValue(day, metric);
     // Recharts requires coordinates as numbers. Keep the original value for text and tooltips.
@@ -130,16 +75,16 @@ function AgentTrend({
           <h3 id={titleId}>{t("ops.monitoring.agent.trend")}</h3>
           <span>{t("ops.monitoring.agent.daily")}</span>
         </div>
-        <Segmented<AgentTrendMetric>
+        <Segmented<AgentMonitoringMetric>
           className={styles.trendMetric}
           aria-label={t("ops.monitoring.agent.trendMetric")}
           value={metric}
-          options={(Object.keys(metricLabels) as AgentTrendMetric[]).map(
-            (value) => ({
-              value,
-              label: t(`ops.monitoring.agent.${metricLabels[value]}`),
-            })
-          )}
+          options={(
+            Object.keys(agentMetricLabels) as AgentMonitoringMetric[]
+          ).map((value) => ({
+            value,
+            label: t(`ops.monitoring.agent.${agentMetricLabels[value]}`),
+          }))}
           onChange={setMetric}
         />
       </header>
@@ -281,17 +226,17 @@ function AgentTrend({
 
 export function AgentMonitoringPanels({
   data,
+  tenantLabel,
   inventory,
   singleAgent,
   scopeLoading,
-  hasSelection,
   hasRange,
 }: {
   data: ReturnType<typeof useAgentMonitoring>;
+  tenantLabel: (id: string) => string;
   inventory: { count: number | null; loading: boolean; failed: boolean };
   singleAgent: boolean;
   scopeLoading: boolean;
-  hasSelection: boolean;
   hasRange: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
@@ -300,12 +245,13 @@ export function AgentMonitoringPanels({
   const metrics = summary?.data;
   const usage = summary?.tokens.total_tokens ?? null;
   const samples = metrics ? successSampleCount(metrics) : null;
+  const hasSelection = data.queryKey[3] !== null;
   const summaryLoading =
     scopeLoading || (hasSelection && data.summary.isPending);
   const trendLoading = scopeLoading || (hasSelection && data.trends.isPending);
   const renderValue = (
     value: number | string | null,
-    metric: AgentTrendMetric
+    metric: AgentMonitoringMetric
   ) =>
     summaryLoading && !summary
       ? t("common.loading")
@@ -411,11 +357,27 @@ export function AgentMonitoringPanels({
       <h2 className={styles.metricsTitle} id={titleId}>
         {t("ops.monitoring.agent.metrics")}
       </h2>
-      <AgentTrend
-        trends={data.trends}
-        loading={trendLoading}
-        hasRange={hasRange}
-      />
+      <div className={styles.charts}>
+        <AgentTrend
+          trends={data.trends}
+          loading={trendLoading}
+          hasRange={hasRange}
+        />
+        {singleAgent ? (
+          <AgentOutcomeDistribution
+            summary={data.summary}
+            loading={summaryLoading}
+            hasRange={hasRange}
+          />
+        ) : (
+          <AgentRankings
+            queryKey={data.queryKey}
+            scopeLoading={scopeLoading}
+            hasRange={hasRange}
+            tenantLabel={tenantLabel}
+          />
+        )}
+      </div>
     </section>
   );
 }

@@ -99,6 +99,18 @@
   border-radius: var(--radius-lg);
 }
 
+.charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1050px) {
+  .charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .trendHeader {
   display: flex;
   justify-content: space-between;
@@ -142,6 +154,163 @@
 
 .tooltip p {
   margin: 2px 0;
+}
+
+.rankRows {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 12px 0;
+  list-style: none;
+}
+
+.rankRow,
+.rankScale {
+  display: grid;
+  grid-template-columns: minmax(0, 24%) minmax(0, 1fr) minmax(0, 30%);
+  gap: 10px;
+  align-items: center;
+}
+
+.rankRow {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.rankName,
+.rankValue {
+  overflow-wrap: anywhere;
+}
+
+.rankValue small {
+  display: block;
+  color: var(--color-text-secondary);
+}
+
+.rankValue strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.rankBar {
+  height: 13px;
+  background: var(--color-border-separator-subtle);
+}
+
+.rankBar span {
+  display: block;
+  height: 100%;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-chart-1);
+}
+
+.rankScale {
+  margin: -4px 0 12px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.rankScale div {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+}
+
+.outcomes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  min-height: 280px;
+  gap: 16px 24px;
+  padding-block: 8px;
+}
+
+.outcomeRing {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 216px;
+  aspect-ratio: 1;
+  margin: auto;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--color-chart-1) 0 var(--success-share),
+    var(--color-error) var(--success-share) 100%
+  );
+}
+
+.outcomeRing > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 72%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--color-bg-3);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.outcomeRing strong {
+  max-width: 88%;
+  color: var(--color-text-primary);
+  font-size: clamp(20px, 2.2vw, 36px);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.outcomeRing span {
+  color: var(--color-text-secondary);
+}
+
+.outcomeLegend {
+  display: grid;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.outcomeLegend > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.outcomeLegend dt {
+  color: var(--color-text-secondary);
+}
+
+.outcomeLegend dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.outcomeSuccess dt::before,
+.outcomeFailure dt::before {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--color-chart-1);
+  content: "";
+}
+
+.outcomeFailure dt::before {
+  background: var(--color-error);
+}
+
+@media (max-width: 500px) {
+  .outcomes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rankScale span:nth-child(even) {
+    display: none;
+  }
 }
 
 .details {

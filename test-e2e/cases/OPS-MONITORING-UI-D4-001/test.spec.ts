@@ -33,6 +33,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   const reads: string[] = [];
   const unexpected: string[] = [];
   const listReads: Record<string, string>[] = [];
+  const rankingReads: Record<string, string>[] = [];
   const stats: {
     view: string;
     tenant: string | null;
@@ -42,6 +43,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     to: string | null;
   }[] = [];
   let scenario: "normal" | "empty" | "failed" = "normal";
+  let pagingFixture = false;
+  let outcomeFixture = false;
   let holdMonth = false;
   let completedDelayedRequests = 0;
   let resumeSingleSummary = () => {};
@@ -129,6 +132,19 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       token_status: missing,
     })),
   ];
+  const extraRows = Array.from({ length: 23 }, (_, index) => ({
+    ...listRows[0],
+    agent_id: index + 30,
+    name: `queue-${index}`,
+    display_name: `工单助手 ${index + 1}`,
+  }));
+  const rankingNames = [
+    "智能问答助手",
+    "知识检索助手",
+    "文档摘要助手",
+    "合同审阅助手",
+    "工单分类助手",
+  ];
   const baseURL = process.env.NEXENT_BASE_URL || "http://localhost:3000";
   const fixedTime = new Date("2026-11-23T12:00:00Z");
   const dashboardUrl = new URL("/zh/ops/dashboard", baseURL).href;
@@ -205,6 +221,49 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         tools: [{ name: service === "3" ? "语义检索" : "查阅文件" }],
       };
     } else if (
+      pathname === "/api/ops/v1/monitoring/agents/rankings" &&
+      request.method() === "GET"
+    ) {
+      rankingReads.push(Object.fromEntries(searchParams));
+      const metric = searchParams.get("metric");
+      if (
+        searchParams.has("agent_id") ||
+        !["execution_count", "success_rate", "total_tokens"].includes(
+          metric ?? "",
+        )
+      )
+        unexpected.push(`rankings:${searchParams}`);
+      const token = metric === "total_tokens";
+      const names = tenantId === "b" ? ["研发助手"] : rankingNames;
+      const data = names.map((display_name, index) => ({
+        tenant_id: tenantId ?? "a",
+        agent_id: index + 1,
+        display_name,
+        metrics: {
+          execution_count: [1461, 1350, 1104, 987, 816][index],
+          success_rate: [0.991, 0.991, 0.977, 0.964, 0.931][index],
+          ...(metric === "success_rate" && {
+            success_sample_count: [151, 699, 857, 715, 432][index],
+          }),
+        },
+        ...(token && {
+          tokens: {
+            total_tokens: {
+              value: (9007199254740993n - BigInt(index)).toString(),
+              known_count: 3,
+              eligible_count: 4,
+              coverage_rate: 0.75,
+            },
+          },
+          token_status: tokenStatus,
+        }),
+      }));
+      json = {
+        ...executionStatus,
+        data: scenario === "empty" ? [] : data,
+        ...(token && { token_status: tokenStatus }),
+      };
+    } else if (
       pathname === "/api/ops/v1/monitoring/agents" &&
       request.method() === "GET"
     ) {
@@ -227,7 +286,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       const items =
         scenario === "empty"
           ? []
-          : listRows
+          : (pagingFixture ? [...listRows, ...extraRows] : listRows)
               .filter(
                 (row) =>
                   (!tenantId || row.tenant_id === tenantId) &&
@@ -297,26 +356,31 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       }
       const empty = scenario === "empty";
       const single = scope.agent !== null;
+      const outcomes = outcomeFixture && single;
       const metrics = {
         execution_count: empty
           ? null
           : delayed
             ? 700001
             : single
-              ? 0
+              ? outcomes
+                ? 1047
+                : 0
               : scope.group
                 ? 33
                 : 26847,
-        succeeded_count: empty ? null : single ? 0 : 977,
-        failed_count: empty ? null : single ? 0 : 23,
-        success_rate: empty || single ? null : 0.977,
+        succeeded_count: empty ? null : single ? (outcomes ? 750 : 0) : 977,
+        failed_count: empty ? null : single ? (outcomes ? 250 : 0) : 23,
+        success_rate: empty ? null : single ? (outcomes ? 0.75 : null) : 0.977,
       };
       const tokens = {
         total_tokens: empty
           ? null
           : {
               value: single
-                ? "0"
+                ? outcomes
+                  ? "1467232"
+                  : "0"
                 : scope.group
                   ? "9007199254740993"
                   : "25025913",
@@ -338,17 +402,19 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
           execution_count: gap
             ? null
             : single
-              ? 0
+              ? outcomes
+                ? 104 + ((index * 43) % 129)
+                : 0
               : [1700, 1820, 1420, 2120, 2410, 2310, 2390][index % 7],
           success_rate:
-            gap || single
+            gap || (single && !outcomes)
               ? null
               : [0.89, 0.92, 0.81, 0.96, 1, 0.94, 0.97][index % 7],
           statistic_date: day.toISOString().slice(0, 10),
           coverage_state: gap ? "uncovered" : "covered",
           tokens: gap
             ? { total_tokens: null }
-            : single
+            : single && !outcomes
               ? tokens
               : {
                   total_tokens: {
@@ -418,7 +484,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       await expect(select("租户")).toBeEnabled();
     },
   );
-  const [dates, scope, tools, metrics, states, details] =
+  const [dates, scope, tools, metrics, states, details, charts] =
     contract.expectedIds("steps");
   await contract.step(dates, async () => {
     await expect(page.getByRole("tab")).toHaveText([
@@ -509,6 +575,11 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     overview.getByText(title, { exact: true }).locator("..").locator("dd");
   const trend = page.getByRole("region", { name: "调用趋势", exact: true });
   const table = page.getByRole("region", { name: "智能体明细", exact: true });
+  const ranking = page.getByRole("region", { name: "智能体排行", exact: true });
+  const distribution = page.getByRole("region", {
+    name: "调用结果分布",
+    exact: true,
+  });
   const curve = trend.locator(".recharts-area-curve");
   const refresh = page.getByRole("button", { name: "刷新", exact: true });
   const chooseMetric = (name: string) =>
@@ -625,6 +696,10 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(card("调用量").locator("strong")).toHaveText("0");
     await expect(card("调用成功率").locator("strong")).toHaveText("—");
     await expect(card("Token 消耗量").locator("strong")).toHaveText("0");
+    await expect(
+      distribution.getByText("暂无纳入统计的调用结果", { exact: true }),
+    ).toBeVisible();
+    await expect(distribution.locator("dd")).toHaveText("0");
     await expect(
       trend.getByText("所选指标暂无可用值", { exact: true }),
     ).toBeVisible();
@@ -753,8 +828,146 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await choose("MCP", "文件服务");
     await page.getByText("自定义", { exact: true }).click();
   });
-  const [dashboard, reset, agentMetrics, safeRefresh, agentDetails] =
-    contract.expectedIds("assertions");
+  await contract.step(charts, async () => {
+    pagingFixture = true;
+    await tab("智能体").click();
+    await page.getByText("近七天", { exact: true }).click();
+    const rankMetric = (name: string) =>
+      ranking.getByText(name, { exact: true });
+    const rankRows = ranking.getByRole("listitem");
+    await expect(rankRows).toHaveCount(5);
+    await expect(rankRows.first()).toContainText("1,461");
+    await expect
+      .poll(() => rankingReads.at(-1))
+      .toMatchObject({ metric: "execution_count", tenant_id: "a" });
+
+    await rankMetric("成功率").click();
+    await expect(rankRows.nth(0)).toContainText("智能问答助手");
+    await expect(rankRows.nth(0)).toContainText("99.1%");
+    await expect(rankRows.nth(0)).toContainText("151 次纳入统计");
+    await expect(rankRows.nth(1)).toContainText("知识检索助手");
+    await expect(rankRows.nth(1)).toContainText("699 次纳入统计");
+    await screenshot("agent-all-rankings");
+
+    await rankMetric("Token").click();
+    await expect(rankRows.nth(0)).toContainText("9,007,199,254,740,993");
+    await expect(rankRows.nth(1)).toContainText("9,007,199,254,740,992");
+    await expect(ranking.getByText("数据滞后", { exact: true })).toBeVisible();
+
+    const tableRequest = {
+      page_size: "20",
+      search: "queue",
+      sort_by: "total_tokens",
+      descending: "true",
+    };
+    const search = table.getByRole("searchbox");
+    await table.getByRole("combobox").click();
+    await dropdown.getByText(/20.*条\/页/).click();
+    await table.getByRole("columnheader", { name: /Token 消耗量/ }).click();
+    await search.fill("queue");
+    await search.press("Enter");
+    await expect
+      .poll(() => listReads.at(-1))
+      .toMatchObject({ ...tableRequest, page: "1" });
+    const pageTwo = table.locator(".ant-pagination-item-2");
+    await pageTwo.click();
+    await expect
+      .poll(() => listReads.at(-1))
+      .toMatchObject({ ...tableRequest, page: "2" });
+
+    const beforeDate = listReads.length;
+    await page.getByText("近一个月", { exact: true }).click();
+    await expect
+      .poll(() => listReads.slice(beforeDate))
+      .toEqual([
+        expect.objectContaining({
+          ...tableRequest,
+          page: "1",
+          start_date: "2026-10-25",
+        }),
+      ]);
+    await expect(search).toHaveValue("queue");
+    await pageTwo.click();
+    await expect
+      .poll(() => listReads.at(-1))
+      .toMatchObject({ ...tableRequest, page: "2", start_date: "2026-10-25" });
+
+    const beforeGroup = listReads.length;
+    await choose("用户组", "一线运营组");
+    await expect
+      .poll(() => listReads.slice(beforeGroup))
+      .toEqual([
+        expect.objectContaining({
+          ...tableRequest,
+          page: "1",
+          group_ids: "10",
+        }),
+      ]);
+    await expect(search).toHaveValue("queue");
+    const activeRanking = {
+      metric: "total_tokens",
+      tenant_id: "a",
+      group_ids: "10",
+      start_date: "2026-10-25",
+    };
+    await expect.poll(() => rankingReads.at(-1)).toMatchObject(activeRanking);
+    await expect(refresh).toBeEnabled();
+    const beforeRefresh = rankingReads.length;
+    await refresh.click();
+    await expect
+      .poll(() => rankingReads.slice(beforeRefresh))
+      .toEqual([expect.objectContaining(activeRanking)]);
+
+    await page.getByText("近七天", { exact: true }).click();
+    await expect
+      .poll(() => rankingReads.at(-1))
+      .toMatchObject({
+        ...activeRanking,
+        start_date: "2026-11-17",
+      });
+    await expect(rankRows).toHaveCount(5);
+    outcomeFixture = true;
+    const beforeSingle = rankingReads.length;
+    const beforeSummary = stats.length;
+    await choose("智能体", "智能问答助手");
+    await expect(ranking).toHaveCount(0);
+    await expect(
+      distribution.getByText("次纳入统计", { exact: true }),
+    ).toBeVisible();
+    await expect(distribution.getByText("1,000", { exact: true })).toBeVisible();
+    await expect(distribution.locator("dt")).toHaveText([
+      "调用量",
+      "成功 · 75%",
+      "失败 · 25%",
+    ]);
+    await expect(distribution.locator("dd")).toHaveText([
+      "1,047",
+      "750",
+      "250",
+    ]);
+    expect(
+      stats.slice(beforeSummary).filter((item) => item.view === "summary"),
+    ).toEqual([
+      expect.objectContaining({
+        tenant: "a",
+        agent: "1",
+        group: "10",
+        from: "2026-11-17",
+      }),
+    ]);
+    expect(rankingReads).toHaveLength(beforeSingle);
+    await screenshot("agent-selected-outcomes");
+    await tab("MCP").click();
+    await page.getByText("自定义", { exact: true }).click();
+  });
+  const [
+    dashboard,
+    reset,
+    agentMetrics,
+    safeRefresh,
+    agentDetails,
+    agentCharts,
+  ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
     await expect(placeholder).toBeVisible();
@@ -818,6 +1031,12 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         expect.objectContaining({ view: "summary", tenant: "b", agent: "1" }),
         expect.objectContaining({ view: "trends", tenant: "b", agent: "1" }),
       ]),
+    );
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(agentCharts, async () => {
+    expect(new Set(rankingReads.map(({ metric }) => metric))).toEqual(
+      new Set(["execution_count", "success_rate", "total_tokens"]),
     );
     expect(unexpected).toEqual([]);
   });

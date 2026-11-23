@@ -394,6 +394,7 @@ function MonitoringScope({
             <>
               <AgentMonitoringPanels
                 data={agentMonitoring}
+                tenantLabel={tenantLabel}
                 inventory={{
                   count: agents
                     ? new Set(
@@ -411,11 +412,10 @@ function MonitoringScope({
                 }}
                 singleAgent={Boolean(selectedAgent)}
                 scopeLoading={scopeLoading}
-                hasSelection={Boolean(selection)}
                 hasRange={Boolean(range)}
               />
               <AgentMonitoringDetails
-                key={JSON.stringify(selection)}
+                key={JSON.stringify([filters.tenant, resourceSelection])}
                 queryKey={agentMonitoring.queryKey}
                 scopeLoading={scopeLoading}
                 hasRange={Boolean(range)}

@@ -11,7 +11,7 @@ import type {
   AgentMonitoringRow,
 } from "@/types/agentMonitoring";
 import type { OperationsResource } from "@/types/operations";
-import { PublicationStatus, TokenCoverage } from "./AgentMonitoringPanels";
+import { PublicationStatus, TokenCoverage } from "./AgentMonitoringStatus";
 import {
   formatAgentMetric,
   getAgentSuccessRate,
@@ -51,16 +51,24 @@ export function AgentMonitoringDetails({
   const titleId = useId();
   const [list, setList] = useState(defaultList);
   const selection = queryKey[3];
+  const scope = JSON.stringify(selection);
+  const [listScope, setListScope] = useState(scope);
+  if (listScope !== scope) {
+    setListScope(scope);
+    if (list.page !== 1) setList({ ...list, page: 1 });
+  }
+  const request = listScope === scope ? list : { ...list, page: 1 };
   const details = useQuery({
-    queryKey: [...queryKey, "list", list],
-    queryFn: ({ signal }) => getAgentMonitoringList(selection!, list, signal),
+    queryKey: [...queryKey, "list", request],
+    queryFn: ({ signal }) =>
+      getAgentMonitoringList(selection!, request, signal),
     enabled: selection !== null,
     placeholderData: keepPreviousData,
   });
   const response = details.isPlaceholderData ? undefined : details.data;
   const total = details.data?.data.total;
   const lastPage = Math.max(1, Math.ceil((total ?? 0) / list.pageSize));
-  if (response && list.page > lastPage) {
+  if (listScope === scope && response && list.page > lastPage) {
     setList({ ...list, page: lastPage });
   }
 
