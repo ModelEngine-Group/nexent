@@ -2241,7 +2241,7 @@ deployment_apply_image_source() {
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
-  export MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  export MINIO_IMAGE="${MINIO_IMAGE:-nexent/minio:RELEASE.2023-12-20T01-00-02Z}"
   # Nginx image for the optional HTTPS reverse proxy (docker and k8s).
   export NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
   export OPENSSH_SERVER_IMAGE="${OPENSSH_SERVER_IMAGE:-nexent/nexent-ubuntu-terminal:$version}"
@@ -2251,7 +2251,6 @@ deployment_apply_image_source() {
   export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
   export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
   export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
-  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
   export LANGFUSE_REDIS_IMAGE="${LANGFUSE_REDIS_IMAGE:-docker.io/redis:alpine}"
   export LANGFUSE_POSTGRES_IMAGE="${LANGFUSE_POSTGRES_IMAGE:-docker.io/postgres:15-alpine}"
 
@@ -2277,7 +2276,6 @@ deployment_apply_image_source() {
       LANGFUSE_WORKER_IMAGE \
       LANGFUSE_WEB_IMAGE \
       CLICKHOUSE_IMAGE \
-      LANGFUSE_MINIO_IMAGE \
       LANGFUSE_REDIS_IMAGE \
       LANGFUSE_POSTGRES_IMAGE; do
       export "$image_var=$(deployment_add_image_registry_prefix "${!image_var}")"
@@ -2351,7 +2349,6 @@ deployment_render_docker_env() {
     printf 'LANGFUSE_WORKER_IMAGE="%s"\n' "$LANGFUSE_WORKER_IMAGE"
     printf 'LANGFUSE_WEB_IMAGE="%s"\n' "$LANGFUSE_WEB_IMAGE"
     printf 'CLICKHOUSE_IMAGE="%s"\n' "$CLICKHOUSE_IMAGE"
-    printf 'LANGFUSE_MINIO_IMAGE="%s"\n' "$LANGFUSE_MINIO_IMAGE"
     printf 'LANGFUSE_REDIS_IMAGE="%s"\n' "$LANGFUSE_REDIS_IMAGE"
     printf 'LANGFUSE_POSTGRES_IMAGE="%s"\n' "$LANGFUSE_POSTGRES_IMAGE"
   } > "$output_file"
@@ -2580,10 +2577,8 @@ deployment_render_helm_monitoring_global_values() {
 
 deployment_render_monitoring_image_value() {
   local key="$1"
-  local repository="$2"
-  local tag="$3"
   local image
-  image="$(deployment_add_image_registry_prefix "${repository}:${tag}")"
+  image="$(deployment_add_image_registry_prefix "$2")"
 
   printf '    %s:\n' "$key"
   printf '      repository: %s\n' "$(deployment_yaml_quote "$(deployment_image_repo "$image")")"
@@ -2597,7 +2592,6 @@ deployment_render_helm_monitoring_chart_values() {
   local phoenix_tag
   local langfuse_tag
   local clickhouse_tag
-  local minio_tag
   local redis_tag
   local postgres_tag
   enabled="$(deployment_monitoring_enabled)"
@@ -2606,7 +2600,6 @@ deployment_render_helm_monitoring_chart_values() {
   phoenix_tag="$(deployment_monitoring_env_value PHOENIX_VERSION "15")"
   langfuse_tag="$(deployment_monitoring_env_value LANGFUSE_VERSION "3")"
   clickhouse_tag="$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")"
-  minio_tag="$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")"
   redis_tag="$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")"
   postgres_tag="$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")"
 
@@ -2614,14 +2607,14 @@ deployment_render_helm_monitoring_chart_values() {
   printf '  enabled: %s\n' "$enabled"
   printf '  provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
   printf '  images:\n'
-  deployment_render_monitoring_image_value otelCollector otel/opentelemetry-collector-contrib "$otel_collector_tag"
-  deployment_render_monitoring_image_value phoenix arizephoenix/phoenix "$phoenix_tag"
-  deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
-  deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
-  deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
-  deployment_render_monitoring_image_value minio quay.io/minio/minio "$minio_tag"
-  deployment_render_monitoring_image_value redis docker.io/redis "$redis_tag"
-  deployment_render_monitoring_image_value postgres docker.io/postgres "$postgres_tag"
+  deployment_render_monitoring_image_value otelCollector "otel/opentelemetry-collector-contrib:$otel_collector_tag"
+  deployment_render_monitoring_image_value phoenix "arizephoenix/phoenix:$phoenix_tag"
+  deployment_render_monitoring_image_value langfuseWeb "docker.io/langfuse/langfuse:$langfuse_tag"
+  deployment_render_monitoring_image_value langfuseWorker "docker.io/langfuse/langfuse-worker:$langfuse_tag"
+  deployment_render_monitoring_image_value clickhouse "docker.io/clickhouse/clickhouse-server:$clickhouse_tag"
+  deployment_render_monitoring_image_value minio "$MINIO_IMAGE"
+  deployment_render_monitoring_image_value redis "docker.io/redis:$redis_tag"
+  deployment_render_monitoring_image_value postgres "docker.io/postgres:$postgres_tag"
   printf '  collector:\n'
   printf '    configFile: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_CONFIG_FILE "$(deployment_monitoring_collector_config_file k8s "$DEPLOYMENT_MONITORING_PROVIDER")")")"
   printf '    service:\n'

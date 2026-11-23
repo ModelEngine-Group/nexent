@@ -45,7 +45,7 @@ def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, bo
     info = SimpleNamespace(agent_config=None, query='q', model_config_list=[], history=[], attempt_outcome=None)
     if boundary is not None:
         info.observer = SimpleNamespace(boundary_reached=boundary)
-    monkeypatch.setattr(module, '_agent_run_thread', lambda run: setattr(run, 'attempt_outcome', outcome))
+    monkeypatch.setattr(module, '_agent_run_thread', lambda run, **_: setattr(run, 'attempt_outcome', outcome))
     module.agent_run_thread(info)
     root = next(span for span in spans.exporter.get_finished_spans() if span.name == 'agent.run')
     assert root.attributes['nexent.business_status'] == expected
@@ -63,7 +63,7 @@ def test_worker_input_uses_original_request_query_with_prepared_fallback(spans, 
                            model_config_list=[], history=[], attempt_outcome='completed')
     captured = []
     monkeypatch.setattr(module, '_agent_run_thread',
-                        lambda run: captured.append(dict(trace.get_current_span().attributes)))
+                        lambda run, **_: captured.append(dict(trace.get_current_span().attributes)))
     with agent_monitoring_context(AgentRunMetadata(query=request_query)):
         module.agent_run_thread(info)
     root = next(span for span in spans.exporter.get_finished_spans() if span.name == 'agent.run')

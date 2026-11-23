@@ -20,10 +20,15 @@ RUN --mount=type=bind,from=uv,source=/uv,target=/usr/local/bin/uv \
     uv --no-config pip install --strict --link-mode copy --python "$VIRTUAL_ENV/bin/python" \
         ${MIRROR:+--default-index "$MIRROR"} --group /tmp/pyproject.toml:ops
 
+RUN --mount=type=cache,id=nexent-ops-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-ops-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends postgresql-client
+
 COPY backend/contracts /opt/backend/contracts
 COPY backend/gateway/identity /opt/backend/gateway/identity
 COPY backend/ops /opt/backend/ops
 COPY backend/permissions /opt/backend/permissions
+COPY infrastructure/monitoring /opt/infrastructure/monitoring
 COPY infrastructure/system_configuration /opt/infrastructure/system_configuration
 COPY backend/__init__.py /opt/backend/
 COPY backend/ext_components/__init__.py /opt/backend/ext_components/
@@ -91,6 +96,7 @@ COPY \
     backend/management/utils/account_passwords.py \
     backend/management/utils/audit_fields.py \
     backend/management/utils/request_context.py \
+    backend/management/utils/serialization.py \
     /opt/backend/management/utils/
 COPY infrastructure/__init__.py infrastructure/skill_execution.py /opt/infrastructure/
 COPY \
@@ -115,6 +121,8 @@ COPY \
 COPY infrastructure/trace /opt/infrastructure/trace
 COPY sdk/nexent /opt/nexent
 COPY VERSION /opt/nexent/VERSION
-COPY --chmod=0755 deploy/common/start-backend.sh /opt/nexent/scripts/
+COPY --chmod=0755 deploy/common/start-backend.sh deploy/common/run-sql-migrations.sh deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
+COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
 
 ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service"]

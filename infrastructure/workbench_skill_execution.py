@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared Workbench Skill access and configuration policy."""
 
+from collections.abc import Collection, Mapping
 from copy import deepcopy
 from math import isfinite
 from typing import Any, Dict
@@ -41,6 +42,22 @@ def can_view_skill(
     if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
         return False
     return bool(user_group_ids.intersection(_to_group_id_set(skill.get("group_ids"))))
+
+
+def select_workbench_skill_ids(names: Mapping[int, str], explicit_ids: Collection[int]) -> list[int]:
+    """Choose a complete skill per name before resolving configs, tools or files."""
+    selected: dict[str, int] = {}
+    for skill_id, name in names.items():
+        previous = selected.get(name)
+        if previous is not None:
+            previous_is_explicit = previous in explicit_ids
+            current_is_explicit = skill_id in explicit_ids
+            if previous_is_explicit == current_is_explicit:
+                raise WorkbenchError("RUNTIME_SKILL_NAME_CONFLICT")
+            if previous_is_explicit:
+                continue
+        selected[name] = skill_id
+    return list(selected.values())
 
 
 def resolve_skill_config(schemas, defaults, published, runtime):

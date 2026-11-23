@@ -10,6 +10,7 @@ import {
   buildInferenceParamsPayload,
   type ModelAdvancedSettingsValue,
 } from "@/app/models/components/model/ModelAdvancedSettings";
+import type { ReasoningCapability } from "@/types/modelConfig";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -57,6 +58,37 @@ describe("model sampling controls", () => {
     expect(
       buildInferenceParamsPayload(change.mock.lastCall![0])
     ).not.toHaveProperty("temperature");
+  });
+
+  it("drops enable_thinking for budget-only reasoning outlets", () => {
+    const capability = {
+      status: "supported",
+      control: "budget_tokens",
+      levels: [],
+      controls: [{ type: "budget_tokens", min: 128, max: 32768 }],
+      source: "catalog",
+    } as ReasoningCapability;
+    const payload = buildInferenceParamsPayload(
+      { enable_thinking: true, reasoning_budget_tokens: 2048 },
+      capability
+    );
+    expect(payload).not.toHaveProperty("enable_thinking");
+    expect(payload.extra_params).toEqual({ reasoning_budget_tokens: 2048 });
+  });
+
+  it("keeps enable_thinking for outlets that declare a thinking toggle", () => {
+    const capability = {
+      status: "supported",
+      control: "toggle",
+      levels: [],
+      controls: [{ type: "toggle" }],
+      source: "catalog",
+    } as ReasoningCapability;
+    const payload = buildInferenceParamsPayload(
+      { enable_thinking: false },
+      capability
+    );
+    expect(payload).toHaveProperty("extra_params", { enable_thinking: false });
   });
 
   it("applies separate numeric ranges and synchronizes the sliders", () => {

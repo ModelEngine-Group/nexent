@@ -3,8 +3,9 @@
 
 from contextlib import nullcontext
 
-from sqlalchemy import select
+from sqlalchemy import select, text, tuple_
 
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.account_access import get_user_role_by_tenant, query_group_ids_by_user_in_tenant
 from infrastructure.rdb.client import get_db_session
@@ -12,7 +13,15 @@ from infrastructure.rdb.conversation_state import tenant_membership_matches
 from infrastructure.rdb.mcp_execution_records import ToolInfo, ToolInstance
 from infrastructure.rdb.skill_execution_records import SkillInfo, SkillInstance, SkillToolRelation
 from infrastructure.skill_execution import merge_skill_tool_parameters
-from infrastructure.workbench_skill_execution import can_view_skill, resolve_skill_config
+from infrastructure.workbench_skill_execution import can_view_skill, resolve_skill_config, select_workbench_skill_ids
+
+
+_PUBLISHED_WORKBENCH = text("""
+    SELECT 1 FROM nexent.ag_tenant_agent_t
+    WHERE agent_id = :agent_id AND version_no = :version_no AND version_no > 0
+      AND tenant_id = :owner AND system_key = 'workbench_main'
+      AND agent_origin = 'SYSTEM' AND delete_flag = 'N' AND enabled IS NOT FALSE
+""")
 
 
 def read_workbench_skill_rows(
@@ -22,44 +31,64 @@ def read_workbench_skill_rows(
     with get_db_session() as session:
         if not tenant_membership_matches(session, actor.user_id, actor.tenant_id):
             return {}
+        if session.scalar(_PUBLISHED_WORKBENCH, {
+            "agent_id": agent_id, "version_no": agent_version, "owner": ASSET_OWNER_TENANT_ID,
+        }) is None:
+            return {}
         published = {}
         for skill_id, values in session.execute(select(SkillInstance.skill_id, SkillInstance.config_values).where(
             SkillInstance.agent_id == agent_id, SkillInstance.version_no == agent_version,
-            SkillInstance.tenant_id == actor.tenant_id, SkillInstance.enabled.is_(True), SkillInstance.delete_flag != "Y",
+            SkillInstance.tenant_id == ASSET_OWNER_TENANT_ID, SkillInstance.enabled.is_(True),
+            SkillInstance.delete_flag != "Y",
         )):
             if skill_id in published:
                 return {}
             published[skill_id] = values or {}
-        available_ids = set(published) | mounts.keys()
-        if ids is not None and ids != available_ids:
+        owners = {skill_id: actor.tenant_id for skill_id in mounts}
+        owners.update(dict.fromkeys(published, ASSET_OWNER_TENANT_ID))
+        if not owners:
             return {}
-        ids = available_ids
-        groups = set(query_group_ids_by_user_in_tenant(
-            actor.user_id, actor.tenant_id, session_factory=lambda: nullcontext(session),
-        ))
-        role = get_user_role_by_tenant(actor.user_id, actor.tenant_id, session_factory=lambda: nullcontext(session))
-        dependencies = {skill_id: [] for skill_id in ids}
+        catalog = {skill.skill_id: skill for skill in session.scalars(select(SkillInfo).where(
+            tuple_(SkillInfo.skill_id, SkillInfo.tenant_id).in_(list(owners.items())), SkillInfo.delete_flag != "Y",
+        ))}
+        if catalog.keys() != owners.keys():
+            return {}
+
+        tenant_mount_ids = mounts.keys() - published.keys()
+        if tenant_mount_ids:
+            groups = set(query_group_ids_by_user_in_tenant(
+                actor.user_id, actor.tenant_id, session_factory=lambda: nullcontext(session),
+            ))
+            role = get_user_role_by_tenant(actor.user_id, actor.tenant_id, session_factory=lambda: nullcontext(session))
+            for skill_id in tenant_mount_ids:
+                skill = catalog[skill_id]
+                if not can_view_skill(
+                    skill={"source": skill.source, "created_by": skill.created_by, "group_ids": skill.group_ids,
+                           "ingroup_permission": skill.ingroup_permission},
+                    user_id=actor.user_id, user_role=role, user_group_ids=groups,
+                ):
+                    return {}
+
+        names = {skill_id: catalog[skill_id].skill_name for skill_id in dict.fromkeys([*published, *mounts])}
+        selected = select_workbench_skill_ids(names, mounts)
+        if ids is not None and ids != set(selected):
+            return {}
+        dependencies = {skill_id: [] for skill_id in selected}
         for skill_id, tool_id in session.execute(select(SkillToolRelation.skill_id, SkillToolRelation.tool_id).where(
-            SkillToolRelation.skill_id.in_(ids), SkillToolRelation.delete_flag != "Y",
+            SkillToolRelation.skill_id.in_(selected), SkillToolRelation.delete_flag != "Y",
         )):
             dependencies[skill_id].append(tool_id)
         rows = {}
-        for skill in session.scalars(select(SkillInfo).where(
-            SkillInfo.skill_id.in_(ids), SkillInfo.tenant_id == actor.tenant_id, SkillInfo.delete_flag != "Y",
-        )):
-            if not can_view_skill(
-                skill={"source": skill.source, "created_by": skill.created_by, "group_ids": skill.group_ids,
-                       "ingroup_permission": skill.ingroup_permission},
-                user_id=actor.user_id, user_role=role, user_group_ids=groups,
-            ):
-                continue
-            rows[skill.skill_id] = {
-                "skill_id": skill.skill_id, "name": skill.skill_name, "description": skill.skill_description or "",
+        for skill_id in selected:
+            skill = catalog[skill_id]
+            rows[skill_id] = {
+                "skill_id": skill_id, "name": names[skill_id], "description": skill.skill_description or "",
+                "owner_tenant_id": owners[skill_id],
                 "config": resolve_skill_config(
                     skill.config_schemas or [], skill.config_values or {},
-                    published.get(skill.skill_id, {}), mounts.get(skill.skill_id, {}),
+                    published.get(skill_id, {}), mounts.get(skill_id, {}),
                 ),
-                "tool_ids": sorted(dependencies[skill.skill_id]),
+                "tool_ids": sorted(dependencies[skill_id]),
             }
         return rows
 

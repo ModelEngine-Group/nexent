@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-CHILDREN-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-CHILDREN-20261119
+  title: Capture actual child Agent executions with parent and root identity
+  description: Reuse child invocation IDs and context to measure adapter execution and publish child facts through the shared Agent writer, daily aggregation and queries.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/sdk/core/agents/test_child_run_facts.py, test/sdk/core/agents/test_agent_run_facts.py, test/sdk/core/agents/test_core_child_dispatch.py]
+    behaviors:
+    - Reuse independent child invocation IDs for start and end, inheriting the root and immediate parent for nested and concurrent calls.
+    - Measure only adapter run, report after adapter cleanup, preserve RunResult and propagated exceptions and cancellation.
+    - Skip debug, untrusted or incomplete identity, rejected setup and cancellation before actual execution.
+    - Keep capture active with trajectory disabled and restore parent context after success or failure.
+    reason: Existing root fact tests cover run timing and existing child tests cover ownership and traces. The remaining proof is child fact identity, nested ancestry, execution boundary and end-to-end shared persistence.
+  notes: Strengthen the existing real Agent D3 through a parent that invokes children using actual SDK and HTTP model execution. Reuse existing isolated stores and cleanup. No new D1 boundary is required. The Ops Feature retains its existing responsibility mapping.

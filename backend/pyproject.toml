@@ -74,6 +74,7 @@ management = [
 ]
 ops = [
     "bcrypt>=4.2,<6",
+    "elasticsearch==8.17.2",
     "fastapi>=0.115.12,<=0.141.1",
     "greenlet<3.5.0",
     "opentelemetry-exporter-otlp>=1.20",

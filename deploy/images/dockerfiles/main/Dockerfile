@@ -80,8 +80,14 @@ ENV PYTHONPATH=/opt:/opt/backend
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
 RUN /opt/backend/.venv/bin/python -B -c "from nexent.core.model_service.profiles.resolver import load_profile_catalog; load_profile_catalog()"
-COPY deploy/common/start-backend.sh /opt/nexent/scripts/
-RUN chmod +x /opt/nexent/scripts/start-backend.sh
+COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
+COPY deploy/common/run-ops-sql-migrations.sh /opt/nexent/scripts/
+COPY deploy/sql/ops-init.sql /opt/nexent/ops-sql/ops-init.sql
+COPY deploy/sql/migrations/ops/ /opt/nexent/ops-sql/migrations/
+RUN chmod +x /opt/nexent/scripts/*.sh
+RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends postgresql-client
 
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
@@ -96,7 +102,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        postgresql-client fontconfig fonts-noto-cjk && \
+        fontconfig fonts-noto-cjk && \
     fc-cache -f
 RUN --mount=type=bind,from=builder,source=/usr/local/bin/uv,target=/tmp/uv \
     --mount=type=bind,from=builder,source=/opt/backend/management-requirements.txt,target=/tmp/management-requirements.txt \

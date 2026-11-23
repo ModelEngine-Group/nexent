@@ -183,6 +183,7 @@ services:
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
+      OPS_MONITORING_ENABLED: "false"
       PYTHON_DOTENV_DISABLED: "1"
       skip_proxy: "true"
       UMASK: "0022"
