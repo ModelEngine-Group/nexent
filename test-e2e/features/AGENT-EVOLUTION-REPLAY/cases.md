@@ -11,4 +11,5 @@
 - D3 [EVOLUTION-MCP-RESULT-D3-001](../../cases/EVOLUTION-MCP-RESULT-D3-001/case.yaml) · active
 - D3 [EVOLUTION-NEW-SKILL-D3-001](../../cases/EVOLUTION-NEW-SKILL-D3-001/case.yaml) · active
 - D3 [EVOLUTION-SKILL-SCRIPT-D3-001](../../cases/EVOLUTION-SKILL-SCRIPT-D3-001/case.yaml) · active
+- D3 [EVOLUTION-TOOL-BUILD-D3-001](../../cases/EVOLUTION-TOOL-BUILD-D3-001/case.yaml) · active
 - D3 [EVOLUTION-TOOL-MAPPING-D3-001](../../cases/EVOLUTION-TOOL-MAPPING-D3-001/case.yaml) · active

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-TOOL-BUILD-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-05]
+  title: 按镜像验证工具修复并检查另一个调用方
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 对两个分别登记配送单和退货单的调用方，对照原构建和修复构建。
+  preconditions: [本地 Docker 服务已安装 Nexent Management 镜像。]
+  test_data:
+    profile: 自建原始、修复、误改镜像，可信验证程序通过只读资源核对账本。
+  steps:
+  - order: 1
+    action: 在固定初态下分别运行原镜像和修复镜像，对照源问题和原本正常的退货单。
+    expected: 原镜像复现大小写错误，修复镜像将两种单号正确入账。
+  - order: 2
+    action: 另跑故意损坏退货单的镜像，并将已修复结果作为源基线提交比较。
+    expected: 正常调用方出现退化。与源失败证据不符的基线也不能通过。
+  expected_results: [观察到与远端账本相符的结果。, 识别退化和基线漂移。]
+  forbidden_side_effects: [运行回执不持久化原始单号或账本内容。]
+  acceptance:
+  - {id: AC-01, description: 识别真实工具结果, steps: [1], expected_results: [1], forbidden_side_effects: [1]}
+  - {id: AC-02, description: 识别退化及错误基线, steps: [2], expected_results: [2]}
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary: [真实 Docker 镜像、隔离回环 MCP 服务、可信评分容器与 Management 对照规则。]
+  observations: [服务收到的调用、回复摘要、账本摘要和评分差异。]
+  cleanup: [检查本次验证产生的容器已释放。]

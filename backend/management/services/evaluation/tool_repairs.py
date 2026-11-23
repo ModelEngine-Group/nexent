@@ -139,18 +139,22 @@ async def share_tool_brief(tenant, user, eid, request):
     return await _io("freeze-tool-repair-examples", freeze_tool_brief, tenant, user, eid, request, spec)
 
 
-def maintainer_brief(tenant, user, fid):
-    brief = jobs.read_handoff(tenant, fid)
-    if not brief or brief.get("method") != "T4":
-        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+def require_tool_maintenance(tenant, user, server_id):
     roles = get_user_role_by_tenant(user, tenant)
-    service = get_mcp_record_by_id_and_tenant(brief["server_id"], tenant)
+    service = get_mcp_record_by_id_and_tenant(server_id, tenant)
     if not roles or not service:
         raise AppException(ErrorCode.COMMON_FORBIDDEN)
     all_tools = has_any_role(roles, CAN_EDIT_ALL_USER_ROLES)
     groups = query_group_ids_by_user_in_tenant(user, tenant)
     if catalog_permission(service, user, all_tools, groups) != PERMISSION_EDIT:
         raise AppException(ErrorCode.COMMON_FORBIDDEN)
+
+
+def maintainer_brief(tenant, user, fid):
+    brief = jobs.read_handoff(tenant, fid)
+    if not brief or brief.get("method") != "T4":
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+    require_tool_maintenance(tenant, user, brief["server_id"])
     require_development_sources(tenant, brief["agent_id"], brief["source_case_ids"], {})
     remote = brief["failure"]["observation"]["remote"]
     cases = {

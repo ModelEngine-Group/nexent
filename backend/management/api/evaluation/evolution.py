@@ -12,7 +12,8 @@ from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateReq
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
 from contracts.skill_script_repair import ReviewedScriptBuild, ScriptDraftRequest, ScriptRepairFeedback
 from management.services.evaluation.skill_script_repairs import build_reviewed_script, draft_script, share_script_feedback
-from contracts.tool_repair import ToolRepairRequest
+from contracts.tool_repair import ReviewedToolBuild, ToolCallerApproval, ToolRepairRequest
+from management.services.evaluation.tool_builds import approve_guard, build_status, list_builds, register_build
 from management.services.evaluation.tool_repairs import maintainer_brief, share_tool_brief
 from contracts.new_skill_candidates import NewSkillBriefRequest
 from contracts.releases import PromotionRequest, RollbackRequest
@@ -205,6 +206,34 @@ async def read_tool_repair_brief(feedback_id: int, authorization: str | None = H
     result = await run_blocking("read-tool-maintainer-brief", maintainer_brief, tenant, user, feedback_id,
                                 lane="evaluation", owner="management")
     return {"data": result}
+
+
+@router.post("/feedback/{feedback_id}/tool-builds")
+async def register_reviewed_tool(feedback_id: int, request: ReviewedToolBuild, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking("register-reviewed-tool", register_build, tenant, user, feedback_id, request,
+                                lane="evaluation", owner="management")
+    return {"data": result}
+
+
+@router.get("/feedback/{feedback_id}/tool-builds")
+async def registered_tool_builds(feedback_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await run_blocking("list-tool-builds", list_builds, tenant, user, feedback_id,
+                                       lane="evaluation", owner="management")}
+
+
+@router.post("/tool-builds/{build_id}/caller-cases")
+async def approve_tool_caller_case(build_id: int, request: ToolCallerApproval, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await approve_guard(tenant,user,build_id,request)}
+
+
+@router.get("/tool-builds/{build_id}")
+async def read_tool_build(build_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await run_blocking("read-tool-build",build_status,tenant,user,build_id,
+                                       lane="evaluation",owner="management")}
 
 
 @router.post("/experiments/{experiment_id}/skill-script-feedback")

@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: EVOLUTION-TOOL-BUILD-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_reviewed_builds
+acceptance_bindings:
+  AC-01: [test_reviewed_builds]
+  AC-02: [test_reviewed_builds]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

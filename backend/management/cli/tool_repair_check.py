@@ -17,7 +17,7 @@ from nexent.core.agents.resources.replay_mcp import call_session_tool, capture_r
 from nexent.core.agents.resources.replay_tools import argument_digest
 
 
-async def check_session(session, rule):
+async def check_session(session, rule, *, include_evidence=False):
     expected = rule.expected_mcp_reply
     call = {
         "name": rule.name,
@@ -37,6 +37,7 @@ async def check_session(session, rule):
     grade = judge_tool_use({"rules": [rule.model_dump(mode="json")]}, observation)
     return {
         "status": grade["status"],
+        **({"observation": grade["mcp_evidence"][0]} if include_evidence and grade.get("mcp_evidence") else {}),
         "reasons": [grade["reason"]] if "reason" in grade else [issue["reason"] for issue in grade["issues"]],
     }
 

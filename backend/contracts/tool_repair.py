@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -40,3 +40,30 @@ class ToolReproductionSuite(BaseModel):
             ):
                 raise ValueError("Each task must declare one remote call and independent initial/final state")
         return self
+
+
+ImageId = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+
+
+class ReviewedToolBuild(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    base_image: ImageId
+    result_image: ImageId
+    port: int = Field(default=8000, gt=0, le=65535)
+    path: str = Field(default="/mcp", max_length=256, pattern=r"^/([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]*/?$")
+    transport: Literal["streamable-http", "sse"] = "streamable-http"
+    review: str = Field(min_length=1, max_length=1500)
+
+    @model_validator(mode="after")
+    def distinct_images(self):
+        if self.base_image == self.result_image or "//" in self.path:
+            raise ValueError("Choose two distinct immutable images and a local service path")
+        return self
+
+
+class ToolCallerApproval(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    experiment_id: int = Field(gt=0)
+    case_id: int = Field(gt=0)
+    tool_name: str = Field(min_length=1, max_length=180)
+    share_example: Literal[True]

@@ -218,6 +218,14 @@ export const evolutionService = {
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
   shareToolRepair: (id: number, body: ToolRepairFeedback) =>
     read<{feedback_id: number}>(`${root}/experiments/${id}/tool-repair-feedback`, body),
+  registerToolBuild: (feedback: number, body: {base_image: string; result_image: string; review: string; port: number; path: string; transport: string}) =>
+    read<{build_id: number}>(`${root}/feedback/${feedback}/tool-builds`, body),
+  toolBuildIds: (feedback: number) => read<number[]>(`${root}/feedback/${feedback}/tool-builds`),
+  toolBuildStatus: (id: number) => read<{caller_count: number; missing_caller_count: number; case_count: number;
+    manifest: {base_image: string; result_image: string; review: string};
+    verification: null | {status: string; cases: {label: string; outcome: string}[]}}>(`${root}/tool-builds/${id}`),
+  approveToolCaller: (build: number, body: {experiment_id: number; case_id: number; tool_name: string; share_example: true}) =>
+    read<{case_id: number}>(`${root}/tool-builds/${build}/caller-cases`,body),
   toolRepairBrief: (id: number) =>
     read<{test_suite: {format: "nexent-mcp-repair-v1"; failure: ToolExpectation["rules"][number]; protection: ToolExpectation["rules"][number]};
       tool_name: string; goal: string; failure: {arguments: Record<string, unknown>; expected: ExpectedMcpReply};

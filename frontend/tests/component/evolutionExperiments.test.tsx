@@ -48,6 +48,10 @@ vi.mock("@/services/evolutionService", () => ({
     toolSetCandidates: vi.fn(),
     toolMappingCandidate: vi.fn(),
     toolRepairBrief: vi.fn(),
+    toolBuildIds: vi.fn(),
+    registerToolBuild: vi.fn(),
+    toolBuildStatus: vi.fn(),
+    approveToolCaller: vi.fn(),
     scriptDraft: vi.fn(),
     buildScript: vi.fn(),
     setFixedRegression: vi.fn(),
@@ -543,6 +547,12 @@ it("opens a maintainer brief by number and clears examples when the selected num
   expect(await screen.findByText(/FIX1/)).toBeInTheDocument();
   expect(screen.getByText(/KEEP2/)).toBeInTheDocument();
   expect(evolutionService.toolRepairBrief).toHaveBeenCalledWith(35);
+  vi.mocked(evolutionService.toolBuildIds).mockResolvedValue([1]);
+  const registry = screen.getByText("evolution.build.registry",{selector:"summary"}).parentElement!;
+  registry.setAttribute("open","");
+  fireEvent(registry,new Event("toggle"));
+  await waitFor(() => expect(evolutionService.toolBuildIds).toHaveBeenCalledWith(35));
+  expect(evolutionService.registerToolBuild).not.toHaveBeenCalled();
   fireEvent.change(field,{target:{value:"36"}});
   expect(screen.queryByText(/FIX1/)).toBeNull();
 });

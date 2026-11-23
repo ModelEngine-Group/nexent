@@ -551,7 +551,7 @@ function Experiments({
             )}
           </Flex>
           {development && report.data.status === "finished" && !baselineReport && (
-            <ExampleCandidates key={report.data.experiment_id} report={development} cases={choices?.cases || []}
+            <ExampleCandidates key={`ExampleCandidates-${report.data.experiment_id}`} report={development} cases={choices?.cases || []}
               onGenerated={(id) => {
                 setCandidate(`prompt:${id}`);
                 setCases([]);
@@ -561,19 +561,19 @@ function Experiments({
             />
           )}
           {development && report.data.status === "finished" && choices && Object.values(development.pairs).some(p => p.base.result?.selection) &&
-            <DiscoveryFeedback key={report.data.experiment_id} report={development} workspace={choices} />}
-          {development && report.data.status === "finished" && choices && <LocalEditFeedback key={report.data.experiment_id}
+            <DiscoveryFeedback key={`DiscoveryFeedback-${report.data.experiment_id}`} report={development} workspace={choices} />}
+          {development && report.data.status === "finished" && choices && <LocalEditFeedback key={`LocalEditFeedback-${report.data.experiment_id}`}
             report={development} workspace={choices} agent={agent} version={version} viewer={viewer} />}
           {development && report.data.status === "finished" && baselineReport && choices &&
-            <ToolMappingCandidate key={report.data.experiment_id} report={development} cases={choices.cases} onSelect={id => {
+            <ToolMappingCandidate key={`ToolMappingCandidate-${report.data.experiment_id}`} report={development} cases={choices.cases} onSelect={id => {
               setCandidate(`tool_mapping:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
             }}/>}
           {development && report.data.status === "finished" && baselineReport && choices && <ToolRepairForm
-            key={report.data.experiment_id} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
+            key={`ToolRepairForm-${report.data.experiment_id}`} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
           {development && report.data.status === "finished" && baselineReport && choices && <ScriptFeedbackForm
-            key={report.data.experiment_id} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
-          {development && report.data.status === "finished" && baselineReport && choices && <NewSkillBriefForm key={report.data.experiment_id} report={development} workspace={choices}/>}
-          {development && report.data.status === "finished" && baselineReport && <ToolSetCandidates key={report.data.experiment_id}
+            key={`ScriptFeedbackForm-${report.data.experiment_id}`} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
+          {development && report.data.status === "finished" && baselineReport && choices && <NewSkillBriefForm key={`NewSkillBriefForm-${report.data.experiment_id}`} report={development} workspace={choices}/>}
+          {development && report.data.status === "finished" && baselineReport && <ToolSetCandidates key={`ToolSetCandidates-${report.data.experiment_id}`}
             report={development} cases={choices?.cases || []} onSelect={id => {
               setCandidate(`tool_set:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
             }} />}

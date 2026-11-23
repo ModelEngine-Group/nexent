@@ -49,7 +49,7 @@ def test_tool_repair_http(runtime, monkeypatch):
     models.TableBase.metadata.create_all(db_client.engine)
     path = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cur:
-        for n in (18, 19, 20, 25, 28):
+        for n in (18, 19, 20, 25, 28, 39):
             (file,) = path.glob(f"v2.9.0_{n:03}_*.sql")
             cur.execute(file.read_text(encoding="utf-8"))
     seed_membership_roles(editor, ["DEV"])
@@ -225,6 +225,45 @@ def test_tool_repair_http(runtime, monkeypatch):
             )
             assert "receipt_id" not in str(suite) and "binding_revision" not in str(suite)
             assert "query" not in str(brief) and "mcp_server" not in str(brief)
+            builds = f"/api/agent-evolution/feedback/{fid}/tool-builds"
+            manifest = {
+                "base_image": "sha256:" + "1" * 64,
+                "result_image": "sha256:" + "2" * 64,
+                "review": "Reviewed by service owner",
+            }
+            assert client.post(builds, headers=editor_header, json=manifest).status_code == 403
+            assert client.get(builds, headers=editor_header).status_code == 403
+            assert (
+                client.post(
+                    builds, headers=designer_header, json={**manifest, "base_image": "latest"}
+                ).status_code
+                == 422
+            )
+            assert (
+                client.post(
+                    builds, headers=designer_header, json={**manifest, "result_image": manifest["base_image"]}
+                ).status_code
+                == 422
+            )
+            first = client.post(builds, headers=designer_header, json=manifest)
+            assert first.is_success, first.text
+            bid = first.json()["data"]["build_id"]
+            assert client.post(builds, headers=designer_header, json=manifest).json()["data"]["build_id"] == bid
+            assert client.get(builds, headers=designer_header).json()["data"] == [bid]
+            guard_url = f"/api/agent-evolution/tool-builds/{bid}/caller-cases"
+            guard = {
+                "experiment_id": eid,
+                "case_id": ids[1],
+                "tool_name": "post_receipt",
+                "share_example": True,
+            }
+            assert client.post(guard_url, headers=designer_header, json=guard).status_code == 403
+            assert (
+                client.post(
+                    guard_url, headers=editor_header, json={**guard, "share_example": False}
+                ).status_code
+                == 422
+            )
             seed_membership_roles(editor, ["ADMIN"])
             assert client.get(read, headers=editor_header).is_success
     finally:
