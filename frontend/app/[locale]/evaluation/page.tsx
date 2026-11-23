@@ -48,6 +48,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { API_ENDPOINTS } from "@/services/api";
+import EvolutionExperiments from "./components/EvolutionExperiments";
 import { getAuthHeaders } from "@/lib/auth";
 import {
   DEFAULT_EVALUATION_SET_FILE_SIZE_MB,
@@ -3430,6 +3431,11 @@ export default function EvaluationPage() {
             key: "runs",
             label: t("agentEvaluation.tabRuns"),
             children: <RunsTab />,
+          },
+          {
+            key: "evolution",
+            label: t("evolution.tab"),
+            children: <EvolutionExperiments />,
           },
           {
             key: "evaluators",

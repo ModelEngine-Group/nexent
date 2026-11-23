@@ -1,6 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.conversation import ConversationModelPreferencePatch, ConversationModelSelectionPatch, ConversationTarget, BranchConversationRequest, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
 from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
+from contracts.conversation import ConversationEvolutionSetting
+from infrastructure.rdb.agent_admission import AdmissionScopeError
+from management.db.conversation.prepared_turn import evolution_setting
 from contracts.agent import WorkbenchConfigUpdateRequest
 from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError, AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, AgentDraftEditError, WorkbenchConfigVersionConflict, WorkbenchError
 import logging
@@ -37,6 +40,26 @@ from management.services.conversation.creation_mode import confirm_creation_mode
 
 
 router = APIRouter(prefix="/conversation")
+
+
+def _conversation_evolution_setting(conversation_id, authorization, enabled=None):
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        data = evolution_setting(conversation_id, user_id, tenant_id, enabled)
+    except AdmissionScopeError:
+        raise HTTPException(status_code=404, detail="CONVERSATION_NOT_FOUND") from None
+    return ConversationResponse(code=0, message="success", data=data)
+
+
+@router.get("/{conversation_id}/evolution-setting", response_model=ConversationResponse)
+def read_evolution_setting(conversation_id: int, authorization: Optional[str] = Header(None)):
+    return _conversation_evolution_setting(conversation_id, authorization)
+
+
+@router.put("/{conversation_id}/evolution-setting", response_model=ConversationResponse)
+def set_evolution_setting(conversation_id: int, request: ConversationEvolutionSetting,
+                          authorization: Optional[str] = Header(None)):
+    return _conversation_evolution_setting(conversation_id, authorization, request.enabled)
 
 
 @router.post("/{conversation_id}/creation_mode_responses", response_model=ConversationResponse)

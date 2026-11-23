@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from functools import cache, wraps
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -106,18 +106,34 @@ def build_evaluation_input(query, minio_files, history, user_id, tenant_id) -> R
     return request
 
 
-async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str, tenant_id: str):
+async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str, tenant_id: str, *,
+                                      prompt_candidate_id: int | None = None, skill_candidate_id: int | None = None,
+                                      skill_variant: Literal["base", "result"] = "result",
+                                      language: Literal["zh", "en"] | None = None):
     from management.services.agent.preparation.run import create_agent_run_info
+
+    if skill_candidate_id is not None:
+        from management.services.evaluation.evolution_access import require_business_agent_edit
+        from nexent.core.concurrency import run_blocking
+        await run_blocking("authorize-skill-candidate", require_business_agent_edit, request.agent_id, tenant_id,
+                           user_id, lane="control-io", owner="management")
 
     history = AgentRequest(
         agent_id=request.agent_id, query=request.query, history=request.history, is_debug=True,
     ).history
-    return await create_agent_run_info(
+    snapshot = await create_agent_run_info(
         agent_id=request.agent_id, minio_files=None, query=request.query, history=history,
         tenant_id=tenant_id, user_id=user_id, allow_memory_search=False, is_debug=True,
         override_version_no=request.version_no, conversation_id=request.conversation_id,
         enable_automation_tool=False,
+        **({"language": language} if language is not None else {}),
+        **({"prompt_candidate_id": prompt_candidate_id} if prompt_candidate_id is not None else {}),
     )
+    if skill_candidate_id is not None:
+        from management.services.evaluation.skill_candidates import pin_skill_candidate
+        await run_blocking("pin-skill-candidate", pin_skill_candidate, snapshot.resource, tenant_id,
+                           skill_candidate_id, skill_variant, lane="evaluation", owner="management")
+    return snapshot
 
 
 async def _authorize_prepared_metadata(request: AgentRequest, tenant_id: str) -> None:
@@ -614,7 +630,7 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs
-        if workbench_skills:
+        if workbench_skills or "authorized_skill_names" in actual:
             expected["authorized_skill_names"] = sorted(configs)
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):

@@ -496,6 +496,11 @@ def release_prepared_run(info: AgentRunInfo, conversation_id: int, user_id: str,
 
 
 async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> EvaluationAgentResult:
+    from contracts.agentos import ReplayReceipt
+    from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
+
+    if payload.replay_trial_id is not None and not EVOLUTION_REPLAY_RUNTIME:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_REPLAY_RUNTIME_REQUIRED"})
     info = await load_prepared_run(payload, actor, prepare_evaluation_run)
     try:
         agent_run_manager.register_agent_run(payload.conversation_id, info, actor.user_id)
@@ -509,6 +514,9 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
     try:
         result = await collect_observer_output(info, agent_run, runtime_thread_manager)
         status = info.attempt_outcome or "completed"
+        if payload.replay_trial_id is not None:
+            result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id,
+                                                  outcome=info.attempt_outcome or "unconfirmed")
         return result
     except asyncio.CancelledError:
         status = "stopped"

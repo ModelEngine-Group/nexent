@@ -10,7 +10,10 @@ feature:
   business_rules:
   - rule_id: V5-PW-EVAL-RUN-01-RULE-01
     description: Create Evaluation→Agent/Version/Judge/Evaluator/Set→Try it out→Run→结果
+  - rule_id: V5-PW-EVAL-RUN-01-RULE-02
+    description: Agent 编辑者可用已标注的正反例校准已发布判据；误放、误拒、缺证及裁判故障分别计数。
   required_test_stages:
+  - D2
   - D4
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

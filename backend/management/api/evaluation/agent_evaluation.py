@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.evaluation import CreateEvaluationRequest, AgentEvaluationTrialRunRequest as TrialRunRequest
+from contracts.evaluation import CreateEvaluationRequest, EvaluatorCalibrationRequest, AgentEvaluationTrialRunRequest as TrialRunRequest
 from contracts.constants.constants import _AUTH_REQUIRED_MSG, _UNKNOWN_ID
 import logging
 from http import HTTPStatus
@@ -514,6 +514,18 @@ async def delete_agent_evaluation_api(
             exc,
         )
         raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete agent evaluation")
+
+
+@router.post("/calibrate")
+async def calibrate_evaluator_api(payload: EvaluatorCalibrationRequest, authorization: str | None = Header(None)):
+    from management.services.evaluation.calibration import calibrate_evaluator
+
+    user_id, tenant_id = get_current_user_id(authorization)
+    result = await run_blocking(
+        "agent-evaluation-calibration", calibrate_evaluator, payload, tenant_id, user_id,
+        lane="evaluation", owner="management",
+    )
+    return _ok(result)
 
 
 @router.post("/trial-run")

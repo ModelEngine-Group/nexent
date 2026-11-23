@@ -125,6 +125,7 @@ async def create_agent_run_info(
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
     metadata: Optional[Dict[str, Any]] = None,
     user_query: str | None = None,
+    prompt_candidate_id: int | None = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -180,6 +181,10 @@ async def create_agent_run_info(
         create_config_kwargs["authorized_knowledge_tools"] = authorized_knowledge_tools
     if runtime_skill_snapshot is not None:
         create_config_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
+    if prompt_candidate_id is not None:
+        if not is_debug or prepared_conversation is not None or version_no <= 0:
+            raise ValueError("Candidate preview requires a released evaluation baseline")
+        create_config_kwargs["prompt_candidate_id"] = prompt_candidate_id
     if enable_automation_tool and not is_debug and conversation_id is not None:
         create_config_kwargs.update(
             {

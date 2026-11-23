@@ -140,8 +140,8 @@ async def test_recovery_sweep_advances_after_a_failed_turn_and_retries_a_failed_
     recover.assert_awaited_once_with(flow.turn, flow.client)
 
 
-async def test_prepared_turn_lifespan_discards_both_background_workers(mocker):
-    started = {name: asyncio.Event() for name in ("turn", "memory")}
+async def test_prepared_turn_lifespan_stops_all_background_workers(mocker):
+    started = {name: asyncio.Event() for name in ("turn", "memory", "evolution")}
     stopped = []
 
     async def worker(name):
@@ -152,10 +152,11 @@ async def test_prepared_turn_lifespan_discards_both_background_workers(mocker):
             stopped.append(name)
 
     mocker.patch.object(service, "_recover_pending_turns", side_effect=lambda: worker("turn"), new_callable=mocker.Mock)
+    mocker.patch.object(service, "_register_evolution_turns", side_effect=lambda: worker("evolution"), new_callable=mocker.Mock)
     mocker.patch.object(
         prepared_completion, "recover_memory_jobs", side_effect=lambda: worker("memory"), new_callable=mocker.Mock,
     )
     async with service.prepared_turn_lifespan():
         await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), timeout=5)
         assert stopped == []
-    assert set(stopped) == {"turn", "memory"}
+    assert set(stopped) == {"turn", "memory", "evolution"}

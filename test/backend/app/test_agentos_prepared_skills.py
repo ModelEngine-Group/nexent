@@ -21,6 +21,40 @@ from test.backend.app.test_agentos_prepared_evaluation import model_record
 from test.backend.services.model_profile_helpers import stub_resolved_model_catalog
 
 
+@pytest.mark.parametrize("variant,expected", [("base", "skill guide"), ("result", "candidate guide")])
+def test_skill_candidate_stages_exact_package(skill_snapshot, mocker, variant, expected):
+    from infrastructure import skill_package
+    from infrastructure.rdb import skill_candidate_records
+    from management.services.evaluation import skill_candidates
+
+    agent, model, directory, row, _ = skill_snapshot
+    baseline = {p.relative_to(directory).as_posix(): p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+    candidate = {**baseline, "SKILL.md": baseline["SKILL.md"].replace(b"skill guide", b"candidate guide")}
+    packages = {"old": baseline, "new": candidate}
+    record = {"instance_id": 23, "skill_id": 5, "base_digest": "old", "result_digest": "new"}
+    mocker.patch.object(skill_candidates, "read_bound_skills", return_value=[row])
+    mocker.patch.object(skill_candidates, "read_bound_skill_candidate", return_value=record)
+    mocker.patch.object(skill_candidate_records, "read_bound_skill_candidate", return_value=record)
+    for module in (skill_candidates, skill_package):
+        mocker.patch.object(module, "load_skill_package", side_effect=lambda tenant, skill, digest: packages[digest])
+    spec = evaluation_snapshot.export_snapshot(agent, [model], "hello", None, tenant_id="tenant-a",
+                                                conversation_id=-42, language="en")
+    skill_candidates.pin_skill_candidate(spec.resource, "tenant-a", 31, variant)
+    (directory / "SKILL.md").write_text("changed after compilation", encoding="utf-8")
+    payload = PreparedEvaluationRun.model_validate_json(spec.model_dump_json())
+    info = prepared_evaluation.prepare_evaluation_run(payload, ServicePrincipal("editor", "tenant-a"))
+    try:
+        tool = NexentAgent.create_builtin_tool(None, info.agent_config.tools[1])
+        assert expected in tool.forward("summarize")
+        assert "changed after compilation" not in tool.forward("summarize")
+    finally:
+        prepared_evaluation._remove_skill_files(info.workspace_path)
+    mocker.patch.object(skill_candidate_records, "read_bound_skill_candidate", return_value=None)
+    with pytest.raises(HTTPException) as denied:
+        prepared_evaluation.prepare_evaluation_run(payload, ServicePrincipal("editor", "tenant-a"))
+    assert denied.value.status_code == 409
+
+
 @pytest.fixture
 def skill_snapshot(mocker, tmp_path):
     from infrastructure import skill_execution
@@ -125,6 +159,22 @@ def test_export_refuses_unrecognized_skill_tool_parameters(skill_snapshot):
     assert evaluation_snapshot.export_snapshot(
         agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
     ) is None
+
+
+@pytest.mark.parametrize("unexpected_name", [False, True])
+def test_persisted_skill_guide_and_config_accept_only_bound_names(skill_snapshot, unexpected_name):
+    agent, binding, *_ = skill_snapshot
+    for tool in agent.tools:
+        tool.params["authorized_skill_names"] = ["summarize"]
+    if unexpected_name:
+        agent.tools[1].params["authorized_skill_names"].append("outside-binding")
+    snapshot = evaluation_snapshot.export_snapshot(
+        agent, [binding], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+    )
+    if unexpected_name:
+        assert snapshot is None
+    else:
+        assert len(snapshot.resource.skill_refs) == 1
 
 
 

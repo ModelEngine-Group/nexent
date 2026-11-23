@@ -1,0 +1,35 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-PAIR-REPORT-D1-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-01]
+  title: 由实际判据和两组回执生成逐题报告
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 将两组受控输出交给产品代码判分并生成逐题变化和有效分母。
+  preconditions: [使用固定回答和代码判据。]
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 对同题两组结果依次构造改善、退步、均通过、均失败、无回执和未完成，然后读取实验报告。
+    expected: 每种有效变化分别计数，缺证与未完成仅进入未判定数。
+  expected_results: [六题中有效四题，四类有效变化各一题，零分作为有效失败。]
+  forbidden_side_effects: [读取报告不会重新执行智能体或修改题目。]
+  acceptance:
+  - id: AC-01
+    description: 核对报告的逐题状态、总数与有效数。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  assertions: [每题按旧版和候选判分配对，缺证不给任一版本加分。]
+  unit_boundary: 运行实际产品判分和报告聚合；权限及试验记录读取使用测试替身。
+  inputs: [六组确定的开发题试跑结果及已知业务答案。]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []

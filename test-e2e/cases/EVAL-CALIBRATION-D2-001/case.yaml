@@ -1,0 +1,39 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVAL-CALIBRATION-D2-001
+  feature_id: V5-PW-EVAL-RUN-01
+  business_rule_ids: [V5-PW-EVAL-RUN-01-RULE-02]
+  title: 业务编辑者校准判据时区分误判、缺证和故障
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 从 Management HTTP 接口对准备好的回答评分。
+  preconditions: [隔离的 PostgreSQL 实例可供用例创建临时数据库。]
+  test_data:
+    profile: 合成的原回答、双类业务标注、已发布代码评估器和独立测试账号
+  steps:
+  - order: 1
+    action: 编辑者提交含评分正确、误判、缺证与裁判异常的样本，核对各行。
+    expected: 返回已发布判据版本、逐行状态和各类计数。
+  - order: 2
+    action: 使用没有编辑权的同租户身份请求同一 Agent 的校准。
+    expected: 接口拒绝并且不返回评分。
+  expected_results: [误放和误拒各自计数，缺失参考答案及非法裁判输出不进入两类误判。, 只读用户被拒绝。]
+  forbidden_side_effects: [校准不创建智能体评测执行记录。]
+  acceptance:
+  - id: AC-01
+    description: 对比逐行响应、人工标注和缺证原因，同时核对没有创建执行记录。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 只读用户通过相同入口无法发起校准。
+    steps: [2]
+    expected_results: [2]
+  contract:
+    protocol: HTTP API
+    request_expectations: [POST /api/agent-evaluations/calibrate 带用户会话身份。]
+    response_expectations: [成功返回逐题结果及计数，拒绝时不返回逐题信息。]

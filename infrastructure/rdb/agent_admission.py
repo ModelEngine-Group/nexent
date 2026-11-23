@@ -27,6 +27,7 @@ class ConversationRunAdmission(TableBase):
     journal_available = Column(Boolean, nullable=False, server_default=text("false"), doc="Run output journal opened.")
     prepared_user_turn = Column(JSONB(none_as_null=True), doc="Pending turn settings and retained prompt scope for assistant-only Memory work.")
     prepared_message_index = Column(Integer, doc="Assistant message index while Management projection is outstanding.")
+    evolution_source_message_id = Column(Integer, comment="Original user message eligible for evolution analysis in this admitted run.")
     prepared_assistant_id = Column(Integer, doc="Assistant message reserved by Management for the admitted run.")
     prepared_automation_context = Column(JSONB(none_as_null=True), doc="Authorized proposal settings for the pending run.")
 

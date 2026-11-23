@@ -314,6 +314,22 @@ class EvaluationSkillTool(str, Enum):
 class SkillExecutionBinding(RunSpecModel):
     instance_id: PositiveInt
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package_candidate_id: PositiveInt | None = None
+    package_variant: Literal["base", "result"] | None = None
+
+    @model_validator(mode="after")
+    def paired_package_reference(self):
+        if (self.package_candidate_id is None) != (self.package_variant is None):
+            raise ValueError("Incomplete Skill package reference")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_package_reference(self, serialize):
+        payload = serialize(self)
+        if self.package_candidate_id is None:
+            payload.pop("package_candidate_id", None)
+            payload.pop("package_variant", None)
+        return payload
 
 
 class WorkbenchSkillBinding(RunSpecModel):
@@ -703,12 +719,33 @@ class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 
     conversation_id: Annotated[int, Field(le=0)] = 0
+    replay_trial_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
+
+    @model_serializer(mode="wrap")
+    def omit_ordinary_replay_reference(self, serialize):
+        payload = serialize(self)
+        if self.replay_trial_id is None:
+            payload.pop("replay_trial_id", None)
+        return payload
+
+
+class ReplayReceipt(RunSpecModel):
+    trial_id: str = Field(pattern=RUN_ID_PATTERN)
+    outcome: str = Field(min_length=1)
 
 
 class EvaluationAgentResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     answer: str
     events: list[dict[str, JsonValue]]
+    replay_receipt: ReplayReceipt | None = None
+
+    @model_serializer(mode="wrap")
+    def omit_ordinary_replay_receipt(self, serialize):
+        payload = serialize(self)
+        if self.replay_receipt is None:
+            payload.pop("replay_receipt", None)
+        return payload
 
 
 class ModelOperation(str, Enum):

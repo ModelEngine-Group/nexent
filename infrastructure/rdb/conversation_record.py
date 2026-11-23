@@ -25,6 +25,8 @@ class ConversationRecord(TableBase):
         comment="Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation",
     )
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
+    evolution_tenant_id = Column(String(100), comment="Tenant authorized by the owner for future automatic evolution analysis; NULL when disabled.")
+    evolution_setting_time = Column(TIMESTAMP(timezone=True), comment="Time of the latest change to the conversation analysis setting.")
     target = Column(JSONB, nullable=True,
                     comment="Creator operation target: type agent or skill and positive resource id; NULL before creation")
     chat_mode = Column(

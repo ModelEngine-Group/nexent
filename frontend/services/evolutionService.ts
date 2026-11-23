@@ -1,0 +1,91 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { API_BASE_URL, API_ENDPOINTS } from "./api";
+import { getAuthHeaders } from "@/lib/auth";
+
+const root = `${API_BASE_URL}/agent-evolution`;
+
+interface AgentChoice {
+  agent_id: number;
+  name: string;
+  display_name?: string;
+}
+interface VersionChoice {
+  version_no: number;
+  version_name?: string;
+}
+interface Rule {
+  evaluator_id: number;
+  name: string;
+  evaluator_type: string;
+  status: string;
+}
+export interface Workspace {
+  candidates: { candidate_id: number; kind: string; name: string }[];
+  cases: { case_id: number; family: string; query: string }[];
+  experiments: { experiment_id: number; create_time: string }[];
+}
+interface Trial {
+  status: string;
+  result?: {
+    answer?: string;
+    error?: string;
+    judgment?: { score?: number; reason?: string };
+  };
+}
+export interface ExperimentReport {
+  experiment_id: number;
+  status: string;
+  valid_pairs: number;
+  total_pairs: number;
+  pairs: Record<string, { base: Trial; result: Trial; comparison: string }>;
+}
+
+async function read<T>(url: string, body?: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: body === undefined ? "GET" : "POST",
+    headers: getAuthHeaders(),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (
+    !response.ok ||
+    (typeof payload.code === "number" && payload.code !== 0)
+  ) {
+    const message = [payload.detail, payload.message].find(
+      (value) => typeof value === "string"
+    );
+    throw new Error(message || `HTTP ${response.status}`);
+  }
+  return payload.data ?? payload.items ?? payload;
+}
+
+export const evolutionService = {
+  agents: () => read<AgentChoice[]>(API_ENDPOINTS.agent.publishedList),
+  versions: (agent: number) =>
+    read<VersionChoice[]>(API_ENDPOINTS.agent.versions.list(agent)),
+  evaluators: () => read<Rule[]>(API_ENDPOINTS.evaluators.list),
+  workspace: (agent: number, version: number) =>
+    read<Workspace>(`${root}/agents/${agent}/versions/${version}/workspace`),
+  createCase: (body: {
+    agent_id: number;
+    version_no: number;
+    family: string;
+    query: string;
+    expected: string;
+    attachments: { name: string; object_name: string }[];
+  }) => read<{ case_id: number }>(`${root}/development-cases`, body),
+  submit: (body: {
+    request_id: string;
+    agent_id: number;
+    version_no: number;
+    candidate_type: string;
+    candidate_id: number;
+    case_ids: number[];
+    evaluator_id: number;
+    judge_model_id?: number;
+    language: string;
+  }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
+  report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  cancel: (id: number) =>
+    read<ExperimentReport>(`${root}/experiments/${id}/cancel`, {}),
+};

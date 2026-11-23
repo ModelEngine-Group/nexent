@@ -181,6 +181,7 @@ class ExecutionRepository:
         trajectory_id,
         *,
         agent_version_no=None,
+        agentos_run_id=None,
         capturing=True,
         prior_turn=0,
     ):
@@ -218,6 +219,7 @@ class ExecutionRepository:
             session.add(
                 Execution(
                     trajectory_id=trajectory_id,
+                    agentos_run_id=agentos_run_id,
                     conversation_id=int(identity.conversation_id),
                     turn_no=turn,
                     agent_id=int(identity.root_agent_id)

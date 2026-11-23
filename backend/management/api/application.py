@@ -54,6 +54,7 @@ from management.api.knowledge_base.haotian import router as haotian_router
 from management.api.knowledge_base.ind_aidp import router as ind_aidp_router
 from management.api.evaluation.evaluation_set import router as evaluation_set_router
 from management.api.evaluation.agent_evaluation import router as agent_evaluation_router
+from management.api.evaluation.evolution import router as agent_evolution_router
 from management.api.evaluation.evaluator import router as evaluator_router
 from management.api.evaluation.evaluation_annotation import router as evaluation_annotation_router
 from management.api.identity.cas import router as cas_router
@@ -135,6 +136,7 @@ async def automation_lifespan():
 @asynccontextmanager
 async def config_lifespan(_app):
     from management.services.agent.prepared_turn import prepared_turn_lifespan
+    from management.services.evaluation.experiments import experiment_lifespan
     from management.services.conversation.creator_runtime import shutdown_creator_streams
 
     # One Management manager owns ordinary and Northbound requests and recovery.
@@ -149,7 +151,7 @@ async def config_lifespan(_app):
             await validate_external_service_configuration()
             dreaming_started = True
             await start_dreaming_scheduler()
-            async with automation_lifespan(), prepared_turn_lifespan():
+            async with automation_lifespan(), prepared_turn_lifespan(), experiment_lifespan():
                 yield
         finally:
             try:
@@ -236,6 +238,7 @@ app.include_router(haotian_router)
 app.include_router(ind_aidp_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
+app.include_router(agent_evolution_router)
 app.include_router(evaluator_router)
 app.include_router(evaluation_annotation_router)
 if ENABLE_AIDP_KNOWLEDGE:

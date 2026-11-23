@@ -314,6 +314,11 @@ class ConversationModelPreferencePatch(BaseModel):
     delete_parameters: List[str] = Field(default_factory=list, max_length=128)
 
 
+class ConversationEvolutionSetting(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(strict=True)
+
+
 class ConversationModelSelectionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     selected_model_id: int = Field(gt=0, lt=2**31, strict=True)

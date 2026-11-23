@@ -86,6 +86,21 @@ def _next_index(session, conversation_id):
     return 0 if last is None else 2 * (last // 2 + 1)
 
 
+def evolution_setting(conversation_id: int, user_id: str, tenant_id: str, enabled: bool | None = None) -> dict:
+    """Read or update consent under the same ownership lock used to admit a turn."""
+    with get_db_session() as session:
+        record = _owned(session, conversation_id, user_id, tenant_id, lock=enabled is not None)
+        if record is None:
+            raise AdmissionScopeError
+        current = record.evolution_tenant_id == tenant_id
+        if enabled is not None and enabled != current:
+            record.evolution_tenant_id = tenant_id if enabled else None
+            record.evolution_setting_time = datetime.now(timezone.utc)
+            record.updated_by = user_id
+            current = enabled
+        return {"enabled": current, "effective_at": record.evolution_setting_time}
+
+
 def allocate_conversation_id() -> int:
     """Reserve a sequence value without exposing a conversation before compilation."""
     sequence = ConversationRecord.__table__.c.conversation_id.default
@@ -449,7 +464,18 @@ def stage_turn(
         row.prepared_user_turn = {
             **{key: value for key, value in user_turn.items() if key != "automation"},
             "new_conversation": initial_title is not None,
+            "evolution_eligible": False,
         }
+        if initial_title is None and not omitted_user and not background_run and conversation.evolution_tenant_id == tenant_id:
+            # A retry cannot extend today's authorization to a previously unconsented message.
+            eligible = saved_user is None or (
+                saved_user.message_source == "CHAT" and session.scalar(select(admission.run_id).where(
+                    admission.tenant_id == tenant_id, admission.conversation_id == reference.conversation_id,
+                    admission.evolution_source_message_id == saved_user.message_id,
+                    admission.created_by == user_id, admission.delete_flag == "N",
+                ).limit(1)) is not None
+            )
+            row.prepared_user_turn = {**row.prepared_user_turn, "evolution_eligible": eligible}
         if omitted_user:
             row.prepared_user_turn = {**row.prepared_user_turn, "omitted_user": True}
         if background_run:
@@ -587,6 +613,8 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 "role": "assistant", "content": "",
             }, turn.user_id, status="streaming", streaming_owner="management", db_session=session, **source_options)
             conversation.chat_mode = user_turn["chat_mode"]
+            if user_turn.get("evolution_eligible") and source_message_id is not None:
+                row.evolution_source_message_id = source_message_id
             if workbench is None:
                 conversation.agent_id = user_turn["agent_id"]
             row.prepared_user_turn = {

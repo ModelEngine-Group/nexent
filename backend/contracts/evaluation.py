@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 from contracts.constants.constants import _REPORT_LABELS
@@ -28,6 +28,29 @@ class AgentEvaluationTrialRunRequest(BaseModel):
     language: str = Field(
         default="zh", description="Language of the trial run: zh / en"
     )
+
+
+class CalibrationExample(BaseModel):
+    query: str = Field(min_length=1, max_length=16000)
+    actual: str | None = Field(default=None, max_length=32000)
+    expected: str | None = Field(default=None, max_length=16000)
+    runtime_events: list[dict[str, Any]] | None = Field(default=None, max_length=128)
+    human_verdict: Literal["pass", "fail"]
+
+
+class EvaluatorCalibrationRequest(BaseModel):
+    agent_id: int = Field(gt=0)
+    evaluator_id: int = Field(gt=0)
+    judge_model_id: int | None = Field(default=None, gt=0)
+    required_evidence: set[Literal["actual", "expected", "runtime_events"]] = Field(min_length=1)
+    examples: list[CalibrationExample] = Field(min_length=2, max_length=32)
+    language: Literal["zh", "en"] = "zh"
+
+    @model_validator(mode="after")
+    def check_labeled_examples(self):
+        if {example.human_verdict for example in self.examples} != {"pass", "fail"}:
+            raise ValueError("Calibration requires both passing and failing human examples")
+        return self
 
 
 class CreateSchemaRequest(BaseModel):

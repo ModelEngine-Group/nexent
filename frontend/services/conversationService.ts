@@ -42,6 +42,21 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async evolutionSetting(id: number, enabled?: boolean): Promise<boolean> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.conversation.evolutionSetting(id),
+      {
+        method: enabled === undefined ? "GET" : "PUT",
+        headers: getAuthHeaders(),
+        body: enabled === undefined ? undefined : JSON.stringify({ enabled }),
+      }
+    );
+    const payload = await response.json();
+    if (payload.code !== 0 || typeof payload.data?.enabled !== "boolean") {
+      throw new ApiError(payload.code || response.status, payload.message);
+    }
+    return payload.data.enabled;
+  },
   async getCreatorHistories(
     kind: ConversationTarget["type"],
     targetId: number,

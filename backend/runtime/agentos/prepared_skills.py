@@ -93,7 +93,17 @@ def materialize_skill_tools(
         try:
             revision_row = dict(row)
             owner = revision_row.pop("owner_tenant_id") if workbench_refs else tenant
-            files = capture_skill_files(owner, name)
+            candidate = getattr(ref, "package_candidate_id", None)
+            if candidate is None:
+                files = capture_skill_files(owner, name)
+            else:
+                from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
+                from infrastructure.skill_package import load_skill_package
+
+                bound = read_bound_skill_candidate(tenant, resource.agent_id, resource.version_no, candidate)
+                if not bound or bound["instance_id"] != ref.instance_id:
+                    raise ValueError("Skill candidate is outside the Agent binding")
+                files = load_skill_package(tenant, bound["skill_id"], bound[ref.package_variant + "_digest"])
             revision = skill_execution_revision(tenant, resource.agent_id, resource.version_no, revision_row, files)
         except (KeyError, OSError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc

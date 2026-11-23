@@ -98,6 +98,7 @@ async def create_agent_config(
     portable_evaluation: bool = False,
     authorized_knowledge_tools: dict | None = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
+    prompt_candidate_id: int | None = None,
 ):
     portable_options = {"portable_evaluation": True} if portable_evaluation else {}
     if authorized_knowledge_tools is not None:
@@ -269,6 +270,13 @@ async def create_agent_config(
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")
+    if prompt_candidate_id is not None:
+        from management.services.evaluation.prompt_candidates import resolve_prompt_candidate
+
+        candidate = resolve_prompt_candidate(tenant_id, user_id, agent_id, version_no, prompt_candidate_id)
+        if prompt != candidate["source_text"]:
+            raise ValueError("Compiled Agent no longer matches the candidate baseline")
+        prompt = candidate["result_text"]
     if agent_info.get("agent_origin") == "SYSTEM":
         from management.services.agent.system import localized_system_prompt
 

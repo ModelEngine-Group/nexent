@@ -2,5 +2,6 @@
 
 此页由结构化用例生成，不手工编辑。
 
+- D2 [EVAL-CALIBRATION-D2-001](../../cases/EVAL-CALIBRATION-D2-001/case.yaml) · active
 - D4 [PW-EVAL-RUN-01](../../cases/PW-EVAL-RUN-01/case.yaml) · active
 - D5 [EVAL-LEGACY-D5-001](../../cases/EVAL-LEGACY-D5-001/case.yaml) · active

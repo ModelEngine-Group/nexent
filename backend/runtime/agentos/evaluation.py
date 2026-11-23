@@ -60,6 +60,8 @@ async def collect_observer_output(agent_run_info, runner, thread_manager) -> Eva
             data = json.loads(msg)
             if isinstance(data, dict):
                 runtime_events.append(data)
+                if data.get("type") == "final_answer" and isinstance(data.get("content"), str):
+                    final_answer_parts.append(data["content"])
         except Exception:
             logger.debug(
                 "Failed to parse straggler observer message", exc_info=True

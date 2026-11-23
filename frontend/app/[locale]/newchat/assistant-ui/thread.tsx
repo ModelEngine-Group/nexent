@@ -3,6 +3,7 @@
 "use client";
 
 import { useMessageSources } from "../ui/message-sources";
+import { ConversationEvolutionSwitch } from "./conversation-evolution-switch";
 
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
@@ -987,6 +988,9 @@ const ThreadView: FC<ThreadViewProps> = ({
             </header>
           )}
 
+        {conversationId && hasMessages && !readOnly && !isShareMode && variant !== "embedded" ? (
+          <ConversationEvolutionSwitch key={conversationId} id={conversationId} />
+        ) : null}
         <ConversationArtifactsToolbarEntry />
         <QuestionDirectoryRail
           questions={questionDirectory}

@@ -531,15 +531,28 @@ async def _recover_pending_turns():
         await asyncio.sleep(1 if after_run_id else 3)
 
 
+async def _register_evolution_turns():
+    from management.db.conversation.evolution_review import enqueue_review_batches
+
+    while True:
+        try:
+            await _io("evolution-register-completed-turns", enqueue_review_batches)
+        except Exception:
+            logger.exception("Failed to register completed turns for evolution review")
+        await asyncio.sleep(10)
+
+
 @asynccontextmanager
 async def prepared_turn_lifespan():
     from management.services.memory.prepared_completion import recover_memory_jobs
 
     recovery = asyncio.create_task(_recover_pending_turns(), name="prepared-public-turn-recovery")
     memory = asyncio.create_task(recover_memory_jobs(), name="prepared-memory-recovery")
+    evolution = asyncio.create_task(_register_evolution_turns(), name="evolution-turn-registration")
     try:
         yield
     finally:
         recovery.cancel()
         memory.cancel()
-        await asyncio.gather(recovery, memory, return_exceptions=True)
+        evolution.cancel()
+        await asyncio.gather(recovery, memory, evolution, return_exceptions=True)

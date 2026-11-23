@@ -1,0 +1,13 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: AGENT-EVOLUTION-REPLAY
+  name: 自演进业务任务对照评测
+  status: active
+  description: 对同一发布版本、候选和业务任务分别执行，按题报告有效结果与缺证。
+  business_rules:
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-01
+    description: 基线和候选均取得有效判分才计算改进或退步；未完成、故障及缺证保留在总题数中。
+  required_test_stages: [D1]

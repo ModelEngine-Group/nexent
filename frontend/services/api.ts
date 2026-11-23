@@ -76,6 +76,8 @@ export const API_ENDPOINTS = {
     renew: `${API_BASE_URL}/user/cas/renew`,
   },
   conversation: {
+    evolutionSetting: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/evolution-setting`,
     creatorHistories: `${API_BASE_URL}/conversation/creator_histories`,
     modelSelection: (conversationId: number) =>
       `${API_BASE_URL}/conversation/${conversationId}/model_preferences`,

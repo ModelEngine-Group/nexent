@@ -557,6 +557,20 @@ def _build_evaluator_prompt(
     )
 
 
+def _read_evaluator_score(data: dict, evaluator: dict, *, strict: bool) -> float:
+    """Preserve the published scoring range when judging evolution experiments."""
+    value = data.get("score", None if strict else 0)
+    if strict and (isinstance(value, bool) or not isinstance(value, (int, float))):
+        raise ValueError("Evaluator must return a numeric score")
+    score = float(value)
+    if strict:
+        lower = evaluator.get("score_range_min", 0)
+        upper = evaluator.get("score_range_max", 1)
+        if not isfinite(score) or not lower <= score <= upper:
+            raise ValueError("Evaluator score is outside the declared range")
+    return score
+
+
 def _call_one_llm_evaluator(
     eid: int,
     ev: dict[str, Any],
@@ -571,6 +585,7 @@ def _call_one_llm_evaluator(
     conversation_history: list[dict[str, Any]] | None,
     *,
     user_id: str,
+    strict: bool = False,
 ) -> tuple:
     """Call a single LLM evaluator — submitted to the thread pool.
 
@@ -592,21 +607,20 @@ def _call_one_llm_evaluator(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    # Defensive parsing: judge models occasionally return empty or non-JSON
-    # content (e.g. all output inside <think> tags is filtered out). Treat
-    # these as a 0-score evaluator result with an explicit reason instead of
-    # letting json.loads blow up the whole case run.
+    invalid = None if strict else 0.0
     if not isinstance(response, str) or not response.strip():
-        return eid, ev["name"], 0.0, "Judge model returned empty response"
+        return eid, ev["name"], invalid, "Judge model returned empty response"
     try:
         data = json.loads(response)
     except (json.JSONDecodeError, TypeError) as exc:
-        return eid, ev["name"], 0.0, f"Judge model returned invalid JSON: {exc}"
+        return eid, ev["name"], invalid, f"Judge model returned invalid JSON: {exc}"
     if not isinstance(data, dict):
-        return eid, ev["name"], 0.0, "Judge model response was not a JSON object"
+        return eid, ev["name"], invalid, "Judge model response was not a JSON object"
     try:
-        score = float(data.get("score", 0))
-    except (TypeError, ValueError):
+        score = _read_evaluator_score(data, ev, strict=strict)
+    except (TypeError, ValueError, OverflowError) as exc:
+        if strict:
+            return eid, ev["name"], None, str(exc)
         score = 0.0
     return eid, ev["name"], score, str(data.get("reason", ""))
 
@@ -617,6 +631,8 @@ def _run_code_evaluators(
     expected: str,
     actual: str,
     runtime_events: list[dict] | None,
+    *,
+    strict: bool = False,
 ) -> tuple[dict, dict]:
     """Run code-type evaluators serially (pure Python, no I/O).
 
@@ -626,7 +642,7 @@ def _run_code_evaluators(
     The same ``ALLOWED_BUILTINS`` whitelist is re-applied here for runtime
     parity with the authoring-validation environment.
     """
-    scores: dict[str, float] = {}
+    scores: dict[str, float | None] = {}
     reasons: dict[str, str] = {}
     for eid, ev in code_evals.items():
         name = ev["name"]
@@ -646,10 +662,10 @@ def _run_code_evaluators(
                 actual=actual,
                 runtime_events=runtime_events or [],
             )
-            scores[name] = float(result.get("score", 0))
+            scores[name] = _read_evaluator_score(result, ev, strict=strict)
             reasons[name] = str(result.get("reason", ""))
         except Exception as exc:
-            scores[name] = 0.0
+            scores[name] = None if strict else 0.0
             reasons[name] = f"Code evaluator error: {exc}"
     return scores, reasons
 
@@ -657,12 +673,14 @@ def _run_code_evaluators(
 def _collect_llm_results(
     futures: dict,
     llm_evals: dict[int, dict[str, Any]],
+    *,
+    strict: bool = False,
 ) -> tuple[dict, dict]:
     """Collect LLM evaluator results from completed futures.
 
-    On per-future failure, records a zero score with the error message.
+    Experiment callers retain an invalid result when a judge call fails.
     """
-    scores: dict[str, float] = {}
+    scores: dict[str, float | None] = {}
     reasons: dict[str, str] = {}
     for f in as_completed(futures):
         try:
@@ -672,7 +690,7 @@ def _collect_llm_results(
         except Exception as exc:
             eid = futures[f]
             name = llm_evals[eid]["name"]
-            scores[name] = 0.0
+            scores[name] = None if strict else 0.0
             reasons[name] = f"LLM evaluator error: {exc}"
     return scores, reasons
 
@@ -684,12 +702,13 @@ def _score_with_evaluators(
     query: str,
     expected: str,
     actual: str,
-    judge_model_id: int,
+    judge_model_id: int | None,
     runtime_events: list[dict] | None = None,
     context_window: int = 4096,
     conversation_history: list[dict[str, Any]] | None = None,
     *,
     user_id: str,
+    strict: bool = False,
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
     LLM evaluators run in the Management model lane, separately from the evaluation worker."""
@@ -701,11 +720,13 @@ def _score_with_evaluators(
     }
 
     scores, reasons = _run_code_evaluators(
-        code_evals, query, expected, actual, runtime_events
+        code_evals, query, expected, actual, runtime_events, strict=strict
     )
 
     if not llm_evals:
         return scores, reasons
+    if judge_model_id is None:
+        raise ValueError("A judge model is required for an LLM evaluator")
 
     futures = {
         config_thread_manager.submit(
@@ -727,10 +748,58 @@ def _score_with_evaluators(
             context_window,
             conversation_history,
             user_id=user_id,
+            strict=strict,
         ).future: eid
         for eid, ev in llm_evals.items()
     }
-    llm_scores, llm_reasons = _collect_llm_results(futures, llm_evals)
+    llm_scores, llm_reasons = _collect_llm_results(futures, llm_evals, strict=strict)
     scores.update(llm_scores)
     reasons.update(llm_reasons)
     return scores, reasons
+
+
+def grade_observed_case(
+    evaluators: dict[int, dict[str, Any]],
+    *,
+    tenant_id: str,
+    user_id: str,
+    query: str,
+    expected: str | None,
+    actual: str | None,
+    runtime_events: list[dict] | None,
+    required_evidence: dict[int, set[str]],
+    judge_model_id: int | None,
+    judge_system_prompt: str,
+    context_window: int = 4096,
+    history: list[dict] | None = None,
+) -> dict[int, dict]:
+    """Grade an authorized observation without executing the business Agent or its tools."""
+    evidence = {"actual": actual, "expected": expected, "runtime_events": runtime_events}
+    if not evaluators or evaluators.keys() != required_evidence.keys():
+        raise ValueError("Every selected evaluator requires an evidence declaration")
+    ready = {}
+    results = {}
+    for eid, evaluator in evaluators.items():
+        required = required_evidence[eid]
+        if not required or not required.issubset(evidence):
+            raise ValueError("Missing or unsupported evidence declaration")
+        missing = sorted(key for key in required if evidence[key] is None)
+        if missing:
+            results[eid] = {"status": "missing_evidence", "score": None, "missing": missing}
+        else:
+            # Scores are keyed by name on the legacy path. Use stable IDs internally
+            # so two independently versioned rules may share a display name.
+            ready[eid] = {**evaluator, "name": str(eid)}
+    if ready:
+        scores, reasons = _score_with_evaluators(
+            ready, judge_system_prompt, tenant_id, query, expected or "", actual or "",
+            judge_model_id, runtime_events, context_window, history, user_id=user_id, strict=True,
+        )
+        for eid, evaluator in ready.items():
+            key = str(eid)
+            score = scores[key]
+            status = "invalid"
+            if score is not None:
+                status = "pass" if score >= evaluator.get("pass_threshold", DEFAULT_PASS_THRESHOLD) else "fail"
+            results[eid] = {"status": status, "score": score, "reason": reasons[key]}
+    return results

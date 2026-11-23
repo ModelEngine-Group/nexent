@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: EVAL-CALIBRATION-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: EVAL-CALIBRATION-D2-001
+acceptance_bindings:
+  AC-01: [test_calibration_http]
+  AC-02: [test_calibration_http]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The native authentication fixture creates and drops a unique database on the isolated NEXENT_AUTH_TEST_DSN instance.

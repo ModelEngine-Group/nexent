@@ -1,0 +1,8 @@
+schema_version: '1.0'
+case_id: EVOLUTION-PAIR-REPORT-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_grade_and_compare
+acceptance_bindings:
+  AC-01: [test_grade_and_compare]

@@ -501,3 +501,7 @@ NEXENT_LITELLM_JSON = os.environ.get('NEXENT_LITELLM_JSON', '/opt/nexent/litellm
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv('NEXENT_MODEL_DIAGNOSTIC_CHUNKS', os.getenv('NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT', '0')) == '1'
 # Read OAuth settings centrally, including provider-specific credential names.
 GET_OAUTH_SETTING = os.getenv
+
+# Comparative replay uses a Runtime with isolated tool bindings and test data.
+EVOLUTION_REPLAY_RUNTIME_URL = os.getenv("NEXENT_EVOLUTION_REPLAY_RUNTIME_URL", "").rstrip("/")
+EVOLUTION_REPLAY_RUNTIME = os.getenv("NEXENT_EVOLUTION_REPLAY_RUNTIME", "").lower() == "true"

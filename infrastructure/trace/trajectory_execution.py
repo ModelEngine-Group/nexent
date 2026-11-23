@@ -42,11 +42,13 @@ def execution_observer(*, capturing, store=None):
             except (OSError, TrajectoryConflict, TrajectoryCorrupt):
                 # PG remains authoritative when an archive cannot be inspected.
                 logger.warning("trajectory.prior_turn_unavailable")
+        run_id = (metadata.extra_metadata or {}).get("agentos_run_id")
         turn = repository.begin(
             identity,
             trajectory_id,
             agent_version_no=metadata.agent_version_no,
             capturing=capturing,
+            **({"agentos_run_id": run_id} if isinstance(run_id, str) and len(run_id) == 32 else {}),
             **({"prior_turn": prior_turn} if store is not None else {}),
         )
         bound = replace(

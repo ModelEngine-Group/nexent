@@ -53,6 +53,7 @@ class TrajectoryExecution(TableBase):
         comment="Serialized execution order; zero denotes a historical placeholder",
     )
     agent_id = Column(Integer, comment="Actual root Agent for this execution")
+    agentos_run_id = Column(String(32), comment="Trusted AgentOS run identifier linking the root execution to its admission.")
     agent_version_no = Column(
         Integer, comment="Captured root Agent version; zero is a draft"
     )

@@ -300,6 +300,134 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/feedback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-feedback-register",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/feedback/{feedback_id}/candidates",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-feedback-generate",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/experiments",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-experiment-create",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/experiments/{experiment_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-experiment-read",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/cancel",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-experiment-cancel",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/development-cases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-case-create",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/workspace",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-workspace",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/development-cases/{case_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-case-read",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/skill-step-candidates",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-skill-step-generate",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/skill-candidates/{candidate_id}/preview",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-skill-preview",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/prompt-candidates",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-prompt-generate",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/prompt-candidates/{candidate_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-prompt-read",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/agents/{agent_id}/versions/{version_no}/prompt-candidates/{candidate_id}/preview",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-prompt-preview",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evaluations/calibrate",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "agent-evaluation-calibrate",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-evaluations/trial-run",
       "transport": "http",
       "target": "management",
@@ -1383,6 +1511,28 @@
       "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-ba15db0c1101e081",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/{conversation_id}/evolution-setting",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-evolution-setting-read",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/conversation/{conversation_id}/evolution-setting",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "web-conversation-evolution-setting-update",
       "credential_kinds": [
         "session"
       ]
