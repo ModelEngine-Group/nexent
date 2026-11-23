@@ -2,6 +2,7 @@
 """Give a resource editor only the development excerpts approved by the Agent editor."""
 
 from hashlib import sha256
+import json
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -83,6 +84,27 @@ def _prepare_handoff(tenant, user, eid, request):
         if (trial["result"] or {}).get("case_digest") != case["digest"]:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Case does not match the trial receipt")
         feedback[field] = _approved_excerpt(excerpt, status, trial, case["task"])
+        if excerpt.input_excerpt is not None:
+            if not excerpt.input_excerpt.strip() or excerpt.input_excerpt not in case["task"]["query"]:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Approve an exact request excerpt")
+            feedback[field]["input_excerpt"] = excerpt.input_excerpt
+        if request.method in {"T1", "T2"} and case["task"].get("tool_use"):
+            evidence = trial["result"].get("tool_use") or {}
+            rule = next((r for r in case["task"]["tool_use"]["rules"] if r["name"] == request.tool_name), None)
+            if rule is None or evidence.get("status") not in {"pass", "fail"}:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose a tool with verified behavior on both tasks")
+            issues = [problem for problem in evidence["issues"] if problem.get("tool") == request.tool_name
+                      or problem["reason"] == "wrong_order" and request.tool_name in (case["task"]["tool_use"].get("order") or [])]
+            if field == "failure" and not issues:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The selected tool met its requirements on the failure task")
+            feedback[field]["tool_evidence"] = json.dumps({
+                "name": request.tool_name, "required_min": rule["min_calls"], "required_max": rule["max_calls"],
+                "checked_arguments": list(rule["arguments"]), "calls": evidence["sequence"].count(request.tool_name),
+                "approved_expected_values": {key: rule["arguments"][key] for key in request.share_expected_arguments
+                                             if key in rule["arguments"]},
+                "issues": issues[:8]}, ensure_ascii=False)
+            if len(feedback[field]["tool_evidence"]) > 5000:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Reduce the selected argument evidence")
     if request.method == "S2":
         provenance = plan["request"]
         bindings = query_skill_instances_by_agent_id(agent_id, tenant, version)
@@ -93,7 +115,8 @@ def _prepare_handoff(tenant, user, eid, request):
             raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
         selected = [trials[request.failure.case_id], trials[request.protection.case_id]]
         if provenance.get("candidate_type") == "baseline":
-            if not all(t["result"].get("selection", {}).get("reads", {}).get(skill["name"], 0) > 0 for t in selected):
+            if not all(t["result"].get("guide_reads", t["result"].get("selection", {}).get("reads", {}))
+                       .get(skill["name"], 0) > 0 for t in selected):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "S2 requires actual guide reads in both baseline tasks")
         else:
             target = (read_bound_skill_candidate(tenant, agent_id, version, provenance["candidate_id"])

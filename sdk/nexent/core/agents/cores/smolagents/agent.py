@@ -586,6 +586,12 @@ class NexentAgent(AgentResources):
 
             # Create the agent
             self._check_sandbox_cancelled()
+            if getattr(self.observer, "replay_tool_recorder", None) is not None:
+                from nexent.core.agents.resources.replay_tools import bind_replay_tool
+                mcp_names = {cfg.name or cfg.class_name for cfg in tool_configs if cfg.source == "mcp"}
+                for tool in tool_list:
+                    if tool.name not in mcp_names:
+                        bind_replay_tool(self.observer, agent_config, tool, tool.name)
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,

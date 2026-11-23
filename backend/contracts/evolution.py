@@ -3,7 +3,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 
 class DevelopmentFeedback(BaseModel):
@@ -12,6 +12,8 @@ class DevelopmentFeedback(BaseModel):
     example_id: str = Field(min_length=1, max_length=128)
     expected: str = Field(min_length=1, max_length=3000)
     observed: str = Field(min_length=1, max_length=3000)
+    tool_evidence: str | None = Field(default=None, max_length=5000, exclude_if=lambda v: v is None)
+    input_excerpt: str | None = Field(default=None, max_length=1500, exclude_if=lambda v: v is None)
 
 
 class LocalEditRequest(BaseModel):
@@ -56,6 +58,41 @@ class ReplayAttachmentSource(BaseModel):
         return value
 
 
+class ToolUseRule(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    name: str = Field(min_length=1, max_length=180, pattern=r"^\S+$")
+    min_calls: int = Field(default=1, ge=0, le=512)
+    max_calls: int | None = Field(default=None, ge=0, le=512)
+    arguments: dict[str, JsonValue] = Field(default_factory=dict, max_length=32)
+
+    @model_validator(mode="after")
+    def valid_bounds(self):
+        if self.max_calls is not None and self.max_calls < self.min_calls:
+            raise ValueError("Maximum call count must cover the minimum")
+        if any(not key.strip() or len(key) > 128 for key in self.arguments):
+            raise ValueError("Invalid tool argument name")
+        return self
+
+
+class ToolUseExpectation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    rules: list[ToolUseRule] = Field(min_length=1, max_length=32)
+    order: list[str] | None = Field(default=None, min_length=2, max_length=512)
+
+    @model_validator(mode="after")
+    def distinct_rules(self):
+        names = {r.name for r in self.rules}
+        if len(names) != len(self.rules) or self.order and not set(self.order).issubset(names):
+            raise ValueError("Specify one rule per tool and order only named tools")
+        if self.order:
+            for rule in self.rules:
+                if rule.name in self.order:
+                    count = self.order.count(rule.name)
+                    if count < rule.min_calls or rule.max_calls is not None and count > rule.max_calls:
+                        raise ValueError("Tool order contradicts its call-count rule")
+        return self
+
+
 class ReplayCaseRequest(BaseModel):
     """A business-approved development task. Only the query and files reach the Agent."""
 
@@ -68,6 +105,7 @@ class ReplayCaseRequest(BaseModel):
     attachments: list[ReplayAttachmentSource] = Field(default_factory=list, max_length=32)
     source_group: str | None = Field(default=None, min_length=1, max_length=128)
     expected_skill_names: list[str] | None = Field(default=None, max_length=32)
+    tool_use: ToolUseExpectation | None = None
 
     @model_validator(mode="after")
     def check_inputs(self):
@@ -158,6 +196,7 @@ class FeedbackExcerpt(BaseModel):
     case_id: int = Field(gt=0)
     expected: str = Field(min_length=1, max_length=3000)
     observed: str = Field(max_length=3000)
+    input_excerpt: str | None = Field(default=None, min_length=1, max_length=1500)
 
 
 class FeedbackHandoffRequest(BaseModel):
@@ -168,9 +207,15 @@ class FeedbackHandoffRequest(BaseModel):
     source_passage: str = Field(min_length=1, max_length=2000)
     failure: FeedbackExcerpt
     protection: FeedbackExcerpt
+    tool_name: str | None = Field(default=None, min_length=1, max_length=180)
+    share_expected_arguments: list[str] = Field(default_factory=list, max_length=32)
 
     @model_validator(mode="after")
     def valid_resource(self):
+        if self.tool_name and self.method not in {"T1", "T2"}:
+            raise ValueError("Select a tool only for a tool-call improvement")
+        if self.share_expected_arguments and (self.method != "T2" or not self.tool_name):
+            raise ValueError("Choose a tool parameter improvement to share expected argument values")
         if (self.method == "S2") != (self.skill_id is not None):
             raise ValueError("Select a bound Skill only for an S2 handoff")
         if self.failure.case_id == self.protection.case_id:

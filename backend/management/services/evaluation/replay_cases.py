@@ -62,6 +62,8 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
     task = {"family": request.family, "query": request.query, "expected": request.expected, "attachments": manifest}
     if request.expected_skill_names is not None:
         task["expected_skill_names"] = sorted(request.expected_skill_names)
+    if request.tool_use is not None:
+        task["tool_use"] = request.tool_use.model_dump(mode="json")
     if request.source_group is not None:
         if not request.source_group.strip():
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide a non-empty source group")

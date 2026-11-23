@@ -471,6 +471,8 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
 
     if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
+    if payload.watch_tool_arguments and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_TOOL_OBSERVATION_REQUIRES_REPLAY"})
     return prepare_run_snapshot(payload, actor)
 
 
@@ -524,6 +526,11 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
     status = "failed"
     try:
         skill, path = None, None
+        recorder = None
+        if payload.watch_tool_arguments:
+            from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
+            recorder = ReplayToolRecorder(info.agent_config, payload.watch_tool_arguments)
+            info.observer.replay_tool_recorder = recorder
         if payload.replay_trial_id and any(ref.package_candidate_id for ref in payload.resource.skill_refs):
             skill, path = await run_blocking("observe-trial-skill", skill_trial_observation, payload, info, actor,
                                              lane="control-io", owner="runtime")
@@ -535,6 +542,7 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
                 skill.guide_reads = reads.count if reads is not None else 0
             result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id,
                 outcome=info.attempt_outcome or "unconfirmed", skill=skill,
+                tool_observation=recorder.receipt() if recorder is not None else None,
                 root_guide_reads={name: read.count for name, read in all_reads.items() if read.count}
                 if payload.observe_root_skill_choices else None)
         return result

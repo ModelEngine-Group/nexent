@@ -219,7 +219,7 @@ class ToolResources:
         return from_langchain(tool_obj)
 
 
-    def create_mcp_tool(self, class_name):
+    def create_mcp_tool(self, class_name, *, replay_recorder=None, replay_name=None):
         if self.mcp_tool_collection is None:
             raise ValueError("MCP tool collection is not initialized")
         tool_obj = next(
@@ -231,6 +231,8 @@ class ToolResources:
         # Collections may be shared by multiple runs; never wrap their template.
         tool_obj = copy(tool_obj)
         tool_obj.inputs = deepcopy(tool_obj.inputs)
+        if replay_recorder is not None:
+            replay_recorder.bind(tool_obj, replay_name, mapping_input=True)
         return apply_user_context_to_mcp_tool(tool_obj, self.user_context)
 
 
@@ -351,7 +353,12 @@ class ToolResources:
         if source == "local":
             tool_obj = self.create_local_tool(tool_config)
         elif source == "mcp":
-            tool_obj = self.create_mcp_tool(class_name)
+            from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
+            recorder = getattr(getattr(self, "observer", None), "replay_tool_recorder", None)
+            if isinstance(recorder, ReplayToolRecorder) and any(tool_config is c for c in recorder.root_config.tools):
+                tool_obj = self.create_mcp_tool(class_name, replay_recorder=recorder, replay_name=tool_config.name or class_name)
+            else:
+                tool_obj = self.create_mcp_tool(class_name)
             tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
         elif source == "langchain":
             tool_obj = self.create_langchain_tool(tool_config)

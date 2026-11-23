@@ -25,12 +25,14 @@ change:
     - test/backend/services/test_evolution_prompt_candidates.py
     - test/backend/services/test_evolution_skill_package.py
     - test/backend/services/test_evolution_skill_discovery.py
+    - test/backend/services/test_evolution_tool_use.py
     - test/backend/services/test_evolution_replay.py
     - test/backend/services/test_evolution_examples.py
     - test/backend/services/test_evolution_feedback_handoff.py
     - test/backend/app/test_agentos_prepared_skills.py
     - test/backend/gateway/test_exposure.py
     - test/sdk/core/tools/test_read_skill_md_tool.py
+    - test/sdk/core/agents/test_replay_tool_bindings.py
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
     behaviors:
@@ -42,5 +44,6 @@ change:
     - P2 仅从有通过回执的业务开发题抽取批准原文，按目标行为、互补行为和来源去重，并隔离同源试题。
     - 不挂载组保留其他 Skill 及同一业务工具授权，目标正文不展示、不落入其运行目录。S2 报告按实际读取次数及三组可判题数区分证据。
     - S1 从实际漏选、误选和正确交付记录生成简介候选；可选同类 Skill、额外误读和维护权限变化均单独核对。
+    - 工具专项在根工具入口比较调用次数、实参及完成先后；缺证单列，交付正确也能发现漏调或错参。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
   notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。随开发增量登记其余 AC 的证明边界。

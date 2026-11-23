@@ -337,6 +337,9 @@ class JiuwenAdapter(AgentCoreAdapter):
                 continue
             tool = _wrap_tool_with_monitoring(self.resources.create_tool(config), info.agent_config.name)
             name = config.name or tool.name
+            if getattr(info.observer, "replay_tool_recorder", None) is not None:
+                from nexent.core.agents.resources.replay_tools import bind_replay_tool
+                bind_replay_tool(info.observer, info.agent_config, tool, name)
             self.business_tools[name] = tool
             if name in self.visible_tool_names:
                 native_tools.append(LocalFunction(
@@ -703,8 +706,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         mcp_tools = [tool for tool in self.tool_configs if tool.source == "mcp" and
                      (tool.name or tool.class_name) in self.visible_tool_names]
         if mcp_tools:
+            from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
+            recorder = getattr(info.observer, "replay_tool_recorder", None)
             self.mcp = JiuwenMCPCollection(
                 authorized_tools=mcp_tools, observe=self._observe_tool, manager=self.manager,
+                replay_recorder=recorder if isinstance(recorder, ReplayToolRecorder) and recorder.root_config is info.agent_config else None,
                 emit_result=self._resource_result, user_context=info.user_context,
                 server_parameters=info.mcp_host, cancellation_scope=self.scope,
                 tool_timeout_seconds=info.mcp_tool_timeout_seconds,

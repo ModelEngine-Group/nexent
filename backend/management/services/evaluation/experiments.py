@@ -26,6 +26,7 @@ from management.services.evaluation.evolution_access import published_business_a
 from management.services.evaluation.example_candidates import example_source_keys
 from management.services.evaluation.replay_cases import get_development_case, remove_trial_inputs, stage_case_input
 from management.services.evaluation.scoring import grade_observed_case
+from management.services.evaluation.tool_use import judge_tool_use
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
 
@@ -107,7 +108,7 @@ async def create_experiment(request, tenant, user):
                          request.version_no, case_id)
         if excluded.intersection(example_source_keys(case["task"])):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
-        if request.candidate_type in {"baseline", "skill_discovery"} and case["task"].get("expected_skill_names") is None:
+        if request.candidate_type == "skill_discovery" and case["task"].get("expected_skill_names") is None:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Label the acceptable Skill choices for each task")
         cases[str(case_id)] = case["digest"]
     snapshots = {}
@@ -253,8 +254,11 @@ async def execute_trial(job):
         except asyncio.CancelledError:
             await stage
             raise
-        payload = spec.model_copy(update={"input": inputs, "conversation_id": -job["trial_id"],
-                                          "replay_trial_id": job["receipt_id"]})
+        watch = case["task"].get("tool_use")
+        updates = {"input": inputs, "conversation_id": -job["trial_id"], "replay_trial_id": job["receipt_id"]}
+        if watch:
+            updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
+        payload = spec.model_copy(update=updates)
         observed = await client.run_prepared_evaluation(payload, user, tenant)
     finally:
         await _io("release-development-input", stack.close)
@@ -272,7 +276,7 @@ async def execute_trial(job):
                 or omitted and (skill.listed or skill.guide_reads)):
             return "invalid", {"error": "skill_observation_mismatch"}
     selection = None
-    if request.candidate_type in {"baseline", "skill_discovery"}:
+    if request.candidate_type in {"baseline", "skill_discovery"} and case["task"].get("expected_skill_names") is not None:
         reads = receipt.root_guide_reads
         listed = {item["content"]["name"] for item in (spec.resource.evaluation_options.context_items or [])
                   if item.get("type") == "skill"}
@@ -283,7 +287,14 @@ async def execute_trial(job):
     await _io("recheck-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
     grade = await run_blocking("grade-development-trial", _grade, request, job, case["task"], observed,
                                lane="evaluation", owner="management")
-    return grade["status"], {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
+    tool_grade = judge_tool_use(watch, receipt.tool_observation) if watch else None
+    status = grade["status"]
+    if tool_grade and status in {"pass", "fail"} and tool_grade["status"] != "pass":
+        status = tool_grade["status"]
+    return status, {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
+                             **({"tool_use": tool_grade} if tool_grade else {}),
+                             **({"guide_reads": receipt.root_guide_reads} if request.candidate_type == "baseline"
+                                and receipt.root_guide_reads is not None else {}),
                              **({"skill": skill.model_dump()} if skill else {}),
                              **({"selection": selection} if selection else {}),
                              "reported_step_input_tokens": reported_step_input_tokens(observed.events),

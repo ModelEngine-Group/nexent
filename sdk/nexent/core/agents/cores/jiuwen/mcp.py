@@ -35,10 +35,11 @@ def _registered_tool_name(name):
 class JiuwenMCPCollection(ManagedMCPToolCollection):
     """Reuse bounded lifecycle ownership, never instantiate a smolagents MCP adapter."""
 
-    def __init__(self, *, authorized_tools, observe, user_context=None, emit_result=None, **kwargs):
+    def __init__(self, *, authorized_tools, observe, user_context=None, emit_result=None, replay_recorder=None, **kwargs):
         super().__init__(**kwargs)
         self.authorized_tools = authorized_tools
         self.observe = observe
+        self.replay_recorder = replay_recorder
         self.emit_result = emit_result
         self.terminal_error = None
         self.user_context = deepcopy(dict(user_context or {}))
@@ -91,6 +92,8 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
                 card.input_params["required"] = [name for name in card.input_params.get("required", [])
                                                  if name not in hidden]
                 card.name = tool_config.name or tool_config.class_name
+                if self.replay_recorder is not None:
+                    proxy.send = self.replay_recorder.wrap_forward(card.name, proxy.send, [], mapping_input=True)
                 if tool_config.description:
                     card.description = tool_config.description
                 tools.append(_ObservedMCPTool(proxy, card, self.observe, self.emit_result))
@@ -122,7 +125,7 @@ class _ManagedNativeClient:
         execution = owner.manager.submit(
             "model-tool-io",
             ManagedTaskSpec(task_name="jiuwen-mcp-tool", owner=__name__, close_hook=owner.request_close),
-            owner._call_tool, self.client, self.remote_name, arguments,
+            self.send, arguments,
         )
         try:
             return await asyncio.wait_for(asyncio.wrap_future(execution.future), owner.tool_timeout_seconds)
@@ -137,6 +140,9 @@ class _ManagedNativeClient:
         except asyncio.CancelledError:
             owner.request_close()
             raise
+
+    def send(self, arguments):
+        return self.owner._call_tool(self.client, self.remote_name, arguments)
 
 
 class _ObservedMCPTool(MCPTool):

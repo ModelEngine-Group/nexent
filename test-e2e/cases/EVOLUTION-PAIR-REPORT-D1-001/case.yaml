@@ -24,7 +24,10 @@ case:
   - order: 3
     action: 单独运行现用版本并提供三条选用记录，其中一条无有效回执。
     expected: 只统计两个有效基线结果，区分应选漏选与正确选用。
-  expected_results: [六题中有效四题，四类有效变化各一题，零分作为有效失败。, 三题三组有效，其中两题新旧版均读到正文。, 基线三题中两题有效且对照题数为零。]
+  - order: 4
+    action: 回答符合预期，实际工具回执显示漏调；再去掉回执。
+    expected: 业务判分通过；有完整回执时标出漏调，缺少回执时标记缺证。
+  expected_results: [六题中有效四题，四类有效变化各一题，零分作为有效失败。, 三题三组有效，其中两题新旧版均读到正文。, 基线三题中两题有效且对照题数为零。, 答案正确时仍区分漏调与缺证。]
   forbidden_side_effects: [读取报告不会重新执行智能体或修改题目。]
   acceptance:
   - id: AC-01
@@ -41,6 +44,11 @@ case:
     description: 无候选也能运行基线，选择正确率与业务交付分别展示。
     steps: [3]
     expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: 工具调用和最终交付独立判分。
+    steps: [4]
+    expected_results: [4]
     forbidden_side_effects: [1]
   assertions: [每题按旧版和候选判分配对，缺证不给任一版本加分。]
   unit_boundary: 运行实际产品判分和报告聚合；权限及试验记录读取使用测试替身。

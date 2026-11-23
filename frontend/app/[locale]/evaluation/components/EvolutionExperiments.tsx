@@ -21,6 +21,8 @@ import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import ExampleCandidates from "./ExampleCandidates";
 import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedback";
+import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRules";
+import LocalEditFeedback from "./LocalEditFeedback";
 
 function CaseForm({
   agent,
@@ -39,7 +41,7 @@ function CaseForm({
   const [files, setFiles] = useState<File[]>([]);
   const [labelSkill, setLabelSkill] = useState(false);
   const [expectedSkills, setExpectedSkills] = useState<string[]>([]);
-  const [form] = Form.useForm<{
+  const [form] = Form.useForm<ToolRuleFields & {
     family: string;
     source_group?: string;
     query: string;
@@ -48,6 +50,7 @@ function CaseForm({
   const mutation = useMutation({
     mutationFn: async () => {
       const values = await form.validateFields();
+      const { toolRules, toolOrder, ...business } = values;
       const uploaded = files.length
         ? await storageService.uploadFiles(files)
         : undefined;
@@ -63,7 +66,8 @@ function CaseForm({
           object_name: file.object_name,
         })) || [];
       return api.createCase({
-        ...values,
+        ...business,
+        tool_use: toolExpectation({ toolRules, toolOrder }),
         source_group: values.source_group?.trim() || undefined,
         agent_id: agent,
         version_no: version,
@@ -106,6 +110,7 @@ function CaseForm({
           <Select mode="multiple" value={expectedSkills} onChange={setExpectedSkills}
             options={skills.map(s => ({ value: s.name, label: s.name }))} />
         </Form.Item>}
+        <ToolUseRules />
         <Form.Item label={t("evolution.attachments")}>
           <input
             type="file"
@@ -196,7 +201,7 @@ function Experiments({
     },
   });
   const choices = workspace.data;
-  const discoveryRun = candidate === "baseline" || candidate?.startsWith("skill_discovery:");
+  const discoveryRun = candidate?.startsWith("skill_discovery:");
   const baselineReport = report.data?.total_pairs === 0;
   const active = ["pending", "running"].includes(report.data?.status || "");
   const error =
@@ -311,7 +316,10 @@ function Experiments({
               disabled={
                 !candidate ||
                 (candidate === "baseline" && !!suggestion) ||
-                (discoveryRun && caseIds.some(id => choices.cases.find(c => c.case_id === id)?.expected_skill_names == null)) ||
+                (discoveryRun && caseIds.some(id => {
+                  const c = choices.cases.find(task => task.case_id === id);
+                  return c?.expected_skill_names == null;
+                })) ||
                 caseIds.length < (suggestion ? 2 : 1) ||
                 (!!suggestion && !caseIds.includes(targetCase ?? 0)) ||
                 !evaluatorId ||
@@ -369,6 +377,8 @@ function Experiments({
           )}
           {report.data.status === "finished" && choices && Object.values(report.data.pairs).some(p => p.base.result?.selection) &&
             <DiscoveryFeedback key={report.data.experiment_id} report={report.data} workspace={choices} />}
+          {report.data.status === "finished" && choices && <LocalEditFeedback key={report.data.experiment_id}
+            report={report.data} workspace={choices} agent={agent} version={version} viewer={viewer} />}
           <Table
             pagination={false}
             rowKey="id"
@@ -401,6 +411,14 @@ function Experiments({
                         revision: trial.result.skill.mounted_revision?.slice(0, 10) || t("evolution.unmounted"),
                         reads: trial.result.skill.guide_reads,
                       })}
+                    </div>}
+                    {trial.result?.tool_use && <div>
+                      {t("evolution.toolAndDelivery", { tool: t(`evolution.state.${trial.result.tool_use.status}`),
+                        delivery: t(`evolution.state.${trial.result.judgment?.status}`) })}
+                      <div>{trial.result.tool_use.sequence?.join(" → ")}</div>
+                      {trial.result.tool_use.issues?.map((issue, i) => <div key={i}>
+                        {issue.tool} {t(`evolution.issue.${issue.reason}`)} {issue.fields?.join(", ")}
+                      </div>)}
                     </div>}
                     {trial.result?.selection && <div>{t("evolution.skillChoice", {
                       expected: trial.result.selection.expected.join(", ") || "∅",

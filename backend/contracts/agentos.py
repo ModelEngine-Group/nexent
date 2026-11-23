@@ -724,6 +724,8 @@ class PreparedEvaluationRun(AgentRunSpec):
     replay_trial_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
     omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
+    watch_tool_arguments: dict[str, list[str]] | None = Field(default=None, min_length=1, max_length=32,
+                                                              exclude_if=lambda v: v is None)
 
     @model_serializer(mode="wrap")
     def omit_ordinary_replay_reference(self, serialize):
@@ -742,11 +744,26 @@ class SkillTrialObservation(RunSpecModel):
     guide_reads: int = Field(ge=0)
 
 
+class ToolForwardCall(RunSpecModel):
+    name: str
+    start: PositiveInt
+    end: PositiveInt | None
+    arguments: dict[str, Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]]
+    outcome: Literal["returned", "raised", "pending"]
+
+
+class ReplayToolObservation(RunSpecModel):
+    registered: list[str] = Field(max_length=32)
+    complete: bool
+    calls: list[ToolForwardCall] = Field(max_length=512)
+
+
 class ReplayReceipt(RunSpecModel):
     trial_id: str = Field(pattern=RUN_ID_PATTERN)
     outcome: str = Field(min_length=1)
     skill: SkillTrialObservation | None = Field(default=None, exclude_if=lambda v: v is None)
     root_guide_reads: dict[str, PositiveInt] | None = Field(default=None, exclude_if=lambda v: v is None)
+    tool_observation: ReplayToolObservation | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class EvaluationAgentResult(BaseModel):

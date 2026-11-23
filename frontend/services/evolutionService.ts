@@ -34,8 +34,10 @@ export interface Trial {
     reported_step_input_tokens?: number | null;
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
     selection?: { expected: string[]; reads: Record<string, number>; outcome: string };
+    guide_reads?: Record<string, number>;
+    tool_use?: { status: string; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[] }[] };
     error?: string;
-    judgment?: { score?: number; reason?: string };
+    judgment?: { score?: number; reason?: string; status?: string };
   };
 }
 export interface ExperimentReport {
@@ -94,6 +96,7 @@ export const evolutionService = {
     query: string;
     expected: string;
     expected_skill_names?: string[];
+    tool_use?: ToolExpectation;
     attachments: { name: string; object_name: string }[];
   }) => read<{ case_id: number }>(`${root}/development-cases`, body),
   submit: (body: {
@@ -110,6 +113,11 @@ export const evolutionService = {
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  developmentCase: (agent: number, version: number, id: number) =>
+    read<{ task: { query: string; expected: string; tool_use?: ToolExpectation } }>(
+      `${root}/agents/${agent}/versions/${version}/development-cases/${id}`),
+  shareLocalEdit: (id: number, body: LocalFeedback) =>
+    read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
   shareDiscovery: (id: number, body: { method: "S1"; skill_id: number; goal: string } &
     Record<"missed" | "overused" | "correct", { case_id: number; query_excerpt: string }>) =>
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
@@ -126,3 +134,19 @@ export const evolutionService = {
   cancel: (id: number) =>
     read<ExperimentReport>(`${root}/experiments/${id}/cancel`, {}),
 };
+
+export interface ToolExpectation {
+  rules: { name: string; min_calls: number; max_calls: number | null; arguments: Record<string, unknown> }[];
+  order?: string[];
+}
+
+export interface LocalFeedback {
+  method: "P1" | "P3" | "T1" | "T2" | "S2";
+  goal: string;
+  source_passage: string;
+  tool_name?: string;
+  skill_id?: number;
+  share_expected_arguments?: string[];
+  failure: { case_id: number; expected: string; observed: string; input_excerpt?: string };
+  protection: { case_id: number; expected: string; observed: string; input_excerpt?: string };
+}

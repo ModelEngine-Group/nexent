@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperiments";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
+import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
 import { evolutionService } from "@/services/evolutionService";
 
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
@@ -27,6 +28,8 @@ vi.mock("@/services/evolutionService", () => ({
     submit: vi.fn(),
     exampleCandidates: vi.fn(),
     shareDiscovery: vi.fn(),
+    developmentCase: vi.fn(),
+    shareLocalEdit: vi.fn(),
   },
 }));
 
@@ -132,6 +135,44 @@ it("selects a published scope and opens its paired results with the original sta
   fireEvent.click(compare);
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
+  })));
+});
+
+it("hands off a tool failure when the answer passed, with approved input and argument fields", async () => {
+  vi.mocked(evolutionService.developmentCase).mockResolvedValue({ task: {
+    query: "extract rows from the meeting", expected: "[]",
+    tool_use: { rules: [{ name: "read", min_calls: 1, max_calls: 1, arguments: { mode: "rows" } }] },
+  } });
+  vi.mocked(evolutionService.shareLocalEdit).mockResolvedValue({ feedback_id: 33 });
+  const trial = (passed: boolean) => ({ status: passed ? "pass" : "fail", result: {
+    answer: "[]", judgment: { status: "pass" }, tool_use: { status: passed ? "pass" : "fail", checked: ["read"] },
+  } });
+  render(<QueryClientProvider client={new QueryClient()}><LocalEditFeedback viewer="tenant-editor" agent={1} version={1}
+    workspace={{ candidates: [], experiments: [], cases: [
+      { case_id: 1, query: "incorrect argument", family: "tool" }, { case_id: 2, query: "correct argument", family: "tool" },
+    ] }} report={{ experiment_id: 24, status: "finished", total_pairs: 0, valid_pairs: 0, pairs: {
+      "1": { base: trial(false), comparison: "baseline_only" }, "2": { base: trial(true), comparison: "baseline_only" },
+    } }} /></QueryClientProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "evolution.shareLocalEdit" }));
+  await choose("evolution.editMethod", "evolution.method.T2");
+  await choose("evolution.feedback.failure", "incorrect argument");
+  await choose("evolution.feedback.protection", "correct argument");
+  await choose("evolution.toolName", "read");
+  await choose("evolution.shareArgumentValues", "mode");
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.shareArgumentValues" }), { key: "Escape" });
+  for (const [label, value] of [["editGoal","respect supplied mode"],["sourcePassage","read the meeting"]]) {
+    fireEvent.change(screen.getByLabelText("evolution." + label), { target: { value } });
+  }
+  for (const [label, value] of [["input_excerpt","extract rows"],["expected","[]"],["observed","[]"]]) {
+    for (const el of screen.getAllByLabelText("evolution.excerpt." + label)) {
+      fireEvent.change(el, { target: { value } });
+    }
+  }
+  fireEvent.click(screen.getByRole("button", { name: "evolution.shareFeedback" }));
+  await waitFor(() => expect(evolutionService.shareLocalEdit).toHaveBeenCalledWith(24, expect.objectContaining({
+    method: "T2", tool_name: "read", share_expected_arguments: ["mode"],
+    failure: { case_id: 1, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
+    protection: { case_id: 2, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
   })));
 });
 

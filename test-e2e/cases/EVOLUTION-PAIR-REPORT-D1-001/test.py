@@ -48,3 +48,13 @@ def test_grade_and_compare(monkeypatch):
     assert report["total_tasks"] == 3 and report["valid_baselines"] == 2
     assert report["valid_pairs"] == report["total_pairs"] == 0
     assert report["selection_counts"] == {"base": {"missed": 1, "hit": 1}}
+    from contracts.agentos import ReplayToolObservation
+    from contracts.evolution import ToolUseExpectation
+    from management.services.evaluation.tool_use import judge_tool_use
+    rule = ToolUseExpectation(rules=[{"name": "read", "min_calls": 1, "max_calls": 1}]).model_dump()
+    receipt = ReplayToolObservation(registered=["read"], complete=True, calls=[])
+    tool_grade = judge_tool_use(rule, receipt)
+    delivered = service._grade(request, job, {"query": "deliver", "expected": "y"},
+                               EvaluationAgentResult(answer="y", events=[{"type": "final_answer"}]))
+    assert delivered["status"] == "pass" and tool_grade["issues"][0]["reason"] == "too_few"
+    assert judge_tool_use(rule, None)["status"] == "missing_evidence"
