@@ -15,7 +15,6 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   FolderOutlined,
-  InfoCircleOutlined,
   TagsOutlined,
   MoreOutlined,
   ReloadOutlined,
@@ -42,7 +41,6 @@ import {
   useOntologyMetadataSchema,
 } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpChunkMetadata";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { useAidpFolderTree } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpFolderTree";
 import AidpFolderTree, {
   type AidpFolderNodeTarget,
@@ -179,7 +177,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   const [fileRenameSaving, setFileRenameSaving] = useState(false);
   const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<AidpDocumentItem | null>(null);
   // The file detail replaces the list while open: it hosts the preview, the
   // summary tab and the semantic chunk panel for one file.
   const [detailFile, setDetailFile] = useState<AidpDocumentItem | null>(null);
@@ -211,7 +208,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     fileMoveRequest !== null ||
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
-    previewFile !== null ||
     detailFile !== null ||
     metadataFile !== null;
 
@@ -1149,7 +1145,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
             <span className="truncate">{record.name}</span>
           </button>
         ) : (
-          <Tooltip title={t("common.preview")}>
+          <Tooltip title={t("aidpKnowledge.fileDetailTitle")}>
             <button
               type="button"
               disabled={
@@ -1159,7 +1155,7 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
               }
               data-aidp-file-name="true"
               className="flex max-w-full items-center gap-2 truncate text-left text-blue-600 hover:text-blue-700 hover:underline disabled:cursor-default disabled:text-gray-500 disabled:no-underline"
-              onClick={() => setPreviewFile(toDocumentItem(record.file))}
+              onClick={() => setDetailFile(toDocumentItem(record.file))}
             >
               <FileTextOutlined className="shrink-0 text-blue-500" />
               <span className="truncate">{record.name || "-"}</span>
@@ -1265,32 +1261,18 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         const menuItems = fileMenuItems(record.file);
         return (
           <div className="flex items-center gap-2 whitespace-nowrap">
-            <Tooltip title={t("aidpKnowledge.fileDetailOpen")}>
-              <Button
-                type="text"
-                size="small"
-                icon={<InfoCircleOutlined />}
-                disabled={!record.file.file_uuid}
-                aria-label={t("aidpKnowledge.fileDetailOpen")}
-                onClick={() => setDetailFile(toDocumentItem(record.file))}
-              />
-            </Tooltip>
-            <Tooltip
-              title={
-                odId === null
-                  ? t("aidpKnowledge.chunkMetadataNoBinding")
-                  : t("aidpKnowledge.fileMetadataEdit")
-              }
-            >
-              <Button
-                type="text"
-                size="small"
-                icon={<TagsOutlined />}
-                disabled={!record.file.file_uuid || odId === null}
-                aria-label={t("aidpKnowledge.fileMetadataEdit")}
-                onClick={() => setMetadataFile(toDocumentItem(record.file))}
-              />
-            </Tooltip>
+            {odId !== null && (
+              <Tooltip title={t("aidpKnowledge.fileMetadataEdit")}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<TagsOutlined />}
+                  disabled={!record.file.file_uuid}
+                  aria-label={t("aidpKnowledge.fileMetadataEdit")}
+                  onClick={() => setMetadataFile(toDocumentItem(record.file))}
+                />
+              </Tooltip>
+            )}
             <Tooltip title={t("aidpKnowledge.download")}>
               <Button
                 type="text"
@@ -1749,25 +1731,6 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         }}
         onSave={handleSaveFileMetadata}
       />
-
-      {previewFile && (
-        <FilePreviewDrawer
-          open
-          source="remote"
-          objectName={previewFile.file_uuid}
-          fileName={previewFile.file_name}
-          fileType={previewFile.file_type}
-          fileSize={previewFile.file_size}
-          previewUrl={aidpKnowledgeService.getPreviewUrl(
-            knowledgeBase.kds_id,
-            previewFile.file_uuid
-          )}
-          rawStream
-          presentation="fullscreen"
-          previewContext="knowledgeBase"
-          onClose={() => setPreviewFile(null)}
-        />
-      )}
     </section>
   );
 };

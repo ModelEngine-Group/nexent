@@ -4,10 +4,11 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Drawer, Input } from "antd";
+import { Alert, Button, Drawer } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 
 import type { AidpOntologyMetadataField } from "@/ext_components/aidp/shared/types/ontology";
+import AidpMetadataEditor, { type AidpMetadataRow } from "./AidpMetadataEditor";
 import styles from "./AidpSemanticChunks.module.css";
 
 interface AidpFileMetadataDrawerProps {
@@ -26,15 +27,20 @@ const AidpFileMetadataForm: React.FC<
   Omit<AidpFileMetadataDrawerProps, "open">
 > = ({ fileName, metadataFields, submitting, onClose, onSave }) => {
   const { t } = useTranslation();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [rows, setRows] = useState<AidpMetadataRow[]>([]);
   const [touched, setTouched] = useState(false);
 
   const metadataJson: Record<string, string> = {};
-  for (const field of metadataFields) {
-    const value = (values[field.field_name] ?? "").trim();
-    if (value) metadataJson[field.field_name] = value;
+  for (const row of rows) {
+    const value = row.value.trim();
+    if (row.fieldName && value) metadataJson[row.fieldName] = value;
   }
   const canSubmit = !submitting && Object.keys(metadataJson).length > 0;
+
+  const handleRowsChange = (next: AidpMetadataRow[]) => {
+    setRows(next);
+    setTouched(true);
+  };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -61,9 +67,11 @@ const AidpFileMetadataForm: React.FC<
           />
         </div>
         <div className={styles.drawerContent}>
-          <p className={styles.formHint}>
-            {t("aidpKnowledge.fileMetadataHint", { name: fileName })}
-          </p>
+          <Alert
+            type="info"
+            showIcon
+            title={t("aidpKnowledge.fileMetadataHint", { name: fileName })}
+          />
           {metadataFields.length === 0 ? (
             <Alert
               type="info"
@@ -71,37 +79,13 @@ const AidpFileMetadataForm: React.FC<
               title={t("aidpKnowledge.fileMetadataNoFields")}
             />
           ) : (
-            metadataFields.map((field) => (
-              <div key={field.field_name} className={styles.metadataFieldRow}>
-                <span className={styles.metadataFieldLabel}>
-                  {field.field_name}
-                </span>
-                <Input
-                  className={styles.metadataFieldControl}
-                  value={values[field.field_name] ?? ""}
-                  onChange={(event) => {
-                    setValues((current) => ({
-                      ...current,
-                      [field.field_name]: event.target.value,
-                    }));
-                    setTouched(true);
-                  }}
-                  placeholder={
-                    field.field_type === "number"
-                      ? t("aidpKnowledge.chunkMetadataNumberPlaceholder")
-                      : field.field_type === "date"
-                        ? t("aidpKnowledge.chunkMetadataDatePlaceholder")
-                        : t("aidpKnowledge.chunkMetadataTextPlaceholder")
-                  }
-                  disabled={submitting}
-                />
-              </div>
-            ))
-          )}
-          {touched && Object.keys(metadataJson).length === 0 && (
-            <p className={styles.errorText}>
-              {t("aidpKnowledge.chunkMetadataAtLeastOne")}
-            </p>
+            <AidpMetadataEditor
+              fields={metadataFields}
+              rows={rows}
+              onChange={handleRowsChange}
+              submitting={submitting}
+              showEmptyError={touched && Object.keys(metadataJson).length === 0}
+            />
           )}
         </div>
       </div>
@@ -127,7 +111,8 @@ const AidpFileMetadataForm: React.FC<
  *
  * AIDP exposes this as the batch-metadata `file_uuid_list` variant, so the
  * page only needs the field definitions of the bound domain; the file's
- * chunks are addressed upstream by UUID.
+ * chunks are addressed upstream by UUID. The metadata editor is shared with
+ * the chunk drawer so both entry points behave identically.
  */
 const AidpFileMetadataDrawer: React.FC<AidpFileMetadataDrawerProps> = ({
   open,
@@ -141,7 +126,7 @@ const AidpFileMetadataDrawer: React.FC<AidpFileMetadataDrawerProps> = ({
   <Drawer
     open={open}
     onClose={onClose}
-    size="min(720px, 42vw)"
+    size="min(960px, 50vw)"
     rootClassName={styles.chunkDrawer}
     closable={false}
     styles={{ body: { padding: 0, display: "flex", flexDirection: "column" } }}

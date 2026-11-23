@@ -13,7 +13,6 @@ import {
   Dropdown,
   Empty,
   Input,
-  Modal,
   Skeleton,
 } from "antd";
 import {
@@ -251,26 +250,6 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     [fileUuid, kdsId, queryClient, refetch, scope.key]
   );
 
-  const saveChunkMetadata = useCallback(
-    async (chunkId: number, payload: AidpChunkFormPayload) => {
-      if (!payload.metadataDirty || odId === null || odId === undefined) {
-        return;
-      }
-      await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
-        od_id: Number(odId),
-        metadata_json: payload.metadata_json,
-        tag: payload.tag,
-        chunk_id_list: [chunkId],
-      });
-    },
-    [kdsId, odId]
-  );
-
-  const [importTarget, setImportTarget] = useState<AidpChunk | null>(null);
-  const [importDraft, setImportDraft] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-
   const handleExportChunkMetadata = useCallback((chunk: AidpChunk) => {
     const payload = chunk.metadata_json ?? {};
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -289,69 +268,20 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
     }
   }, []);
 
-  const openImportChunkMetadata = useCallback((chunk: AidpChunk) => {
-    setImportTarget(chunk);
-    setImportDraft("");
-    setImportError(null);
-  }, []);
-
-  const submitImportChunkMetadata = useCallback(async () => {
-    if (!importTarget || odId === null || odId === undefined) return;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(importDraft || "{}");
-    } catch {
-      setImportError(t("aidpKnowledge.chunkImportInvalidJson"));
-      return;
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      setImportError(t("aidpKnowledge.chunkImportInvalidJson"));
-      return;
-    }
-    const metadata: Record<string, string> = {};
-    for (const [key, value] of Object.entries(
-      parsed as Record<string, unknown>
-    )) {
-      if (typeof value === "string" || typeof value === "number") {
-        metadata[key] = String(value);
+  const saveChunkMetadata = useCallback(
+    async (chunkId: number, payload: AidpChunkFormPayload) => {
+      if (!payload.metadataDirty || odId === null || odId === undefined) {
+        return;
       }
-    }
-    if (Object.keys(metadata).length === 0) {
-      setImportError(t("aidpKnowledge.chunkImportEmpty"));
-      return;
-    }
-    setImporting(true);
-    setImportError(null);
-    try {
-      await aidpKnowledgeService.importChunkMetadata(String(odId), {
-        kds_id: kdsId,
-        metadata_json: metadata,
-        chunk_id_list: [importTarget.chunk_id],
+      await aidpKnowledgeService.batchUpdateChunkMetadata(kdsId, {
+        od_id: Number(odId),
+        metadata_json: payload.metadata_json,
+        tag: payload.tag,
+        chunk_id_list: [chunkId],
       });
-      await queryClient.invalidateQueries({
-        queryKey: [...scope.key, "chunk-detail", kdsId, importTarget.chunk_id],
-      });
-      await refreshAfterWrite(true);
-      message.success(t("aidpKnowledge.chunkImportSuccess"));
-      setImportTarget(null);
-    } catch (error) {
-      setImportError(
-        getAidpErrorMessage(error, t, t("aidpKnowledge.chunkImportFailed"))
-      );
-    } finally {
-      setImporting(false);
-    }
-  }, [
-    importDraft,
-    importTarget,
-    kdsId,
-    message,
-    odId,
-    queryClient,
-    refreshAfterWrite,
-    scope.key,
-    t,
-  ]);
+    },
+    [kdsId, odId]
+  );
 
   const handleSave = useCallback(
     async (payload: AidpChunkFormPayload) => {
@@ -665,7 +595,6 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
               onDelete={() => setDeleteTargets([chunk.chunk_id])}
               metadataEnabled={odId !== null && odId !== undefined}
               onExportMetadata={() => handleExportChunkMetadata(chunk)}
-              onImportMetadata={() => openImportChunkMetadata(chunk)}
             />
           ))
         )}
@@ -697,32 +626,6 @@ const AidpSemanticChunksPanel: React.FC<AidpSemanticChunksPanelProps> = ({
         onClose={closeDrawer}
         onSubmit={handleSave}
       />
-
-      <Modal
-        open={importTarget !== null}
-        title={t("aidpKnowledge.chunkImportTitle")}
-        okText={t("aidpKnowledge.chunkImportConfirm")}
-        cancelText={t("common.cancel")}
-        confirmLoading={importing}
-        onOk={() => void submitImportChunkMetadata()}
-        onCancel={() => {
-          if (!importing) setImportTarget(null);
-        }}
-        destroyOnHidden
-      >
-        <p className={styles.formHint}>{t("aidpKnowledge.chunkImportHint")}</p>
-        <Input.TextArea
-          rows={8}
-          value={importDraft}
-          onChange={(event) => {
-            setImportDraft(event.target.value);
-            setImportError(null);
-          }}
-          placeholder='{"field_name": "value"}'
-          disabled={importing}
-        />
-        {importError && <p className={styles.errorText}>{importError}</p>}
-      </Modal>
 
       <AidpChunkDetailDrawer
         open={detailId !== null}

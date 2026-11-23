@@ -51,7 +51,7 @@ export const useOntologyMetadataSchema = (
   });
 };
 
-/** Entity display names usable as chunk tags (first page, up to 200). */
+/** Entity display names usable as chunk tags (first page, up to 100). */
 export const useOntologyEntityOptions = (
   odId: number | string | null | undefined
 ) => {
@@ -62,7 +62,7 @@ export const useOntologyEntityOptions = (
       const response = await aidpOntologyService.listEntities(
         String(odId),
         1,
-        200,
+        100,
         undefined,
         "entity",
         signal

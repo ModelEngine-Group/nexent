@@ -4106,48 +4106,6 @@ class TestFileSummaryEndpoints:
             SERVER_URL, API_KEY, "kb-1", self.FILE_UUID
         )
 
-    def test_summary_retry_requires_edit_and_sends_uuid_array(self):
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        result = {
-            "partial_success_list": [{"file_uuid": self.FILE_UUID}],
-            "failed_list": [],
-        }
-        with patch.object(aidp_permission_service, "require_permission",
-                          return_value=MagicMock(permission="EDIT")) as mock_perm, \
-             patch.object(aidp_summary_routes, "retry_aidp_file_summaries_impl",
-                          return_value=result) as retry_summary:
-            response = _client().post(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
-                headers=_bearer(),
-                json={"file_uuids": [self.FILE_UUID]},
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        assert response.json() == result
-        assert mock_perm.call_args.kwargs["required"] == "EDIT"
-        retry_summary.assert_called_once_with(
-            SERVER_URL, API_KEY, "kb-1", [self.FILE_UUID]
-        )
-
-    def test_summary_retry_rejects_empty_and_invalid_uuid_lists(self):
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        for payload in ({"file_uuids": []}, {"file_uuids": ["not-a-uuid"]}):
-            with patch.object(aidp_permission_service, "require_permission",
-                              return_value=MagicMock(permission="EDIT")), \
-                 patch.object(aidp_summary_routes,
-                              "retry_aidp_file_summaries_impl") as retry_summary:
-                response = _client().post(
-                    "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
-                    headers=_bearer(),
-                    json=payload,
-                )
-            assert response.status_code == 422
-            retry_summary.assert_not_called()
-
     def test_summary_read_denied_does_not_call_aidp(self):
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -4163,24 +4121,6 @@ class TestFileSummaryEndpoints:
 
         assert response.status_code == HTTPStatus.FORBIDDEN
         get_summary.assert_not_called()
-
-    def test_summary_retry_denied_does_not_call_aidp(self):
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        with patch.object(aidp_permission_service, "require_permission",
-                          side_effect=aidp_mgmt_app.HTTPException(
-                              status_code=HTTPStatus.FORBIDDEN, detail="denied")), \
-             patch.object(aidp_summary_routes,
-                          "retry_aidp_file_summaries_impl") as retry_summary:
-            response = _client().post(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents/retry-summary",
-                headers=_bearer(),
-                json={"file_uuids": [self.FILE_UUID]},
-            )
-
-        assert response.status_code == HTTPStatus.FORBIDDEN
-        retry_summary.assert_not_called()
 
     def test_summary_edit_via_permission_save_forwards_three_fields(self):
         from ext_components.aidp.apps import aidp_mgmt_app

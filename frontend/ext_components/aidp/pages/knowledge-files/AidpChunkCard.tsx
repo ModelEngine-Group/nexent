@@ -9,7 +9,6 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExportOutlined,
-  ImportOutlined,
 } from "@ant-design/icons";
 
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
@@ -32,7 +31,6 @@ interface AidpChunkCardProps {
   /** True when the KB is bound to an ontology domain (metadata is editable). */
   metadataEnabled: boolean;
   onExportMetadata: () => void;
-  onImportMetadata: () => void;
 }
 
 const formatMetadataValue = (value: unknown): string => {
@@ -63,7 +61,6 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
   onDelete,
   metadataEnabled,
   onExportMetadata,
-  onImportMetadata,
 }) => {
   const { t } = useTranslation();
   const text = typeof chunk.chunk_text === "string" ? chunk.chunk_text : "";
@@ -209,37 +206,14 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
         )}
       </div>
       <div className={styles.cardActions}>
-        <Tooltip
-          title={
-            metadataEnabled
-              ? t("aidpKnowledge.chunkExportMetadata")
-              : t("aidpKnowledge.chunkMetadataNoBinding")
-          }
-        >
-          <Button
-            type="text"
-            size="small"
-            aria-label={t("aidpKnowledge.chunkExportMetadata")}
-            icon={<ExportOutlined />}
-            disabled={!metadataEnabled}
-            onClick={onExportMetadata}
-          />
-        </Tooltip>
-        {canEdit && (
-          <Tooltip
-            title={
-              metadataEnabled
-                ? t("aidpKnowledge.chunkImportMetadata")
-                : t("aidpKnowledge.chunkMetadataNoBinding")
-            }
-          >
+        {metadataEnabled && (
+          <Tooltip title={t("aidpKnowledge.chunkExportMetadata")}>
             <Button
               type="text"
               size="small"
-              aria-label={t("aidpKnowledge.chunkImportMetadata")}
-              icon={<ImportOutlined />}
-              disabled={!metadataEnabled}
-              onClick={onImportMetadata}
+              aria-label={t("aidpKnowledge.chunkExportMetadata")}
+              icon={<ExportOutlined />}
+              onClick={onExportMetadata}
             />
           </Tooltip>
         )}

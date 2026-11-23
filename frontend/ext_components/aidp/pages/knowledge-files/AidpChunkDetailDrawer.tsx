@@ -372,21 +372,6 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
                 </div>
               )}
 
-              {tags.length > 0 && (
-                <section className={styles.detailSection}>
-                  <h3 className={styles.detailSectionTitle}>
-                    {t("aidpKnowledge.chunkTags")}
-                  </h3>
-                  <div className={styles.metadataList}>
-                    {tags.map((tag) => (
-                      <span key={tag} className={styles.metadataTag}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </section>
-              )}
-
               <section className={styles.detailSection}>
                 <h3 className={styles.detailSectionTitle}>
                   {metadataEntries.length > 0
@@ -409,6 +394,23 @@ const AidpChunkDetailDrawer: React.FC<AidpChunkDetailDrawerProps> = ({
                   </div>
                 )}
               </section>
+
+              {tags.length > 0 && (
+                <section className={styles.detailSection}>
+                  <h3 className={styles.detailSectionTitle}>
+                    {t("aidpKnowledge.chunkTagsCount", {
+                      count: tags.length,
+                    })}
+                  </h3>
+                  <div className={styles.metadataList}>
+                    {tags.map((tag) => (
+                      <span key={tag} className={styles.metadataTag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
 

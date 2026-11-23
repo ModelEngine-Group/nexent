@@ -122,7 +122,7 @@ def list_ontology_bindings_impl(
     )["value"]
     rows = []
     for item in domains[:_BINDING_SCAN_DOMAIN_LIMIT]:
-        raw_id = item.get("domain_id") or item.get("id")
+        raw_id = item.get("od_id") or item.get("domain_id") or item.get("id")
         if raw_id is None:
             continue
         for binding in _list_domain_bindings_raw(

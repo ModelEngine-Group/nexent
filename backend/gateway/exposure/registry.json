@@ -7044,17 +7044,6 @@
     },
     {
       "method": "POST",
-      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/documents/retry-summary",
-      "transport": "http",
-      "target": "management",
-      "source": "backend/ext_components/aidp/apps/aidp_summary_routes.py",
-      "route_id": "route-316d202a9a1c6189",
-      "credential_kinds": [
-        "session"
-      ]
-    },
-    {
-      "method": "POST",
       "path": "/api/aidp-mgmt/ontology/domains/{domain_id}/chunks/metadata/export",
       "transport": "http",
       "target": "management",
@@ -7098,5 +7087,5 @@
       ]
     }
   ],
-  "revision": "2026-11-23.2"
+  "revision": "2026-11-23.3"
 }

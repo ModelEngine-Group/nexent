@@ -196,7 +196,6 @@ const AidpFileDetailView: React.FC<AidpFileDetailViewProps> = ({
               <AidpFileSummaryPanel
                 kdsId={kdsId}
                 fileUuid={file.file_uuid}
-                canEdit={canEdit}
                 previewEnabled={summaryPreview}
               />
             ) : (

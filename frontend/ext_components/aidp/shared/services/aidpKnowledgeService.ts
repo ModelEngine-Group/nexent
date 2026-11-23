@@ -44,10 +44,7 @@ import type {
   AidpChunkListResponse,
   AidpChunkUpdatePayload,
 } from "../types/chunks";
-import type {
-  AidpFileSummaryResponse,
-  AidpSummaryRetryResponse,
-} from "../types/summary";
+import type { AidpFileSummaryResponse } from "../types/summary";
 
 function buildUrl(
   base: string,
@@ -904,30 +901,6 @@ class AidpKnowledgeService {
           ? result.result
           : {},
     };
-  }
-
-  /**
-   * Retry summary generation for the requested files.
-   *
-   * AIDP always expects a non-empty `file_uuids` array, including a single
-   * file retry; per-file success/failure lists are returned unchanged.
-   */
-  async retryFileSummaries(
-    id: string,
-    fileUuids: string[]
-  ): Promise<AidpSummaryRetryResponse> {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.aidpMgmt.retryKbFileSummaries(id),
-      {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ file_uuids: fileUuids }),
-      }
-    );
-    return (await response.json()) as AidpSummaryRetryResponse;
   }
 
   /**

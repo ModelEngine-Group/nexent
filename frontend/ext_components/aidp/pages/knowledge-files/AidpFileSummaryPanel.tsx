@@ -2,26 +2,19 @@
 
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, App, Button, Spin, Tooltip } from "antd";
+import { Alert, Button, Spin, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 
-import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import type {
-  AidpFileSummary,
-  AidpSummaryRetryItem,
-  AidpSummaryRetryResponse,
-} from "@/ext_components/aidp/shared/types/summary";
-import log from "@/lib/logger";
+import type { AidpFileSummary } from "@/ext_components/aidp/shared/types/summary";
 import { useAidpFileSummary } from "./hooks/useAidpFileSummary";
 import styles from "./AidpFileSummary.module.css";
 
 interface AidpFileSummaryPanelProps {
   kdsId: string;
   fileUuid: string;
-  canEdit: boolean;
   /** KB summary_preview; when false AIDP returns an empty result. */
   previewEnabled: boolean;
 }
@@ -34,42 +27,21 @@ const readReason = (summary: AidpFileSummary): string | undefined => {
   return undefined;
 };
 
-const retryItemReason = (
-  item: AidpSummaryRetryItem | string | undefined
-): string | undefined => {
-  if (!item || typeof item === "string") return undefined;
-  const message = item.message || item.reason;
-  if (typeof message === "string" && message.trim()) return message.trim();
-  return item.err_code === undefined || item.err_code === null
-    ? undefined
-    : String(item.err_code);
-};
-
-const findRetryItem = (
-  items: AidpSummaryRetryResponse["partial_success_list"] | undefined,
-  fileUuid: string
-) =>
-  (items ?? []).find((item) =>
-    typeof item === "string" ? item === fileUuid : item.file_uuid === fileUuid
-  );
-
 /**
  * File summary tab.
  *
  * States come from AIDP's `result`: pending is polled by the query, success
- * renders `summary_text`, failed offers a per-file retry when the user has EDIT
- * permission. An empty result is interpreted together with the KB's
- * `summary_preview` flag and is never reported as a generation failure.
+ * renders `summary_text`, failed shows the upstream reason. An empty result is
+ * interpreted together with the KB's `summary_preview` flag and is never
+ * reported as a generation failure. AIDP has no summary-retry endpoint, so the
+ * failed state is read-only.
  */
 const AidpFileSummaryPanel: React.FC<AidpFileSummaryPanelProps> = ({
   kdsId,
   fileUuid,
-  canEdit,
   previewEnabled,
 }) => {
   const { t } = useTranslation();
-  const { message } = App.useApp();
-  const [retrying, setRetrying] = useState(false);
   const query = useAidpFileSummary(kdsId, fileUuid, true, previewEnabled);
   const summary: AidpFileSummary = useMemo(
     () => query.data?.result ?? {},
@@ -84,44 +56,6 @@ const AidpFileSummaryPanel: React.FC<AidpFileSummaryPanelProps> = ({
   const isPending = status === "pending" || (!status && !text);
   const isFailed = status === "failed";
   const isSuccess = status === "success" || (!status && !!text);
-
-  const retry = useCallback(async () => {
-    setRetrying(true);
-    try {
-      const result = await aidpKnowledgeService.retryFileSummaries(kdsId, [
-        fileUuid,
-      ]);
-      const failed = findRetryItem(result.failed_list, fileUuid);
-      const succeeded = findRetryItem(result.partial_success_list, fileUuid);
-      if (failed) {
-        message.error(
-          t("aidpKnowledge.fileSummaryRetryFailed", {
-            reason: retryItemReason(failed) || t("aidpKnowledge.chunkUnknown"),
-          })
-        );
-      } else if (succeeded) {
-        message.success(t("aidpKnowledge.fileSummaryRetrySuccess"));
-      } else {
-        message.warning(t("aidpKnowledge.fileSummaryRetrySubmitted"));
-      }
-      await query.refetch();
-    } catch (error) {
-      log.error("Failed to retry AIDP file summary:", {
-        kdsId,
-        fileUuid,
-        error,
-      });
-      message.error(
-        getAidpErrorMessage(
-          error,
-          t,
-          t("aidpKnowledge.fileSummaryRetryFailedShort")
-        )
-      );
-    } finally {
-      setRetrying(false);
-    }
-  }, [fileUuid, kdsId, message, query, t]);
 
   if (query.isError) {
     return (
@@ -198,17 +132,6 @@ const AidpFileSummaryPanel: React.FC<AidpFileSummaryPanelProps> = ({
             title={t("aidpKnowledge.fileSummaryFailed")}
             description={reason}
           />
-          {canEdit && (
-            <div className={styles.retryActions}>
-              <Button
-                type="primary"
-                loading={retrying}
-                onClick={() => void retry()}
-              >
-                {t("aidpKnowledge.fileSummaryRetry")}
-              </Button>
-            </div>
-          )}
         </div>
       ) : isPending ? (
         <div className={styles.state}>

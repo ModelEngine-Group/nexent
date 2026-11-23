@@ -1593,12 +1593,17 @@ def _public_kb_detail(kb: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _same_file_uuid(left: Any, right: Any) -> bool:
+    """Compare uuids across the two shapes AIDP deployments report."""
+    return _uuid_hex(left) == _uuid_hex(right)
+
+
 def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
     found = next(
         (
             document
             for document in _DOCUMENTS_BY_KB.get(kds_id, [])
-            if document.get("file_uuid") == file_uuid
+            if _same_file_uuid(document.get("file_uuid"), file_uuid)
         ),
         None,
     )
@@ -2005,12 +2010,6 @@ class UpdateChunkBody(BaseModel):
     """Body of PATCH .../Chunks/{chunk_id} (text is the only writable field)."""
 
     chunk_text: str = Field(..., min_length=1, max_length=10240)
-
-
-class RetrySummariesBody(BaseModel):
-    """Body of POST .../KnowledgeFiles/RetrySummary."""
-
-    file_uuids: List[uuid.UUID] = Field(..., min_length=1)
 
 
 class SummaryStatusBody(BaseModel):
@@ -3150,7 +3149,7 @@ def remove_documents(
     for raw_file_uuid in body.file_uuids:
         file_uuid = str(raw_file_uuid)
         matched = next(
-            (document for document in documents if document.get("file_uuid") == file_uuid),
+            (document for document in documents if _same_file_uuid(document.get("file_uuid"), file_uuid)),
             None,
         )
         already_deleted = (
@@ -3285,7 +3284,7 @@ def _file_chunks(kds_id: str, file_uuid: str) -> List[Dict[str, Any]]:
     return [
         chunk
         for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
-        if chunk.get("file_uuid") == file_uuid
+        if _same_file_uuid(chunk.get("file_uuid"), file_uuid)
     ]
 
 
@@ -3338,13 +3337,14 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             "metadata_json": {},
         }
         # User-defined metadata from the bound ontology domain; the page shows
-        # this field instead of AIDP's system metadata.
+        # this field instead of AIDP's system metadata. Keys mirror domain 1's
+        # definitions so the FAQ demo KB (bound to domain 1) round-trips them.
         if index in (0, 4):
-            chunk["metadata_json"] = {"部门": "研发", "密级": "内部"}
+            chunk["metadata_json"] = {"doc_type": "faq", "publish_year": "2026"}
         # Newer AIDP builds return ontology auto-tags on `tag`; only some
         # chunks carry them, so the page must treat the field as optional.
         if index in (0, 2):
-            chunk["tag"] = ["示例实体", "自动打标"]
+            chunk["tag"] = ["智能手机"]
         chunks.append(chunk)
     _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
     _save_state()
@@ -3502,7 +3502,99 @@ def view_image(
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
     if not re.fullmatch(r"[A-Za-z0-9_-]+\.png", file_id):
         raise HTTPException(status_code=400, detail="Invalid FileID format")
+    # Demo fixtures may hold the real picture bytes under the image uuid; a
+    # seeded demo otherwise falls back to the synthetic PNG.
+    if _DOCUMENT_FIXTURE_DIR is not None:
+        image_uuid = file_id.rsplit("_", 1)[-1].removesuffix(".png")
+        try:
+            fixture = _DOCUMENT_FIXTURE_DIR / f"{uuid.UUID(image_uuid)}.bin"
+        except ValueError:
+            fixture = None
+        if fixture is not None and fixture.is_file():
+            content = fixture.read_bytes()
+            media_type = "image/png"
+            if content.startswith(bytes([0xFF, 0xD8])):
+                media_type = "image/jpeg"
+            elif content.startswith(b"BM"):
+                media_type = "image/bmp"
+            return Response(content=content, media_type=media_type)
     return Response(content=_mock_png_bytes(), media_type="image/png")
+
+
+@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Chunks/BatchMetadataJson")
+def batch_chunk_metadata(
+    kds_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Apply metadata/tags to chunks selected by ids or by file UUIDs.
+
+    Registered before the ``/Chunks/{chunk_id}`` template so the literal
+    ``BatchMetadataJson`` path is not captured as a chunk id.
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    raw_od_id = body.get("od_id")
+    if not isinstance(raw_od_id, int) or isinstance(raw_od_id, bool):
+        raise HTTPException(status_code=400, detail="od_id must be an integer")
+    od_id = raw_od_id
+    metadata = body.get("metadata_json") or {}
+    tag = body.get("tag")
+    chunk_ids = body.get("chunk_id_list") or []
+    file_uuids = {str(item) for item in (body.get("file_uuid_list") or [])}
+    if not any(
+        binding["od_id"] == od_id and binding["kds_id"] == kds_id
+        for binding in _ONTOLOGY_BINDINGS
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Knowledge base is not bound to the ontology domain",
+        )
+    defined = {
+        item["fieldName"] for item in _ONTOLOGY_METADATA.get(str(od_id), [])
+    }
+    if not metadata or not set(metadata).issubset(defined):
+        raise HTTPException(
+            status_code=400,
+            detail="metadata_json contains undefined fields",
+        )
+    if tag is not None and (
+        not isinstance(tag, list)
+        or any(not isinstance(item, str) for item in tag)
+    ):
+        raise HTTPException(status_code=400, detail="tag must be a list of strings")
+
+    id_targets = {
+        item if isinstance(item, int) else int(item)
+        for item in chunk_ids
+        if isinstance(item, int) or str(item).isdigit()
+    }
+    success = 0
+    failed = 0
+    for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, []):
+        if chunk.get("chunk_id") not in id_targets and not any(
+            _same_file_uuid(chunk.get("file_uuid"), target)
+            for target in file_uuids
+        ):
+            continue
+        if str(chunk.get("chunk_id")) in _ONTOLOGY_METADATA_FAIL_CHUNK_IDS:
+            failed += 1
+            continue
+        chunk.setdefault("metadata_json", {}).update(
+            {key: str(value) for key, value in metadata.items()}
+        )
+        if tag is not None:
+            chunk["tag"] = list(tag)
+        success += 1
+    _save_state()
+    return {
+        "kds_id": kds_id,
+        "od_id": str(od_id),
+        "partial_failure": failed > 0,
+        "total_chunks": success + failed,
+        "updated_chunks": success,
+    }
 
 
 @app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
@@ -3553,7 +3645,7 @@ def _file_chunks(kds_id: str, file_uuid: str) -> List[Dict[str, Any]]:
     return [
         chunk
         for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
-        if chunk.get("file_uuid") == file_uuid
+        if _same_file_uuid(chunk.get("file_uuid"), file_uuid)
     ]
 
 
@@ -3606,13 +3698,14 @@ def _ensure_file_chunks(kds_id: str, document: Dict[str, Any]) -> List[Dict[str,
             "metadata_json": {},
         }
         # User-defined metadata from the bound ontology domain; the page shows
-        # this field instead of AIDP's system metadata.
+        # this field instead of AIDP's system metadata. Keys mirror domain 1's
+        # definitions so the FAQ demo KB (bound to domain 1) round-trips them.
         if index in (0, 4):
-            chunk["metadata_json"] = {"部门": "研发", "密级": "内部"}
+            chunk["metadata_json"] = {"doc_type": "faq", "publish_year": "2026"}
         # Newer AIDP builds return ontology auto-tags on `tag`; only some
         # chunks carry them, so the page must treat the field as optional.
         if index in (0, 2):
-            chunk["tag"] = ["示例实体", "自动打标"]
+            chunk["tag"] = ["智能手机"]
         chunks.append(chunk)
     _DOCUMENT_CHUNK_GENERATED_FILES.add(marker)
     _save_state()
@@ -3642,120 +3735,6 @@ def _require_chunk(kds_id: str, chunk_id: int) -> Dict[str, Any]:
     return chunk
 
 
-@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
-def list_chunks(
-    kds_id: str,
-    file_uuid: uuid.UUID = Query(...),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    authorization: Optional[str] = Header(default=None),
-) -> JSONResponse:
-    """Page through the chunks of one file, as the live contract declares."""
-    _check_auth(authorization)
-    document = _require_file(kds_id, str(file_uuid))
-    chunks = _ensure_file_chunks(kds_id, document)
-    start = (page - 1) * page_size
-    items = [_public_chunk(chunk) for chunk in chunks[start:start + page_size]]
-    # The current contract sends next_link=null on the last page.
-    has_next = page * page_size < len(chunks)
-    next_link = None
-    if has_next:
-        next_link = (
-            f"{_KB_PREFIX}/{kds_id}/Chunks?file_uuid={file_uuid}"
-            f"&page={page + 1}&page_size={page_size}"
-        )
-    logger.info(
-        "LIST CHUNKS  kds_id=%s file=%s page=%d returned=%d total=%d",
-        kds_id, file_uuid, page, len(items), len(chunks),
-    )
-    return JSONResponse(content={
-        "value": items,
-        "next_link": next_link,
-        "total_count": len(chunks),
-    })
-
-
-@app.put(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
-def create_chunk(
-    kds_id: str,
-    body: CreateChunkBody,
-    authorization: Optional[str] = Header(default=None),
-) -> JSONResponse:
-    """Add one chunk and answer with its id, as the live service does."""
-    _check_auth(authorization)
-    document = _require_file(kds_id, str(body.file_uuid))
-    if not body.chunk_text.strip():
-        raise HTTPException(status_code=400, detail="chunk_text must not be blank")
-    chunk = {
-        "chunk_id": _next_chunk_id(),
-        "chunk_text": body.chunk_text,
-        "chunk_type": "TEXT",
-        "file_uuid": str(body.file_uuid),
-        "file_name": str(document.get("file_name") or ""),
-        "file_url": f"/aidp/knowledge/{kds_id}/{document.get('file_name') or ''}",
-        "page_ids": [],
-        "metadata": {},
-    }
-    _DOCUMENT_CHUNKS_BY_KB.setdefault(kds_id, []).append(chunk)
-    _DOCUMENT_CHUNK_GENERATED_FILES.add(f"{kds_id}:{body.file_uuid}")
-    _save_state()
-    return JSONResponse(content={"chunk_id": str(chunk["chunk_id"])})
-
-
-@app.post(f"{_KB_PREFIX}/{{kds_id}}/Chunks/Remove")
-def remove_chunks(
-    kds_id: str,
-    body: RemoveChunksBody,
-    authorization: Optional[str] = Header(default=None),
-) -> Response:
-    """Remove the requested chunks; the live contract answers 204 with no body.
-
-    The 2026-11-20 verified contract uses POST /Chunks/Remove; the earlier
-    DELETE /Chunks variant is not served by the real deployment (405).
-    """
-    _check_auth(authorization)
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    targets = set(body.chunk_ids)
-    _DOCUMENT_CHUNKS_BY_KB[kds_id] = [
-        chunk
-        for chunk in _DOCUMENT_CHUNKS_BY_KB.get(kds_id, [])
-        if chunk.get("chunk_id") not in targets
-    ]
-    _save_state()
-    return Response(status_code=204)
-
-
-@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
-def get_chunk(
-    kds_id: str,
-    chunk_id: int,
-    authorization: Optional[str] = Header(default=None),
-) -> JSONResponse:
-    """Read one chunk."""
-    _check_auth(authorization)
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    return JSONResponse(content=_public_chunk(_require_chunk(kds_id, chunk_id)))
-
-
-@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
-def update_chunk(
-    kds_id: str,
-    chunk_id: int,
-    body: UpdateChunkBody,
-    authorization: Optional[str] = Header(default=None),
-) -> JSONResponse:
-    """Update one chunk's text."""
-    _check_auth(authorization)
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    chunk = _require_chunk(kds_id, chunk_id)
-    if not body.chunk_text.strip():
-        raise HTTPException(status_code=400, detail="chunk_text must not be blank")
-    chunk["chunk_text"] = body.chunk_text
-    _save_state()
-    return JSONResponse(content=_public_chunk(chunk))
 
 
 # =============================================================================
@@ -3804,53 +3783,6 @@ def get_file_summary(
     if result["summary_status"] == "success":
         result["summary_text"] = document.get("_summary_text") or ""
     return JSONResponse(content={"result": result})
-
-
-@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/RetrySummary")
-def retry_file_summaries(
-    kds_id: str,
-    body: RetrySummariesBody,
-    authorization: Optional[str] = Header(default=None),
-) -> JSONResponse:
-    """Retry failed summaries and report per-file success/failure."""
-    _check_auth(authorization)
-    kb = _KNOWLEDGE_BASES.get(kds_id)
-    if kb is None:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    success_list: List[Dict[str, Any]] = []
-    failed_list: List[Dict[str, Any]] = []
-    for file_uuid in body.file_uuids:
-        document = _find_document(kds_id, str(file_uuid))
-        if document is None:
-            failed_list.append({
-                "file_uuid": str(file_uuid),
-                "err_code": 404,
-                "message": "File not found",
-            })
-            continue
-        if not _summary_preview_enabled(kb):
-            failed_list.append({
-                "file_uuid": str(file_uuid),
-                "err_code": 400,
-                "message": "Summary is disabled for this knowledge base",
-            })
-            continue
-        document = _ensure_summary_state(kb, document)
-        if document.get("_summary_status") != "failed":
-            failed_list.append({
-                "file_uuid": str(file_uuid),
-                "err_code": 409,
-                "message": "Summary is not in failed state",
-            })
-            continue
-        document["_summary_status"] = "pending"
-        document["_summary_text"] = ""
-        success_list.append({"file_uuid": str(file_uuid)})
-    _save_state()
-    return JSONResponse(content={
-        "partial_success_list": success_list,
-        "failed_list": failed_list,
-    })
 
 
 @app.post("/_mock/summary-status")
@@ -4844,6 +4776,40 @@ def list_domain_bindings_confirmed(
     return {"data": {"items": items, "total_count": total, "next_link": next_link}}
 
 
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Bindings")
+def list_domain_bindings_singular(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Per-domain bindings on the singular route the proxy pages through."""
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if binding["od_id"] == int(domain_id)
+    ]
+    total = len(rows)
+    start = (page - 1) * page_size
+    items = [
+        {
+            "kb_id": row["kds_id"],
+            "kb_name": row.get("kb_name"),
+            "domain_id": row["od_id"],
+            "create_time": row.get("create_time"),
+        }
+        for row in rows[start : start + page_size]
+    ]
+    next_link = (
+        f"{_ONTOLOGY_PREFIX}/{domain_id}/Bindings?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {"value": items, "total_count": total, "next_link": next_link}
+
+
 @app.delete(f"{_ONTOLOGY_PREFIX}/Bindings/{{binding_id}}")
 def delete_ontology_binding_confirmed(
     binding_id: str,
@@ -5641,104 +5607,6 @@ def _chunk_belongs_to(kds_id: str, chunk_id: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
-def list_chunks(
-    kds_id: str,
-    file_uuid: str = Query(...),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    authorization: Optional[str] = Header(default=None),
-) -> Dict[str, Any]:
-    _check_auth(authorization)
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    items = [
-        chunk
-        for chunk in _ONTOLOGY_CHUNKS_BY_KB.get(kds_id, [])
-        if chunk.get("_file_uuid") == file_uuid
-    ]
-    total = len(items)
-    start = (page - 1) * page_size
-    page_items = items[start:start + page_size]
-    next_link = (
-        f"{_KB_PREFIX}/{kds_id}/Chunks?file_uuid={file_uuid}&page={page + 1}&page_size={page_size}"
-        if start + page_size < total
-        else None
-    )
-    return {
-        "value": [_public_chunk(item) for item in page_items],
-        "total_count": total,
-        "next_link": next_link,
-    }
-
-
-@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
-def get_chunk(
-    kds_id: str,
-    chunk_id: str,
-    authorization: Optional[str] = Header(default=None),
-) -> Dict[str, Any]:
-    _check_auth(authorization)
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    chunk = _chunk_belongs_to(kds_id, chunk_id)
-    if chunk is None:
-        raise HTTPException(status_code=404, detail="Chunk not found")
-    return _public_chunk(chunk)
-
-
-@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Chunks/BatchMetadataJson")
-def batch_chunk_metadata(
-    kds_id: str,
-    body: Dict[str, Any] = Body(...),
-    authorization: Optional[str] = Header(default=None),
-) -> Dict[str, Any]:
-    _check_auth(authorization)
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    raw_od_id = body.get("od_id")
-    if not isinstance(raw_od_id, int) or isinstance(raw_od_id, bool):
-        raise HTTPException(status_code=400, detail="od_id must be an integer")
-    od_id = raw_od_id
-    metadata = body.get("metadata_json") or {}
-    chunk_ids = body.get("chunk_id_list") or []
-    if not any(
-        binding["od_id"] == od_id and binding["kds_id"] == kds_id
-        for binding in _ONTOLOGY_BINDINGS
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Knowledge base is not bound to the ontology domain",
-        )
-    defined = {
-        item["fieldName"] for item in _ONTOLOGY_METADATA.get(str(od_id), [])
-    }
-    if not metadata or not set(metadata).issubset(defined):
-        raise HTTPException(
-            status_code=400,
-            detail="metadata_json contains undefined fields",
-        )
-    success_list: List[Dict[str, Any]] = []
-    failed_list: List[Dict[str, Any]] = []
-    for chunk_id in chunk_ids:
-        chunk = _chunk_belongs_to(kds_id, chunk_id)
-        if chunk is None:
-            failed_list.append({"chunk_id": chunk_id, "message_zh": "Chunk 不存在"})
-            continue
-        if str(chunk_id) in _ONTOLOGY_METADATA_FAIL_CHUNK_IDS:
-            failed_list.append({"chunk_id": chunk_id, "message_zh": "模拟标注失败"})
-            continue
-        chunk.setdefault("metadata", {}).update(metadata)
-        success_list.append({"chunk_id": chunk.get("chunk_id")})
-    _save_state()
-    # Confirmed contract answers counters, not per-chunk lists.
-    return {
-        "kds_id": kds_id,
-        "od_id": str(od_id),
-        "partial_failure": bool(failed_list),
-        "total_chunks": len(chunk_ids),
-        "updated_chunks": len(success_list),
-    }
 
 
 # =============================================================================
@@ -6260,7 +6128,7 @@ def seed_ontology_file(
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     file_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mock-ontology:{kds_id}:{file_name}"))
     documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
-    if not any(str(document.get("file_uuid")) == file_uuid for document in documents):
+    if not any(_same_file_uuid(document.get("file_uuid"), file_uuid) for document in documents):
         documents.append(
             {
                 "file_uuid": file_uuid,

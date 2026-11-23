@@ -5,15 +5,21 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Drawer, Input, Select } from "antd";
-import { CloseOutlined } from "@ant-design/icons";
+import {
+  CloseOutlined,
+  DeleteOutlined,
+  InfoCircleOutlined,
+} from "@ant-design/icons";
 
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
 import type { AidpOntologyMetadataField } from "@/ext_components/aidp/shared/types/ontology";
 import { normalizeAidpChunkType } from "@/ext_components/aidp/shared/utils/aidpChunkType";
 import { sanitizeAidpTableHtml } from "@/ext_components/aidp/shared/utils/aidpTableHtml";
+import AidpMetadataEditor, { type AidpMetadataRow } from "./AidpMetadataEditor";
 import styles from "./AidpSemanticChunks.module.css";
 
 export const AIDP_CHUNK_TEXT_MAX_LENGTH = 10240;
+const AIDP_TAG_LIMIT = 100;
 
 export type AidpChunkDrawerMode = "create" | "edit";
 
@@ -32,7 +38,7 @@ interface AidpChunkDrawerProps {
   /** The chunk being edited; null when adding a new one. */
   chunk: AidpChunk | null;
   submitting: boolean;
-  /** Bound ontology domain; null/undefined hides the tag and metadata editors. */
+  /** Bound ontology domain; without it the tag/metadata editors are hidden. */
   odId?: number | string | null;
   metadataFields: AidpOntologyMetadataField[];
   /** Entity display names of the bound domain, offered as tag choices. */
@@ -44,29 +50,31 @@ interface AidpChunkDrawerProps {
 
 type AidpChunkFormProps = Omit<AidpChunkDrawerProps, "open">;
 
-const initialMetadataValues = (
+const buildInitialRows = (
   chunk: AidpChunk | null,
   fields: AidpOntologyMetadataField[]
-): Record<string, string> => {
+): AidpMetadataRow[] => {
   const raw = chunk?.metadata_json ?? {};
-  const values: Record<string, string> = {};
-  for (const field of fields) {
-    const value = raw[field.field_name];
-    if (value !== null && value !== undefined && value !== "") {
-      values[field.field_name] = String(value);
-    }
-  }
-  return values;
+  return fields
+    .filter((field) => {
+      const value = raw[field.field_name];
+      return value !== null && value !== undefined && value !== "";
+    })
+    .map((field) => ({
+      fieldName: field.field_name,
+      value: String(raw[field.field_name]),
+    }));
 };
 
 /**
- * Text, tags and user metadata form for one chunk.
+ * Text, metadata and tags form for one chunk, laid out per the edit-chunk UCD:
+ * metadata rows (field name, type, value) followed by tag rows, each with its
+ * own select and delete action.
  *
- * Text is always editable. Tags and metadata are only offered while the
- * knowledge base is bound to an ontology domain: metadata keys must exist in
- * that domain, and tag values must be entities of it. Saving calls AIDP only
- * when the user actually changed one of them, so a plain text edit never
- * rewrites metadata.
+ * Tags and metadata are only offered while the knowledge base is bound to an
+ * ontology domain: metadata keys must exist in that domain, and tag values
+ * must be entities of it. Saving calls AIDP only when the user actually
+ * changed one of them, so a plain text edit never rewrites metadata.
  */
 const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   mode,
@@ -85,15 +93,15 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   const [focused, setFocused] = useState(false);
   const [touched, setTouched] = useState(false);
   const hasOntology = odId !== null && odId !== undefined;
-  const [tags, setTags] = useState<string[]>(() => chunk?.tag ?? []);
-  const [metadataValues, setMetadataValues] = useState<Record<string, string>>(
-    () => initialMetadataValues(chunk, metadataFields)
+  const [rows, setRows] = useState<AidpMetadataRow[]>(() =>
+    buildInitialRows(chunk, metadataFields)
   );
-  const initialTags = useMemo(() => chunk?.tag ?? [], [chunk]);
-  const initialValues = useMemo(
-    () => initialMetadataValues(chunk, metadataFields),
+  const [tagRows, setTagRows] = useState<string[]>(() => chunk?.tag ?? []);
+  const initialRows = useMemo(
+    () => buildInitialRows(chunk, metadataFields),
     [chunk, metadataFields]
   );
+  const initialTags = useMemo(() => chunk?.tag ?? [], [chunk]);
 
   // TABLE chunks edit the HTML source; the preview renders it only when it
   // sanitizes cleanly, otherwise the toggle surfaces a format error.
@@ -111,27 +119,36 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
 
   const metadataJson = useMemo(() => {
     const result: Record<string, string> = {};
-    for (const field of metadataFields) {
-      const value = (metadataValues[field.field_name] ?? "").trim();
-      if (value) result[field.field_name] = value;
+    for (const row of rows) {
+      const value = row.value.trim();
+      if (row.fieldName && value) result[row.fieldName] = value;
     }
     return result;
-  }, [metadataFields, metadataValues]);
+  }, [rows]);
+
+  const cleanedTags = useMemo(
+    () => Array.from(new Set(tagRows.map((tag) => tag.trim()).filter(Boolean))),
+    [tagRows]
+  );
 
   const metadataDirty = useMemo(() => {
     if (!hasOntology) return false;
     const tagsChanged =
-      tags.length !== initialTags.length ||
-      tags.some((tag) => !initialTags.includes(tag));
+      cleanedTags.length !== initialTags.length ||
+      cleanedTags.some((tag) => !initialTags.includes(tag));
+    const initialJson: Record<string, string> = {};
+    for (const row of initialRows) {
+      if (row.value.trim()) initialJson[row.fieldName] = row.value.trim();
+    }
     const keys = new Set([
       ...Object.keys(metadataJson),
-      ...Object.keys(initialValues),
+      ...Object.keys(initialJson),
     ]);
     const valuesChanged = Array.from(keys).some(
-      (key) => (metadataJson[key] ?? "") !== (initialValues[key] ?? "")
+      (key) => (metadataJson[key] ?? "") !== (initialJson[key] ?? "")
     );
     return tagsChanged || valuesChanged;
-  }, [hasOntology, initialTags, initialValues, metadataJson, tags]);
+  }, [cleanedTags, hasOntology, initialRows, initialTags, metadataJson]);
 
   // AIDP requires a non-empty metadata_json on the batch endpoint; clearing
   // every field while also changing tags cannot be submitted.
@@ -139,8 +156,6 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
     metadataDirty && Object.keys(metadataJson).length === 0;
   const canSubmit = !isEmpty && !isTooLong && !submitting && !metadataTooEmpty;
   // UCD values: 1px border, 4px radius, #DFDFDF default and #0067D1 focus.
-  // Applied inline because Ant Design's outlined input draws its border with a
-  // box-shadow, which overrides a same-specificity CSS module rule.
   const textAreaBorderColor = isTooLong
     ? "#e02128"
     : focused
@@ -153,13 +168,13 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
       await onSubmit({
         text: trimmed,
         metadataDirty,
-        tag: tags,
+        tag: cleanedTags,
         metadata_json: metadataJson,
       });
     } catch {
       // The parent reports the failure; keeping the values lets the user retry.
     }
-  }, [canSubmit, metadataDirty, metadataJson, onSubmit, tags, trimmed]);
+  }, [canSubmit, cleanedTags, metadataDirty, metadataJson, onSubmit, trimmed]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -245,6 +260,7 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
                   minHeight: 160,
                   padding: "8px 12px",
                   resize: "vertical",
+                  background: "#f5f5f5",
                 }}
                 value={text}
                 onChange={(event) => {
@@ -270,6 +286,7 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
             )}
             <div className={styles.counterRow}>
               <span className={styles.formHint}>
+                <InfoCircleOutlined className={styles.hintIcon} />
                 {mode === "create"
                   ? t("aidpKnowledge.chunkCreateHint")
                   : isTableChunk
@@ -294,71 +311,72 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
             )}
           </div>
 
-          {hasOntology && (
-            <div>
-              <div className={styles.fieldLabelRow}>
-                <span className={styles.fieldLabel}>
-                  {t("aidpKnowledge.chunkTags")}
-                </span>
-              </div>
-              <Select
-                mode="multiple"
-                allowClear
-                showSearch
-                className={styles.metadataFieldControl}
-                value={tags}
-                onChange={(value: string[]) => setTags(value)}
-                options={tagOptions.map((name) => ({
-                  value: name,
-                  label: name,
-                }))}
-                placeholder={t("aidpKnowledge.chunkTagsPlaceholder")}
-                disabled={submitting}
-                optionFilterProp="label"
-              />
-              <p className={styles.formHint}>
-                {t("aidpKnowledge.chunkTagsHint")}
-              </p>
-            </div>
+          {hasOntology && metadataFields.length > 0 && (
+            <AidpMetadataEditor
+              fields={metadataFields}
+              rows={rows}
+              onChange={setRows}
+              submitting={submitting}
+              showEmptyError={metadataTooEmpty}
+            />
           )}
 
-          {hasOntology && metadataFields.length > 0 && (
+          {hasOntology && (
             <div>
-              <div className={styles.fieldLabelRow}>
-                <span className={styles.fieldLabel}>
-                  {t("aidpKnowledge.chunkMetadata")}
+              <div className={styles.tagTableHead}>
+                <span className={styles.headRequired}>
+                  {t("aidpKnowledge.chunkMetadataValue")}
                 </span>
+                <span>{t("aidpKnowledge.chunkMetadataOperation")}</span>
               </div>
-              {metadataFields.map((field) => (
-                <div key={field.field_name} className={styles.metadataFieldRow}>
-                  <span className={styles.metadataFieldLabel}>
-                    {field.field_name}
-                  </span>
-                  <Input
+              {tagRows.map((tag, index) => (
+                <div key={`tag-${index}`} className={styles.tagTableRow}>
+                  <Select
                     className={styles.metadataFieldControl}
-                    value={metadataValues[field.field_name] ?? ""}
-                    onChange={(event) =>
-                      setMetadataValues((current) => ({
-                        ...current,
-                        [field.field_name]: event.target.value,
-                      }))
-                    }
-                    placeholder={
-                      field.field_type === "number"
-                        ? t("aidpKnowledge.chunkMetadataNumberPlaceholder")
-                        : field.field_type === "date"
-                          ? t("aidpKnowledge.chunkMetadataDatePlaceholder")
-                          : t("aidpKnowledge.chunkMetadataTextPlaceholder")
+                    value={tag || undefined}
+                    showSearch
+                    allowClear
+                    optionFilterProp="label"
+                    options={tagOptions.map((name) => ({
+                      value: name,
+                      label: name,
+                    }))}
+                    placeholder={t("aidpKnowledge.chunkTagsSelectPlaceholder")}
+                    onChange={(value?: string) =>
+                      setTagRows((current) =>
+                        current.map((item, idx) =>
+                          idx === index ? (value ?? "") : item
+                        )
+                      )
                     }
                     disabled={submitting}
                   />
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label={t("aidpKnowledge.chunkTagsRemoveRow")}
+                    icon={<DeleteOutlined />}
+                    disabled={submitting}
+                    onClick={() =>
+                      setTagRows((current) =>
+                        current.filter((_, idx) => idx !== index)
+                      )
+                    }
+                  />
                 </div>
               ))}
-              {metadataTooEmpty && (
-                <p className={styles.errorText}>
-                  {t("aidpKnowledge.chunkMetadataAtLeastOne")}
-                </p>
-              )}
+              <Button
+                type="link"
+                size="small"
+                className={styles.metadataAddRow}
+                disabled={submitting || tagRows.length >= AIDP_TAG_LIMIT}
+                onClick={() => setTagRows((current) => [...current, ""])}
+              >
+                {t("aidpKnowledge.chunkTagsAddRow", {
+                  count: tagRows.length,
+                  limit: AIDP_TAG_LIMIT,
+                })}
+              </Button>
             </div>
           )}
         </div>
@@ -383,8 +401,8 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
 /**
  * Add or edit one chunk.
  *
- * Only the text, tags and user metadata are writable: AIDP takes `chunk_text`
- * on the chunk endpoints and applies tags/metadata through the batch-metadata
+ * Only the text, metadata and tags are writable: AIDP takes `chunk_text` on
+ * the chunk endpoints and applies tags/metadata through the batch-metadata
  * call. Tag choices and metadata keys come from the bound ontology domain.
  */
 const AidpChunkDrawer: React.FC<AidpChunkDrawerProps> = ({

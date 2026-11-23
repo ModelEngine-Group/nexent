@@ -724,7 +724,7 @@ def test_summary_returns_empty_result_when_preview_disabled(mock_aidp_server):
     assert response.json() == {"result": {}}
 
 
-def test_summary_state_success_failed_and_retry_round_trip(mock_aidp_server):
+def test_summary_state_success_and_failed(mock_aidp_server):
     client = _summary_client(mock_aidp_server)
     auth = {"Authorization": "Bearer mock-aidp-key"}
     path = (
@@ -749,28 +749,6 @@ def test_summary_state_success_failed_and_retry_round_trip(mock_aidp_server):
     failed_result = client.get(path, headers=auth).json()["result"]
     assert failed_result["summary_status"] == "failed"
     assert "summary_text" not in failed_result
-
-    retried = client.post(
-        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
-        "/KnowledgeFiles/RetrySummary",
-        headers=auth,
-        json={"file_uuids": [_SUMMARY_FILE]},
-    )
-    assert retried.status_code == 200
-    body = retried.json()
-    assert body["partial_success_list"] == [{"file_uuid": _SUMMARY_FILE}]
-    assert body["failed_list"] == []
-    assert client.get(path, headers=auth).json()["result"]["summary_status"] == "pending"
-
-    # Retrying a non-failed file reports it as failed, not silently successful.
-    again = client.post(
-        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
-        "/KnowledgeFiles/RetrySummary",
-        headers=auth,
-        json={"file_uuids": [_SUMMARY_FILE]},
-    ).json()
-    assert again["partial_success_list"] == []
-    assert again["failed_list"][0]["err_code"] == 409
 
 
 def test_summary_config_is_echoed_on_create(mock_aidp_server):
@@ -800,34 +778,6 @@ def test_summary_config_is_echoed_on_create(mock_aidp_server):
     config = json.loads(detail["kms_config_str"])
     assert config["summary_enable"] is True
     assert config["summary_preview"] is True
-
-
-def test_summary_retry_reports_partial_success_and_failures_together(mock_aidp_server):
-    client = _summary_client(mock_aidp_server)
-    auth = {"Authorization": "Bearer mock-aidp-key"}
-    second = "19b675cd-fdb7-4412-9c6a-4fddf3b3f295"
-    mock_aidp_server._DOCUMENTS_BY_KB[_SUMMARY_KB].append({
-        "file_uuid": second,
-        "file_name": "第二份.pdf",
-        "status": 1,
-        "first_upload_time": time.time(),
-        "_summary_status": "success",
-        "_summary_text": "已生成",
-    })
-    mock_aidp_server._DOCUMENTS_BY_KB[_SUMMARY_KB][0]["_summary_status"] = "failed"
-    mock_aidp_server._DOCUMENTS_BY_KB[_SUMMARY_KB][0]["_summary_text"] = ""
-
-    response = client.post(
-        f"/KnowledgeBase/Tenants/aidp/KnowledgeBases/{_SUMMARY_KB}"
-        "/KnowledgeFiles/RetrySummary",
-        headers=auth,
-        json={"file_uuids": [_SUMMARY_FILE, second]},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["partial_success_list"] == [{"file_uuid": _SUMMARY_FILE}]
-    assert body["failed_list"][0]["file_uuid"] == second
-    assert body["failed_list"][0]["err_code"] == 409
 
 
 def test_summary_config_can_be_changed_via_kb_patch(mock_aidp_server):

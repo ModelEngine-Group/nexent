@@ -4471,29 +4471,3 @@ class TestFileSummaryImpls:
         assert lifted["result"]["summary_status"] == "failed"
         assert empty == {"result": {}}
 
-    def test_summary_retry_posts_file_uuid_array_and_preserves_lists(
-        self, aidp_summary_service_module
-    ):
-        mock_client = MagicMock()
-        mock_client.request.return_value = self._json_response({
-            "partial_success_list": [{"file_uuid": "file-1"}],
-            "failed_list": [{"file_uuid": "file-2", "err_code": 500}],
-        })
-        self._install_client(aidp_summary_service_module, mock_client)
-
-        result = aidp_summary_service_module.retry_aidp_file_summaries_impl(
-            "http://127.0.0.1:30081",
-            "jwt-token",
-            "kb-1",
-            ["file-1", "file-2"],
-        )
-
-        assert mock_client.request.call_args.args[1] == (
-            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
-            "/KnowledgeBases/kb-1/KnowledgeFiles/RetrySummary"
-        )
-        assert mock_client.request.call_args.kwargs["json"] == {
-            "file_uuids": ["file-1", "file-2"]
-        }
-        assert result["partial_success_list"] == [{"file_uuid": "file-1"}]
-        assert result["failed_list"] == [{"file_uuid": "file-2", "err_code": 500}]

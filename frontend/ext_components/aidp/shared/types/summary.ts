@@ -17,20 +17,3 @@ export interface AidpFileSummary {
 export interface AidpFileSummaryResponse {
   result: AidpFileSummary;
 }
-
-/** One entry in a RetrySummary success/failure list. */
-export interface AidpSummaryRetryItem {
-  file_uuid?: string;
-  err_code?: string | number | null;
-  code?: string | number | null;
-  message?: string | null;
-  reason?: string | null;
-  [key: string]: unknown;
-}
-
-export interface AidpSummaryRetryResponse {
-  /** Files whose retry was accepted; may be a partial subset of the request. */
-  partial_success_list?: Array<AidpSummaryRetryItem | string>;
-  failed_list?: Array<AidpSummaryRetryItem | string>;
-  [key: string]: unknown;
-}

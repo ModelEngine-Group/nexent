@@ -1,18 +1,19 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""AIDP file summary proxy service (read one summary, retry generation).
+"""AIDP file summary proxy service (read one file summary).
 
 Summaries belong to one ingested AIDP file and are addressed under
 ``/KnowledgeBase/Tenants/aidp/KnowledgeBases/{kds_id}/KnowledgeFiles``. The
-read returns AIDP's ``result`` object as-is (an empty object means summaries
-are off or not generated yet); retry forwards a non-empty file UUID list and
-passes AIDP's per-file success/failure lists through unchanged.
+read returns AIDP's ``result`` object as-is; an empty object means summaries
+are off or not generated yet. AIDP has no summary-retry endpoint, so the proxy
+exposes no regeneration call.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
+from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from ext_components.aidp.services.aidp_client import (
     _request_aidp_json,
@@ -30,14 +31,6 @@ def _get_file_summary_path(kds_id: str, file_uuid: str, tenant_id: str | None = 
     return (
         f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
         f"/KnowledgeBases/{kds_id}/KnowledgeFiles/{file_uuid}/Summary"
-    )
-
-
-def _get_retry_summary_path(kds_id: str, tenant_id: str | None = None) -> str:
-    """Build the knowledge-base scoped summary retry path."""
-    return (
-        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
-        f"/KnowledgeBases/{kds_id}/KnowledgeFiles/RetrySummary"
     )
 
 
@@ -98,30 +91,6 @@ def get_aidp_file_summary_impl(
     if direct:
         return {"result": _normalize_summary_result(direct)}
     return {"result": _normalize_summary_result(result)}
-
-
-def retry_aidp_file_summaries_impl(
-    server_url: str,
-    api_key: str,
-    kds_id: str,
-    file_uuids: List[str],
-) -> Dict[str, Any]:
-    """Ask AIDP to regenerate summaries for the requested files.
-
-    The contract always takes a non-empty ``file_uuids`` array, including for a
-    single file. Per-file success/failure lists are passed through unchanged so
-    the caller never turns a partial success into a total success.
-    """
-    result = _request_aidp_json(
-        server_url,
-        api_key,
-        "POST",
-        _get_retry_summary_path(kds_id),
-        context="retry-file-summaries",
-        retry=True,
-        json_body={"file_uuids": list(file_uuids)},
-    )
-    return result if isinstance(result, dict) else {}
 
 
 # ==================== Knowledge-file history (all-status listing) ====================

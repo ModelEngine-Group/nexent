@@ -435,6 +435,7 @@
   gap: 24px;
 }
 .readonlyInput {
+  max-width: 360px;
   padding: 5px 12px;
   border: 1px solid #dfdfdf;
   border-radius: 4px;
@@ -512,19 +513,83 @@
 .chunkTableWrap {
   margin-top: 16px;
 }
-.metadataFieldRow {
-  display: flex;
-  align-items: center;
+.metadataTableHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) 72px minmax(0, 1.4fr) 32px;
   gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  color: var(--chunk-secondary, #595959);
+  font-size: 12px;
+  line-height: 20px;
+  background: #f5f5f5;
+  margin-top: 4px;
   margin-bottom: 8px;
 }
-.metadataFieldLabel {
-  flex: 0 0 140px;
-  min-width: 0;
+.tagTableHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
   color: var(--chunk-secondary, #595959);
-  font-size: 14px;
-  line-height: 22px;
-  word-break: break-all;
+  font-size: 12px;
+  line-height: 20px;
+  background: #f5f5f5;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+.headRequired::before {
+  content: "*";
+  color: #e02128;
+  margin-right: 2px;
+}
+.metadataTableRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) 72px minmax(0, 1.4fr) 32px;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.tagTableRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.metadataTypeCell {
+  padding: 5px 12px;
+  border: 1px solid #dfdfdf;
+  border-radius: 4px;
+  background: #f5f5f5;
+  color: var(--chunk-secondary, #595959);
+  font-size: 12px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hintIcon {
+  margin-right: 4px;
+  font-size: 12px;
+}
+.fieldInfoIcon {
+  color: #999999;
+  font-size: 13px;
+  cursor: help;
+}
+.jsonButton {
+  margin-left: auto;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.metadataAddRow {
+  height: 22px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 20px;
 }
 .metadataFieldControl {
   flex: 1;
