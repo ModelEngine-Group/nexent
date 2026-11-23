@@ -75,6 +75,7 @@ vi.mock("@/components/skill/SkillChatEditor", () => ({
     onDraftChange,
     onSaved,
     onBusyChange,
+    onDraftHeaderChange,
   }: {
     payload: SkillChatPayload | null;
     open: boolean;
@@ -84,6 +85,11 @@ vi.mock("@/components/skill/SkillChatEditor", () => ({
     onDraftChange: (payload: SkillChatPayload) => void;
     onSaved: (payload: SkillChatPayload) => void;
     onBusyChange: (value: boolean) => void;
+    onDraftHeaderChange: (header: {
+      name: string;
+      savedAt: string;
+      cacheError: boolean;
+    }) => void;
   }) => (
     <div>
       <output aria-label="Generated name">{payload?.name ?? "empty"}</output>
@@ -108,6 +114,17 @@ vi.mock("@/components/skill/SkillChatEditor", () => ({
       </button>
       <button onClick={onNew}>New skill</button>
       <button onClick={() => onBusyChange(true)}>Start saving</button>
+      <button
+        onClick={() =>
+          onDraftHeaderChange({
+            name: "Named draft",
+            savedAt: "2026-11-23T12:00:00.000Z",
+            cacheError: false,
+          })
+        }
+      >
+        Show saved draft
+      </button>
     </div>
   ),
 }));
@@ -129,6 +146,23 @@ function show() {
   );
   return { ...result, props };
 }
+test("shows the draft name and autosave status in the drawer title", () => {
+  show();
+  const title = screen.getByRole("heading", { name: "skillChat.untitled" });
+  const drawerHeader = title.closest(".ant-drawer-header");
+  expect(drawerHeader).toContainElement(
+    screen.getByText("skillChat.localDraft")
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Show saved draft" }));
+  expect(drawerHeader).toContainElement(
+    screen.getByRole("heading", { name: "Named draft" })
+  );
+  expect(drawerHeader).toContainElement(
+    screen.getByText("skillChat.localSavedAt")
+  );
+});
+
 test("opens an independent dialog and feeds generated content to its editor", async () => {
   const { props } = show();
   await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());

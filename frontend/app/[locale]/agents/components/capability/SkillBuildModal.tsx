@@ -1206,8 +1206,6 @@ export default function SkillBuildModal({
             </div>
             <section className="flex min-h-[600px] min-w-0 flex-1 flex-col border-t border-border bg-muted/30 lg:min-h-0 lg:border-l lg:border-t-0">
               <SkillConfigurationHeader
-                name={interactiveSkillName || editingSkillName}
-                tags={editingSkill?.tags}
                 groupStep={showGroupSteps ? showGroupStep : undefined}
                 actions={
                   <>

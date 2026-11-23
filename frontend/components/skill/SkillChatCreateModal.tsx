@@ -55,10 +55,16 @@ export default function SkillChatCreateModal({
   const [dirty, setDirty] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
   const [selectedPath, setSelectedPath] = useState("SKILL.md");
+  const [draftHeader, setDraftHeader] = useState<{
+    name: string;
+    savedAt: string | null;
+    cacheError: boolean;
+  } | null>(null);
   const checkpoint = useRef(initialSkillCreationDraft);
   const scopeKey = `${user?.tenantId ?? ""}:${user?.id ?? ""}:repository-chat:${sessionId}`;
   const generated = useMemo(() => buildSkillSavePayload(draft), [draft]);
   const artifact = edited ?? generated;
+  const headerName = (draftHeader?.name ?? artifact?.name ?? "").trim();
   const getDraftSnapshot = useCallback(
     () => ({
       ...(buildSkillSavePayload(draftRef.current) ?? {}),
@@ -138,6 +144,7 @@ export default function SkillChatCreateModal({
       setSavedName(null);
       setDirty(false);
       setSelectedPath("SKILL.md");
+      setDraftHeader(null);
       setEditorOpen(true);
     });
   return (
@@ -147,8 +154,17 @@ export default function SkillChatCreateModal({
       closable={{ placement: "end", "aria-label": t("common.close") }}
       title={
         <SkillPanelTitle
-          name={artifact?.name ?? ""}
-          title={t("skillChat.title")}
+          name={headerName}
+          title={headerName || t("skillChat.untitled")}
+          subtitle={
+            draftHeader?.cacheError
+              ? t("skillChat.localSaveFailed")
+              : draftHeader?.savedAt
+                ? t("skillChat.localSavedAt", {
+                    time: new Date(draftHeader.savedAt).toLocaleTimeString(),
+                  })
+                : t("skillChat.localDraft")
+          }
         />
       }
       onClose={() => close()}
@@ -246,6 +262,7 @@ export default function SkillChatCreateModal({
           onClose={() => setEditorOpen(false)}
           onNew={newSession}
           onBusyChange={setSaving}
+          onDraftHeaderChange={setDraftHeader}
           onDraftChange={(payload) => {
             draftRef.current = {
               ...draftRef.current,

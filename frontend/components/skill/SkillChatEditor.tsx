@@ -52,6 +52,7 @@ export default function SkillChatEditor({
   onDraftChange,
   onSaved,
   onBusyChange,
+  onDraftHeaderChange,
 }: {
   scopeKey: string;
   payload: SkillChatPayload | null;
@@ -64,6 +65,11 @@ export default function SkillChatEditor({
   onDraftChange: (payload: SkillChatPayload) => void;
   onSaved: (payload: SkillChatPayload) => void;
   onBusyChange?: (busy: boolean) => void;
+  onDraftHeaderChange?: (header: {
+    name: string;
+    savedAt: string | null;
+    cacheError: boolean;
+  }) => void;
 }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
@@ -111,6 +117,7 @@ export default function SkillChatEditor({
   const busy = useRef(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [cacheError, setCacheError] = useState(false);
+  const draftName = draft?.name ?? payload?.name ?? "";
   const [error, setError] = useState<string | null>(null);
   const [lookup, setLookup] = useState<"checking" | "ready" | "error">(
     "checking"
@@ -124,6 +131,9 @@ export default function SkillChatEditor({
   valuesRef.current = values;
   const wasRunning = useRef(running);
   const storageKey = `nexent:repository:skill-editor:v1:${scopeKey}`;
+  useEffect(() => {
+    onDraftHeaderChange?.({ name: draftName, savedAt, cacheError });
+  }, [cacheError, draftName, onDraftHeaderChange, savedAt]);
   const setCurrent = (next: EditorDraft | null) => {
     draftRef.current = next;
     setDraft(next);
@@ -490,17 +500,6 @@ export default function SkillChatEditor({
         </div>
       </div>
       <SkillConfigurationHeader
-        name={draft?.name || ""}
-        tags={payload?.tags}
-        subtitle={
-          cacheError
-            ? t("skillChat.localSaveFailed")
-            : savedAt
-              ? t("skillChat.localSavedAt", {
-                  time: new Date(savedAt).toLocaleTimeString(),
-                })
-              : t("skillChat.localDraft")
-        }
         groupStep={tab === "groups"}
         actions={
           <>

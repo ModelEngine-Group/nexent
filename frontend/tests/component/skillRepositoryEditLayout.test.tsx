@@ -88,6 +88,11 @@ test("edits a repository skill in the same two steps as creation", async () => {
     "skillManagement.form.description"
   );
   expect(description).toHaveValue(skill.description);
+  expect(
+    screen
+      .getByRole("heading", { name: skill.name })
+      .closest(".ant-drawer-header")
+  ).not.toBeNull();
   expect(screen.getByText("skillCreation.parameters")).toBeInTheDocument();
   expect(screen.getByLabelText("resourceCenter.search")).toBeVisible();
   expect(screen.queryByRole("checkbox", { name: "Current group" })).toBeNull();
