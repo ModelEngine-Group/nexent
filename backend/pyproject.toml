@@ -61,6 +61,8 @@ test = [
     "mock",
     "pytest-mock",
     "fakeredis[lua]>=2.31,<3",
+    # fakeredis 2.40.0 cannot initialize with redis-py 8.2 (fakeredis-py #636).
+    "redis<8.2",
     "httpx>=0.28.1",
     "selenium",
     "botocore"
