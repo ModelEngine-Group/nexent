@@ -403,6 +403,11 @@ loads both `deploy/env/.env` and `deploy/env/monitoring.env`, mounts the shared
 logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Gateway
 uses the corresponding `GATEWAY_OPS_URL`.
 
+Build local service images with `bash build.sh --images mcp-service,ops --version latest --load`.
+The deployment uses `NEXENT_OPS_IMAGE` for Ops and `NEXENT_MCP_SERVICE_IMAGE`
+for the MCP backend. The existing `NEXENT_MCP_DOCKER_IMAGE` is the MCP proxy
+image used for separately provisioned proxy containers.
+
 ```shell
 docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml up -d nexent-ops
 ```

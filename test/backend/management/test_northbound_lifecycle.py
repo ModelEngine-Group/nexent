@@ -38,7 +38,7 @@ def lifecycle(monkeypatch):
     monkeypatch.setitem(sys.modules, "management.recovery", recovery)
     config = SimpleNamespace(start_system_configuration=AsyncMock(),
                              stop_system_configuration=AsyncMock())
-    monkeypatch.setitem(sys.modules, "management.configuration.runtime", config)
+    monkeypatch.setitem(sys.modules, "infrastructure.system_configuration.runtime", config)
     path = Path(__file__).resolve().parents[3] / "backend/management/api/northbound_application.py"
     spec = importlib.util.spec_from_file_location("isolated_management_northbound", path)
     module = importlib.util.module_from_spec(spec)

@@ -1,0 +1,305 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Backend bridge: turn DB model configs into gateway adapters.
+Service factory functions keep their signatures but delegate adapter
+construction to the gateway via :func:`get_adapter_from_config`.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Optional
+
+from contracts.model_names import get_model_name_from_config
+from nexent import MessageObserver
+from nexent.core.gateway import (
+    EmbeddingContext,
+    LLMContext,
+    LongContextLLMContext,
+    ModelContext,
+    VLMContext,
+    get_gateway,
+)
+from nexent.core.gateway.registry import get_registry
+from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+from nexent.core.model_service.profiles.outlet_storage import ProfileStorageError, decode_resolved_model_profile
+from nexent.core.model_service.registry import model_service_references
+from nexent.core.model_service.profiles.request_parameters import apply_extra_api_parameters
+
+logger = logging.getLogger("model_gateway_service")
+
+# Normalize vendor aliases to canonical registry factory names.
+_FACTORY_NORMALIZE: Dict[str, str] = {
+    "volc": "volc",
+    "volcano": "volc",
+    "volcengine": "volc",
+    "火山引擎": "volc",
+    "dashscope": "dashscope",
+    "ali": "ali",
+    "alibaba": "ali",
+    "阿里云": "ali",
+    "silicon": "siliconflow",
+    "siliconflow": "siliconflow",
+    "openai": "openai",
+    "tokenpony": "tokenpony",
+    "jina": "jina",
+    "cohere": "cohere",
+    "modelengine": "modelengine",
+}
+
+# Modality-specific default factory when the raw factory is empty/unknown.
+_MODALITY_DEFAULT_FACTORY: Dict[str, str] = {
+    "llm": "openai",
+    "llm_long_context": "openai",
+    "vlm": "openai",
+    "embedding": "openai",
+    "rerank": "openai",
+    "multi_embedding": "jina",
+}
+
+
+def _normalize_factory(raw: Optional[str], modality: str) -> str:
+    """Return the canonical registry factory for ``raw`` under ``modality``."""
+    cleaned = (raw or "").strip().lower()
+    factory = _FACTORY_NORMALIZE.get(cleaned, cleaned)
+    if get_registry().has(factory, modality):
+        return factory
+    default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
+    if factory:
+        logger.debug(
+            "factory %r has no %s adapter; falling back to %r",
+            factory,
+            modality,
+            default,
+        )
+    return default
+
+
+def _coalesce(*vals: Any) -> Any:
+    """Return the first non-``None`` value, or ``None`` if all are ``None``.
+
+    Unlike ``a or b``, this preserves falsy-but-valid values such as
+    ``temperature=0`` — an explicit temperature of ``0`` must reach the
+    adapter rather than being silently replaced by the cfg/default fallback.
+    """
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
+def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
+    """Extract the operator's __custom__ KV pairs as the OpenAI extra_body.
+
+    ``extra_params`` is the nexent field ({"__custom__": {...}, ...}); the
+    ``__custom__`` sub-dict holds user-entered provider-specific params that
+    must reach the chat request's ``extra_body``. JSON-compatible nested
+    values are deliberately returned unchanged. Returns None when absent so
+    default behaviour is unchanged.
+    """
+    if not extra_params:
+        return None
+    custom = extra_params.get("__custom__")
+    return custom if isinstance(custom, dict) and custom else None
+
+
+def _llm_construct_kwargs(
+    construct_extras: Dict[str, Any], cfg: dict
+) -> Dict[str, Any]:
+    """Per-call kwargs shared by every LLM-family context subclass."""
+    return {
+        "temperature": _coalesce(
+            construct_extras.pop("temperature", None), cfg.get("temperature")
+        ),
+        "top_p": _coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+        "stream": construct_extras.pop("stream", None),
+        "max_output_tokens": _coalesce(
+            construct_extras.pop("max_output_tokens", None),
+            cfg.get("max_output_tokens"),
+        ),
+        "frequency_penalty": cfg.get("frequency_penalty"),
+    }
+
+
+def _config_to_context(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str],
+    **construct_extras: Any,
+) -> ModelContext:
+    """Build a modality-specific :class:`ModelContext` from a DB config + per-call extras.
+
+    ``construct_extras`` carries per-call-site tuning (temperature, top_p,
+    max_output_tokens, stream, observer, display_name, timeout_seconds,
+    language, speed_ratio, ...) so construction is behavior-preserving. Known
+    keys are mapped to subclass fields directly.
+    """
+    cfg = cfg or {}
+    if modality in ("llm", "llm_long_context"):
+        snapshot = restore_model_snapshot(cfg, tenant_id)
+        if snapshot is not None:
+            # Explicit legacy business overrides remain validated, rather than overriding the wire body.
+            overrides = {key: construct_extras[key] for key in ("temperature", "top_p", "max_output_tokens")
+                         if construct_extras.get(key) is not None}
+            snapshot = LegacyInvocationOptions(overrides).resolve(snapshot)
+            requested_name = construct_extras.get("model_name", snapshot.identity.request_model_id)
+            if requested_name != snapshot.identity.request_model_id:
+                raise ProfileStorageError()
+            context_type = {"llm": LLMContext, "llm_long_context": LongContextLLMContext}[modality]
+            return context_type(
+                model_name=snapshot.identity.request_model_id, base_url=snapshot.connection.base_url,
+                api_key=cfg.get("api_key", ""), http_headers=cfg.get("http_headers") or {},
+                modality=modality, factory="openai",
+                tenant_id=tenant_id, slot=slot, observer=construct_extras.get("observer") or MessageObserver(),
+                resolved_profile=snapshot, cancellation_scope=construct_extras.get("cancellation_scope"),
+                **({"truncation_strategy": cfg.get("truncation_strategy")} if modality == "llm_long_context" else {}),
+            )
+    factory = _normalize_factory(cfg.get("model_factory"), modality)
+    needs_observer = modality in ("vlm", "llm", "llm_long_context")
+    observer = construct_extras.pop("observer", None)
+    if needs_observer and observer is None:
+        observer = MessageObserver()
+
+    # ---- common kwargs (base class fields) ----
+    common: Dict[str, Any] = {
+        "model_name": construct_extras.pop("model_name", None)
+        or get_model_name_from_config(cfg)
+        or "",
+        "base_url": cfg.get("base_url", ""),
+        "api_key": cfg.get("api_key", ""),
+        "modality": modality,
+        "factory": factory,
+        "tenant_id": tenant_id,
+        "catalog_model_id": cfg.get("model_id"),
+        "slot": slot,
+        "ssl_verify": cfg.get("ssl_verify", True),
+        "observer": observer,
+        "display_name": _coalesce(
+            construct_extras.pop("display_name", None), cfg.get("display_name")
+        ),
+        "timeout_seconds": _coalesce(
+            construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")
+        ),
+        "extra_body": cfg.get("extra_body")
+        or _custom_extra_body(cfg.get("extra_params")),
+    }
+
+    # ---- modality-specific subclass construction ----
+    if modality == "llm":
+        return LLMContext(**common, **_llm_construct_kwargs(construct_extras, cfg))
+    if modality == "llm_long_context":
+        return LongContextLLMContext(
+            **common,
+            **_llm_construct_kwargs(construct_extras, cfg),
+            max_tokens=cfg.get("max_tokens"),
+            truncation_strategy=cfg.get("truncation_strategy"),
+        )
+    if modality == "vlm":
+        explicit_caps = construct_extras.pop("capabilities", None) or {}
+        caps = {"audio": True, "video": False, "image": False} if slot == "vlm4" else {}
+        caps.update(explicit_caps)
+        return VLMContext(
+            **common,
+            **_llm_construct_kwargs(construct_extras, cfg),
+            max_tokens=cfg.get("max_tokens"),
+            capabilities=caps,
+        )
+    if modality in ("embedding", "multi_embedding"):
+        return EmbeddingContext(
+            **common,
+            embedding_dim=cfg.get("max_tokens", 1024),
+            model_type=cfg.get("model_type"),
+        )
+    if modality == "rerank":
+        return ModelContext(**common)
+    raise ValueError(f"Unknown modality: {modality}")
+
+
+def get_adapter_from_config(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    """Resolve and return the adapter for ``cfg``."""
+    context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
+    return get_gateway().get_adapter(context)
+
+
+def build_adapter_fresh(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    """Build a fresh adapter for ``cfg``.
+
+    Used by per-call construction sites (e.g. voice streaming sessions) where
+    vendor config carries per-request params (api_key, ws_url, voice, …) that
+    must not collide across tenants.
+    """
+    context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
+    cls = get_registry().resolve(context.factory, modality)
+    return cls(context)
+
+
+def restore_model_snapshot(cfg: dict, tenant_id: str):
+    """Restore one row with executable registrations; never reload TOML or credentials."""
+    if cfg.get("profile_schema_version") is None:
+        if cfg.get("resolved_profile") is not None or cfg.get("protocol_id") is not None:
+            raise ProfileStorageError()
+        if cfg.get("model_id") is not None and cfg.get("model_type") in {"llm", "chat"}:
+            from contracts.errors.exceptions import ModelOutletValidationError
+
+            raise ModelOutletValidationError("PROFILE_MIGRATION_REQUIRED")
+        return None
+    profile = decode_resolved_model_profile(cfg, registered_references=model_service_references())
+    if profile.identity.tenant_id != tenant_id:
+        raise ProfileStorageError()
+    return profile
+
+
+def project_saved_outlet(row):
+    """Return compatible read fields and review state without modifying the stored row."""
+    remainder = row.get("resolved_profile")
+    if row.get("profile_schema_version") is None:
+        if isinstance(remainder, dict) and "migration_error" in remainder:
+            return {"migration_status": "failed", "migration_diagnostic": remainder["migration_error"]}
+        return None
+    try:
+        profile = decode_resolved_model_profile(row, registered_references=model_service_references())
+    except ProfileStorageError:
+        return {"migration_status": "failed", "migration_diagnostic": {"category": "PROFILE_STORAGE_INVALID"}}
+    controls = []
+    levels = []
+    primary = "toggle"
+    for control in profile.capabilities.reasoning.controls or []:
+        primary = control.mode
+        item = {"type": control.mode}
+        if control.mode == "effort":
+            item["values"] = list(control.values)
+            levels = [value for value in control.values if isinstance(value, str)]
+        elif control.mode == "budget_tokens":
+            item.update(min=control.min, max=control.max)
+        controls.append(item)
+    params = {key: value for key, value in profile.parameter_values.items()
+              if key not in {"temperature", "top_p", "max_output_tokens", "max_tokens"}}
+    custom = apply_extra_api_parameters({}, profile.extra_api_parameters)
+    if custom:
+        params["__custom__"] = custom
+    result = {"extra_params": params or None,
+        "max_tokens": profile.parameter_values.get("max_output_tokens", profile.capabilities.context.output_limit),
+        "reasoning_capability": {"status": profile.capabilities.reasoning.status, "control": primary,
+            "levels": levels, "controls": controls, "default": profile.parameter_values.get("reasoning_effort", "auto"),
+            "provider_id": profile.identity.provider_id, "matched_model_id": profile.identity.request_model_id,
+            "matched_api": profile.connection.base_url, "source": "operator"},
+        "profile_schema_version": profile.schema_version, "config_revision": profile.config_revision}
+    migration = profile.provenance.provider_metadata.get("migration")
+    if isinstance(migration, dict):
+        result.update(migration_status="migrated", migration_review_required=
+            not (type(migration.get("reviewed_revision")) is int and migration["reviewed_revision"] > 0),
+            migration_details={key: migration.get(key) for key in ("from_version", "version", "migrated_at",
+                "defaulted_fields", "unmatched_atoms", "unbound_legacy_parameters")})
+    return result

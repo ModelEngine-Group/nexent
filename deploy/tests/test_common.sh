@@ -233,7 +233,9 @@ PREFIXED_HELM_VALUES="$TMP_DIR/prefixed-generated-values.yaml"
 deployment_render_helm_values "$PREFIXED_HELM_VALUES"
 PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
-assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-management"' "helm values should use prefixed Management repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-mcp-service"' "helm values should use prefixed MCP backend repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-ops"' "helm values should use prefixed Ops repositories"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
 unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
@@ -330,7 +332,8 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
 deployment_render_helm_values "$LOCAL_HELM_VALUES"
 LOCAL_HELM_CONTENT="$(cat "$LOCAL_HELM_VALUES")"
-assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp-service\"" "local-latest should render the MCP backend image"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-ops\"" "local-latest should render the Ops image"
 assert_contains "$LOCAL_HELM_CONTENT" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
 assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
 
@@ -1400,15 +1403,26 @@ else
   assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
 fi
 assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
-assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
-for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-postgresql/templates/deployment.yaml")" '/docker-entrypoint-initdb.d/' "PostgreSQL must leave application SQL initialization to Management"
+for renderer in yaml_quote env_or_default render_yaml_literal_file sql_files_checksum render_infrastructure_runtime_values render_k8s_runtime_config_values; do
   eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
 done
 SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
-assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must not render application initialization SQL"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+render_k8s_runtime_config_values "$TMP_DIR/application-sql-values.yaml"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'init: |' "Management values must include baseline SQL"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'CREATE SCHEMA IF NOT EXISTS nexent;' "Management values must include the real baseline"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'migrations:' "Management values must include versioned SQL"
+original_sql_checksum="$(sql_files_checksum)"
+cp "$SQL_INIT_FILE" "$TMP_DIR/init-checksum.sql"
+printf '\n-- initialization checksum regression\n' >> "$TMP_DIR/init-checksum.sql"
+SQL_INIT_FILE="$TMP_DIR/init-checksum.sql"
+assert_not_eq "$original_sql_checksum" "$(sql_files_checksum)" "Management rollout checksum must include init.sql"
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
 
 export AUTH_HOOK_EXIT=17
 if deployment_upgrade_local_accounts docker; then

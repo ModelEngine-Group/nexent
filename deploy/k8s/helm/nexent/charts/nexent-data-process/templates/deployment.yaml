@@ -5,7 +5,6 @@
 {{- fail "nexent-data-process strategy.type must be Recreate for startup task recovery" -}}
 {{- end -}}
 {{- $global := default dict .Values.global -}}
-{{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $logsStorage := default dict $sharedStorage.logs -}}
@@ -33,8 +32,15 @@ spec:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
         checksum/nexent-data-process-image: {{ dig "rolloutChecksums" "dataProcessImage" "" .Values.global | quote }}
-        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
+      initContainers:
+        - name: wait-for-management
+          image: "{{ .Values.images.dataProcess.repository }}:{{ .Values.images.dataProcess.tag }}"
+          imagePullPolicy: {{ .Values.images.dataProcess.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - until curl --noproxy '*' -fsS http://nexent-config:5010/health/ready >/dev/null; do sleep 2; done
       containers:
         - name: nexent-data-process
           image: "{{ .Values.images.dataProcess.repository }}:{{ .Values.images.dataProcess.tag }}"
@@ -69,9 +75,6 @@ spec:
             - name: skip_proxy
               value: {{ .Values.config.skipProxy | quote }}
           volumeMounts:
-            - name: nexent-sql-files
-              mountPath: /opt/nexent/sql
-              readOnly: true
             - name: nexent-workspace
               mountPath: /mnt/nexent
             - name: nexent-logs
@@ -84,19 +87,6 @@ spec:
               memory: {{ .Values.resources.dataProcess.limits.memory }}
               cpu: {{ .Values.resources.dataProcess.limits.cpu }}
       volumes:
-        - name: nexent-sql-files
-          configMap:
-            name: nexent-sql-files
-            items:
-              - key: init.sql
-                path: init.sql
-              - key: migrations-.keep
-                path: migrations/.keep
-{{ range $name := default (list) $sqlFileNames.migrations }}
-              - key: {{ printf "migrations-%s" $name | quote }}
-                path: {{ printf "migrations/%s" $name | quote }}
-{{ end }}
-
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

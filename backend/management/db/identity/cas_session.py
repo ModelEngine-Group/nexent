@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
-from management.db.models import UserCasSession
+from management.db.identity.models import UserCasSession
 
 
 def create_cas_session(

@@ -393,20 +393,29 @@ def model_peer(request):
 
 
 def _resume_app(info, tenant, channel, threads, monkeypatch):
-    from management.services.agent import subscription
-    from runtime.api.agent import execution as api
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY
+    from nexent.core.concurrency import ManagedTaskSpec
+    from runtime.agentos import legacy_resume, resume
 
-    monkeypatch.setattr(api, "get_current_user_id", lambda _: (info.user_id, tenant))
-    monkeypatch.setattr(subscription, "get_conversation_service", lambda **_: {"conversation_id": info.conversation_id})
-    monkeypatch.setattr(subscription, "update_conversation_chat_mode_service", Mock())
-    monkeypatch.setattr(subscription, "get_latest_assistant_message", lambda *_: {"message_id": 1, "status": "streaming"})
-    monkeypatch.setattr(subscription, "get_last_unit_for_message", lambda _: None)
-    monkeypatch.setattr(subscription, "agent_run_manager", SimpleNamespace(get_agent_run_info=lambda **_: info))
-    monkeypatch.setattr(subscription, "streaming_channel_manager", SimpleNamespace(get_channel=lambda *_, **__: channel))
-    monkeypatch.setattr(subscription.runtime_state_service, "get_run_state_async", AsyncMock(return_value={}))
-    monkeypatch.setattr(subscription, "runtime_thread_manager", threads)
+    monkeypatch.setattr(legacy_resume, "read_legacy_resume_state", lambda *_: (False, ("streaming", None)))
+    monkeypatch.setattr(legacy_resume, "agent_run_manager", SimpleNamespace(get_agent_run_info=lambda *_: info))
+    monkeypatch.setattr(legacy_resume, "streaming_channel_manager", SimpleNamespace(get_channel=lambda *_, **__: channel))
+    monkeypatch.setattr(legacy_resume.runtime_state_service, "get_run_state_async", AsyncMock(return_value={}))
+
+    async def control_io(task, function, *args, lane, owner, **kwargs):
+        return await threads.run(lane, ManagedTaskSpec(task, owner), function, *args, **kwargs)
+
+    monkeypatch.setattr(legacy_resume, "run_blocking", control_io)
     app = FastAPI()
-    app.include_router(api.agent_runtime_router)
+
+    @app.middleware("http")
+    async def owned_identity(request, call_next):
+        # Authentication has separate signed-protocol coverage; retain the real lifecycle and replay handlers.
+        request.scope[PRINCIPAL_KEY] = SimpleNamespace(user_id=info.user_id, tenant_id=tenant)
+        request.scope[BODY_KEY] = await request.body()
+        return await call_next(request)
+
+    app.include_router(resume.create_run_lifecycle_router())
     return app
 
 
@@ -568,7 +577,8 @@ async def _verify_agent_views(client, service, selection, tenant, other, previou
 async def test_real_root_agent_capture_survives_sse_reconnect(
     isolated_monitoring, model_peer, monkeypatch, record_property, first_answer_clock,
 ):
-    from management.services.agent.channels import StreamingChannel, runtime_state_service
+    from contracts.agentos import AgentOperation
+    from infrastructure.agent_stream_channels import StreamingChannel, runtime_state_service
 
     service, tenant = isolated_monitoring
     base, requests, release = model_peer
@@ -637,8 +647,8 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
                 async with asyncio.TaskGroup() as tasks:
                     resumed = tasks.create_task(client.post(
-                        "/agent/run?resume=true",
-                        json={"query": info.query, "agent_id": 21, "conversation_id": info.conversation_id},
+                        AgentOperation.RESUME_LEGACY.value,
+                        json={"conversation_id": info.conversation_id},
                     ))
                     async with asyncio.timeout(5):
                         while not channel.has_subscribers:

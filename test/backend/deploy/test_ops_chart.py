@@ -32,7 +32,7 @@ DEPLOYMENT_PORT_POLICY="$3"
 DEPLOYMENT_IMAGE_SOURCE=general
 DEPLOYMENT_APP_VERSION=latest
 deployment_apply_image_source
-NEXENT_IMAGE=example.invalid/shared/backend:ops-check
+NEXENT_OPS_IMAGE=example.invalid/custom/ops:ops-check
 OPS_PORT="$4"
 deployment_render_helm_chart_values
 """
@@ -63,7 +63,7 @@ deployment_render_helm_chart_values
     )
     assert settings["enabled"] is (component == "application")
     assert settings["images"]["backend"] == {
-        "repository": "example.invalid/shared/backend",
+        "repository": "example.invalid/custom/ops",
         "tag": "ops-check",
         "pullPolicy": "IfNotPresent",
     }

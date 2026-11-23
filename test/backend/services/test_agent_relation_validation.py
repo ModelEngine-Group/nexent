@@ -5,7 +5,6 @@
 from contracts.authentication import AuthenticatedIdentity
 import pytest
 
-from test.backend.services import test_agent_service as legacy
 from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError
 from contracts.agent import AgentInfoRequest
 from management.services.agent import service

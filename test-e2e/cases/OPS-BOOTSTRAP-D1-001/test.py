@@ -99,7 +99,7 @@ DEPLOYMENT_PORT_POLICY=production
 DEPLOYMENT_IMAGE_SOURCE=general
 DEPLOYMENT_APP_VERSION=latest
 deployment_apply_image_source
-NEXENT_IMAGE=example.invalid/shared/backend:ops-check
+NEXENT_OPS_IMAGE=example.invalid/custom/ops:ops-check
 OPS_PORT=15016
 LOG_LEVEL=DEBUG
 deployment_render_helm_chart_values
@@ -111,7 +111,7 @@ deployment_render_helm_chart_values
         )
         assert result.returncode == 0, result.stderr
         values = yaml.safe_load(result.stdout)
-        values['global'] = {'namespace': 'ops-proof', 'rolloutChecksums': {'backendImage': 'image-rev-1'}}
+        values['global'] = {'namespace': 'ops-proof', 'rolloutChecksums': {'opsImage': 'image-rev-1'}}
         values.setdefault('nexent-common', {}).setdefault('secrets', {})['jwtSecret'] = 'controlled-fixture'
         values_path.write_text(yaml.safe_dump(values), encoding='utf-8')
         rendered = subprocess.run(
@@ -137,7 +137,7 @@ deployment_render_helm_chart_values
         assert spec['volumes'] == [{'name': 'ops-logs', 'persistentVolumeClaim': {'claimName': 'nexent-logs'}}]
         assert len(spec['containers']) == 1
         container = spec['containers'][0]
-        assert container['image'] == 'example.invalid/shared/backend:ops-check'
+        assert container['image'] == 'example.invalid/custom/ops:ops-check'
         assert container['command'] == ['/opt/nexent/scripts/start-backend.sh', 'python', '-m', 'backend.http.ops_service']
         assert not container.get('envFrom')
         assert container['volumeMounts'] == [{'name': 'ops-logs', 'mountPath': '/mnt/nexent-data/logs'}]
@@ -148,7 +148,7 @@ deployment_render_helm_chart_values
             'NEXENT_SQL_STARTUP_MODE': 'off', 'PYTHON_DOTENV_DISABLED': '1',
             'GATEWAY_AUTH_ENABLED': 'true',
         }
-        for name in ('LOG_LEVEL', 'IS_DEBUG', 'LOG_MAX_BYTES', 'LOG_ROTATION_INTERVAL', 'LOG_BACKUP_COUNT'):
+        for name in ('LOG_LEVEL', 'IS_DEBUG', 'LOG_MAX_BYTES', 'LOG_ROTATION_INTERVAL', 'LOG_BACKUP_COUNT', 'REDIS_URL'):
             assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
                 'name': 'nexent-env', 'key': name, 'optional': True,
             }

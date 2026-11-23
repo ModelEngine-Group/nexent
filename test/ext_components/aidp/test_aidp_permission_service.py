@@ -262,7 +262,7 @@ class TestRequirePermissionRewritten:
 class TestValidateGroupIdsStrict:
     def test_returns_input_when_all_valid(self, monkeypatch):
         monkeypatch.setattr(
-            svc.group_db_module, "filter_tenant_group_ids",
+            svc.account_access, "filter_tenant_group_ids",
             lambda ids, tenant: list(ids),
         )
         result = svc._validate_group_ids_strict([1, 2], "tenant")
@@ -270,7 +270,7 @@ class TestValidateGroupIdsStrict:
 
     def test_raises_on_invalid_id(self, monkeypatch):
         monkeypatch.setattr(
-            svc.group_db_module, "filter_tenant_group_ids",
+            svc.account_access, "filter_tenant_group_ids",
             lambda ids, tenant: [g for g in ids if g != 999],
         )
         with pytest.raises(AidpGroupValidationError) as exc:
@@ -589,14 +589,14 @@ class TestDbPassthroughHelpers:
 class TestUserLookupHelpers:
     def test_get_user_role_calls_db(self, monkeypatch):
         mock_role = MagicMock(return_value="ADMIN")
-        monkeypatch.setattr(svc.user_tenant_db_module, "get_user_role_by_tenant", mock_role)
+        monkeypatch.setattr(svc.account_access, "get_user_role_by_tenant", mock_role)
         result = svc._get_user_role("user-1", "tenant-a")
         assert result == "ADMIN"
         mock_role.assert_called_once_with("user-1", "tenant-a")
 
     def test_get_user_groups_calls_db(self, monkeypatch):
         mock_groups = MagicMock(return_value=[1, 2, 3])
-        monkeypatch.setattr(svc.group_db_module, "query_group_ids_by_user_in_tenant", mock_groups)
+        monkeypatch.setattr(svc.account_access, "query_group_ids_by_user_in_tenant", mock_groups)
         result = svc._get_user_groups("user-1", "tenant-a")
         assert result == [1, 2, 3]
         mock_groups.assert_called_once_with("user-1", "tenant-a")

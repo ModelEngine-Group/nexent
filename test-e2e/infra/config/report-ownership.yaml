@@ -73,6 +73,8 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  AOS-MODEL: model
+  AOS-TRANSPORT: runtime
   SI-STORAGE: system
   GW-AUTH: system
   AGENT-CORE-CONFIG: agent_config
