@@ -1642,8 +1642,8 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         output.write_bytes(b"report")
         published = []
 
-        def save_file(path, key):
-            uploaded.append((Path(path).read_bytes(), key))
+        def save_fileobj(file_obj, key):
+            uploaded.append((file_obj.read(), key))
             return True, "stored"
 
         agent = NexentAgent.__new__(NexentAgent)
@@ -1651,7 +1651,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         agent.workspace_mapping = None
         uploader = UploadToS3Tool(
             workspace_path=str(workspace), user_id=actor.user_id, run_id=info.workspace_run_id,
-            minio_client=SimpleNamespace(upload_file=save_file, default_bucket="bucket"),
+            minio_client=SimpleNamespace(upload_fileobj=save_fileobj, default_bucket="bucket"),
         )
         agent.agent = SimpleNamespace(tools={"upload_to_s3": uploader})
         script = RunSkillScriptTool(
