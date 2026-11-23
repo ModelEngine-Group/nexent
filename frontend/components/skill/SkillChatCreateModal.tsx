@@ -17,6 +17,7 @@ import {
   type SkillChatPayload,
 } from "@/lib/skillChatDraft";
 import SkillChatEditor from "./SkillChatEditor";
+import SkillPanelTitle from "./SkillPanelTitle";
 import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import log from "@/lib/logger";
 
@@ -142,8 +143,13 @@ export default function SkillChatCreateModal({
     <Drawer
       placement="right"
       open={open}
-      closable={{ "aria-label": t("common.close") }}
-      title={t("skillChat.title")}
+      closable={{ placement: "end", "aria-label": t("common.close") }}
+      title={
+        <SkillPanelTitle
+          name={artifact?.name ?? ""}
+          title={t("skillChat.title")}
+        />
+      }
       onClose={() => close()}
       size="min(1600px, 100vw)"
       styles={{
@@ -160,7 +166,7 @@ export default function SkillChatCreateModal({
       <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
         <section
           inert={saving}
-          className={`flex min-h-[460px] min-w-0 flex-col gap-3 p-3 lg:min-h-0 ${editorOpen ? "lg:w-1/2" : "flex-1"}`}
+          className={`flex min-h-[460px] min-w-0 flex-col gap-3 p-3 lg:min-h-0 ${editorOpen ? "lg:w-2/5" : "flex-1"}`}
           aria-label={t("skillChat.conversation")}
         >
           {!editorOpen && (

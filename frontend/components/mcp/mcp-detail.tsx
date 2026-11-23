@@ -16,6 +16,8 @@ import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import ResourceDetail from "@/components/resource/ResourceDetail";
+import ResourcePanelTitle from "@/components/resource/ResourcePanelTitle";
+import panel from "@/components/resource/resource-panel.module.css";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import {
   getDeploymentTypeLabelKey,
@@ -100,17 +102,17 @@ export function McpDetail({
         bodyStyle={{ padding: 0 }}
       >
         {presentation?.resourceType === "mcp" ? (
-          <div className="-mx-6 flex min-h-0 flex-1 flex-col text-sm leading-[22px] text-foreground">
+          <div className="-mx-6 flex min-h-0 flex-1 flex-col text-body-2 leading-[22px] text-foreground">
             <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 pb-4 pr-14">
-              <div className="shrink-0">{icon}</div>
-              <div className="min-w-0 flex-1">
-                <h2 className="break-words text-xl font-medium leading-7">
-                  {service.name}
-                </h2>
-                <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 text-xs text-primary">
-                  {deploymentLabel}
-                </span>
-              </div>
+              <ResourcePanelTitle
+                title={service.name}
+                icon={icon}
+                subtitle={
+                  <span className="rounded bg-primary/10 px-1.5 text-primary">
+                    {deploymentLabel}
+                  </span>
+                }
+              />
             </header>
             <div className="repository-detail-body min-h-0 flex-1 overflow-y-auto">
               <section className="space-y-3 border-b border-border px-6 py-5">
@@ -189,7 +191,7 @@ export function McpDetail({
                   {snapshotTools.map((tool) => (
                     <details
                       key={tool.name}
-                      className="group rounded bg-white px-4 py-[9px] text-xs leading-[18px] shadow-[inset_0_0_0_1px_#DFDFDF]"
+                      className="group rounded-lg border border-border bg-background px-4 py-2 text-body-1 leading-5"
                     >
                       <summary className="flex cursor-pointer list-none items-center gap-3">
                         <Wrench
@@ -202,7 +204,7 @@ export function McpDetail({
                         >
                           {tool.name}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-[#191919]/70 group-open:invisible">
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground group-open:invisible">
                           {tool.description}
                         </span>
                         <ChevronDown
@@ -211,7 +213,7 @@ export function McpDetail({
                         />
                       </summary>
                       {tool.description && (
-                        <p className="mt-2 whitespace-pre-wrap break-words font-['HarmonyHeiTi',sans-serif] text-[#191919]/70">
+                        <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
                           {tool.description}
                         </p>
                       )}
@@ -220,7 +222,7 @@ export function McpDetail({
                 </div>
               </section>
             </div>
-            <footer className="-mx-6 flex shrink-0 items-center justify-end gap-2 border-t border-border bg-background px-6 py-3">
+            <footer className={`${panel.detailFooter} ${panel.footerActions}`}>
               <Button className="min-w-[88px]" onClick={onClose}>
                 {t("common.close")}
               </Button>

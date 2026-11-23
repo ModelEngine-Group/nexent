@@ -17,6 +17,7 @@ import {
 import { fetchMyEditableSkills } from "@/services/skillRepositoryService";
 import { tagManagementApi } from "@/services/tagManagementService";
 import SkillCreationFiles from "@/components/skill/SkillCreationFiles";
+import resourcePanel from "@/components/resource/resource-panel.module.css";
 import SkillGroupSelection from "@/components/skill/SkillGroupSelection";
 import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import { isValidSkillDraftPath } from "@/lib/skillCreationDraft";
@@ -454,7 +455,7 @@ export default function SkillChatEditor({
   return (
     <section
       aria-label={t("skillChat.title")}
-      className={`${open ? "flex" : "hidden"} ${maximized ? "fixed inset-4 z-50 rounded-lg border shadow-xl" : "min-h-[600px] w-full border-t lg:min-h-0 lg:w-1/2 lg:border-t-0 lg:border-l"} min-w-0 flex-col bg-[#FAFAFA]`}
+      className={`${open ? "flex" : "hidden"} ${maximized ? "fixed inset-4 z-50 rounded-lg border shadow-xl" : "min-h-[600px] w-full border-t border-border lg:min-h-0 lg:w-auto lg:flex-1 lg:border-t-0 lg:border-l"} min-w-0 flex-col bg-muted/30`}
     >
       <div className="flex h-14 shrink-0 items-center gap-2 border-b bg-white px-4">
         <span className="flex min-w-0 items-center gap-2 rounded bg-[#F3F3F3] px-3 py-2 text-sm">
@@ -524,7 +525,7 @@ export default function SkillChatEditor({
         )}
         <Button
           type="primary"
-          className="!border-[#191919] !bg-[#191919]"
+          className="min-w-[88px]"
           loading={saving}
           disabled={
             unavailable ||
@@ -619,14 +620,15 @@ export default function SkillChatEditor({
         <Form
           form={form}
           layout="vertical"
+          className={resourcePanel.editForm}
           disabled={unavailable || !draft}
           onValuesChange={(changed, all) =>
             change({
               ...all,
               aclTouched: Boolean(
                 draft?.aclTouched ||
-                  "group_ids" in changed ||
-                  "ingroup_permission" in changed
+                "group_ids" in changed ||
+                "ingroup_permission" in changed
               ),
               tagsTouched: Boolean(
                 draft?.tagsTouched || "tag_value_ids" in changed
@@ -636,8 +638,11 @@ export default function SkillChatEditor({
         >
           <div
             hidden={tab !== "configure"}
-            className="space-y-4 rounded-lg bg-white p-4"
+            className={`${resourcePanel.editSection} space-y-4`}
           >
+            <h3 className="text-body-2 font-semibold">
+              {t("resourceCenter.agentDetail.basicInfo")}
+            </h3>
             <Form.Item
               name="name"
               label={t("skillManagement.form.name")}
@@ -718,7 +723,7 @@ export default function SkillChatEditor({
             >
               <Input.TextArea rows={4} maxLength={1000} showCount />
             </Form.Item>
-            <h3 className="mb-2 text-sm">
+            <h3 className="mb-2 text-body-2 font-semibold">
               {t("skillRepository.detail.skillFiles")}
             </h3>
             <SkillCreationFiles

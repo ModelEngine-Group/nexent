@@ -64,6 +64,7 @@ export interface SkillRepositoryListingListParams {
 }
 
 export interface SkillRepositoryListingDetail extends SkillRepositoryListingItem {
+  agent_reference_count?: number;
   skill_info_json?: Record<string, unknown>;
   skill_zip_base64?: string;
   created_at?: string | null;

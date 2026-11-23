@@ -20,7 +20,6 @@ const show = () =>
   render(
     <App>
       <SkillReadOnlyDetail
-        name="Example"
         source="Custom"
         description="Description"
         tags={["example"]}

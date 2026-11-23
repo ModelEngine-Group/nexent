@@ -24,7 +24,7 @@ import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
-import { SkillDetail } from "@/components/skill/skill-detail";
+import { SkillDetail } from "./components/skill-detail";
 import { RepositoryView } from "./components/RepositoryView";
 import { getSkillRepositoryStatusLabel } from "./components/skillRepositoryShared";
 
@@ -130,6 +130,9 @@ export function SkillSpace({
     detailRepositoryId != null
   );
   const repositoryItems = repositoryData?.items ?? [];
+  const selectedListing = repositoryItems.find(
+    (listing) => listing.skill_repository_id === detailRepositoryId
+  );
   const repositoryTotal = repositoryData?.pagination?.total ?? 0;
   const updatingRepositoryId = updateStatusMutation.isPending
     ? (updateStatusMutation.variables?.skillRepositoryId ?? null)
@@ -308,6 +311,17 @@ export function SkillSpace({
         isFetching={isDetailFetching}
         onClose={() => setDetailRepositoryId(null)}
         onRetry={() => refetchDetail()}
+        onInstall={() => {
+          if (selectedListing) handleInstall(selectedListing);
+        }}
+        installDisabled={
+          !selectedListing ||
+          (enhanced && selectedListing.installation_state !== "not_installed")
+        }
+        installing={installingRepositoryId === detailRepositoryId}
+        installed={
+          enhanced && selectedListing?.installation_state === "installed"
+        }
       />
       <Drawer
         size="min(800px, 100vw)"

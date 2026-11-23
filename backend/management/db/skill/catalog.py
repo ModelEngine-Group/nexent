@@ -3,13 +3,13 @@
 import math
 from typing import Any, Collection, Dict, List, Optional
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import and_, func, or_, select, update
 
-from contracts.constants.constants import STATUS_NOT_SHARED
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, STATUS_NOT_SHARED
 from infrastructure.rdb.orm import as_dict, filter_property
 from infrastructure.rdb.client import get_db_session
 from management.db.repository_transactions import current_repository_session, lock_repository_source
-from management.db.models import SkillRepository
+from management.db.models import AgentInfo, SkillInfo, SkillInstance, SkillRepository
 
 _UPDATE_ALLOWED_FIELDS = frozenset(
     {
@@ -96,6 +96,50 @@ def get_skill_repository_by_skill_id(
             query = query.filter(SkillRepository.status.in_(list(statuses)))
         record = query.order_by(SkillRepository.update_time.desc()).first()
         return as_dict(record) if record else None
+
+
+def count_skill_repository_agent_references(
+    repository_id: int, source_skill_id: int, tenant_id: str
+) -> int:
+    """Count agents with a saved draft or current published binding to this listing."""
+    statement = (
+        select(func.count(SkillInstance.agent_id.distinct()))
+        .select_from(SkillInstance)
+        .join(SkillInfo, SkillInfo.skill_id == SkillInstance.skill_id)
+        .join(
+            AgentInfo,
+            and_(
+                AgentInfo.agent_id == SkillInstance.agent_id,
+                AgentInfo.tenant_id == SkillInstance.tenant_id,
+                AgentInfo.version_no == 0,
+            ),
+        )
+        .where(
+            SkillInstance.tenant_id == tenant_id,
+            SkillInstance.delete_flag != "Y",
+            AgentInfo.delete_flag != "Y",
+            SkillInfo.delete_flag != "Y",
+            or_(
+                SkillInstance.version_no == 0,
+                SkillInstance.version_no == AgentInfo.current_version_no,
+            ),
+            or_(
+                and_(
+                    SkillInfo.skill_id == source_skill_id,
+                    or_(
+                        SkillInfo.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
+                        SkillInfo.tenant_id.is_(None),
+                    ),
+                ),
+                and_(
+                    SkillInfo.source_repository_id == repository_id,
+                    SkillInfo.tenant_id == tenant_id,
+                ),
+            ),
+        )
+    )
+    with get_db_session() as session:
+        return session.execute(statement).scalar_one()
 
 
 def _apply_skill_repository_filters(

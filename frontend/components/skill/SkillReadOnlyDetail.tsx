@@ -4,38 +4,37 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Empty, Input, Modal, Tree } from "antd";
-import {
-  Copy,
-  Download,
-  FileText,
-  Folder,
-  Maximize2,
-  Search,
-} from "lucide-react";
+import { Copy, Download, Eye, FileText, Maximize2, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { buildSkillDetailTree } from "@/lib/skillDetailFiles";
 import type { SkillFileContent } from "@/types/skill";
+import SkillFileSource, { getSkillSourceLines } from "./SkillFileSource";
+import SkillFileTreeTitle from "./SkillFileTreeTitle";
+import panel from "./skill-panel.module.css";
 
 export default function SkillReadOnlyDetail({
-  name,
   source,
   tags,
   description,
   files,
   hideMetadata = false,
+  sourcePreview = false,
+  showFileActions = !sourcePreview,
 }: {
-  name: string;
   source: string;
   tags: string[];
   description: string;
   files: SkillFileContent[];
   /** Skip the label/value metadata block when the shell already renders it. */
   hideMetadata?: boolean;
+  sourcePreview?: boolean;
+  showFileActions?: boolean;
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [expandedPreview, setExpandedPreview] = useState(false);
+  const [markdownPreview, setMarkdownPreview] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPath, setSelectedPath] = useState("");
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
@@ -43,13 +42,25 @@ export default function SkillReadOnlyDetail({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset per-archive selection state when the file list changes.
     setSearch("");
     setExpandedPreview(false);
+    setMarkdownPreview(false);
     setSelectedPath(
-      files.find((file) => /(^|\/)SKILL\.md$/i.test(file.path))?.path ??
+      files.find((file) => /^SKILL\.md$/i.test(file.path))?.path ??
+        files.find((file) => /\/SKILL\.md$/i.test(file.path))?.path ??
         files[0]?.path ??
         ""
     );
-    setExpandedKeys([]);
-  }, [files]);
+    setExpandedKeys(
+      sourcePreview
+        ? [
+            ...new Set(
+              files
+                .filter((file) => file.path.includes("/"))
+                .map((file) => file.path.split("/")[0])
+            ),
+          ]
+        : []
+    );
+  }, [files, sourcePreview]);
   const tree = useMemo(
     () => buildSkillDetailTree(files, search),
     [files, search]
@@ -57,6 +68,10 @@ export default function SkillReadOnlyDetail({
   const active = files.find((file) => file.path === selectedPath);
   const readable =
     active && active.status !== "unsupported" && active.status !== "read_error";
+  const lineCount =
+    sourcePreview && readable && active.content
+      ? getSkillSourceLines(active.content).length
+      : 0;
   const copy = async () => {
     if (!readable) return;
     try {
@@ -88,6 +103,8 @@ export default function SkillReadOnlyDetail({
             : "skillManagement.detail.filePreviewUnsupported"
         )}
       </p>
+    ) : sourcePreview && !markdownPreview ? (
+      <SkillFileSource content={active.content} />
     ) : active.path.toLowerCase().endsWith(".md") ? (
       <MarkdownRenderer
         content={active.content}
@@ -102,69 +119,76 @@ export default function SkillReadOnlyDetail({
       </pre>
     );
   return (
-    <div className="space-y-6 text-sm leading-[22px] text-[#191919]">
+    <div className="space-y-6 text-body-2 leading-[22px] text-foreground">
       {hideMetadata ? null : (
-        <dl className="space-y-6">
-          {[
-            ["name", name],
-            ["source", source],
-          ].map(([key, value]) => (
-            <div key={key} className="space-y-2">
-              <dt className="text-[#777777]">
-                {t(`skillManagement.form.${key}`)}
+        <section className="space-y-3 border-b border-border pb-5">
+          <h3 className="font-semibold">
+            {t("resourceCenter.agentDetail.basicInfo")}
+          </h3>
+          <dl className="grid grid-cols-[minmax(5rem,max-content)_minmax(0,1fr)] gap-x-4 gap-y-3">
+            <div className="contents">
+              <dt className="text-muted-foreground">
+                {t("skillManagement.form.source")}
               </dt>
-              <dd className="break-words">{value || "—"}</dd>
+              <dd className="break-words">{source || "—"}</dd>
             </div>
-          ))}
-          <div className="space-y-2">
-            <dt className="text-[#777777]">{t("skillManagement.form.tags")}</dt>
-            <dd className="flex flex-wrap gap-2">
-              {tags.length
-                ? tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded bg-[#191919]/5 px-2 text-xs leading-5 text-[#393939]"
-                    >
-                      {tag}
-                    </span>
-                  ))
-                : "—"}
-            </dd>
-          </div>
-          <div className="space-y-2">
-            <dt className="text-[#777777]">
-              {t("skillManagement.form.description")}
-            </dt>
-            <dd className="whitespace-pre-wrap break-words">
-              {description || t("skillRepository.common.noDescription")}
-            </dd>
-          </div>
-        </dl>
+            <div className="contents">
+              <dt className="text-muted-foreground">
+                {t("skillManagement.form.tags")}
+              </dt>
+              <dd className="flex flex-wrap gap-2">
+                {tags.length
+                  ? tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded bg-muted px-2 text-body-1 leading-5 text-muted-foreground"
+                      >
+                        {tag}
+                      </span>
+                    ))
+                  : "—"}
+              </dd>
+            </div>
+            <div className="contents">
+              <dt className="text-muted-foreground">
+                {t("skillManagement.form.description")}
+              </dt>
+              <dd className="whitespace-pre-wrap break-words">
+                {description || t("skillRepository.common.noDescription")}
+              </dd>
+            </div>
+          </dl>
+        </section>
       )}
       <section className="space-y-2">
         {hideMetadata ? null : (
-          <h3 className="font-normal">
+          <h3 className="font-semibold">
             {t("skillRepository.detail.skillFiles")}
           </h3>
         )}
-        <div className="flex h-[min(560px,60vh)] min-h-[280px] flex-col overflow-hidden rounded border border-[#D9D9D9] sm:flex-row">
-          <aside className="flex max-h-[180px] shrink-0 flex-col gap-3 border-b p-3 sm:max-h-none sm:w-[220px] sm:border-r sm:border-b-0">
-            <h4 className="text-sm font-medium">
-              {t("skillManagement.detail.files")}
+        <div className={`${panel.panel} h-[460px]`}>
+          <aside className={panel.sidebar}>
+            <h4 className={panel.toolbar}>
+              {sourcePreview
+                ? t("skillRepository.detail.fileCount", { count: files.length })
+                : t("skillManagement.detail.files")}
             </h4>
-            <Input
-              allowClear
-              prefix={<Search size={14} aria-hidden />}
-              placeholder={t("resourceCenter.search")}
-              aria-label={t("skillManagement.detail.files")}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
+            {showFileActions && (
+              <Input
+                className="!mx-2 !mt-2 !w-[calc(100%-1rem)]"
+                allowClear
+                prefix={<Search size={14} aria-hidden />}
+                placeholder={t("resourceCenter.search")}
+                aria-label={t("skillManagement.detail.files")}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            )}
             <div className="min-h-0 flex-1 overflow-auto">
               {tree.length ? (
                 <Tree
                   blockNode
-                  showIcon
+                  className={panel.tree}
                   treeData={tree}
                   selectedKeys={selectedPath ? [selectedPath] : []}
                   expandedKeys={
@@ -183,25 +207,17 @@ export default function SkillReadOnlyDetail({
                       : expandedKeys
                   }
                   onExpand={(keys) => setExpandedKeys(keys.map(String))}
-                  icon={(node) =>
-                    node.isLeaf ? (
-                      <FileText
-                        size={15}
-                        className="text-blue-600"
-                        aria-hidden
-                      />
-                    ) : (
-                      <Folder size={15} aria-hidden />
-                    )
-                  }
                   onSelect={(_keys, info) => {
-                    if (info.node.isLeaf)
+                    if (info.node.isLeaf) {
                       setSelectedPath(String(info.node.key));
+                      setMarkdownPreview(false);
+                    }
                   }}
                   titleRender={(node) => (
-                    <span title={node.title} className="block truncate">
-                      {node.title}
-                    </span>
+                    <SkillFileTreeTitle
+                      name={node.title}
+                      isFile={node.isLeaf}
+                    />
                   )}
                 />
               ) : (
@@ -212,40 +228,76 @@ export default function SkillReadOnlyDetail({
               )}
             </div>
           </aside>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#FAFAFA]">
-            <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-white px-4">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className={panel.toolbar}>
+              {sourcePreview && active && <FileText size={14} aria-hidden />}
               <span className="min-w-0 flex-1 truncate" title={active?.path}>
-                {active?.path || t("skillManagement.detail.selectFile")}
+                {(sourcePreview
+                  ? active?.path.split("/").pop()
+                  : active?.path) || t("skillManagement.detail.selectFile")}
               </span>
-              <Button
-                type="text"
-                size="small"
-                icon={<Maximize2 size={15} />}
-                aria-label={t("skillManagement.detail.expand")}
-                title={t("skillManagement.detail.expand")}
-                disabled={!readable}
-                onClick={() => setExpandedPreview(true)}
-              />
-              <Button
-                type="text"
-                size="small"
-                icon={<Copy size={15} />}
-                aria-label={t("common.copy")}
-                title={t("common.copy")}
-                disabled={!readable}
-                onClick={copy}
-              />
-              <Button
-                type="text"
-                size="small"
-                icon={<Download size={15} />}
-                aria-label={t("skillRepository.detail.downloadFile")}
-                title={t("skillRepository.detail.downloadFile")}
-                disabled={!readable}
-                onClick={download}
-              />
+              {sourcePreview && active?.path.toUpperCase() === "SKILL.MD" && (
+                <span className="rounded bg-primary/10 px-1.5 text-primary">
+                  {t("skillRepository.detail.entryFile")}
+                </span>
+              )}
+              {sourcePreview && readable && !markdownPreview && (
+                <span className="shrink-0 text-muted-foreground">
+                  {t("skillRepository.detail.lineCount", { count: lineCount })}
+                </span>
+              )}
+              {showFileActions && (
+                <>
+                  {sourcePreview &&
+                    readable &&
+                    active.path.toLowerCase().endsWith(".md") && (
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<Eye size={15} />}
+                        aria-label={t("common.preview")}
+                        title={t("common.preview")}
+                        aria-pressed={markdownPreview}
+                        onClick={() => setMarkdownPreview(!markdownPreview)}
+                      />
+                    )}
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Maximize2 size={15} />}
+                    aria-label={t("skillManagement.detail.expand")}
+                    title={t("skillManagement.detail.expand")}
+                    disabled={!readable}
+                    onClick={() => setExpandedPreview(true)}
+                  />
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Copy size={15} />}
+                    aria-label={t("common.copy")}
+                    title={t("common.copy")}
+                    disabled={!readable}
+                    onClick={copy}
+                  />
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Download size={15} />}
+                    aria-label={t("skillRepository.detail.downloadFile")}
+                    title={t("skillRepository.detail.downloadFile")}
+                    disabled={!readable}
+                    onClick={download}
+                  />
+                </>
+              )}
             </div>
-            <div className="min-h-0 flex-1 overflow-auto p-5">
+            <div
+              className={
+                sourcePreview && !markdownPreview
+                  ? "min-h-0 flex-1 overflow-auto"
+                  : "min-h-0 flex-1 overflow-auto p-4"
+              }
+            >
               {renderPreview()}
             </div>
           </div>

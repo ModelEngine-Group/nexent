@@ -22,6 +22,8 @@ import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
 import SkillDraftPanel from "./SkillDraftPanel";
 import SkillReadOnlyDetail from "@/components/skill/SkillReadOnlyDetail";
+import SkillPanelTitle from "@/components/skill/SkillPanelTitle";
+import { RESOURCE_REPOSITORY_DETAIL_DRAWER_WIDTH } from "@/const/resourceRepository";
 
 interface SkillDetailModalProps {
   skill: Skill | null;
@@ -170,11 +172,12 @@ export default function SkillDetailModal({
           {repositoryLayout ? (
             <Form form={form} component={false}>
               <SkillReadOnlyDetail
-                name={detailInfo?.name || skill?.name || ""}
                 source={formatSource(detailInfo?.source, t)}
                 tags={detailInfo?.tags ?? []}
                 description={detailInfo?.description || ""}
                 files={skillTabs}
+                sourcePreview
+                showFileActions
               />
             </Form>
           ) : (
@@ -204,15 +207,31 @@ export default function SkillDetailModal({
         open={open}
         onClose={handleClose}
         placement="right"
-        size="min(960px, 100vw)"
-        title={t("skillManagement.detail.title")}
+        size={`min(${RESOURCE_REPOSITORY_DETAIL_DRAWER_WIDTH}px, 100vw)`}
+        title={
+          <SkillPanelTitle
+            name={
+              detailInfo?.name ||
+              skill?.name ||
+              t("skillManagement.detail.title")
+            }
+            tags={detailInfo?.tags}
+          />
+        }
+        closable={{ placement: "end", "aria-label": t("common.close") }}
         zIndex={zIndex}
         mask={{ closable: maskClosable }}
         destroyOnHidden
         footer={
           <div className="flex justify-end gap-2">
-            <Button onClick={handleClose}>{t("common.cancel")}</Button>
-            <Button type="primary" onClick={handleClose}>
+            <Button className="min-w-[88px]" onClick={handleClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              className="min-w-[88px]"
+              type="primary"
+              onClick={handleClose}
+            >
               {t("common.confirm")}
             </Button>
           </div>

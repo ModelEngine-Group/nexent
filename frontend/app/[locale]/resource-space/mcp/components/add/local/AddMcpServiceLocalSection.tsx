@@ -8,7 +8,6 @@ import {
   Input,
   InputNumber,
   Select,
-  Radio,
   Steps,
   Upload,
 } from "antd";
@@ -22,44 +21,10 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import McpGroupSelectionTable from "../../shared/McpGroupSelectionTable";
+import McpDeploymentCards from "../../shared/McpDeploymentCards";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { Can } from "@/components/permission/Can";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
-
-/** Maps the creation options to deployment types. */
-const DEPLOYMENT_TAB_ITEMS = [
-  {
-    key: "remote",
-    type: McpDeploymentType.REMOTE_LINK,
-    labelKey: "mcpConfig.addServer.title",
-    descriptionKey: "mcpTools.addModal.mode.remoteDescription",
-  },
-  {
-    key: "container",
-    type: McpDeploymentType.CONTAINER,
-    labelKey: "mcpTools.addModal.mode.container",
-    descriptionKey: "mcpTools.addModal.mode.containerDescription",
-  },
-  {
-    key: "openapi",
-    type: McpDeploymentType.API,
-    labelKey: "mcpTools.addModal.mode.api",
-    descriptionKey: "mcpTools.addModal.mode.apiDescription",
-  },
-  {
-    key: "upload",
-    type: McpDeploymentType.LOCAL_IMAGE,
-    labelKey: "mcpConfig.uploadImage.title",
-    descriptionKey: "mcpTools.addModal.mode.uploadDescription",
-  },
-] as const;
-
-const DEPLOYMENT_TAB_KEY: Record<McpDeploymentType, string> = {
-  [McpDeploymentType.REMOTE_LINK]: "remote",
-  [McpDeploymentType.CONTAINER]: "container",
-  [McpDeploymentType.API]: "openapi",
-  [McpDeploymentType.LOCAL_IMAGE]: "upload",
-};
 
 const VALIDATION_FIELDS_BY_DEPLOYMENT: Record<
   McpDeploymentType,
@@ -165,17 +130,7 @@ export default function AddMcpServiceLocalSection({
     setDraft((prev) => ({ ...prev, ...patch }));
   };
 
-  const deploymentTabItems = enableUploadImage
-    ? DEPLOYMENT_TAB_ITEMS
-    : DEPLOYMENT_TAB_ITEMS.filter(
-        (item) => item.type !== McpDeploymentType.LOCAL_IMAGE
-      );
-  const activeTabKey = DEPLOYMENT_TAB_KEY[deploymentType];
-
-  const handleTabChange = (key: string) => {
-    const item = DEPLOYMENT_TAB_ITEMS.find((i) => i.key === key);
-    if (!item) return;
-    const nextType = item.type;
+  const handleDeploymentChange = (nextType: McpDeploymentType) => {
     const nextTransport =
       nextType === McpDeploymentType.CONTAINER ||
       nextType === McpDeploymentType.LOCAL_IMAGE
@@ -304,27 +259,13 @@ export default function AddMcpServiceLocalSection({
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]">
           <Form form={form} layout="vertical" colon={false}>
             <div hidden={showGroupStep}>
-              <Radio.Group
-                aria-label={t("mcpTools.addModal.configureStep")}
-                value={activeTabKey}
-                onChange={(event) => handleTabChange(event.target.value)}
-                className="!mb-4 !grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,155px),1fr))] gap-4"
-              >
-                {deploymentTabItems.map(({ key, labelKey, descriptionKey }) => (
-                  <Radio.Button
-                    key={key}
-                    value={key}
-                    className="!h-auto min-h-[104px] !whitespace-normal !rounded-lg !border !px-4 !py-4 !leading-5 before:!hidden"
-                  >
-                    <span className="block font-medium text-[#191919]">
-                      {t(labelKey)}
-                    </span>
-                    <span className="mt-1 block font-normal text-[#777777]">
-                      {t(descriptionKey)}
-                    </span>
-                  </Radio.Button>
-                ))}
-              </Radio.Group>
+              <McpDeploymentCards
+                ariaLabel={t("mcpTools.addModal.configureStep")}
+                value={deploymentType}
+                includeLocalImage={enableUploadImage}
+                onChange={handleDeploymentChange}
+                className="!mb-4"
+              />
               <Form.Item
                 label={t("mcpTools.addModal.name")}
                 name="name"

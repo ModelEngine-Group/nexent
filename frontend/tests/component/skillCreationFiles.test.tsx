@@ -10,7 +10,9 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("@/components/common/markdownRenderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <div data-testid="markdown-preview">{content}</div>
+  ),
 }));
 
 function Editor() {
@@ -27,6 +29,7 @@ function Editor() {
 test("edits the draft and previews the saved text without submitting to a server", () => {
   render(<Editor />);
   expect(screen.getByText("Initial body")).toBeVisible();
+  expect(screen.queryByTestId("markdown-preview")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "common.edit" }));
   fireEvent.change(
     screen.getByRole("textbox", { name: "skillCreation.fileContent" }),
@@ -34,6 +37,10 @@ test("edits the draft and previews the saved text without submitting to a server
   );
   fireEvent.click(screen.getByRole("button", { name: "common.save" }));
   expect(screen.getByText("Changed body")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "common.preview" }));
+  expect(screen.getByTestId("markdown-preview")).toHaveTextContent(
+    "Changed body"
+  );
 });
 
 test("rejects traversal paths and adds a valid nested file", async () => {

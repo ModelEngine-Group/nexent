@@ -4,22 +4,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Input, Modal, Tree } from "antd";
-import {
-  Copy,
-  Download,
-  Eye,
-  FileText,
-  Folder,
-  Pencil,
-  Plus,
-  Save,
-  Search,
-} from "lucide-react";
+import { Copy, Download, Eye, Pencil, Plus, Save, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { buildSkillDetailTree } from "@/lib/skillDetailFiles";
 import { isValidSkillDraftPath } from "@/lib/skillCreationDraft";
 import type { SkillFileContent } from "@/types/skill";
+import SkillFileSource from "./SkillFileSource";
+import SkillFileTreeTitle from "./SkillFileTreeTitle";
+import panel from "./skill-panel.module.css";
 
 export default function SkillCreationFiles({
   files,
@@ -37,6 +30,7 @@ export default function SkillCreationFiles({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState("SKILL.md");
   const [editing, setEditing] = useState(false);
+  const [markdownPreview, setMarkdownPreview] = useState(false);
   const [adding, setAdding] = useState(false);
   const [path, setPath] = useState("");
   const [pathError, setPathError] = useState(false);
@@ -45,6 +39,7 @@ export default function SkillCreationFiles({
       setSelected(selectedPath);
       setSearch("");
       setEditing(false);
+      setMarkdownPreview(false);
     }
   }, [selectedPath]);
   const tree = useMemo(
@@ -54,6 +49,7 @@ export default function SkillCreationFiles({
   const active = files.find((file) => file.path === selected) ?? files[0];
   const readable =
     active && active.status !== "unsupported" && active.status !== "read_error";
+  const isMarkdown = active?.path.toLowerCase().endsWith(".md");
   const addFile = () => {
     if (
       !isValidSkillDraftPath(path) ||
@@ -70,6 +66,7 @@ export default function SkillCreationFiles({
     onChange([...files, { path, content: "" }]);
     setSelected(path);
     setEditing(true);
+    setMarkdownPreview(false);
     setAdding(false);
     setSearch("");
   };
@@ -95,10 +92,12 @@ export default function SkillCreationFiles({
   };
   return (
     <>
-      <div className="flex h-[560px] min-h-[280px] overflow-hidden rounded border border-[#D9D9D9]">
-        <aside className="flex w-[26%] min-w-[140px] max-w-[230px] shrink-0 flex-col gap-3 border-r p-3">
-          <div className="flex items-center justify-between text-sm">
-            <span>{t("skillManagement.detail.files")}</span>
+      <div className={`${panel.panel} h-[460px]`}>
+        <aside className={panel.sidebar}>
+          <div className={`${panel.toolbar} justify-between`}>
+            <span>
+              {t("skillRepository.detail.fileCount", { count: files.length })}
+            </span>
             <Button
               type="link"
               size="small"
@@ -110,10 +109,11 @@ export default function SkillCreationFiles({
                 setAdding(true);
               }}
             >
-              {t("skillCreation.newFile")}
+              <span className="sr-only">{t("skillCreation.newFile")}</span>
             </Button>
           </div>
           <Input
+            className="!mx-2 !mt-2 !w-[calc(100%-1rem)]"
             allowClear
             prefix={<Search size={14} />}
             aria-label={t("skillManagement.detail.files")}
@@ -123,37 +123,35 @@ export default function SkillCreationFiles({
           />
           <div className="min-h-0 flex-1 overflow-auto">
             <Tree
+              className={panel.tree}
               key={`${search}:${files.length}`}
               defaultExpandAll
               blockNode
-              showIcon
               treeData={tree}
               selectedKeys={active ? [active.path] : []}
-              icon={(node) =>
-                node.isLeaf ? <FileText size={14} /> : <Folder size={14} />
-              }
               onSelect={(_keys, info) => {
                 if (info.node.isLeaf) {
                   setSelected(String(info.node.key));
                   setEditing(false);
+                  setMarkdownPreview(false);
                 }
               }}
               titleRender={(node) => (
-                <span title={node.title} className="block truncate">
-                  {node.title}
-                </span>
+                <SkillFileTreeTitle name={node.title} isFile={node.isLeaf} />
               )}
             />
           </div>
         </aside>
-        <div className="flex min-w-0 flex-1 flex-col bg-[#FAFAFA]">
-          <div className="flex h-11 shrink-0 items-center gap-1 border-b bg-white px-3">
-            <span
-              className="min-w-0 flex-1 truncate text-sm"
-              title={active?.path}
-            >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className={`${panel.toolbar} flex-wrap !gap-1`}>
+            <span className="min-w-0 flex-1 truncate" title={active?.path}>
               {active?.path}
             </span>
+            {active?.path === "SKILL.md" && (
+              <span className="rounded bg-primary/10 px-1.5 text-body-1 text-primary">
+                {t("skillRepository.detail.entryFile")}
+              </span>
+            )}
             <Button
               type="text"
               size="small"
@@ -167,7 +165,14 @@ export default function SkillCreationFiles({
               size="small"
               icon={<Eye size={14} />}
               aria-label={t("common.preview")}
-              onClick={() => setEditing(false)}
+              aria-pressed={!editing && markdownPreview}
+              disabled={!readable}
+              onClick={() => {
+                setEditing(false);
+                setMarkdownPreview(
+                  isMarkdown ? editing || !markdownPreview : false
+                );
+              }}
             />
             <Button
               type="text"
@@ -191,10 +196,15 @@ export default function SkillCreationFiles({
               disabled={disabled || !readable}
               icon={<Save size={14} />}
               aria-label={t("common.save")}
-              onClick={() => setEditing(false)}
+              onClick={() => {
+                setEditing(false);
+                setMarkdownPreview(false);
+              }}
             />
           </div>
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div
+            className={`min-h-0 flex-1 overflow-auto ${editing || markdownPreview ? "p-3" : ""}`}
+          >
             {!readable ? (
               <p>
                 {t(
@@ -219,12 +229,10 @@ export default function SkillCreationFiles({
                 }
                 className="!h-full !resize-none font-mono"
               />
-            ) : active.path.toLowerCase().endsWith(".md") ? (
+            ) : markdownPreview && isMarkdown ? (
               <MarkdownRenderer content={active.content} />
             ) : (
-              <pre className="whitespace-pre-wrap break-words text-xs">
-                {active.content}
-              </pre>
+              <SkillFileSource content={active.content} />
             )}
           </div>
         </div>

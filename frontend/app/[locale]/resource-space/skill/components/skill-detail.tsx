@@ -26,6 +26,10 @@ interface SkillDetailProps {
   isFetching: boolean;
   onClose: () => void;
   onRetry: () => void;
+  onInstall?: () => void;
+  installDisabled?: boolean;
+  installing?: boolean;
+  installed?: boolean;
 }
 
 const statusStyles = {
@@ -54,6 +58,10 @@ export function SkillDetail({
   isFetching,
   onClose,
   onRetry,
+  onInstall,
+  installDisabled,
+  installing,
+  installed,
 }: SkillDetailProps) {
   const { t } = useTranslation("common");
   const repositoryLayout =
@@ -71,6 +79,10 @@ export function SkillDetail({
         isFetching={isFetching}
         onClose={onClose}
         onRetry={onRetry}
+        onInstall={onInstall}
+        installDisabled={installDisabled}
+        installing={installing}
+        installed={installed}
       />
     );
   }

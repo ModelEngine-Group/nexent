@@ -8,10 +8,11 @@ import JSZip from "jszip";
 import { useTranslation } from "react-i18next";
 import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 import type { SkillFileContent } from "@/types/skill";
-import SkillReadOnlyDetail from "./SkillReadOnlyDetail";
-import SkillTypeIcon from "./SkillTypeIcon";
+import SkillReadOnlyDetail from "@/components/skill/SkillReadOnlyDetail";
+import SkillPanelTitle from "@/components/skill/SkillPanelTitle";
 import log from "@/lib/logger";
 import ResourceDetail from "@/components/resource/ResourceDetail";
+import panel from "@/components/resource/resource-panel.module.css";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { formatDateTimeLocale } from "@/lib/date";
 
@@ -23,6 +24,10 @@ export default function RepositorySkillDetail({
   isFetching,
   onClose,
   onRetry,
+  onInstall,
+  installDisabled,
+  installing,
+  installed,
 }: {
   open: boolean;
   detail?: SkillRepositoryListingDetail;
@@ -31,18 +36,24 @@ export default function RepositorySkillDetail({
   isFetching: boolean;
   onClose: () => void;
   onRetry: () => void;
+  onInstall?: () => void;
+  installDisabled?: boolean;
+  installing?: boolean;
+  installed?: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
   const displayName = useUserDisplayName();
   const [files, setFiles] = useState<SkillFileContent[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [fileError, setFileError] = useState(false);
+  const [validatedArchive, setValidatedArchive] = useState<string>();
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset the previous archive before reading the selected listing.
     setFiles([]);
     setFileError(false);
+    setValidatedArchive(undefined);
     setLoadingFiles(true);
     void (async () => {
       try {
@@ -58,7 +69,12 @@ export default function RepositorySkillDetail({
         const entries = Object.values(zip.files).filter((entry) => !entry.dir);
         const firstFolder = entries[0]?.name.split("/")[0];
         const stripRoot =
-          firstFolder &&
+          (firstFolder === detail.name ||
+            entries.some(
+              (entry) =>
+                entry.name.toLowerCase() ===
+                `${firstFolder}/skill.md`.toLowerCase()
+            )) &&
           entries.every((entry) => entry.name.startsWith(`${firstFolder}/`));
         const prefix = stripRoot ? `${firstFolder}/` : "";
         const result = await Promise.all(
@@ -81,7 +97,10 @@ export default function RepositorySkillDetail({
             }
           })
         );
-        if (!cancelled) setFiles(result);
+        if (!cancelled) {
+          setFiles(result);
+          setValidatedArchive(detail.skill_zip_base64);
+        }
       } catch (error) {
         log.error("Failed to read repository skill files", error);
         if (!cancelled) setFileError(true);
@@ -98,9 +117,14 @@ export default function RepositorySkillDetail({
     source === "custom" || source === "repository"
       ? t(`skillRepository.source.${source}`)
       : source === "official"
-        ? t("skillPool.group.official")
+        ? t("skillRepository.detail.official")
         : source || "—";
   const tags = detail?.tags ?? [];
+  const archiveReady =
+    !loadingFiles &&
+    !fileError &&
+    !!validatedArchive &&
+    validatedArchive === detail?.skill_zip_base64;
   return (
     <ResourceDetail
       open={open}
@@ -123,24 +147,18 @@ export default function RepositorySkillDetail({
           </Button>
         </div>
       ) : detail ? (
-        <div className="-mx-6 flex min-h-0 flex-1 flex-col text-sm leading-[22px] text-foreground">
+        <div className="-mx-6 flex min-h-0 flex-1 flex-col text-body-2 leading-[22px] text-foreground">
           <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 pb-4 pr-14">
-            <div className="shrink-0">
-              <SkillTypeIcon
-                className="rounded"
-                name={detail.name}
-                tags={tags}
-                icon={detail.icon}
-              />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="break-words text-xl font-medium leading-7">
-                {detail.name}
-              </h2>
-              <span className="mt-1 inline-block rounded bg-primary/10 px-1.5 text-xs text-primary">
-                {sourceLabel}
-              </span>
-            </div>
+            <SkillPanelTitle
+              name={detail.name}
+              tags={tags}
+              icon={detail.icon}
+              subtitle={
+                <span className="rounded bg-primary/10 px-1.5 text-primary">
+                  {sourceLabel}
+                </span>
+              }
+            />
           </header>
           <div className="repository-detail-body min-h-0 flex-1 overflow-y-auto">
             <section className="space-y-3 border-b border-border px-6 py-5">
@@ -199,6 +217,18 @@ export default function RepositorySkillDetail({
                 </div>
                 <div className="contents">
                   <dt className="text-muted-foreground">
+                    {t("skillRepository.detail.referencedBy")}
+                  </dt>
+                  <dd>
+                    {detail.agent_reference_count == null
+                      ? t("resourceCenter.notRecorded")
+                      : t("skillRepository.detail.agentReferenceCount", {
+                          count: detail.agent_reference_count,
+                        })}
+                  </dd>
+                </div>
+                <div className="contents">
+                  <dt className="text-muted-foreground">
                     {t("skillRepository.detail.downloads")}
                   </dt>
                   <dd className="min-w-0 [overflow-wrap:anywhere]">
@@ -221,7 +251,7 @@ export default function RepositorySkillDetail({
                 )}
                 <SkillReadOnlyDetail
                   hideMetadata
-                  name={detail.name}
+                  sourcePreview
                   source={sourceLabel}
                   tags={tags}
                   description={detail.description ?? ""}
@@ -230,8 +260,25 @@ export default function RepositorySkillDetail({
               </Spin>
             </section>
           </div>
-          <footer className="-mx-6 flex shrink-0 items-center justify-end gap-2 border-t border-border bg-background px-6 py-3">
-            <Button onClick={onClose}>{t("common.close")}</Button>
+          <footer className={`${panel.detailFooter} ${panel.footerActions}`}>
+            <Button className="min-w-[88px]" onClick={onClose}>
+              {t("common.close")}
+            </Button>
+            {onInstall && (
+              <Button
+                type="primary"
+                className="min-w-[88px] max-w-[200px]"
+                onClick={onInstall}
+                disabled={installed || installDisabled || !archiveReady}
+                loading={installing}
+              >
+                {t(
+                  installed
+                    ? "resourceCenter.installed"
+                    : "resourceCenter.install"
+                )}
+              </Button>
+            )}
           </footer>
         </div>
       ) : null}

@@ -50,6 +50,8 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
+import SkillPanelTitle from "@/components/skill/SkillPanelTitle";
+import resourcePanel from "@/components/resource/resource-panel.module.css";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -940,6 +942,7 @@ export default function SkillBuildModal({
       setSkillTabs={setSkillTabs}
       activeSkillTab={activeSkillTab}
       setActiveSkillTab={setActiveSkillTab}
+      repositoryEditor={repositoryLayout}
       isStreaming={isStreaming}
       onNameChange={handleNameChange}
       textareaRefs={textareaRefs}
@@ -996,22 +999,49 @@ export default function SkillBuildModal({
     <>
       <Panel
         title={
-          <div>
-            <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-              {isEditMode
-                ? t("skillManagement.edit.title")
-                : t("skillManagement.title")}
+          repositoryLayout ? (
+            <SkillPanelTitle
+              name={editingSkillName}
+              tags={editingSkill?.tags}
+              title={
+                isEditMode
+                  ? editingSkillName || t("skillManagement.edit.title")
+                  : t("skillManagement.title")
+              }
+              subtitle={
+                isEditMode && editingSkillName
+                  ? t("skillManagement.edit.title")
+                  : undefined
+              }
+            />
+          ) : (
+            <div>
+              <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
+                {isEditMode
+                  ? t("skillManagement.edit.title")
+                  : t("skillManagement.title")}
+              </div>
+              <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
+                {isEditMode
+                  ? t("skillManagement.edit.subtitle", {
+                      name: editingSkillName,
+                    })
+                  : t("skillManagement.create.subtitle")}
+              </div>
             </div>
-            <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
-              {isEditMode
-                ? t("skillManagement.edit.subtitle", { name: editingSkillName })
-                : t("skillManagement.create.subtitle")}
-            </div>
-          </div>
+          )
         }
         open={isOpen}
         {...(repositoryLayout
-          ? { onClose: handleModalClose, size: "min(1180px, 100vw)" }
+          ? {
+              onClose: handleModalClose,
+              size: "min(1180px, 100vw)",
+              closable: {
+                placement: "end" as const,
+                "aria-label": t("common.close"),
+              },
+              classNames: { footer: resourcePanel.footerActions },
+            }
           : {
               onCancel: handleModalClose,
               centered: true,
@@ -1026,7 +1056,6 @@ export default function SkillBuildModal({
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
-                  overflow: "hidden",
                 },
               }
             : {
@@ -1048,13 +1077,18 @@ export default function SkillBuildModal({
               }
         }
         footer={[
-          <Button key="cancel" onClick={handleModalClose}>
+          <Button
+            key="cancel"
+            className={repositoryLayout ? "min-w-[88px]" : undefined}
+            onClick={handleModalClose}
+          >
             {t("common.cancel")}
           </Button>,
           isEditMode || activeTab === "interactive" ? (
             <Button
               key="submit"
               type="primary"
+              className={repositoryLayout ? "min-w-[88px]" : undefined}
               loading={isSubmitting}
               onClick={handleManualSubmit}
               disabled={
@@ -1067,6 +1101,7 @@ export default function SkillBuildModal({
             <Button
               key="submit"
               type="primary"
+              className={repositoryLayout ? "min-w-[88px]" : undefined}
               loading={isSubmitting}
               onClick={handleUploadSubmit}
               disabled={
@@ -1080,16 +1115,18 @@ export default function SkillBuildModal({
           ),
         ]}
       >
-        <Tabs
-          activeKey={isEditMode ? "interactive" : activeTab}
-          onChange={(key) => {
-            if (!isEditMode) {
-              setActiveTab(key);
-            }
-          }}
-          items={visibleTabItems}
-          className="skill-build-tabs shrink-0"
-        />
+        {(!repositoryLayout || !isEditMode) && (
+          <Tabs
+            activeKey={isEditMode ? "interactive" : activeTab}
+            onChange={(key) => {
+              if (!isEditMode) {
+                setActiveTab(key);
+              }
+            }}
+            items={visibleTabItems}
+            className="skill-build-tabs shrink-0"
+          />
+        )}
         {isEditMode && !isEditContentReady ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <Spin spinning={isLoadingEditFiles}>
@@ -1101,19 +1138,34 @@ export default function SkillBuildModal({
             </Spin>
           </div>
         ) : isEditMode || activeTab === "interactive" ? (
-          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            {renderChatPanel()}
+          <div
+            className={
+              repositoryLayout
+                ? "grid min-h-0 flex-1 gap-4 lg:h-full lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
+                : "grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+            }
+          >
+            {repositoryLayout ? (
+              <div className="min-h-[420px] min-w-0 lg:min-h-0">
+                {renderChatPanel()}
+              </div>
+            ) : (
+              renderChatPanel()
+            )}
             {renderDraftPanel()}
           </div>
         ) : (
           <div className="min-h-0 flex-1">{renderUploadTab()}</div>
         )}
         <style jsx global>{`
-          .skill-build-info-form .ant-form-item-label {
+          .skill-build-info-form:not(.skill-repository-editor-form)
+            .ant-form-item-label {
             padding-bottom: 3px !important;
           }
 
-          .skill-build-info-form .ant-form-item-label > label {
+          .skill-build-info-form:not(.skill-repository-editor-form)
+            .ant-form-item-label
+            > label {
             height: 20px;
             color: #475569;
             font-size: 12px;

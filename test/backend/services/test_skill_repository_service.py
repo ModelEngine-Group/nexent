@@ -71,6 +71,7 @@ if consts_const_module is not None:
         consts_const_module.PERMISSION_PRIVATE = "PRIVATE"
 
 _skill_repo_db_mock = MagicMock()
+_skill_repo_db_mock.count_skill_repository_agent_references = MagicMock(return_value=0)
 _skill_repo_db_mock.get_skill_repository_by_id_and_publisher = MagicMock()
 _skill_repo_db_mock.get_skill_repository_by_skill_id = MagicMock()
 _skill_repo_db_mock.increment_skill_repository_downloads = MagicMock(return_value=1)
@@ -910,6 +911,43 @@ def test_repository_list_and_detail_success():
     detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
     assert detail["author"] is None
     _user_tenant_db_mock.get_user_tenant_by_user_id.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["shared", "pending_review", "not_shared", "rejected"])
+def test_repository_detail_exports_only_shared_archive(mocker, status):
+    record = {
+        **_repository_record(status=status),
+        "skill_zip_base64": "UEsDBA==",
+        "published_at": "2026-10-15T14:00:00",
+    }
+    lookup = mocker.patch.object(srs, "get_skill_repository_by_id_and_publisher", return_value=record)
+    count_references = mocker.patch.object(srs, "count_skill_repository_agent_references", return_value=11)
+
+    detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+
+    lookup.assert_called_once_with(1, "tenant-1")
+    if status == "shared":
+        count_references.assert_called_once_with(1, record["skill_id"], "tenant-1")
+        assert detail["agent_reference_count"] == 11
+        assert detail["skill_zip_base64"] == record["skill_zip_base64"]
+        assert detail["published_at"] == record["published_at"]
+    else:
+        count_references.assert_not_called()
+        assert "agent_reference_count" not in detail
+        assert "skill_zip_base64" not in detail
+        assert "published_at" not in detail
+    assert "skill_info_json" not in detail
+
+
+def test_repository_detail_falls_back_to_published_content_only(mocker):
+    record = _repository_record(status="shared")
+    mocker.patch.object(srs, "get_skill_repository_by_id_and_publisher", return_value=record)
+
+    detail = srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+
+    assert detail["skill_info_json"] == {"content": "content"}
+    assert detail["agent_reference_count"] == 0
+    assert "skill_zip_base64" not in detail
 
 
 def test_repository_list_does_not_grant_take_down_to_regular_user():

@@ -5,14 +5,15 @@ import { App, Button, Collapse, Empty, Spin } from "antd";
 import { ChevronDown, Copy, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpContainerLogOutput } from "@/components/mcp/McpContainerLogsModal";
+import panel from "@/components/resource/resource-panel.module.css";
 import type { McpTool } from "@/types/agentConfig";
 
 const codeStyle =
-  "mcp-edit-code m-0 overflow-auto bg-[#191919]/[0.03] px-5 py-4 font-mono text-xs leading-5 text-[#191919]";
+  "mcp-edit-code m-0 overflow-auto bg-muted/40 px-5 py-4 font-mono text-body-1 leading-5 text-foreground";
 const previewStyle =
-  "@container overflow-hidden rounded border border-[#DFDFDF] bg-white";
+  "@container overflow-hidden rounded-lg border border-border bg-background";
 const previewHeaderStyle =
-  "flex h-8 items-center justify-between gap-2 border-b border-[#DFDFDF] px-3 text-sm leading-[22px] text-[#191919]";
+  "flex h-10 items-center justify-between gap-2 border-b border-border px-3 text-body-2 font-medium text-foreground";
 
 function JsonPreview({ name, json }: { name: string; json: string }) {
   const { t } = useTranslation("common");
@@ -70,8 +71,13 @@ export default function McpEditInspection({
   active,
 }: McpEditInspectionProps) {
   const { t } = useTranslation("common");
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<string[]>(["server-json"]);
+  const [showAllTools, setShowAllTools] = useState(false);
   const inspectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (active) void onLoadTools();
+  }, [active, onLoadTools]);
 
   useEffect(() => {
     const inspection = inspectionRef.current;
@@ -104,7 +110,7 @@ export default function McpEditInspection({
   }, []);
 
   const sectionLabel = (key: string, label: string) => (
-    <span className="inline-flex items-center gap-2 text-sm leading-[22px] text-[#191919]">
+    <span className="inline-flex items-center gap-2 text-body-2 leading-[22px] text-foreground">
       {label}
       <ChevronDown
         size={12}
@@ -123,77 +129,8 @@ export default function McpEditInspection({
         body: "!p-0 !pt-2",
       }}
       activeKey={expanded}
-      onChange={(keys) => {
-        if (
-          keys.includes("tools") &&
-          !expanded.includes("tools") &&
-          !loadingTools
-        ) {
-          void onLoadTools();
-        }
-        setExpanded(keys);
-      }}
+      onChange={setExpanded}
       items={[
-        {
-          key: "tools",
-          showArrow: false,
-          label: sectionLabel("tools", t("mcpTools.detail.tools")),
-          children: loadingTools ? (
-            <div className="flex justify-center py-3" role="status">
-              <Spin aria-label={t("mcpConfig.toolsList.loading")} />
-            </div>
-          ) : tools.length ? (
-            <Collapse
-              ghost
-              expandIconPlacement="end"
-              expandIcon={({ isActive }) => (
-                <ChevronDown
-                  size={12}
-                  aria-hidden
-                  className={isActive ? "rotate-180" : undefined}
-                />
-              )}
-              className="flex flex-col gap-2"
-              classNames={{
-                header:
-                  "!min-h-8 !items-center !gap-2 !bg-transparent !px-3 !py-1 !shadow-none hover:!bg-transparent",
-                title: "!min-w-0",
-                body: "!px-3 !pt-0 !pb-2",
-              }}
-              items={tools.map((tool) => ({
-                key: tool.name,
-                className:
-                  "group/tool !rounded !border !border-[#D8D8D8] !bg-transparent",
-                label: (
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="flex size-5 shrink-0 items-center justify-center text-[#0067D1]">
-                      <Wrench size={12} aria-hidden />
-                    </span>
-                    <span
-                      className="max-w-[45%] shrink-0 truncate text-sm leading-[22px] text-[#191919]"
-                      title={tool.name}
-                    >
-                      {tool.name}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-xs leading-[18px] text-[#777777] group-[.ant-collapse-item-active]/tool:hidden">
-                      {tool.description}
-                    </span>
-                  </span>
-                ),
-                children: (
-                  <div className="text-xs leading-[18px] break-words whitespace-pre-wrap text-[#777777]">
-                    {tool.description || "—"}
-                  </div>
-                ),
-              }))}
-            />
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={t("mcpConfig.toolsList.empty")}
-            />
-          ),
-        },
         ...(serverJson
           ? [
               {
@@ -250,5 +187,96 @@ export default function McpEditInspection({
     />
   );
 
-  return <div ref={inspectionRef}>{sections}</div>;
+  const visibleTools = showAllTools ? tools : tools.slice(0, 4);
+  const hiddenToolCount = Math.max(0, tools.length - 4);
+
+  return (
+    <div ref={inspectionRef} className="space-y-4">
+      <section
+        className={`${panel.editSection} space-y-3`}
+        aria-labelledby="mcp-edit-tools"
+      >
+        <div>
+          <h3 id="mcp-edit-tools" className="text-body-2 font-semibold">
+            {t("mcpTools.detail.tools")}
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            {t("mcpTools.editDetail.toolsHint")}
+          </p>
+        </div>
+        {loadingTools ? (
+          <div className="flex justify-center py-3" role="status">
+            <Spin aria-label={t("mcpConfig.toolsList.loading")} />
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t("mcpTools.editDetail.toolsFound", { count: tools.length })}
+            </p>
+            {tools.length > 0 ? (
+              <ul className="space-y-2">
+                {visibleTools.map((tool) => (
+                  <li
+                    key={tool.name}
+                    className="flex min-w-0 items-start gap-2 rounded border border-border p-2.5"
+                  >
+                    <Wrench
+                      size={14}
+                      className="mt-0.5 shrink-0 text-primary"
+                      aria-hidden
+                    />
+                    <div className="min-w-0">
+                      <span className="break-all font-mono text-xs">
+                        {tool.name}
+                      </span>
+                      {tool.description && (
+                        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                          {tool.description}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {t("mcpConfig.toolsList.empty")}
+              </p>
+            )}
+            {hiddenToolCount > 0 && (
+              <Button
+                type="link"
+                size="small"
+                className="!px-0"
+                aria-expanded={showAllTools}
+                onClick={() => setShowAllTools((current) => !current)}
+              >
+                {showAllTools
+                  ? t("mcpTools.editDetail.showFewerTools")
+                  : t("mcpTools.editDetail.showMoreTools", {
+                      count: hiddenToolCount,
+                    })}
+              </Button>
+            )}
+          </>
+        )}
+      </section>
+      {(serverJson || containerConfig || showLogs) && (
+        <section
+          className={`${panel.editSection} space-y-3`}
+          aria-labelledby="mcp-edit-advanced"
+        >
+          <div>
+            <h3 id="mcp-edit-advanced" className="text-body-2 font-semibold">
+              {t("mcpTools.editDetail.advanced")}
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              {t("mcpTools.editDetail.advancedHint")}
+            </p>
+          </div>
+          {sections}
+        </section>
+      )}
+    </div>
+  );
 }

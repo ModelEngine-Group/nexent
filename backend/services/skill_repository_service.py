@@ -31,6 +31,7 @@ from contracts.errors.exceptions import (
 from contracts.roles import has_any_role, roles_from_record
 from management.db.identity.user_tenant import get_user_email_map, get_user_tenant_by_user_id
 from management.db.skill.catalog import (
+    count_skill_repository_agent_references,
     get_skill_repository_by_id_and_publisher,
     get_skill_repository_by_skill_id,
     increment_skill_repository_downloads,
@@ -1193,4 +1194,17 @@ def get_skill_repository_listing_detail_impl(
     if not record:
         raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
 
-    return _to_detail_item(record)
+    detail = _to_detail_item(record)
+    if record.get("status") == STATUS_SHARED:
+        detail["published_at"] = _serialize_created_at(record.get("published_at"))
+        detail["agent_reference_count"] = count_skill_repository_agent_references(
+            skill_repository_id, record["skill_id"], tenant_id
+        )
+        archive = record.get("skill_zip_base64")
+        if isinstance(archive, str) and archive.strip():
+            detail["skill_zip_base64"] = archive
+        else:
+            content = _as_dict(record.get("skill_info_json")).get("content")
+            if isinstance(content, str):
+                detail["skill_info_json"] = {"content": content}
+    return detail

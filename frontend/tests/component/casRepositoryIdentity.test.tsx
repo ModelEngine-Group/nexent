@@ -2,7 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentDetail } from "@/components/agent/agent-detail";
-import { SkillDetail } from "@/components/skill/skill-detail";
+import { SkillDetail } from "@/app/resource-space/skill/components/skill-detail";
 import { SkillRepositoryCard } from "@/app/resource-space/skill/components/SkillRepositoryCard";
 import RepositoryMcpCard from "@/app/resource-space/mcp/components/RepositoryMcpCard";
 import {
