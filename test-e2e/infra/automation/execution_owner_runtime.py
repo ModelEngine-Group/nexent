@@ -47,7 +47,6 @@ async def run_historical_reader(
             (
                 core._execution_owner,
                 core.tools["read_execution_output"].owner,
-                core.context_runtime.context_manager.config.execution_owner,
             )
         )
         return result

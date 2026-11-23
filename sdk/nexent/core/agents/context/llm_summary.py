@@ -3,7 +3,6 @@
 """LLM call orchestration for summary generation with retry and error handling."""
 
 import inspect
-import json
 import logging
 import re
 from collections.abc import Mapping
@@ -103,7 +102,7 @@ class LLMSummary:
                 text, model, call_type, prompt_type, max_output_tokens
             )
         except Exception as e:
-            if _is_context_length_error(e) and getattr(model, "allow_summary_input_truncation", True) is not False:
+            if _is_context_length_error(e):
                 logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
                 shrunk = self._renderer.truncate_text_to_tokens(
                     text, int(self.config.max_summary_input_tokens * 0.66)
@@ -171,17 +170,6 @@ class LLMSummary:
                 f"{contract_instruction}\n\n"
                 f"Conversation content to summarize:\n{text}"
             )
-        if call_type in {"history_summary", "history_incremental"}:
-            from .history_compression import _protected_fact_literals
-            ledger = "\n".join(json.dumps({marker: values}, ensure_ascii=False, separators=(",", ":"))
-                               for marker, values in _protected_fact_literals(text).items())
-            if ledger:
-                hint = "\n\nExact protected identifier ledger: retain each identifier and associated literal value:\n" + ledger
-                hinted = [{"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-                          {"role": "user", "content": [{"type": "text", "text": user_prompt + hint}]}]
-                limit = self.config.effective_input_limit_tokens or self.config.context_window_tokens
-                if limit and len(json.dumps(hinted, ensure_ascii=False)) / self.config.chars_per_token < limit:
-                    user_prompt += hint
         messages = [
             ContextMessage(role="system",
                         content=[{"type": "text", "text": system_prompt}]),

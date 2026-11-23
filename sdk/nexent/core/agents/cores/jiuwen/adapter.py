@@ -406,11 +406,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
-        from nexent.core.agents.context.action_history import register_authorized_sources
+        from nexent.core.agents.context.action_history import register_historical_results
         from nexent.core.agents.context.execution_history import ExecutionHistory
         from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
         self.execution_history = ExecutionHistory()
-        self.context_items = register_authorized_sources(self.context_items, self.execution_history, self.owner_id)
+        self.context_items = register_historical_results(self.context_items, self.execution_history, self.owner_id)
         if any(item.metadata.get("execution_source_refs") for item in self.context_items):
             reader = ReadExecutionOutputTool(self.execution_history, self.owner_id, lambda: None)
             self.business_tools[reader.name] = reader
@@ -426,7 +426,6 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items,
                                                   message_format="openai_chat_completions")
         self.context_bridge.context_manager.config.execution_history = self.execution_history
-        self.context_bridge.context_manager.config.execution_owner = self.owner_id
         model.prepare_messages = self._prepare_model_messages
         model.prefix = []
         self.native_agent = create_deep_agent(
@@ -474,9 +473,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         card.properties = properties
 
     def begin_request(self):
-        """Keep model correction re-entry inside the same context recovery budget."""
-        if self.context_bridge is not None:
-            self.context_bridge.begin_request()
+        """Reset the existing bounded execution reader for one model invocation."""
         if getattr(self, "execution_history", None) is not None:
             self.execution_history.reset_read_budget(self.owner_id)
 

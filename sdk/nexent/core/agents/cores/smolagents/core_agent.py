@@ -9,7 +9,6 @@ import time
 import uuid
 from collections.abc import Generator
 from copy import deepcopy
-from dataclasses import replace
 from datetime import datetime
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -28,6 +27,7 @@ from smolagents.utils import (
     extract_code_from_text,
     truncate_content,
 )
+
 
 from nexent.consts.mcp_errors import (
     classify_mcp_failure,
@@ -658,9 +658,8 @@ class CoreAgent(CodeAgent):
             from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
             from nexent.core.agents.contracts.context import ContextItemInput
             context_manager.config.execution_history = self._execution_history
-            context_manager.config.execution_owner = self._execution_owner
-            from nexent.core.agents.context.action_history import register_authorized_sources
-            self.context_runtime.items = register_authorized_sources(
+            from nexent.core.agents.context.action_history import register_historical_results
+            self.context_runtime.items = register_historical_results(
                 self.context_runtime.items, self._execution_history, self._execution_owner)
             if "read_execution_output" in self.tools:
                 raise ValueError("read_execution_output is reserved for execution history")
@@ -1391,32 +1390,6 @@ Additional Args:
             tail_overlay.append(self._thought_continuation_message())
         return system_overlay, tail_overlay
 
-    def _screen_capacity_frame(self, memory_step, messages, trusted_tail_count):
-        engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
-        if not engine:
-            return messages
-        decision = engine.check_input(input_messages=messages, trusted_tail_count=trusted_tail_count)
-        self.verification_controller.emit(decision.verification_result, message=decision.message)
-        if decision.effective_action == "terminate":
-            self._append_verification_feedback(memory_step, decision.verification_result)
-            refusal = render_guardrail_refusal(decision, messages)
-            memory_step.model_output = refusal
-            raise RuntimeFinalAnswer(refusal, "guardrail_input")
-        if decision.effective_action == "mask" and decision.masked_messages is not None:
-            self._append_verification_feedback(memory_step, decision.verification_result)
-            return decision.masked_messages
-        return messages
-
-    def _fit_capacity_frame(self, messages, rebuild):
-        from nexent.core.agents.context.usage import ContextInputCapacityExceeded
-        try:
-            self.context_runtime.check_input_capacity(messages, self._context_tools(), self.model)
-        except ContextInputCapacityExceeded:
-            rebuilt = rebuild(recovery_origin="local_capacity_recovery")
-            messages = native_context_messages(rebuilt.messages)
-            self.context_runtime.check_input_capacity(messages, self._context_tools(), self.model)
-        return messages
-
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -1431,14 +1404,6 @@ Additional Args:
             {"request_system_messages": system_overlay, "request_tail_messages": tail_overlay}
             if system_overlay or tail_overlay else {}
         )
-        def finalize_recovery(context):
-            frame = self._ensure_open_model_turn(native_context_messages(context.messages))
-            frame = self._screen_capacity_frame(memory_step, frame, len(tail_overlay))
-            return replace(context, messages=frame)
-
-        begin_request = getattr(self.context_runtime, "begin_request", None)
-        if begin_request is not None:
-            begin_request(model=self.model, recovery_finalize=finalize_recovery)
         final_context = self.context_runtime.prepare_step(
             model=self.model,
             memory=self.memory,
@@ -1499,22 +1464,36 @@ Additional Args:
         # Log model call parameters before execution
         self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
-        # Screen the actual frame again if explicit capacity recovery changes history.
-        if final_context.evidence.maintenance_phase not in {"local_capacity_recovery", "provider_overflow_recovery"}:
-            input_messages = self._screen_capacity_frame(memory_step, input_messages, len(tail_overlay))
+        # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
+        guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if guardrail_engine:
+            decision = guardrail_engine.check_input(
+                input_messages=input_messages,
+                trusted_tail_count=len(tail_overlay),
+            )
+            self.verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "terminate":
+                self._append_verification_feedback(memory_step, decision.verification_result)
+                refusal = render_guardrail_refusal(decision, input_messages)
+                memory_step.model_output = refusal
+                raise RuntimeFinalAnswer(refusal, "guardrail_input")
+            if decision.effective_action == "mask" and decision.masked_messages is not None:
+                input_messages = decision.masked_messages
+                self._append_verification_feedback(memory_step, decision.verification_result)
 
 
         try:
             self._emit_step_count_before_model()
 
-            def rebuild_after_provider_overflow(recovery_origin="provider_overflow_recovery"):
+            def rebuild_after_provider_overflow():
                 rebuilt = self.context_runtime.recover_step(
                     model=self.model,
                     memory=self.memory,
                     current_run_start_idx=self._history_step_count,
                     tools=self._context_tools(),
-                    **request_kwargs, **({"recovery_origin": recovery_origin}
-                                         if recovery_origin != "provider_overflow_recovery" else {}),
+                    **request_kwargs,
                 )
                 get_monitoring_manager().record_final_context_evidence(
                     rebuilt.evidence, step_number=self.step_number
@@ -1526,7 +1505,7 @@ Additional Args:
                 self._emit_history_summary_event()
                 return native_context_rebuild(rebuilt)
 
-            input_messages = self._fit_capacity_frame(input_messages, rebuild_after_provider_overflow)
+            self.context_runtime.check_input_capacity(input_messages, self._context_tools(), self.model)
             self.context_runtime.capture_request(input_messages, self._context_tools(), self.model)
             chat_message: ChatMessage = self.model(
                 input_messages,
@@ -1991,15 +1970,10 @@ Additional Args:
                 bind(self._delegation.record_dispatch)
         if getattr(self, "_execution_history", None) is not None:
             owner = uuid.uuid4().hex
-            context_runtime = getattr(self, "context_runtime", None)
-            context_manager = getattr(context_runtime, "context_manager", None)
-            if context_manager is not None:
-                from nexent.core.agents.context.action_history import register_authorized_sources
-                # Validate the current authorized snapshot before publishing the new owner.
-                items = register_authorized_sources(context_runtime.items, self._execution_history, owner)
-                context_runtime.items = items
-                context_manager.config.execution_history = self._execution_history
-                context_manager.config.execution_owner = owner
+            runtime = getattr(self, "context_runtime", None)
+            if getattr(runtime, "context_manager", None) is not None:
+                from nexent.core.agents.context.action_history import register_historical_results
+                runtime.items = register_historical_results(runtime.items, self._execution_history, owner)
             self._execution_owner = owner
             reader = self.tools.get("read_execution_output")
             if reader is not None:
@@ -2647,9 +2621,6 @@ Additional Args:
             self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
         # Build messages for final answer generation
-        begin_request = getattr(self.context_runtime, "begin_request", None)
-        if begin_request is not None:
-            begin_request(model=self.model)
         final_context = self.context_runtime.prepare_final_answer(
             model=self.model,
             memory=self.memory,
@@ -2680,7 +2651,7 @@ Additional Args:
             # Use streaming call (model.__call__) to generate final answer
             # This will trigger observer.add_model_new_token() and
             # observer.add_model_reasoning_content() in OpenAIModel
-            def rebuild_final_after_provider_overflow(recovery_origin="provider_overflow_recovery"):
+            def rebuild_final_after_provider_overflow():
                 rebuilt = self.context_runtime.recover_final_answer(
                     model=self.model,
                     memory=self.memory,
@@ -2688,8 +2659,6 @@ Additional Args:
                     tools=self._context_tools(),
                     task=task,
                     final_answer_templates=self.prompt_templates,
-                    **({"recovery_origin": recovery_origin}
-                       if recovery_origin != "provider_overflow_recovery" else {}),
                 )
                 get_monitoring_manager().record_final_context_evidence(
                     rebuilt.evidence, step_number=self.step_number
@@ -2700,7 +2669,7 @@ Additional Args:
             model_kwargs: dict[str, Any] = {}
             if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
                 model_kwargs["_defer_attempt_commit"] = True
-            messages = self._fit_capacity_frame(messages, rebuild_final_after_provider_overflow)
+            self.context_runtime.check_input_capacity(messages, self._context_tools(), self.model)
             self.context_runtime.capture_request(messages, self._context_tools(), self.model)
             chat_message = self.model(
                 messages,

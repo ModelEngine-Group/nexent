@@ -252,7 +252,7 @@ def assert_defaulted_skill_history(info, output, state):
     """Prove actual SDK formatting survives the backend-bound cross-turn loader."""
     from management.db.conversation.repository import get_historical_context
     from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManager
-    from nexent.core.agents.context.action_history import register_authorized_sources
+    from nexent.core.agents.context.action_history import register_historical_results
     from nexent.core.agents.context.execution_history import ExecutionHistory
 
     call = next(event for event in output if event["type"] == "tool"
@@ -281,9 +281,11 @@ def assert_defaulted_skill_history(info, output, state):
                            if message.get("tool_call_id") == call["provider_call_id"])
     assert restored_result["role"] == "tool" and restored_result["content"] == result["result"]
     store = ExecutionHistory()
-    register_authorized_sources([item], store, "restored-owner")
-    sources = store.authorized_sources("restored-owner")
-    assert any(source.source_kind == "tool_result" and source.text == result["result"] for source in sources)
+    register_historical_results([item], store, "restored-owner")
+    result_record = next(record for record in item.content['execution_records']
+                         if record['record_type'] == 'tool_result' and record['tool_call_id'] == call['local_call_id'])
+    reference = f"message:{item.content['assistant_message_id']}/unit-index:{result_record['unit_index']}"
+    assert json.loads(store.read('restored-owner', reference))['text'] == result['result']
 
 
 @pytest.mark.parametrize("protocol", ["native", "text"])

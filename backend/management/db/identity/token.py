@@ -11,7 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import aliased
 
 from infrastructure.rdb.client import get_db_session
-from management.db.models import UserTenant, UserTokenInfo, UserTokenUsageLog
+from management.db.identity.models import UserTenant, UserTokenInfo, UserTokenUsageLog
 
 
 def generate_access_key() -> str:

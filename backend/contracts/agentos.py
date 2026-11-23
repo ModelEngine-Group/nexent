@@ -562,19 +562,17 @@ class AgentRunSpec(RunSpecModel):
     tool_caller: ToolCallerContext | None = None
 
 
-class StructuredHistoryProof(RunSpecModel):
-    source_kind: Literal["execution_result", "tool_result", "user_message"]
-    source_ref: str
-    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    part: int = Field(ge=0, strict=True)
-    json_path: str
-    row_count: int = Field(ge=0, strict=True)
-
-
 class HistoryCheckpointCandidate(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_source_extensions(cls, value):
+        """Read older persisted checkpoints without activating withdrawn source catalogs."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items()
+                    if key not in {"structured_source_proofs", "execution_sources"}}
+        return value
+
     summary: dict[str, JsonValue]
-    structured_source_proofs: list[StructuredHistoryProof] = Field(default_factory=list)
     covered_through_message_id: PositiveInt
     previous_summary_unit_id: PositiveInt | None = None
     trigger: str | None = None
@@ -585,27 +583,8 @@ class HistoryCheckpointCandidate(RunSpecModel):
     compaction_target_tokens: int | None = Field(default=None, ge=0)
 
 
-class PreparedExecutionSource(RunSpecModel):
-    """Private typed historical originals; the legacy container name remains compatible."""
-    message_id: int = Field(gt=0, strict=True)
-    unit_index: int | None = Field(default=None, ge=0, strict=True)
-    content: str
-    record_type: Literal["execution_result", "tool_result", "user_message"] = "execution_result"
-    tool_call_id: str | None = None
-
-    @model_validator(mode="after")
-    def validate_source_kind(self):
-        if self.record_type == "user_message":
-            if self.unit_index is not None or self.tool_call_id is not None:
-                raise ValueError("User source cannot impersonate an execution unit")
-        elif self.unit_index is None or self.record_type == "tool_result" and not self.tool_call_id:
-            raise ValueError("Result source requires its actual unit and call provenance")
-        return self
-
-
 class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
     unit_id: PositiveInt
-    execution_sources: list[PreparedExecutionSource] = Field(default_factory=list)
 
 
 class PreparedHistoryExecutionRecord(RunSpecModel):
@@ -618,8 +597,15 @@ class PreparedHistoryExecutionRecord(RunSpecModel):
 
 
 class PreparedHistoryTurn(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_user_original(cls, value):
+        """Keep older Prepared turns readable without a second user-original channel."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "user_source_content"}
+        return value
+
     user_message: str
-    user_source_content: str | None = None
     assistant_final_answer: str
     user_message_id: PositiveInt
     assistant_message_id: int

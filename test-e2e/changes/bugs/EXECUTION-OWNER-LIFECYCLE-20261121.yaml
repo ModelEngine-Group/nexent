@@ -5,35 +5,41 @@ change:
   bug_id: EXECUTION-OWNER-LIFECYCLE-20261121
   title: Keep run-scoped execution readers aligned with authorized historical sources
   description: Synchronize fresh CodeAgent owner and historical grants before preparing each run.
-  observed_behavior: CodeAgent rotates the reader owner while its ContextManager and authorized historical sources retain the constructor owner, so a rendered valid reference is denied.
-  expected_behavior: Each fresh run restores only its current authorized snapshot and uses the same fresh owner in Core, ContextManager and reader; foreign and previous unpersisted sources remain denied.
+  observed_behavior: CodeAgent rotates the reader owner while its ContextManager and authorized historical sources
+    retain the constructor owner, so a rendered valid reference is denied.
+  expected_behavior: Each fresh run registers only real execution results present in its authorized current history
+    and synchronizes Core and reader owners; foreign and previous live-only results remain denied.
   escaped_stage: D3
   coverage_gap:
     type: missing_assertion
-    description: Existing output persistence integration checked source preservation but did not execute a new CodeAgent reader against that saved source.
+    description: Existing output persistence integration checked source preservation but did not execute a new CodeAgent
+      reader against that saved source.
   feature_contract_changed: false
   affected_features:
-    existing: [JIUWEN-OUTPUT]
+    existing:
+    - JIUWEN-OUTPUT
     modified: []
     added: []
     retired: []
   affected_cases:
     existing: []
-    modified: [JIUWEN-OUTPUT-D3-001]
+    modified:
+    - JIUWEN-OUTPUT-D3-001
     added: []
     retired: []
   traditional_ut:
     decision: add
     behaviors:
-    - Actual first and reused CoreAgent.run align the fresh owner, ContextManager, reader and authorized current snapshot.
-    - Cold checkpoint proofs revalidate; invalid proofs or conflicting sources fail atomically before publishing the new owner.
-    - Same-run records remain readable; foreign and previous live-only sources remain denied; absent history or manager stays compatible.
-    reason: Existing history permission tests do not exercise owner rotation through the real CoreAgent.run boundary; no duplicate formal D1 is needed.
+    - Each fresh run registers only real execution results present in its authorized current history and synchronizes
+      Core and reader owners; foreign and previous live-only results remain denied.
+    - Withdraw checkpoint proof/catalog grants; legacy summary text remains data and does not authorize a reference.
+    reason: Existing history permission tests do not exercise owner rotation through the real CoreAgent.run boundary;
+      no duplicate formal D1 is needed.
     test_selectors:
     - test/sdk/core/agents/test_execution_owner_lifecycle.py
-  notes: >-
-    SPEC09 EXECUTION-OWNER-LIFECYCLE-20261121 owns root-approved minimal design and EO-01..04.
-    The D3 reuses the existing output Feature, actual CodeAgent SDK provider HTTP, canonical execution-fact PostgreSQL projection and authorized history reload;
-    the new reader assertion closes the integration gap. Preparation uses no shared factories or anchors:
-    an owned isolated PostgreSQL container, loopback model listener and SDK ThreadManager are all released by finally blocks.
-    Native protocol/capacity, current closed-action indexing, SQL, tool arguments and reader budgets are unchanged.
+  notes: 'SPEC09 EXECUTION-OWNER-LIFECYCLE-20261121 owns root-approved minimal design and EO-01..04. The D3 reuses
+    the existing output Feature, actual CodeAgent SDK provider HTTP, canonical execution-fact PostgreSQL projection
+    and authorized history reload; the new reader assertion closes the integration gap. Preparation uses no shared
+    factories or anchors: an owned isolated PostgreSQL container, loopback model listener and SDK ThreadManager
+    are all released by finally blocks. Native protocol/capacity, current closed-action indexing, SQL, tool arguments
+    and reader budgets are unchanged.'

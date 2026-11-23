@@ -47,36 +47,11 @@ case:
       or committed compact view exactly once. Expanded business arguments stay in raw storage; uncovered or unproven
       records remain conservative evidence, rejected code is never promoted to execution, and an irreducible new
       frame at or above the combined window still fails without an auxiliary request.
-  - order: 7
-    action: On both real Agent runtimes, reject a cold oversized full frame with eligible committed history and
-      a fitting protected frame; recover old history once, continue the request and a later user turn. Repeat summary
-      failure, no gain, cancellation/deadline, stale/conflicting sources, repeated prepare/final checks and provider
-      overflow. Inspect covered checkpoint recall and Phoenix phases.
-    expected: Normal fitting prepare makes no summary call. One logical completion shares a single recovery transaction
-      and at most three auxiliary summary subrequests (transport retries remain separately counted). Only actual
-      rendered reduction with final full frame below C commits old facts; rejected candidates roll back with no
-      truncation or half-registered references. Accepted old summaries survive a later main failure. Both runtimes
-      recall an authorized original middle range through bounded real tools, reject foreign/invalid/stale references,
-      and behave identically with tracing off; private source bodies never enter the summary wire. All physical
-      usage and recovery phase provenance are retained.
-  - order: 8
-    action: On both real runtimes, use actual authorized user-message and native/CodeAgent result sources to compact
-      structured bulk; continue across a persisted checkpoint and inspect original middle-page numbers and Phoenix
-      source provenance. Keep same-ID outside facts and run missing/stale/foreign/invalid source negatives.
-    expected: Only fully covered arrays with useful reduction use trusted kind/ref/hash/path/count descriptors.
-      Original values/types and array order remain recoverable; object key order is insignificant. Unknown, ambiguous
-      duplicate-key, incomplete or stale proof stays unexempted. Cross-checkpoint proofs are revalidated atomically.
-      Current prompt and open transactions remain protected; no arbitrary history RPC, dataset/model special case
-      or output cap is added.
   expected_results:
   - Real Agent completes with correct final answer and no repeated side effects.
   - Summary and recall match tested source and persisted execution record.
   - Cross-turn context retains only proven action coverage and accepted representations while original facts remain
     authorized and readable.
-  - Explicit capacity recovery preserves current prompt, system/developer, schemas, overlays and unfinished native
-    groups; full originals remain authorized, independently readable and absent from compact wire views.
-  - Structured bulk uses only complete typed source coverage; native local IDs and wire provider IDs stay distinct,
-    and original user text is never mislabeled as execution output.
   forbidden_side_effects:
   - Cross-conversation result access
   - Replacing or deleting original tool results
@@ -140,34 +115,6 @@ case:
     - 1
     - 2
     - 3
-    forbidden_side_effects:
-    - 1
-    - 2
-    - 3
-  - id: AC-07
-    description: Verify one transactional history-only recovery after typed capacity rejection, shared budgets and
-      deadline, exact rendered full-frame fit, rollback and cross-run original recall on both runtimes; distinguish
-      local capacity, provider overflow and post-response phases.
-    steps:
-    - 7
-    expected_results:
-    - 2
-    - 3
-    - 4
-    forbidden_side_effects:
-    - 1
-    - 2
-    - 3
-  - id: AC-08
-    description: Real-model/container evidence for exact typed source-backed bulk, strict outside facts and atomic
-      cross-checkpoint original recall on both runtimes; full frozen long-task scale is tested separately from static
-      estimates.
-    steps:
-    - 8
-    expected_results:
-    - 2
-    - 3
-    - 5
     forbidden_side_effects:
     - 1
     - 2

@@ -17,6 +17,10 @@ CHART = ROOT / "deploy/k8s/helm/nexent"
 def test_gateway_image_delegates_the_application_command_like_main():
     for image in ("gateway", "main"):
         source = (ROOT / "deploy/images/dockerfiles" / image / "Dockerfile").read_text(encoding="utf-8")
+        if image == "main":
+            shared, services_and_final = source.split("FROM python:3.11-slim AS standalone-service", 1)
+            final = services_and_final.split(" AS final\n", 1)[1]
+            source = shared + final
         instructions = [line.strip().split(maxsplit=1)[0].upper() for line in source.splitlines()
                         if line.strip() and not line.lstrip().startswith("#")]
         assert "ENTRYPOINT" not in instructions
@@ -152,6 +156,7 @@ printf '%s' "$NEXENT_GATEWAY_IMAGE"
 
 
 @pytest.mark.parametrize("registry", ["overseas", "mainland"])
-def test_release_matrix_publishes_gateway(registry):
+def test_release_matrix_publishes_gateway_and_service_images(registry):
     workflow = yaml.safe_load((ROOT / f".github/workflows/docker-build-push-{registry}.yml").read_text(encoding="utf-8"))
-    assert "gateway" in workflow["jobs"]["build-and-push"]["strategy"]["matrix"]["image"]
+    images = workflow["jobs"]["build-and-push"]["strategy"]["matrix"]["image"]
+    assert {"main", "gateway", "management", "runtime", "mcp-service", "ops", "mcp"}.issubset(images)

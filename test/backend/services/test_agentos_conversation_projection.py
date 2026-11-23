@@ -178,5 +178,5 @@ async def test_history_checkpoint_is_included_in_the_terminal_transaction(monkey
     batch = persist.await_args.kwargs
     assert batch["message_units"] == []
     assert batch["history_checkpoints"] == [{
-        "summary": {"markdown": "earlier history"}, "covered_through_message_id": 16, **proofs,
+        "summary": {"markdown": "earlier history"}, "covered_through_message_id": 16,
     }]

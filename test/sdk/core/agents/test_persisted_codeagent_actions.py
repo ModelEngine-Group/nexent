@@ -68,7 +68,8 @@ def test_fix01_invalid_coverage_preserves_raw_history(indices):
     source[-1]["content"] = json.dumps(payload)
     text = render_persisted_actions(source, assistant_message_id=42)
     assert "EXPANDED" in text
-    assert "write_file(body=computed)" not in text
+    assert "<completed_action>" not in text
+    assert "<tool_call>" not in text
 
 
 def test_fix01_uncovered_records_remain_and_output_can_be_read_by_owning_run():
@@ -135,7 +136,8 @@ def test_fix01_unproven_projection_never_hides_raw_evidence(mutation):
     source[2 if len(source) > 2 else 1]["content"] = json.dumps(payload)
     text = render_persisted_actions(source, assistant_message_id=42)
     assert "EXPANDED" in text
-    assert "write_file(body=computed)" not in text
+    assert "<completed_action>" not in text
+    assert "<tool_call>" not in text
 
 
 def test_fix01_real_renderer_and_hard_guard_use_restored_representation():
@@ -326,3 +328,22 @@ def test_fix01_real_core_records_only_the_dispatched_interpreter_action():
         == 'print("ACTUAL_RESULT")'
     )
     assert "ACTUAL_RESULT" in payload["content"]
+
+
+@pytest.mark.parametrize('missing', ['model_action', 'covered_unit_indices', 'unit_index'])
+def test_legacy_result_without_action_provenance_remains_readonly_evidence(missing):
+    source = records()[-1]
+    if missing == 'unit_index':
+        source.pop(missing)
+    else:
+        payload = json.loads(source['content'])
+        payload.pop(missing)
+        source['content'] = json.dumps(payload)
+    original = deepcopy(source)
+    store = ExecutionHistory()
+    rendered = render_persisted_actions([source], assistant_message_id=42, history=store, owner='new')
+    assert 'actual stdout' in rendered and source == original
+    assert '<completed_action>' not in rendered and '<tool_call>' not in rendered
+    assert 'read_only="true"' in rendered
+    with pytest.raises(PermissionError):
+        store.read('new', 'message:42/unit-index:5')
