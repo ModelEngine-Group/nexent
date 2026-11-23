@@ -742,7 +742,7 @@ async def _load_internal_uninstalled_resource_catalog(
     user_id: str,
 ) -> list[dict[str, Any]]:
     from management.services.repository.mcp.service import list_community_mcp_services
-    from services.skill_repository_service import (
+    from management.services.skill.skill_repository import (
         list_skill_repository_listings_impl,
     )
     from management.services.skill.transfer import get_official_skills_with_status

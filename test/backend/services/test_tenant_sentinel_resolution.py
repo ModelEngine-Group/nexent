@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Gateway tenant_id sentinel must be resolved against real user_tenant rows."""
 
+from contextlib import nullcontext
 from unittest.mock import patch
 
 import pytest
@@ -9,6 +10,8 @@ from contracts.constants.constants import (
     ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
 )
+from infrastructure.rdb import client as rdb_client
+from infrastructure.rdb.tenant_config_record import TenantConfig
 from management.services.permission.identity import session as session_module
 
 
@@ -49,6 +52,19 @@ def test_gateway_sentinel_falls_back_to_first_active_when_row_still_empty(mocker
     _, tenant_id = session_module._resolve_session_user()
 
     assert tenant_id == "first-active-tenant"
+
+
+def test_first_active_tenant_queries_the_shared_tenant_record(mocker):
+    db_session = mocker.Mock()
+    db_session.execute.return_value.scalar_one_or_none.return_value = "real-tenant"
+    open_session = mocker.patch.object(rdb_client, "get_db_session", return_value=nullcontext(db_session))
+
+    assert session_module.resolve_tenant_id_from_user_tenant_record(_record()) == "real-tenant"
+
+    open_session.assert_called_once_with()
+    db_session.execute.assert_called_once()
+    statement = db_session.execute.call_args.args[0]
+    assert statement.column_descriptions[0]["entity"] is TenantConfig
 
 
 def test_real_tenant_passes_through_unchanged(mocker):

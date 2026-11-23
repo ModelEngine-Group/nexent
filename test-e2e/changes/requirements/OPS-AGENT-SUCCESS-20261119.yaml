@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-SUCCESS-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-SUCCESS-20261119
+  title: Publish Agent succeeded and failed counts with success rate
+  description: Count explicit succeeded and failed or timed_out terminal outcomes separately for main and child Agents, including results with missing timing. Merge counts across selected dates before division and return null for zero denominator.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_agent_monitoring.py, test/backend/ops/test_agent_monitoring_api.py, test/backend/ops/test_agent_monitoring_views.py]
+    behaviors:
+    - Classify explicit succeeded, failed and timed_out terminal observations independently of missing timing and exclude cancellation, ongoing and unknown outcomes.
+    - Sum exact succeeded and failed counts across dates and groups before computing success_rate, with null for zero denominator.
+    - Preserve existing duration and execution metrics and return unknown result metrics for legacy daily rows missing the new counters.
+    - Expose the same fields in existing summary, directory and daily trend query paths.
+    reason: Existing UT proves source identity and duration aggregation. Existing real root and child D3 proves execution. Extend those assertions and the fixed D3 with mixed terminal outcomes and replay across two dates.
+  notes: Add long counters through the existing MonitoringKind mapping upgrade. Reuse the existing Ops responsibility mapping, isolated stores, fixture preparation and cleanup. No new D1 proving boundary is needed.

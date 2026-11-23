@@ -31,7 +31,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
+
+      - name: Test Web proxy routing and auth cookies
+        run: node --test frontend/tests/apiProxyRouting.test.mjs
 
       - name: Install dependencies
         run: |

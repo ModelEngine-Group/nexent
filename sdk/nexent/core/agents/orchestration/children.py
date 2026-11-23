@@ -2,10 +2,16 @@
 
 """Resolve one child invocation without inheriting parent model or conversation state."""
 
+from concurrent.futures import CancelledError
 from copy import deepcopy
 
 from nexent.core.agents.contracts.config import copy_invocation_config
+from nexent.core.agents.contracts.output import RunResult
 from nexent.core.agents.orchestration.execution import execute_adapter
+from nexent.core.concurrency.cancellation import RunTerminated
+from nexent.monitor import get_agent_monitoring_context
+from nexent.monitor.agent_fact import child_run_scope, get_child_run_scope
+from nexent.monitor.run_timing import RunTiming
 
 
 def child_run_info(parent, config, scope):
@@ -20,6 +26,7 @@ def child_run_info(parent, config, scope):
         models.append(binding.model_copy(deep=True))
     return parent.model_copy(update={
         "run_role": "subagent",
+        "run_timing": None,
         "agent_config": config, "model_config_list": models, "query": "",
         "stop_event": scope.stop_event, "cancellation_scope": scope,
         "user_context": deepcopy(parent.user_context), "runtime_metadata": deepcopy(parent.runtime_metadata),
@@ -35,9 +42,36 @@ def invoke_child(info, task):
     """Select the configured Core and close its resources even after partial preparation."""
     if not isinstance(task, str) or not task.strip():
         raise ValueError("Child task must be a non-empty string")
+    metadata = get_agent_monitoring_context()
+    scope = get_child_run_scope()
+    if scope is not None and metadata is not None and scope.timing.run_id == metadata.monitoring_run_id:
+        return _invoke_child(info, task, scope)
+    timing = RunTiming(run_id=metadata.monitoring_run_id if metadata else None)
+    timing.start()
+    with child_run_scope(metadata, timing) as scope:
+        return _invoke_child(info, task, scope)
+
+
+def _invoke_child(info, task, scope):
     info.query = task
     info.run_role = "subagent"
-    return execute_adapter(info)
+    info.run_result = None
+    info.run_timing = scope.timing
+    observation = scope.observation
+    try:
+        run_scope = observation.measure(info.stop_event, run_timing=scope.timing) if observation is not None else None
+        result = execute_adapter(info, run_scope=run_scope)
+        info.attempt_outcome = info.run_result.status if isinstance(info.run_result, RunResult) else (
+            "stopped" if info.stop_event.is_set() else "completed")
+        return result
+    except (RunTerminated, CancelledError):
+        info.attempt_outcome = "stopped"
+        raise
+    except Exception:
+        info.attempt_outcome = "failed"
+        raise
+    finally:
+        scope.attempt_outcome = info.attempt_outcome
 
 
 def child_invocation_factory(parent):

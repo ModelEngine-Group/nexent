@@ -217,6 +217,10 @@ class MessageObserver:
         """Identify an untagged body as final after runtime classification."""
         self._step_output()["reclassify_step"] = True
 
+    def mark_answer_fallback(self) -> None:
+        """Keep an empty-answer placeholder outside measured answer output."""
+        self._step_output()["answer_fallback"] = True
+
     def complete_final_answer(self, agent_name: str, answer: str) -> None:
         """Finalize the existing answer slot without appending its body twice."""
         state = self._step_output()
@@ -371,6 +375,15 @@ class MessageObserver:
         step_id = self._step_output().get("step_id")
         if step_id:
             metadata.setdefault("step_id", step_id)
+        if process_type in {ProcessType.FINAL_ANSWER, ProcessType.MODEL_OUTPUT}:
+            from nexent.monitor.agent_fact import record_agent_answer
+
+            state = self._step_output()
+            if not state.get("answer_fallback"):
+                answer = (
+                    state.get("accepted_answer", content) if metadata.get("answer_phase") == "complete" else content
+                )
+                record_agent_answer(answer, agent_id=resolved_agent_id, invocation_id=resolved_invocation)
         self._append_message(
             Message(
                 process_type,

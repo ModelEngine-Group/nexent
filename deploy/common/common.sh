@@ -2183,6 +2183,8 @@ deployment_render_image_rollout_checksums() {
   printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
   printf '    managementImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_MANAGEMENT_IMAGE")"
   printf '    runtimeImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_RUNTIME_IMAGE")"
+  printf '    mcpServiceImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_MCP_SERVICE_IMAGE")"
+  printf '    opsImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_OPS_IMAGE")"
   printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
   printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
   printf '    sshImage: "%s"\n' "$(deployment_image_rollout_checksum "$OPENSSH_SERVER_IMAGE")"
@@ -2197,6 +2199,8 @@ deployment_apply_image_source() {
     export NEXENT_IMAGE="nexent/nexent:latest"
     export NEXENT_MANAGEMENT_IMAGE="nexent/nexent-management:latest"
     export NEXENT_RUNTIME_IMAGE="nexent/nexent-runtime:latest"
+    export NEXENT_MCP_SERVICE_IMAGE="nexent/nexent-mcp-service:latest"
+    export NEXENT_OPS_IMAGE="nexent/nexent-ops:latest"
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
     export NEXENT_MCP_DOCKER_IMAGE="nexent/nexent-mcp:latest"
@@ -2208,6 +2212,8 @@ deployment_apply_image_source() {
   export NEXENT_IMAGE="${NEXENT_IMAGE:-nexent/nexent:$version}"
   export NEXENT_MANAGEMENT_IMAGE="${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:$version}"
   export NEXENT_RUNTIME_IMAGE="${NEXENT_RUNTIME_IMAGE:-nexent/nexent-runtime:$version}"
+  export NEXENT_MCP_SERVICE_IMAGE="${NEXENT_MCP_SERVICE_IMAGE:-nexent/nexent-mcp-service:$version}"
+  export NEXENT_OPS_IMAGE="${NEXENT_OPS_IMAGE:-nexent/nexent-ops:$version}"
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
@@ -2238,7 +2244,7 @@ deployment_apply_image_source() {
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
-  export MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  export MINIO_IMAGE="${MINIO_IMAGE:-nexent/minio:RELEASE.2023-12-20T01-00-02Z}"
   # Nginx image for the optional HTTPS reverse proxy (docker and k8s).
   export NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
   export OPENSSH_SERVER_IMAGE="${OPENSSH_SERVER_IMAGE:-nexent/nexent-ubuntu-terminal:$version}"
@@ -2248,7 +2254,6 @@ deployment_apply_image_source() {
   export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
   export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
   export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
-  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
   export LANGFUSE_REDIS_IMAGE="${LANGFUSE_REDIS_IMAGE:-docker.io/redis:alpine}"
   export LANGFUSE_POSTGRES_IMAGE="${LANGFUSE_POSTGRES_IMAGE:-docker.io/postgres:15-alpine}"
 
@@ -2258,6 +2263,8 @@ deployment_apply_image_source() {
       NEXENT_IMAGE \
       NEXENT_MANAGEMENT_IMAGE \
       NEXENT_RUNTIME_IMAGE \
+      NEXENT_MCP_SERVICE_IMAGE \
+      NEXENT_OPS_IMAGE \
       NEXENT_WEB_IMAGE \
       NEXENT_DATA_PROCESS_IMAGE \
       NEXENT_MCP_DOCKER_IMAGE \
@@ -2273,7 +2280,6 @@ deployment_apply_image_source() {
       LANGFUSE_WORKER_IMAGE \
       LANGFUSE_WEB_IMAGE \
       CLICKHOUSE_IMAGE \
-      LANGFUSE_MINIO_IMAGE \
       LANGFUSE_REDIS_IMAGE \
       LANGFUSE_POSTGRES_IMAGE; do
       export "$image_var=$(deployment_add_image_registry_prefix "${!image_var}")"
@@ -2331,6 +2337,8 @@ deployment_render_docker_env() {
     printf 'NEXENT_IMAGE="%s"\n' "$NEXENT_IMAGE"
     printf 'NEXENT_MANAGEMENT_IMAGE="%s"\n' "$NEXENT_MANAGEMENT_IMAGE"
     printf 'NEXENT_RUNTIME_IMAGE="%s"\n' "$NEXENT_RUNTIME_IMAGE"
+    printf 'NEXENT_MCP_SERVICE_IMAGE="%s"\n' "$NEXENT_MCP_SERVICE_IMAGE"
+    printf 'NEXENT_OPS_IMAGE="%s"\n' "$NEXENT_OPS_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
@@ -2346,7 +2354,6 @@ deployment_render_docker_env() {
     printf 'LANGFUSE_WORKER_IMAGE="%s"\n' "$LANGFUSE_WORKER_IMAGE"
     printf 'LANGFUSE_WEB_IMAGE="%s"\n' "$LANGFUSE_WEB_IMAGE"
     printf 'CLICKHOUSE_IMAGE="%s"\n' "$CLICKHOUSE_IMAGE"
-    printf 'LANGFUSE_MINIO_IMAGE="%s"\n' "$LANGFUSE_MINIO_IMAGE"
     printf 'LANGFUSE_REDIS_IMAGE="%s"\n' "$LANGFUSE_REDIS_IMAGE"
     printf 'LANGFUSE_POSTGRES_IMAGE="%s"\n' "$LANGFUSE_POSTGRES_IMAGE"
   } > "$output_file"
@@ -2375,11 +2382,11 @@ deployment_render_image_values() {
   printf 'nexent-runtime:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_RUNTIME_IMAGE")" "$(deployment_image_tag "$NEXENT_RUNTIME_IMAGE")" "$local_pull_policy"
   printf 'nexent-mcp:\n'
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_SERVICE_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_SERVICE_IMAGE")" "$local_pull_policy"
   printf 'nexent-gateway:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
   printf 'nexent-ops:\n'
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_OPS_IMAGE")" "$(deployment_image_tag "$NEXENT_OPS_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf 'nexent-data-process:\n'
@@ -2473,7 +2480,7 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30014\n' "$internal_type"
   printf 'nexent-mcp:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_SERVICE_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_SERVICE_IMAGE")" "$local_pull_policy"
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-gateway:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
@@ -2482,7 +2489,7 @@ deployment_render_helm_chart_values() {
   printf '  opsUrl: "http://nexent-ops:%s"\n' "${OPS_PORT:-5016}"
   printf 'nexent-ops:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_OPS_IMAGE")" "$(deployment_image_tag "$NEXENT_OPS_IMAGE")" "$local_pull_policy"
   printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
@@ -2575,10 +2582,8 @@ deployment_render_helm_monitoring_global_values() {
 
 deployment_render_monitoring_image_value() {
   local key="$1"
-  local repository="$2"
-  local tag="$3"
   local image
-  image="$(deployment_add_image_registry_prefix "${repository}:${tag}")"
+  image="$(deployment_add_image_registry_prefix "$2")"
 
   printf '    %s:\n' "$key"
   printf '      repository: %s\n' "$(deployment_yaml_quote "$(deployment_image_repo "$image")")"
@@ -2592,7 +2597,6 @@ deployment_render_helm_monitoring_chart_values() {
   local phoenix_tag
   local langfuse_tag
   local clickhouse_tag
-  local minio_tag
   local redis_tag
   local postgres_tag
   enabled="$(deployment_monitoring_enabled)"
@@ -2601,7 +2605,6 @@ deployment_render_helm_monitoring_chart_values() {
   phoenix_tag="$(deployment_monitoring_env_value PHOENIX_VERSION "15")"
   langfuse_tag="$(deployment_monitoring_env_value LANGFUSE_VERSION "3")"
   clickhouse_tag="$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")"
-  minio_tag="$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")"
   redis_tag="$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")"
   postgres_tag="$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")"
 
@@ -2609,14 +2612,14 @@ deployment_render_helm_monitoring_chart_values() {
   printf '  enabled: %s\n' "$enabled"
   printf '  provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
   printf '  images:\n'
-  deployment_render_monitoring_image_value otelCollector otel/opentelemetry-collector-contrib "$otel_collector_tag"
-  deployment_render_monitoring_image_value phoenix arizephoenix/phoenix "$phoenix_tag"
-  deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
-  deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
-  deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
-  deployment_render_monitoring_image_value minio quay.io/minio/minio "$minio_tag"
-  deployment_render_monitoring_image_value redis docker.io/redis "$redis_tag"
-  deployment_render_monitoring_image_value postgres docker.io/postgres "$postgres_tag"
+  deployment_render_monitoring_image_value otelCollector "otel/opentelemetry-collector-contrib:$otel_collector_tag"
+  deployment_render_monitoring_image_value phoenix "arizephoenix/phoenix:$phoenix_tag"
+  deployment_render_monitoring_image_value langfuseWeb "docker.io/langfuse/langfuse:$langfuse_tag"
+  deployment_render_monitoring_image_value langfuseWorker "docker.io/langfuse/langfuse-worker:$langfuse_tag"
+  deployment_render_monitoring_image_value clickhouse "docker.io/clickhouse/clickhouse-server:$clickhouse_tag"
+  deployment_render_monitoring_image_value minio "$MINIO_IMAGE"
+  deployment_render_monitoring_image_value redis "docker.io/redis:$redis_tag"
+  deployment_render_monitoring_image_value postgres "docker.io/postgres:$postgres_tag"
   printf '  collector:\n'
   printf '    configFile: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_CONFIG_FILE "$(deployment_monitoring_collector_config_file k8s "$DEPLOYMENT_MONITORING_PROVIDER")")")"
   printf '    service:\n'

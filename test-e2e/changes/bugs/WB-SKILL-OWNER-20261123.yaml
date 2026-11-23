@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SKILL-OWNER-20261123
+  change_type: bugfix
+  bug_id: WB-SKILL-OWNER-20261123
+  title: Resolve published Workbench skills in their owning tenant
+  description: Align Runtime catalog selection, authorization and file verification with the Management snapshot.
+  observed_behavior: Management exports platform defaults while Runtime filters bindings and source files by the session tenant.
+  expected_behavior: Published platform defaults execute for ordinary tenants. Other mounts require tenant and user authorization and retain whole-resource precedence.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: The signed transport test substitutes the Workbench Skill reader, and the precedence component test does not exercise Runtime catalog reconstruction.
+  feature_contract_changed: false
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [WB-CONTROLS-D3-001]
+    modified: [WB-SKILL-PRECEDENCE-D1-001, AOS-TRANSPORT-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Platform defaults are read only for an active published Workbench root, and explicit mounts obey business-tenant visibility.
+    - The effective mount set preserves name precedence and refuses revisions with missing or unexpected skills.
+    - Runtime captures the selected owner's files and preserves the signed actor's isolated tool namespace.
+    test_selectors:
+    - test/backend/database/test_workbench_skill_records.py
+    - test/backend/app/test_agentos_prepared_skills.py::test_workbench_skills_pin_the_owned_configuration
+    - test/backend/services/test_workbench_skill_precedence.py
+    reason: Query scope, authorization edge cases and source versus staging ownership require targeted regression assertions.
+  notes: >-
+    SPEC: nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/design.md,
+    WB-SKILL-OWNER-20261123. Runtime owns the new D3 case. It is self-contained and
+    uses a temporary relational fixture and temporary Skill files. The existing D1
+    keeps its assertions through the current Runtime materializer. The signed HTTP
+    fixture includes owner metadata. A deployed business-tenant conversation verifies
+    the PostgreSQL and live service path separately.

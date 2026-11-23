@@ -131,7 +131,7 @@ def _lookup_first_active_tenant() -> Optional[str]:
             TENANT_ID as _TK,
         )
         from infrastructure.rdb.client import get_db_session as _gds
-        from management.db.models import TenantConfig
+        from infrastructure.rdb.tenant_config_record import TenantConfig
         from sqlalchemy import select as _sel
 
         with _gds() as session:
