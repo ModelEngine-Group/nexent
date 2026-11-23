@@ -19,6 +19,8 @@ change:
     - AGENT-HISTORY-D3-001
     - CONTEXT-POST-RESPONSE-D3-001
     - JIUWEN-OUTPUT-D3-001
+    - AOS-TRANSPORT-D3-001
+    - AOS-MODEL-D3-001
     added: []
     retired: []
   traditional_ut:
@@ -51,3 +53,5 @@ change:
     SPEC10 Scope Reduction 20261123.md owns approved scope and test-only fixture/overlay/wire cleanup.
     Preserve all variants and assertions; no new Cases/framework. Existing self-contained HTTP/PostgreSQL
     Case preparation/cleanup is reused; manual real-model acceptance remains pending and48 paused.
+    AgentOS CI contracts retain legacy output-limit input as a negative test and use the existing Skill
+    authorization allowlist in all three fixture tools; no product behavior changes in this test-only follow-up.
