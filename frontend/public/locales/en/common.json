@@ -5493,6 +5493,7 @@
   "agentEvaluation.noSetShort": "No Set",
   "agentEvaluation.noSetTag": "No Set",
   "agentEvaluation.none": "None",
+  "agentEvaluation.runFailureReason": "Failure reason",
   "agentEvaluation.notFound": "Evaluation not found",
   "agentEvaluation.overallScore": "Overall Score",
   "agentEvaluation.pagination.total": "Total {{total}} items",

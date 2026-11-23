@@ -1141,6 +1141,14 @@ export default function EvaluationDetailPage() {
               {run.status}
             </Tag>
           </Flex>
+          {run.status === "FAILED" && run.error_message && (
+            <Text
+              type="danger"
+              style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+            >
+              {t("agentEvaluation.runFailureReason")}: {run.error_message}
+            </Text>
+          )}
           <Space>
             {run.status === "COMPLETED" && (
               <Button
