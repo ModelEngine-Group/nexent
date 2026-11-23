@@ -142,9 +142,16 @@ ZH_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/..
 assert_contains "$ZH_OFFLINE_DRY_RUN" "=== DRY RUN 模式 ===" "offline dry-run should follow Chinese locale"
 assert_contains "$ZH_OFFLINE_DRY_RUN" "目标：docker" "offline dry-run target label should follow Chinese locale"
 
-LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,monitoring --monitoring-provider langfuse --image-source general --target docker --dry-run)"
-assert_contains "$LANGFUSE_OFFLINE_DRY_RUN" "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" "offline Langfuse package should use the Quay MinIO image"
-assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" "docker.io/minio/minio" "offline Langfuse package should not use the Docker Hub MinIO image"
+for image_source in general mainland; do
+  expected_minio="$(APP_VERSION=v2.2.0; source "$SCRIPT_DIR/../env/image-source.$image_source.env"; printf '%s' "$MINIO_IMAGE")"
+  for target in docker k8s all; do
+    LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" \
+      --version v2.2.0 --platform amd64 --components monitoring --monitoring-provider langfuse \
+      --image-source "$image_source" --image-registry-prefix registry.local/nexent --target "$target" --dry-run)"
+    assert_eq '1' "$(grep -Fxc "registry.local/nexent/$expected_minio" <<< "$LANGFUSE_OFFLINE_DRY_RUN")" "offline $target should list the selected MinIO image once for $image_source"
+    assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" 'quay.io/minio/minio:' "offline $target should only use the selected mirror for $image_source"
+  done
+done
 
 if DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --unknown >/tmp/nexent-image-build-zh-invalid.log 2>&1; then
   echo "FAIL: unknown image build option should fail"
@@ -233,7 +240,9 @@ PREFIXED_HELM_VALUES="$TMP_DIR/prefixed-generated-values.yaml"
 deployment_render_helm_values "$PREFIXED_HELM_VALUES"
 PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
-assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-management"' "helm values should use prefixed Management repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-mcp-service"' "helm values should use prefixed MCP backend repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent-ops"' "helm values should use prefixed Ops repositories"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
 unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
@@ -330,7 +339,8 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
 deployment_render_helm_values "$LOCAL_HELM_VALUES"
 LOCAL_HELM_CONTENT="$(cat "$LOCAL_HELM_VALUES")"
-assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp-service\"" "local-latest should render the MCP backend image"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-ops\"" "local-latest should render the Ops image"
 assert_contains "$LOCAL_HELM_CONTENT" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
 assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
 
@@ -834,8 +844,8 @@ assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'quay.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}' "docker compose Langfuse should use the Quay MinIO image"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: quay.io/minio/minio" "k8s Langfuse should use the Quay MinIO image"
+assert_eq '    image: ${MINIO_IMAGE}' "$(grep -A1 '^  langfuse-minio:$' "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml" | tail -n 1)" "docker compose Langfuse should use the core MinIO image reference"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: nexent/minio" "standalone Helm Langfuse should default to the general MinIO mirror"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
@@ -1400,15 +1410,26 @@ else
   assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
 fi
 assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
-assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
-for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-postgresql/templates/deployment.yaml")" '/docker-entrypoint-initdb.d/' "PostgreSQL must leave application SQL initialization to Management"
+for renderer in yaml_quote env_or_default render_yaml_literal_file sql_files_checksum render_infrastructure_runtime_values render_k8s_runtime_config_values; do
   eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
 done
 SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
-assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must not render application initialization SQL"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+render_k8s_runtime_config_values "$TMP_DIR/application-sql-values.yaml"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'init: |' "Management values must include baseline SQL"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'CREATE SCHEMA IF NOT EXISTS nexent;' "Management values must include the real baseline"
+assert_contains "$(cat "$TMP_DIR/application-sql-values.yaml")" 'migrations:' "Management values must include versioned SQL"
+original_sql_checksum="$(sql_files_checksum)"
+cp "$SQL_INIT_FILE" "$TMP_DIR/init-checksum.sql"
+printf '\n-- initialization checksum regression\n' >> "$TMP_DIR/init-checksum.sql"
+SQL_INIT_FILE="$TMP_DIR/init-checksum.sql"
+assert_not_eq "$original_sql_checksum" "$(sql_files_checksum)" "Management rollout checksum must include init.sql"
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
 
 export AUTH_HOOK_EXIT=17
 if deployment_upgrade_local_accounts docker; then

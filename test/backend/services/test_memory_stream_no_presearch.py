@@ -1,166 +1,79 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"""Stream only authorized prepared Memory events and persist their tool metadata."""
+
 import asyncio
 import json
 from threading import Event
 from time import monotonic
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
-import pytest
 import pytest_asyncio
 import redis
+from types import SimpleNamespace
 
-from contracts.agent import AgentRequest
-from management.services.agent import execution as agent_execution
-from management.services.agent import run as agent_run
+import pytest
+
 from management.services.agent.preparation import compiler
-from management.services.memory import context, embedding_health, records, runtime_embedding, runtime_io
+from management.services.memory import context, records
+from runtime.model import memory_embedding as runtime_embedding
+from infrastructure import memory_embedding_health as embedding_health, memory_io as runtime_io
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer, MemorySearchContext, MemorySearchResult
+from contracts.agentos import AgentResource, PreparedMemorySearch, ToolBinding
+from infrastructure.agentos_identity import ServicePrincipal
+from runtime.agentos import prepared_memory, prepared_run
+from .test_agent_run_final_answers import stream_capture
+
+
+@pytest.fixture
+def run_events(mocker):
+    async def model(_info, **_kwargs):
+        yield '{"type":"final_answer","content":"Done"}'
+
+    mocker.patch.object(prepared_run, "agent_run", side_effect=model)
+
+    async def collect(search=None):
+        resource = AgentResource(
+            agent_id=7, version_no=1, name="memory", description="", prompt_templates={},
+            memory_search=search, tools=[ToolBinding(tool_id="store_memory", version="1")],
+        )
+        tools, events = prepared_memory.materialize_memory(resource, ServicePrincipal("user", "tenant"), 42)
+        assert set(tools) == {"store_memory"}
+        info = SimpleNamespace(agent_config=SimpleNamespace(pre_run_tool_events=events))
+        return [json.loads(chunk) async for chunk in prepared_run._snapshot_chunks(info)]
+
+    return collect
 
 
 @pytest.mark.asyncio
-async def test_memory_enabled_stream_does_not_emit_presearch_events(monkeypatch):
-    request = AgentRequest(
-        agent_id=7,
-        conversation_id=777,
-        query="question",
-        history=[],
-        minio_files=[],
-        is_debug=False,
-    )
-    channel = AsyncMock()
-    monkeypatch.setattr(
-        agent_run.streaming_channel_manager,
-        "get_or_create_channel",
-        AsyncMock(return_value=channel),
-    )
-    monkeypatch.setattr(
-        agent_run,
-        "build_memory_context",
-        MagicMock(
-            return_value=MagicMock(
-                user_config=MagicMock(memory_switch=True)
-            )
-        ),
-    )
-    prepare = AsyncMock(return_value=(MagicMock(), MagicMock()))
-    monkeypatch.setattr(agent_run, "prepare_agent_run", prepare)
+async def test_enabled_memory_without_a_search_binding_emits_no_presearch_events(run_events, stream_capture):
+    source = await run_events()
 
-    async def chunks(**_kwargs):
-        yield "data: body\n\n"
+    published, batch = await stream_capture(source)
 
-    monkeypatch.setattr(agent_run, "_stream_agent_chunks", chunks)
-
-    output = [
-        chunk
-        async for chunk in agent_run.generate_stream(
-            request,
-            user_id="user-1",
-            tenant_id="tenant-1",
-            enable_memory=True,
-        )
-    ]
-
-    assert output == ["data: body\n\n"]
-    assert not any("memory_search" in chunk for chunk in output)
-    assert not any(
-        "memory_search" in str(call.args)
-        for call in channel.publish.await_args_list
-    )
-    prepare.assert_awaited_once_with(
-        agent_request=request,
-        user_id="user-1",
-        tenant_id="tenant-1",
-        language=agent_run.LANGUAGE["ZH"],
-        allow_memory_search=True,
-    )
+    assert published == [{"type": "final_answer", "content": "Done"}]
+    assert [unit["type"] for unit in batch["message_units"]] == ["final_answer"]
 
 
 @pytest.mark.asyncio
-async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeypatch):
-    request = AgentRequest(
-        agent_id=7,
-        conversation_id=777,
-        query="question",
-        history=[],
-        minio_files=[],
-        is_debug=False,
-    )
-    pre_run_events = [
-        {
-            "type": "tool",
-            "content": "",
-            "tool_name": "search_memory",
-            "tool_arguments": {"query": "question", "top_k": 5},
-        },
-        {
-            "type": "execution_logs",
-            "content": "No relevant memories found.",
-        },
-    ]
-    run_info = MagicMock()
-    run_info.agent_config.pre_run_tool_events = pre_run_events
-    run_info.stop_event.is_set.return_value = False
+async def test_fixed_search_is_streamed_and_saved_as_a_structured_tool(run_events, stream_capture):
+    search = PreparedMemorySearch(query="question", result="No relevant memories found.")
+    source = await run_events(search)
 
-    async def fake_agent_run(_run_info, **_kwargs):
-        yield json.dumps({"type": "final_answer", "content": "Done"})
+    published, batch = await stream_capture(source)
 
-    async def run_inline(_lane, _spec, func, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    monkeypatch.setattr(agent_execution, "agent_run", fake_agent_run)
-    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_inline)
-    monkeypatch.setattr(agent_execution, "save_message", lambda *args, **kwargs: 42)
-    monkeypatch.setattr(
-        agent_execution.agent_run_manager,
-        "unregister_agent_run",
-        lambda *args, **kwargs: None,
-    )
-    persisted_batches = []
-    monkeypatch.setattr(
-        agent_execution,
-        "persist_assistant_run_batch",
-        lambda **kwargs: persisted_batches.append(kwargs),
-    )
-    monkeypatch.setattr(
-        agent_execution.streaming_channel_manager,
-        "complete_channel",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
-    channel = AsyncMock()
-
-    chunks = [
-        chunk
-        async for chunk in agent_execution._stream_agent_chunks(
-            request,
-            "user-1",
-            "tenant-1",
-            run_info,
-            MagicMock(),
-            channel=channel,
-        )
-    ]
-
-    streamed_tool = json.loads(chunks[0].removeprefix("data: ").strip())
-    assert streamed_tool == {
-        **pre_run_events[0],
-        "unit_index": 0,
-    }
-
-    assert len(persisted_batches) == 1
-    saved_units = persisted_batches[0]["message_units"]
-    tool_unit = next(unit for unit in saved_units if unit["unit_type"] == "tool")
-    persisted_tool = json.loads(tool_unit["unit_content"])
-    assert persisted_tool == {
-        "content": "",
-        "tool_name": "search_memory",
+    assert published[:-1] == search.observer_events()
+    assert [unit["type"] for unit in batch["message_units"]] == ["tool", "execution_logs", "final_answer"]
+    tool, logs, _ = batch["message_units"]
+    assert tool["unit_index"] == 0
+    assert json.loads(tool["unit_content"]) == {
+        "content": "", "tool_name": "search_memory",
         "tool_arguments": {"query": "question", "top_k": 5},
     }
+    assert logs["unit_content"] == "No relevant memories found."
 
 
 @pytest.fixture
@@ -194,15 +107,14 @@ async def test_invalid_embedding_opens_shared_circuit_and_recovery_is_probed(cac
     redis_client, data = cache
     model = EmbeddingModelInfo("test", 2, "http://localhost", "test")
     client = Mock(get_embeddings_with_deadline=AsyncMock(return_value=invalid))
-    monkeypatch.setattr(runtime_embedding, "get_embedding_client", Mock(return_value=client))
 
-    assert await runtime_embedding.compute_runtime_embedding("first", model, tenant_id="t", deadline=monotonic() + 2) is None
+    assert await runtime_embedding.compute_runtime_embedding("first", model, tenant_id="t", client=client, deadline=monotonic() + 2) is None
     key = embedding_health.embedding_circuit_key("t", model)
     assert redis_client.set.call_args.kwargs["ex"] >= 300
 
     # Simulate a separate worker with a cold local cache.
     embedding_health._local.clear()
-    assert await runtime_embedding.compute_runtime_embedding("second", model, tenant_id="t", deadline=monotonic() + 2) is None
+    assert await runtime_embedding.compute_runtime_embedding("second", model, tenant_id="t", client=client, deadline=monotonic() + 2) is None
     client.get_embeddings_with_deadline.assert_awaited_once()
     assert embedding_health.admit_embedding(embedding_health.embedding_circuit_key("other", model)) == ""
 
@@ -223,7 +135,7 @@ async def memory_thread_manager(monkeypatch):
         )},
     )
     manager.start()
-    monkeypatch.setattr(runtime_io, "runtime_thread_manager", manager)
+    monkeypatch.setattr(runtime_io, "get_default_thread_manager", lambda: manager)
     try:
         yield manager
     finally:
@@ -250,7 +162,7 @@ async def test_presearch_returns_long_term_without_waiting_for_slow_vector(monke
     service.retrieval_service.search = AsyncMock()
     monkeypatch.setattr(context, "get_memory_context_service", lambda: service)
     monkeypatch.setattr(records, "_resolve_tenant_embedding_model_info", lambda tenant: object())
-    monkeypatch.setattr(runtime_embedding, "compute_runtime_embedding", block_embedding)
+    monkeypatch.setattr(__import__("management.services.memory.runtime_embedding", fromlist=["_"]), "compute_runtime_embedding", block_embedding)
     monkeypatch.setattr(compiler, "_get_external_provider_service_for_search", lambda: None)
 
     started = monotonic()
@@ -296,10 +208,10 @@ async def test_only_transient_http_failures_open_embedding_circuit(cache, monkey
     request = httpx.Request("POST", "http://localhost/embeddings")
     failure = httpx.HTTPStatusError("model request failed", request=request, response=httpx.Response(status))
     client = Mock(get_embeddings_with_deadline=AsyncMock(side_effect=[failure, [[0.25, 0.75]]]))
-    monkeypatch.setattr(runtime_embedding, "get_embedding_client", lambda **_: client)
 
-    assert await runtime_embedding.compute_runtime_embedding("first", model, tenant_id="t", deadline=monotonic() + 2) is None
-    second = await runtime_embedding.compute_runtime_embedding("second", model, tenant_id="t", deadline=monotonic() + 2)
+
+    assert await runtime_embedding.compute_runtime_embedding("first", model, tenant_id="t", client=client, deadline=monotonic() + 2) is None
+    second = await runtime_embedding.compute_runtime_embedding("second", model, tenant_id="t", client=client, deadline=monotonic() + 2)
     assert second == (None if opens_circuit else [0.25, 0.75])
     assert client.get_embeddings_with_deadline.await_count == (1 if opens_circuit else 2)
 
@@ -348,10 +260,10 @@ async def test_local_hit_accounting_records_only_items_in_prompt(monkeypatch, me
     formatter.format_search_context.return_value = "Found 1 relevant memory: included"
     monkeypatch.setattr(context, "get_memory_context_service", lambda: service)
     monkeypatch.setattr(records, "_resolve_tenant_embedding_model_info", lambda _: model)
-    monkeypatch.setattr(runtime_embedding, "compute_runtime_embedding", AsyncMock(return_value=[0.25, 0.75]))
+    monkeypatch.setattr(__import__("management.services.memory.runtime_embedding", fromlist=["_"]), "compute_runtime_embedding", AsyncMock(return_value=[0.25, 0.75]))
     monkeypatch.setattr(compiler, "_get_external_provider_service_for_search", lambda: None)
     monkeypatch.setattr(compiler, "_create_fixed_search_memory_tool", lambda: formatter)
-    monkeypatch.setattr(compiler, "runtime_thread_manager", SimpleNamespace(submit=submit))
+    monkeypatch.setattr(compiler, "get_default_thread_manager", lambda: SimpleNamespace(submit=submit))
 
     _, diagnostic = await compiler._prepare_runtime_memory(
         tenant_id="t", user_id="u", agent_id="1", conversation_id="2",
@@ -415,10 +327,10 @@ def test_shared_probe_release_error_leaves_local_state_recoverable(cache, monkey
 @pytest.mark.asyncio
 async def test_embedding_skips_when_deadline_has_no_transport_headroom(cache, monkeypatch, seconds):
     resolve_client = Mock()
-    monkeypatch.setattr(runtime_embedding, "get_embedding_client", resolve_client)
+
     model = EmbeddingModelInfo("test", 2, "http://localhost", "test")
     assert await runtime_embedding.compute_runtime_embedding(
-        "query", model, tenant_id="tenant", deadline=monotonic() + seconds
+        "query", model, tenant_id="tenant", client=resolve_client, deadline=monotonic() + seconds
     ) is None
     resolve_client.assert_not_called()
 
@@ -428,8 +340,8 @@ async def test_completed_embedding_after_deadline_cannot_reenter_context(cache, 
     remaining = Mock(side_effect=[1.0, 1.0, 0.0])
     client = Mock(get_embeddings_with_deadline=AsyncMock(return_value=[[0.25, 0.75]]))
     monkeypatch.setattr(runtime_embedding, "remaining_time", remaining)
-    monkeypatch.setattr(runtime_embedding, "get_embedding_client", lambda **_: client)
-    assert await runtime_embedding.compute_runtime_embedding("sample", model, tenant_id="t", deadline=0) is None
+
+    assert await runtime_embedding.compute_runtime_embedding("sample", model, tenant_id="t", client=client, deadline=0) is None
     client.get_embeddings_with_deadline.assert_awaited_once_with("sample", timeout=0.95)
 
 @pytest.mark.parametrize("pipeline_failure", [False, True])
@@ -456,3 +368,54 @@ async def test_retrieval_diagnostics_keep_healthy_sql_memory(monkeypatch, memory
     assert diagnostic == (None if pipeline_failure else "No relevant memories found.")
     assert model_lookup.called is pipeline_failure
     assert out.search_all_enabled.called is pipeline_failure
+
+
+@pytest.mark.asyncio
+async def test_management_passes_remaining_budget_over_signed_model_interface(monkeypatch):
+    from management.services.memory import runtime_embedding as rpc
+
+    client = Mock(invoke_model=AsyncMock(return_value=SimpleNamespace(output=[[0.25, 0.75]])))
+    model = EmbeddingModelInfo("test", 2, "", "", model_id=7, revision="r1")
+    monkeypatch.setattr(rpc, "_model_client", lambda: client)
+    deadline = monotonic() + 0.5
+    assert await rpc.compute_runtime_embedding("query", model, tenant_id="t", user_id="u", deadline=deadline) == [0.25, 0.75]
+    invocation, user, tenant = client.invoke_model.await_args.args
+    assert (invocation.model_id, invocation.expected_revision, user, tenant) == (7, "r1", "u", "t")
+    assert 0 < invocation.memory_timeout_seconds <= 0.5
+    assert "api_key" not in invocation.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_management_model_rpc_is_cancelled_at_memory_deadline(monkeypatch):
+    from management.services.memory import runtime_embedding as rpc
+
+    cancelled = asyncio.Event()
+
+    async def unavailable(*args):
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    client = Mock(invoke_model=AsyncMock(side_effect=unavailable))
+    monkeypatch.setattr(rpc, "_model_client", lambda: client)
+    model = EmbeddingModelInfo("test", 2, "", "", model_id=7)
+    start = monotonic()
+    assert await rpc.compute_runtime_embedding("query", model, tenant_id="t", user_id="u", deadline=start + 0.15) is None
+    assert monotonic() - start < 0.5
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_non_openai_adapter_uses_one_attempt_and_shares_cooldown(cache):
+    client = SimpleNamespace(invoke=AsyncMock(return_value=None))
+    model = EmbeddingModelInfo("test", 2, "", "", model_id=7)
+    for _ in range(2):
+        assert await runtime_embedding.compute_runtime_embedding(
+            "query", model, tenant_id="t", client=client, deadline=monotonic() + 1,
+        ) is None
+    client.invoke.assert_awaited_once()
+    request = client.invoke.await_args.args[0]
+    assert request.retries == 0
+    assert request.worker_lane == "model-embedding"
+    assert 0 < request.timeout <= 1

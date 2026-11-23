@@ -126,10 +126,12 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
 
     async def invoke(self, request: EmbeddingRequest):
         """Embed ``request.inputs`` (text), offloaded to a worker thread."""
+        worker_options = {"lane": request.worker_lane} if request.worker_lane is not None else {}
         return await run_blocking(
             "gateway-embedding-invoke",
             self.get_embeddings, request.inputs,
             with_metadata=request.with_metadata, timeout=request.timeout,
+            retries=request.retries, retry_timeout_step=request.retry_timeout_step, **worker_options,
         )
 
     def get_model_info(self) -> ModelInfo:

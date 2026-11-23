@@ -66,9 +66,11 @@ def test_ut_be_tlm_034_platform_defaults_match_deployment_example():
 
     from runtime.thread_management import runtime_thread_manager
     lanes = {lane.name: lane for lane in runtime_thread_manager.snapshot().lanes}
-    assert lanes["memory-read"].max_workers == 16
+    from management.thread_management import config_thread_manager
+    config_lanes = {lane.name: lane for lane in config_thread_manager.snapshot().lanes}
+    assert config_lanes["memory-read"].max_workers == 16
     assert lanes["memory-write"].max_workers == 8
-    assert lanes["memory-read"].max_queue_size == lanes["memory-write"].max_queue_size == 0
+    assert config_lanes["memory-read"].max_queue_size == lanes["memory-write"].max_queue_size == 0
 
     example_path = Path(__file__).resolve().parents[3] / "deploy" / "env" / ".env.example"
     example = example_path.read_text(encoding="utf-8")

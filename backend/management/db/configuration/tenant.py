@@ -11,7 +11,7 @@ from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantConfig, TenantGroupInfo
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
-from management.configuration.runtime import get_config_snapshot
+from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import TenantResourceLimitError
 
 

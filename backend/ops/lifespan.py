@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from contracts.constants import environment as config
 from fastapi import FastAPI
-from management.configuration.database import configuration_database
+from infrastructure.system_configuration.database import configuration_database
 from ops.concurrency import create_thread_manager
 
 

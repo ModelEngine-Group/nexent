@@ -89,7 +89,6 @@ class TestCreateApp:
 
     def test_create_app_all_parameters(self):
         """Test creating app with all parameters."""
-        internal_request = lambda method, path: method == "POST" and path == "/internal/test"
         app = create_app(
             title="Full Test API",
             description="Full description",
@@ -97,19 +96,13 @@ class TestCreateApp:
             root_path="/v3",
             cors_origins=["https://test.com"],
             cors_methods=["GET", "POST"],
-            enable_monitoring=True,
-            gateway_identity_audience="runtime",
-            internal_runtime_request=internal_request,
+            enable_monitoring=True
         )
 
         assert app.title == "Full Test API"
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
-        identity = next(item for item in app.user_middleware
-                        if item.cls.__name__ == "GatewayIdentityMiddleware")
-        assert identity.kwargs["audience"] == "runtime"
-        assert identity.kwargs["internal_runtime_request"] is internal_request
 
     def test_create_app_uses_lifespan_context(self):
         @asynccontextmanager
@@ -702,7 +695,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('management.utils.exception_handlers.logger') as mock_logger:
+        with patch('backend.http.server.exception_handlers.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -862,7 +855,7 @@ class TestAidpImportErrorBranch:
         from unittest.mock import patch
         from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 
-        with patch("management.utils.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
+        with patch("backend.http.server.exception_handlers.AIDP_EXCEPTIONS_AVAILABLE", False):
             fresh_app = FastAPI()
             register_exception_handlers(fresh_app)
 

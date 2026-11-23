@@ -28,6 +28,19 @@ sys.path.insert(
 # package and can resolve submodules during relative imports.
 # ---------------------------------------------------------------------------
 nexent_pkg = types.ModuleType("nexent")
+core_pkg = types.ModuleType("nexent.core")
+core_pkg.__path__ = []
+concurrency_pkg = types.ModuleType("nexent.core.concurrency")
+
+
+async def _run_memory_job(_label, job, *args, lane, owner, **kwargs):
+    assert (lane, owner) == ("background-service", "management.memory")
+    return job(*args, **kwargs)
+
+
+concurrency_pkg.run_blocking = _run_memory_job
+sys.modules["nexent.core"] = core_pkg
+sys.modules["nexent.core.concurrency"] = concurrency_pkg
 nexent_pkg.__path__ = []
 
 memory_pkg = types.ModuleType("nexent.memory")
@@ -574,7 +587,7 @@ def test_backend_search_hook_serializes_string_layer(fake_retrieval_service):
 
 
 def test_build_memory_service_for_fa_extraction_returns_memory_service():
-    svc = memory_backend_adapter.build_memory_service_for_fa_extraction(tenant_id="t", user_id="u", agent_id="a")
+    svc = memory_backend_adapter.build_memory_service_for_fa_extraction()
     assert isinstance(svc, MemoryService)
     assert callable(svc.kwargs.get("backend_store"))
     assert svc.kwargs.get("backend_search") is None

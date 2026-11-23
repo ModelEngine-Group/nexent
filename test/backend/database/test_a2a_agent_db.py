@@ -17,6 +17,9 @@ from datetime import datetime, timezone
 
 from contracts.errors.exceptions import AgentNotFoundError
 
+# Load the shared ORM mappings before this legacy suite replaces SQLAlchemy.
+import infrastructure.rdb.a2a_execution_records  # noqa: F401
+
 # ---------------------------------------------------------------------------
 # Mock consts module
 # ---------------------------------------------------------------------------

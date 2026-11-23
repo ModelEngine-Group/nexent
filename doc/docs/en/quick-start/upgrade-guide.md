@@ -20,6 +20,8 @@ The script directly copies files from `ROOT_DIR`, `NEXENT_USER_DIR`, and the Doc
 
 ## 2. Perform the Upgrade
 
+Web marks authentication cookies `Secure` by default. If users still connect directly over HTTP on an isolated network, set `NEXENT_AUTH_COOKIE_SECURE=false` in `deploy/env/.env` before upgrading so browsers can store the session. Keep the default `true` for HTTPS reverse proxies, including those that forward requests to Web over HTTP.
+
 ### 2.1 Online Upgrade
 
 In an environment that can reach GitHub and the required image registries, perform an online upgrade from the current Nexent repository. Confirm the current branch and target version, then update with fast-forward only. Do not use an unrecorded `latest` value in place of a specific version.

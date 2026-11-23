@@ -28,9 +28,10 @@ change:
     - Recover without retrying within the shared memory deadline.
     - Keep healthy memory when another optional source or write fails.
     - Share a five-minute cooldown and permit one recovery probe.
-    - Preserve the Runtime application factory callback when integrating the current Dreaming base.
+    - Preserve signed AgentOS model and store boundaries, durable unindexed receipts, and idempotent writes.
     test_selectors:
-    - test/backend/app/test_app_factory.py
+    - test/backend/app/test_agentos_memory_store.py
+    - test/backend/services/test_agentos_model.py
     - test/backend/services/test_memory_stream_no_presearch.py
     - test/backend/services/test_memory_record_unchanged.py
     - test/backend/services/test_memory_backend_adapter.py

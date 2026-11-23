@@ -1,6 +1,6 @@
 services:
   nexent-ops:
-    image: ${NEXENT_IMAGE:?Set NEXENT_IMAGE to a backend image containing ops_service.py}
+    image: ${NEXENT_OPS_IMAGE:-nexent/nexent-ops:latest}
     container_name: nexent-ops
     restart: unless-stopped
     ports:

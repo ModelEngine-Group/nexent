@@ -95,6 +95,7 @@ def store(monkeypatch):
         get_run_state_async=AsyncMock(return_value={}),
         read_replay_checkpoint_async=AsyncMock(return_value=None),
         mark_stream_completed_async=AsyncMock(),
+        mark_run_finished=MagicMock(),
         _run_managed=AsyncMock(),
     )
     monkeypatch.setattr(runtime, "runtime_state_service", state)
@@ -410,7 +411,7 @@ async def test_duplicate_request_id_does_not_create_another_conversation(store):
 
 @pytest.mark.asyncio
 async def test_truncated_local_buffer_recovers_from_the_complete_memory_checkpoint(store, monkeypatch):
-    from management.services.agent import channels
+    from infrastructure import agent_stream_channels as channels
 
     saved = [
         {"unit_type": "final_answer", "unit_index": i, "unit_content": str(i)}
