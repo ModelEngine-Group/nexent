@@ -545,3 +545,43 @@ def test_workbench_snapshot_allows_only_knowledge_tools_omitted_by_authorized_sc
     resource = evaluation_snapshot._export_resource(agent, {}, "tenant-a", "en", None, {}, **options)
     assert [ref.skill_id for ref in resource.workbench_skill_refs] == [53]
     assert all(tool.tool_id != "catalog_search" for tool in resource.tools)
+
+
+def test_new_guide_only_extends_the_reader_for_its_replay(skill_snapshot, mocker):
+    from hashlib import sha256
+    from contracts.agentos import NewSkillTrial
+    from contracts.constants import environment
+    from infrastructure import skill_package
+    from infrastructure.rdb import skill_candidate_records
+    from runtime.agentos.prepared_skills import verify_new_skill_mount
+
+    agent, model, source_dir, _, _ = skill_snapshot
+    files = {"SKILL.md": b"---\nname: intake\ndescription: Intake rules\n---\nRecord reference.", "references/hints.md": b"Extra"}
+    digest = sha256(skill_package.encode_skill_package(files)).hexdigest()
+    find = mocker.patch.object(skill_candidate_records, "read_new_skill_trial", return_value={
+        "candidate_id":3, "name":"intake", "description":"Intake rules", "digest":digest})
+    mocker.patch.object(skill_package, "load_new_skill_package", return_value=files)
+    spec = evaluation_snapshot.export_snapshot(agent,[model],"task",None,tenant_id="tenant-a",conversation_id=-2,language="en")
+    trial = NewSkillTrial(candidate_id=3,name="intake",digest=digest,arm="result")
+    spec = spec.model_copy(update={"new_skill_trial":trial, "observe_root_skill_choices":True, "replay_trial_id":"a"*32})
+    actor = ServicePrincipal("editor","tenant-a")
+    mocker.patch.object(environment, "EVOLUTION_REPLAY_RUNTIME", False)
+    with pytest.raises(HTTPException) as ordinary:
+        prepared_evaluation.prepare_evaluation_run(spec,actor)
+    assert ordinary.value.status_code==422 and not find.called
+    mocker.patch.object(environment, "EVOLUTION_REPLAY_RUNTIME", True)
+    info=prepared_evaluation.prepare_evaluation_run(spec,actor)
+    try:
+        assert verify_new_skill_mount(info,"tenant-a",trial)==trial
+        tools={t.name:t for t in info.agent_config.tools}
+        assert tools["read_skill_md"].params["authorized_skill_names"]==["intake","summarize"]
+        assert tools["run_skill_script"].params["authorized_skill_names"]==["summarize"]
+        assert "intake" not in tools["read_skill_config"].params["config_overrides"]
+        reader=NexentAgent.create_builtin_tool(None,tools["read_skill_md"])
+        assert "Record reference" in reader.forward("intake") and "Extra" in reader.forward("intake",["references/hints.md"])
+        assert not (source_dir.parent/"intake").exists()
+    finally:
+        prepared_evaluation._remove_skill_files(info.workspace_path)
+    find.return_value=None
+    with pytest.raises(HTTPException):
+        prepared_evaluation.prepare_evaluation_run(spec,actor)

@@ -193,12 +193,15 @@ def workspace_choices(tenant, agent_id, version):
             WHERE s.tenant_id=:tenant AND EXISTS (
                 SELECT 1 FROM nexent.ag_skill_instance_t i WHERE i.skill_id=s.skill_id AND i.tenant_id=:tenant
                 AND i.agent_id=:agent AND i.version_no=:version AND i.enabled AND i.delete_flag='N')
+            UNION ALL
+            SELECT c.candidate_id, 'skill_new', c.name, c.created_at FROM nexent.evolution_new_skill_candidate_t c
+            WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.version_no=:version
             ORDER BY create_time DESC LIMIT 200
         """,
         "experiments": """
             SELECT e.experiment_id, e.create_time, plan->'request'->>'candidate_type' AS candidate_type,
                    (plan->'request'->>'candidate_id')::bigint AS candidate_id,
-                   (plan->'request'->>'candidate_id' IS NOT NULL AND NOT e.cancelled AND
+                   (plan->'request'->>'candidate_id' IS NOT NULL AND plan->'request'->>'candidate_type' <> 'skill_new' AND NOT e.cancelled AND
                     NOT EXISTS (SELECT 1 FROM nexent.evolution_trial_t t WHERE t.experiment_id=e.experiment_id
                                 AND t.status IN ('running','pending','cancelled')) AND
                     EXISTS (SELECT 1 FROM nexent.evolution_trial_t t JOIN nexent.evolution_trial_t b

@@ -5,6 +5,21 @@ from collections import Counter
 from math import ceil
 
 
+def new_skill_use(evidence):
+    trial = evidence.get("new_skill_trial")
+    if not trial or trial["arm"] != "result":
+        return None
+    selection = evidence.get("selection") or {}
+    if "expected" not in selection or "reads" not in selection:
+        return None
+    name = trial["name"]
+    if selection.get("outcome") in {"missed", "wrong"}:
+        return "incorrect"
+    if name in selection["expected"]:
+        return "used" if selection["reads"].get(name) else "alternative"
+    return "skipped" if not selection["reads"].get(name) else "incorrect"
+
+
 def arm_measurement(status, result, *, task=None, require_selection=False):
     task = task or {}
     file_grade = result.get("file_state") or {}
@@ -18,6 +33,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False):
         *[result[k] or {} for k in ("tool_use", "file_state") if k in result],
     ]
     selection = result.get("selection") or {}
+    control_without_proposal = (result.get("new_skill_trial") or {}).get("arm") == "base"
     if (
         status not in {"pass", "fail"}
         or any(c.get("status") not in {"pass", "fail"} for c in checks)
@@ -25,12 +41,13 @@ def arm_measurement(status, result, *, task=None, require_selection=False):
         and selection.get("outcome") not in {"missed", "wrong", "hit", "correct_skip"}
     ):
         status = "invalid"
-    elif any(c["status"] == "fail" for c in checks) or (result.get("selection") or {}).get("outcome") in {
+    elif any(c["status"] == "fail" for c in checks) or not control_without_proposal and selection.get("outcome") in {
         "missed",
         "wrong",
     }:
         status = "fail"
     return {
+        **({"new_skill_use": new_skill_use(result)} if result.get("new_skill_trial") else {}),
         "status": status,
         "forbidden": forbidden,
         "unverified_protection": (
@@ -46,7 +63,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False):
     }
 
 
-def comparison_summary(policy, pairs, *, require_guide=False):
+def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False):
     # Private family names and individual task outcomes never appear in the returned object.
     valid, families, timings, token_pairs = [], Counter(), [], []
     failed, missing = [], []
@@ -71,6 +88,16 @@ def comparison_summary(policy, pairs, *, require_guide=False):
             timings.append(candidate["ms"])
         if base["status"] == candidate["status"] == "pass":
             token_pairs.append((base["tokens"], candidate["tokens"]))
+    if require_new_skill:
+        uses = {new.get("new_skill_use") for _, old, new in pairs
+                if old["status"] in {"pass", "fail"} and new["status"] in {"pass", "fail"}}
+        if not {"used", "skipped"} <= uses:
+            missing.append("new_skill_scope_coverage")
+        if "incorrect" in uses:
+            failed.append("skill_selection")
+        if any(old["status"] == "fail" and new["status"] == "pass" and new.get("new_skill_use") != "used"
+               for _, old, new in pairs):
+            missing.append("new_skill_gain_without_read")
     total, count = len(pairs), len(valid)
     improved, regressed = valid.count(("fail", "pass")), valid.count(("pass", "fail"))
     if count < policy.minimum_valid_pairs or count * 100 < total * policy.minimum_valid_percent:

@@ -301,7 +301,10 @@ function Experiments({
   choices?.cases.forEach(c => { if (c.digest && fixedDigests.has(c.digest)) fixedIds.add(c.case_id); });
   const development = report.data && { ...report.data, pairs: Object.fromEntries(
     Object.entries(report.data.pairs).filter(([id]) => !fixedIds.has(Number(id)))) };
-  const discoveryRun = candidate?.startsWith("skill_discovery:");
+  const proposed = choices?.candidates.find(c => c.kind === "skill_new" && candidate === `skill_new:${c.candidate_id}`);
+  const discoveryRun = candidate?.startsWith("skill_discovery:") || !!proposed;
+  const scopeLabels = new Set(choices?.cases.filter(c => caseIds.includes(c.case_id) &&
+    !fixedDigests.has(c.digest ?? "") && c.expected_skill_names != null).map(c => c.expected_skill_names!.includes(proposed?.name ?? "")));
   const baselineReport = report.data?.total_pairs === 0;
   const active = ["pending", "running"].includes(report.data?.status || "");
   const error =
@@ -371,6 +374,7 @@ function Experiments({
                 label: `#${c.candidate_id} · ${c.name}`,
               }))]}
             />
+            {proposed && <span>{t("evolution.newSkill.heldout")}</span>}
             {candidate === "combination" && <Select mode="multiple" maxCount={2} aria-label={t("evolution.chooseComponents")}
               placeholder={t("evolution.chooseComponents")} value={sourceIds} onChange={setSources} style={{minWidth: 260}}
               options={eligible.map(e => ({ value: e.experiment_id, label: t("evolution.sourceExperiment", {
@@ -447,7 +451,7 @@ function Experiments({
             <Button
               type="primary"
               disabled={
-                !candidate ||
+                !candidate || (!!proposed && scopeLabels.size !== 2) ||
                 (candidate !== "baseline" && screen && (!targets.length || !minimum ||
                   (metric === "tasks_fixed" && minimum > targets.length) ||
                   targets.some(id => !caseIds.includes(id) || fixedDigests.has(choices.cases.find(c => c.case_id === id)?.digest ?? "")))) ||
@@ -621,6 +625,10 @@ function Experiments({
                           {t(`evolution.fileIssue.${k}`)} · {trial.result!.file_state![k].join(", ")}
                         </div>)}
                     </div>}
+                    {trial.result?.new_skill_trial && <div>
+                      {t(trial.result.new_skill_trial.arm === "base" ? "evolution.newSkill.absent" : "evolution.newSkill.mounted",
+                        {name: trial.result.new_skill_trial.name, digest: trial.result.new_skill_trial.digest.slice(0,12)})}
+                    </div>}
                     {trial.result?.tool_catalog && <details><summary>{t("evolution.actualToolSet")}</summary>
                       {(["prompt_tools","schema_tools","executable"] as const).map(key => <div key={key}>
                         {t(`evolution.catalog.${key}`)} · {trial.result!.tool_catalog![key].join(", ") || "∅"}
@@ -668,7 +676,8 @@ function Experiments({
           draft={typeof adding === "number" ? source.data : undefined}
           agent={agent}
           version={version}
-          skills={choices?.skills || []}
+          skills={[...new Set([...(choices?.skills || []).map(s => s.name),
+            ...(choices?.candidates || []).filter(c => c.kind === "skill_new").map(c => c.name)])].map(name => ({name}))}
           close={() => setAdding(false)}
           saved={(id) => {
             if (typeof adding === "number") {

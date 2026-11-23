@@ -112,3 +112,47 @@ def test_generation_denies_other_creator_before_inspecting_evidence(monkeypatch)
     with pytest.raises(AppException):
         candidates._authorized_feedback("tenant", "bob", 1)
     reader.assert_not_called()
+
+
+def test_confirmation_measures_delivery_and_checks_actual_use_and_correct_skip():
+    from contracts.confirmation import ConfirmationPolicy
+    from management.services.evaluation.confirmation_results import arm_measurement, comparison_summary
+
+    policy = ConfirmationPolicy(
+        minimum_valid_pairs=2,
+        minimum_valid_percent=100,
+        family_minimums={"business": 2},
+        minimum_quality_gain_pp=1,
+    )
+
+    def measure(arm, grade, expected, reads):
+        from management.services.evaluation.experiments import judge_skill_selection
+
+        data = {
+            "judgment": {"status": grade},
+            "new_skill_trial": {"arm": arm, "name": "intake"},
+            "selection": judge_skill_selection(expected, reads),
+        }
+        return arm_measurement(grade, data, require_selection=True)
+
+    available = measure("result", "pass", ["intake"], {"intake": 1})
+    skipped = measure("result", "pass", [], {})
+    solved = measure("base", "pass", ["intake"], {})
+    failed = measure("base", "fail", ["intake"], {})
+
+    def compare(pairs):
+        return comparison_summary(
+            policy, [("business", old, new) for old, new in pairs], require_new_skill=True
+        )
+
+    control = compare([(solved, available), (solved, skipped)])
+    assert (
+        solved["status"] == "pass" and control["improved"] == 0 and control["failures"] == ["quality_target"]
+    )
+    assert compare([(failed, available), (solved, skipped)])["quality_gain_pp"] == 50
+    assert compare([(failed, available), (solved, available)])["decision"] == "insufficient"
+    assert compare([(failed, skipped), (solved, available)])["decision"] == "insufficient"
+    assert (
+        compare([(failed, available), (solved, measure("result", "pass", [], {"intake": 1}))])["decision"]
+        == "failed"
+    )

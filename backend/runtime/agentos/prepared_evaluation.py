@@ -70,7 +70,7 @@ from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import (
-    materialize_skill_tools, observe_trial_guide_choices, root_without_target_skill, skill_stage_path, skill_trial_observation,
+    mount_new_skill_trial, verify_new_skill_mount, materialize_skill_tools, observe_trial_guide_choices, root_without_target_skill, skill_stage_path, skill_trial_observation,
 )
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
@@ -175,7 +175,7 @@ def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
     root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
-    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None,
+    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None, new_skill_trial=None,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -207,6 +207,8 @@ def _materialize_agent(
         public_reference=public_reference, workbench_version=workbench_version,
         debug_run_id=workbench_debug_run_id,
     )
+    if new_skill_trial:
+        visible = mount_new_skill_trial(visible, actor, workspace_path, local_tools, new_skill_trial, language)
     try:
         mounted_tools = read_workbench_derived_tools(
             resource.agent_id, resource.version_no, actor.tenant_id, mounted_skills,
@@ -404,6 +406,8 @@ def prepare_run_snapshot(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 **({"omit_skill_candidate": payload.omit_root_skill_candidate_id}
                    if isinstance(payload, PreparedEvaluationRun) and payload.omit_root_skill_candidate_id else {}),
+                **({"new_skill_trial": payload.new_skill_trial}
+                   if isinstance(payload, PreparedEvaluationRun) and payload.new_skill_trial else {}),
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None or turn_generation is not None else None,
@@ -469,7 +473,7 @@ def prepare_run_snapshot(
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
 
-    if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
+    if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices or payload.new_skill_trial) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
     if (payload.watch_tool_arguments or payload.tool_set_check) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_TOOL_OBSERVATION_REQUIRES_REPLAY"})
@@ -538,6 +542,10 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
     try:
         observations = []
         recorder = None
+        new_skill = None
+        if payload.new_skill_trial:
+            new_skill = await run_blocking("verify-new-skill-mount", verify_new_skill_mount, info, actor.tenant_id,
+                                           payload.new_skill_trial, lane="control-io", owner="runtime")
         if payload.replay_files is not None:
             from runtime.agentos.replay_file_state import TrialFileState
             fixture = TrialFileState(info)
@@ -560,7 +568,7 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
             for skill, path in observations:
                 skill.guide_reads = reads[path].count if path is not None else 0
             file_state = await fixture.receipt() if fixture else None
-            result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id, file_state=file_state,
+            result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id, file_state=file_state, new_skill_trial=new_skill,
                 confirmation_bucket=payload.confirmation_bucket,
                 outcome=info.attempt_outcome or "unconfirmed",
                 skill=observations[0][0] if len(observations) == 1 else None,

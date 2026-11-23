@@ -86,6 +86,17 @@ class AgentPromptComposer:
         )
         return self.render_system_section("restricted_python_execution", authorized_imports=imports)
 
+    def skill_context_item(self, name: str, skill: dict, language: str) -> ContextItemInput:
+        return ContextItemInput(
+            id=f"skill:{name}", type=ContextItemType.SKILL, content=dict(skill),
+            source=(f"skill:{name}",), priority=40,
+            metadata={
+                "render_group": "skills", "language": language,
+                "usage_guidance": self.render_system_section("skill_usage"),
+                "authority": "agent",
+            },
+        )
+
     def executor_context_item(
         self, *, sandbox_workspace_enabled: bool, restricted_python_authorized_imports: List[str] | None = None,
     ) -> ContextItemInput | None:
@@ -246,15 +257,7 @@ class AgentPromptComposer:
         if include_skills and skills:
             for index, skill in enumerate(skills):
                 name = str(skill.get("name", index))
-                inputs.append(ContextItemInput(
-                    id=f"skill:{name}", type=ContextItemType.SKILL, content=dict(skill),
-                    source=(f"skill:{name}",), priority=40,
-                    metadata={
-                        "render_group": "skills", "language": language,
-                        "usage_guidance": composer.render_system_section("skill_usage"),
-                        "authority": "agent",
-                    },
-                ))
+                inputs.append(composer.skill_context_item(name, skill, language))
 
         add_system(
             "execution_flow",

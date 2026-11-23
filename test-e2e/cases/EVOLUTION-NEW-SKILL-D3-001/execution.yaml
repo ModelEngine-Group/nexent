@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: EVOLUTION-NEW-SKILL-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_new_skill_over_agentos
+acceptance_bindings:
+  AC-01: [test_new_skill_over_agentos]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -219,3 +219,71 @@ def materialize_skill_tools(
             params=builtin_params, metadata=metadata, **FileToolDescription.model_validate(binding.parameters).model_dump(),
         )
     return tools, list(rows.values()) if workbench_refs else []
+
+
+def mount_new_skill_trial(resource, actor, workspace_path, tools, trial, language):
+    from contracts.agentos import ToolBinding
+    from infrastructure.skill_package import load_new_skill_package
+
+    tenant = actor.tenant_id
+    row = skill_candidate_records.read_new_skill_trial(tenant, resource.agent_id, resource.version_no, trial.candidate_id)
+    if (not row or row["name"] != trial.name or row["digest"] != trial.digest
+            or resource.workbench_skill_refs or resource.evaluation_options is None):
+        raise ValueError("New Skill trial no longer matches its approved Agent version")
+    items = list(resource.evaluation_options.context_items or [])
+    reader = tools.get(EvaluationSkillTool.GUIDE)
+    if (any(i["type"] == "skill" and i["content"]["name"] == trial.name for i in items)
+            or reader and trial.name in reader.params["authorized_skill_names"]):
+        raise ValueError("New Skill name conflicts with an existing binding")
+    if trial.arm == "base":
+        return resource
+
+    files = load_new_skill_package(tenant, resource.agent_id, trial.digest)
+    if not files.get("SKILL.md") or any(path != "SKILL.md" and not (
+            path.startswith("references/") and Path(path).suffix.lower() in {".txt", ".md"}) for path in files):
+        raise ValueError("Only a guide and text references can be staged in a new Skill trial")
+    bindings = list(resource.tools)
+    if reader:
+        root = Path(reader.params["local_skills_dir"])
+        params = {**reader.params, "authorized_skill_names": sorted([*reader.params["authorized_skill_names"], trial.name])}
+        tools[EvaluationSkillTool.GUIDE] = reader.model_copy(update={"params": params})
+    else:
+        root = skill_stage_path(workspace_path, create=True) / uuid4().hex
+        guide = EvaluationSkillTool.GUIDE
+        bindings.append(ToolBinding(tool_id=guide.value, version="1"))
+        tools[guide] = ToolConfig(name=guide.value, class_name=guide.class_name, source="builtin", usage="builtin",
+            params={"local_skills_dir": str(root), "isolated_skills_root": True, "authorized_skill_names": [trial.name]},
+            metadata={"tenant_id": tenant, "agent_id": resource.agent_id, "version_no": resource.version_no})
+    directory = root / skill_path_segment(tenant) / skill_path_segment(trial.name)
+    directory.mkdir(parents=True, mode=0o700, exist_ok=False)
+    for path, contents in files.items():
+        dest = directory / path
+        dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        dest.write_bytes(contents)
+    from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
+    role = "manager" if resource.subagents or resource.external_a2a else "managed"
+    composer = AgentPromptComposer(AgentPromptBundle.from_resource(role=role, language=language))
+    entry = composer.skill_context_item(trial.name, {"name": trial.name, "description": row["description"]}, language)
+    items.append(entry.model_dump(mode="json"))
+    options = resource.evaluation_options.model_copy(update={"context_items": items})
+    return resource.model_copy(update={"tools": bindings, "evaluation_options": options})
+
+
+def verify_new_skill_mount(info, tenant, trial):
+    """Read the actual root catalog, reader authorization and staged package before collecting observations."""
+    from hashlib import sha256
+    from infrastructure.skill_package import encode_skill_package
+
+    config = info.agent_config
+    listed = any(item.type == "skill" and item.content.get("name") == trial.name for item in config.context_items or [])
+    reader = next((t for t in config.tools if t.name == EvaluationSkillTool.GUIDE), None)
+    allowed = bool(reader and trial.name in reader.params["authorized_skill_names"])
+    directory = (Path(reader.params["local_skills_dir"]) / skill_path_segment(tenant) / skill_path_segment(trial.name)) if reader else None
+    mounted = bool(directory and directory.is_dir())
+    if any(value != (trial.arm == "result") for value in (listed, allowed, mounted)):
+        raise HTTPException(409, detail={"code": "AGENTOS_NEW_SKILL_MOUNT_MISMATCH"})
+    if mounted:
+        files = {p.relative_to(directory).as_posix(): p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+        if sha256(encode_skill_package(files)).hexdigest() != trial.digest:
+            raise HTTPException(409, detail={"code": "AGENTOS_NEW_SKILL_REVISION_MISMATCH"})
+    return trial

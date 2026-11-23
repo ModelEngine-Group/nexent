@@ -429,3 +429,30 @@ it("offers independent passing development tasks as evidence for a new Skill", a
   open(screen.getByRole("combobox", {name: "evolution.newSkill.counter"}));
   await waitFor(() => expect(visibleOptions().map(el => el.textContent)).toEqual(["#3 Failed task"]));
 });
+
+
+it("requires both an applicable task and a skip task before comparing a new Skill", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Intake" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([
+    { evaluator_id: 3, name: "Business checks", evaluator_type: "code", status: "PUBLISHED" },
+  ]);
+  vi.mocked(evolutionService.workspace).mockResolvedValue({
+    candidates: [{candidate_id: 8, kind: "skill_new", name: "intake"}], experiments: [],
+    cases: [
+      {case_id: 1, family: "Work", query: "Review record", expected_skill_names: ["intake"]},
+      {case_id: 2, family: "Time", query: "Look up time", expected_skill_names: []},
+    ],
+  });
+  render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
+  await choose("agentEvaluation.agentLabel", "Intake");
+  await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  await choose("evolution.candidate", "#8 · intake");
+  await choose("evolution.evaluator", "Business checks");
+  await choose("evolution.cases", "Work · Review record");
+  const compare = screen.getByRole("button", {name:"evolution.compare"});
+  expect(compare).toBeDisabled();
+  fireEvent.keyDown(screen.getByRole("combobox", {name:"evolution.cases"}), {key:"Escape"});
+  await choose("evolution.cases", "Time · Look up time");
+  expect(compare).toBeEnabled();
+});

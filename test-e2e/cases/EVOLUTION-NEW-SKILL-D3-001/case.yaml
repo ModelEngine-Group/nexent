@@ -1,0 +1,36 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-NEW-SKILL-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-03]
+  title: 新 Skill 隔离挂载并回传真实读取记录
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 核对同一业务任务在原版与新 Skill 两组的真实目录、能力清单和读取回执。
+  preconditions: [正式 pytest 环境和可写临时目录。]
+  test_data:
+    profile: 合成的交接指南和查询时间任务。候选存储、模型及配置读取使用测试替身。
+  steps:
+  - order: 1
+    action: 通过签名 AgentOS 请求分别试跑原版、使用候选、跳过候选，随后篡改候选文件再试跑。
+    expected: 原版无该指南。候选组可以读取，越界任务没有读取，未授予脚本工具。错误摘要无法产生有效回执。
+  expected_results: [验证包摘要、实际文件读取及两组归属。]
+  forbidden_side_effects: [不得写入业务共享目录。]
+  acceptance:
+  - id: AC-01
+    description: 签名请求下核对候选文件、原版、跳过和包变更。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - Management 客户端通过进程内 HTTP 调用真实 Runtime 路由，使用真实目录与 SDK 指南工具，受控执行器代替模型。
+  observations: [真实 SDK 读取次数、验证过的包摘要和分组身份。]
+  cleanup: [只使用测试临时目录，验证试跑目录均被回收。]

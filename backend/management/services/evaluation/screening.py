@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Decide whether a development candidate can be submitted for independent confirmation."""
 
+from management.services.evaluation.confirmation_results import new_skill_use
+
 
 def _verified(row, case_digest, arm_digest, rubric):
     result = row.get("result") or {}
@@ -21,6 +23,7 @@ def screen_development(plan, pairs, *, cancelled):
     targets = set(criteria["target_case_ids"])
     regression = plan["regression_cases"]
     gaps, failures = {}, {}
+    skill_uses = set()
     fixed = base_tokens = candidate_tokens = 0
 
     for key, digest in plan["cases"].items():
@@ -35,6 +38,8 @@ def screen_development(plan, pairs, *, cancelled):
             continue
         result = pair["result"]
         evidence = result["result"]
+        if request["candidate_type"] == "skill_new" and key not in regression:
+            skill_uses.add(new_skill_use(evidence))
         if (evidence.get("selection") or {}).get("outcome") in {"wrong", "missed"}:
             failures.setdefault("skill_selection", []).append(cid)
         if (evidence.get("file_state") or {}).get("protected_writes") or any(
@@ -52,6 +57,8 @@ def screen_development(plan, pairs, *, cancelled):
             failures.setdefault("quality_regressed", []).append(cid)
         if base["status"] == "fail" and result["status"] == "pass":
             fixed += 1
+            if request["candidate_type"] == "skill_new" and new_skill_use(evidence) != "used":
+                gaps.setdefault("new_skill_gain_without_read", []).append(cid)
             if request["candidate_type"] == "skill_step" and any(
                     not (pair[arm]["result"].get("skill") or {}).get("guide_reads") for arm in ("base", "result")):
                 gaps.setdefault("skill_not_read", []).append(cid)
@@ -65,6 +72,8 @@ def screen_development(plan, pairs, *, cancelled):
                 base_tokens += counts[0]
                 candidate_tokens += counts[1]
 
+    if request["candidate_type"] == "skill_new" and not {"used", "skipped"} <= skill_uses:
+        gaps["new_skill_scope_coverage"] = []
     if not regression:
         gaps["no_fixed_regression"] = []
     if cancelled:

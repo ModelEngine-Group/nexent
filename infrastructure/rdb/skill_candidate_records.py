@@ -29,3 +29,24 @@ def candidate_skill_row(row, bound, variant):
             or not bound["result_text"] or variant not in {"base", "result"}):
         raise ValueError("Skill discovery description is outside its approved source")
     return {**row, "description": bound["result_text"]} if variant == "result" else row
+
+
+def read_new_skill_trial(tenant, agent, version, candidate_id):
+    """Only resolve a proposal belonging to this published business Agent version."""
+    with get_db_session() as session:
+        row = session.execute(text("""
+            SELECT c.candidate_id, c.name, c.description, c.digest, h.feedback->'source_keys' AS source_keys,
+                   h.feedback->>'baseline_digest' AS baseline_digest
+            FROM nexent.evolution_new_skill_candidate_t c
+            JOIN nexent.evolution_feedback_handoff_t h ON h.feedback_id=c.feedback_id AND h.tenant_id=c.tenant_id
+            WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.version_no=:version AND c.candidate_id=:candidate
+        """), dict(tenant=tenant, agent=agent, version=version, candidate=candidate_id)).mappings().one_or_none()
+        return dict(row) if row else None
+
+
+def proposed_skill_names(tenant, agent, version):
+    with get_db_session() as session:
+        return set(session.scalars(text("""
+            SELECT DISTINCT name FROM nexent.evolution_new_skill_candidate_t
+            WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version
+        """), dict(tenant=tenant, agent=agent, version=version)))

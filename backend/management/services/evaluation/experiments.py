@@ -10,13 +10,13 @@ from collections import Counter
 from contextlib import ExitStack, asynccontextmanager
 
 from backend.http.client import create_httpx_client
-from contracts.agentos import EvaluationAgentRun, ToolSetCheck
+from contracts.agentos import EvaluationAgentRun, NewSkillTrial, ToolSetCheck
 from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest
 from infrastructure.agentos_client import AgentOSClient
-from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
+from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate, read_new_skill_trial
 from management.db.conversation.evolution_review import recent_reviews
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import prompt_example_sources
@@ -87,7 +87,15 @@ async def _snapshot(request, tenant, user, variant):
         spec = spec.model_copy(update={"tool_set_check": ToolSetCheck(arm=variant, removed=removed)})
     if variant == "no_skill":
         spec = spec.model_copy(update={"omit_root_skill_candidate_id": request.candidate_id})
-    if request.candidate_type in {"baseline", "skill_discovery"}:
+    if request.candidate_type == "skill_new":
+        proposal = await _new_skill_proposal(request, tenant)
+        baseline = spec.model_copy(update={"observe_root_skill_choices": True})
+        if snapshot_digest(baseline) != proposal["baseline_digest"]:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The source Agent changed after drafting the Skill")
+        trial = NewSkillTrial(candidate_id=request.candidate_id, name=proposal["name"],
+                              digest=proposal["digest"], arm=variant)
+        spec = spec.model_copy(update={"new_skill_trial": trial})
+    if request.candidate_type in {"baseline", "skill_discovery", "skill_new"}:
         spec = spec.model_copy(update={"observe_root_skill_choices": True})
     return spec
 
@@ -154,7 +162,17 @@ async def _check_components(request, tenant, user):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "A component changed since its single experiment")
 
 
+async def _new_skill_proposal(request, tenant):
+    proposal = await _io("read-proposed-skill", read_new_skill_trial, tenant, request.agent_id,
+                         request.version_no, request.candidate_id)
+    if not proposal:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "New Skill proposal is outside this Agent version")
+    return proposal
+
+
 async def _excluded_sources(request, tenant):
+    if request.candidate_type == "skill_new":
+        return set((await _new_skill_proposal(request, tenant))["source_keys"])
     if request.components:
         prompt = next((p for p in request.components if p.candidate_type == "prompt"), None)
         if not prompt:
@@ -200,6 +218,8 @@ async def create_experiment(request, tenant, user):
     cases = {}
     trace_baseline_digest = None
     development_sources, fixed_sources = set(), set()
+    proposed_name = (await _new_skill_proposal(request, tenant))["name"] if request.candidate_type == "skill_new" else None
+    applicable = set()
     for case_id in dict.fromkeys([*request.case_ids, *map(int, fixed)]):
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
@@ -211,10 +231,14 @@ async def create_experiment(request, tenant, user):
             await _io("verify-reproduced-trace-case", require_trace_baseline, tenant, request.agent_id,
                       request.version_no, case, rule, request.language, request.judge_model_id, trace_baseline_digest)
         if excluded.intersection(sources):
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
-        if (request.candidate_type == "skill_discovery" and case_id in request.case_ids
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the examples used to generate the candidate")
+        if (request.candidate_type in {"skill_discovery", "skill_new"} and case_id in request.case_ids
                 and case["task"].get("expected_skill_names") is None):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Label the acceptable Skill choices for each task")
+        if proposed_name and case_id in request.case_ids and str(case_id) not in fixed:
+            if not any(k.startswith(("group:", "file:", "conversation:", "file-state:")) for k in sources):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Identify the source material of each new Skill test")
+            applicable.add(proposed_name in case["task"]["expected_skill_names"])
         cases[str(case_id)] = case["digest"]
         if str(case_id) in fixed and case["digest"] != fixed[str(case_id)]["digest"]:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Fixed regression task no longer matches its source")
@@ -222,6 +246,8 @@ async def create_experiment(request, tenant, user):
             fixed_sources.update(sources)
         else:
             development_sources.update(sources)
+    if proposed_name and applicable != {True, False}:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Include an unseen task for the new Skill and an unseen task outside its scope")
     if development_sources & fixed_sources:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose development materials outside the fixed regression suite")
     snapshots = {}
@@ -504,6 +530,7 @@ async def run_verified_arm(request, job, case, spec, client, stage_input):
         trace_review["trace_baseline_outcome"] = outcomes.get((source["purpose"], status), "inconclusive")
     return status, {"judgment": grade, "answer": final.answer, "event_count": len(events), "execution_ms":execution_ms, **dialogue,
                              **trace_review,
+                             **({"new_skill_trial": receipt.new_skill_trial.model_dump()} if getattr(receipt, "new_skill_trial", None) else {}),
                              **({"tool_use": tool_grade} if tool_grade else {}),
                              **({"file_state": file_grade} if file_grade else {}),
                              **({"tool_catalog": catalog.model_dump()} if catalog else {}),

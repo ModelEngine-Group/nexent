@@ -139,7 +139,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
                     ledger,
                     attempt,
                     arm_measurement(
-                        status, details, task=task, require_selection=req.candidate_type == "skill_discovery"
+                        status, details, task=task, require_selection=req.candidate_type in {"skill_discovery", "skill_new"}
                     ),
                 )
             measured[arm] = observation
@@ -150,6 +150,7 @@ async def _run_locked(tenant, lock_id, path, bucket, ledger):
         ConfirmationPolicy.model_validate(protocol["policy"]),
         pairs,
         require_guide=req.candidate_type == "skill_step",
+        require_new_skill=req.candidate_type == "skill_new",
     )
     return await _io(
         "record-independent-result", confirmation_runs.finalize, tenant, curator, protocol, summary

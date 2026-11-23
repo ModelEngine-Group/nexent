@@ -29,11 +29,19 @@ def validate_turn(spec, receipt, attempt, expected_names):
         if (skill.instance_id != target.instance_id or skill.variant != ("no_skill" if omitted else target.package_variant)
                 or skill.mounted_revision != (None if omitted else target.revision) or omitted and (skill.listed or skill.guide_reads)):
             return {"error": "skill_observation_mismatch"}
+    proposal = getattr(spec, "new_skill_trial", None)
+    if getattr(receipt, "new_skill_trial", None) != proposal:
+        return {"error": "new_skill_mount_mismatch"}
     if spec.observe_root_skill_choices and expected_names is not None:
         reads = receipt.root_guide_reads
         listed = {item["content"]["name"] for item in (spec.resource.evaluation_options.context_items or [])
                   if item.get("type") == "skill"}
-        if reads is None or not listed.issuperset(set(reads).union(expected_names)):
+        eligible = set(listed)
+        if proposal:
+            eligible.add(proposal.name)
+            if proposal.arm == "result":
+                listed.add(proposal.name)
+        if reads is None or not listed.issuperset(reads) or not eligible.issuperset(expected_names):
             return {"error": "invalid_skill_choice_receipt"}
     if spec.tool_set_check:
         catalog = receipt.tool_catalog

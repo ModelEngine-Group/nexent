@@ -95,8 +95,11 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
                                                   request.trace.turn_id, request.trace.use_previous_task, request.trace.preceding_turns))
     if request.expected_skill_names:
         names = {row["name"] for row in read_bound_skills(request.agent_id, request.version_no, tenant_id)}
+        if set(request.expected_skill_names) - names:
+            from infrastructure.rdb.skill_candidate_records import proposed_skill_names
+            names.update(proposed_skill_names(tenant_id, request.agent_id, request.version_no))
         if not set(request.expected_skill_names) <= names:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Expected Skill must be enabled on this Agent version")
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select a bound Skill or a new Skill proposed for this Agent version")
     for file in request.attachments:
         if not file.object_name.startswith(f"attachments/{user_id}/"):
             raise AppException(ErrorCode.COMMON_FORBIDDEN, "Submit an approved copy of your own attachment")

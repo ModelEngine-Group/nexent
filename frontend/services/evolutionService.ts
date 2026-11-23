@@ -55,6 +55,7 @@ export interface Trial {
     guide_reads?: Record<string, number>;
     tool_catalog?: { core: string; prompt_tools: string[]; schema_tools: string[]; executable: string[];
       model_inputs?: number; instruction_mentions?: string[]; native_definitions?: string[] };
+    new_skill_trial?: {candidate_id: number; name: string; digest: string; arm: "base" | "result"};
     tool_use?: { status: string; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
     error?: string;
     judgment?: { score?: number; reason?: string; status?: string };

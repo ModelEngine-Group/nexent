@@ -733,11 +733,19 @@ class ToolCatalogObservation(RunSpecModel):
     native_definitions: list[str]
 
 
+class NewSkillTrial(RunSpecModel):
+    candidate_id: PositiveInt
+    name: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    arm: Literal["base", "result"]
+
+
 class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 
     conversation_id: Annotated[int, Field(le=0)] = 0
     replay_trial_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
+    new_skill_trial: NewSkillTrial | None = Field(default=None, exclude_if=lambda v: v is None)
     omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
     watch_tool_arguments: dict[str, list[str]] | None = Field(default=None, min_length=1, max_length=32,
@@ -778,6 +786,7 @@ class ReplayToolObservation(RunSpecModel):
 
 
 class ReplayReceipt(RunSpecModel):
+    new_skill_trial: NewSkillTrial | None = Field(default=None, exclude_if=lambda v: v is None)
     trial_id: str = Field(pattern=RUN_ID_PATTERN)
     outcome: str = Field(min_length=1)
     confirmation_bucket: str | None = Field(default=None, min_length=1, max_length=63, exclude_if=lambda v: v is None)
