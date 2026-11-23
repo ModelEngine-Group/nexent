@@ -205,6 +205,7 @@ class AgentRunMetadata:
     monitoring_run_id: Optional[str] = None
     monitoring_root_run_id: Optional[str] = None
     monitoring_mcp_servers: Optional[List[Dict[str, Any]]] = None
+    monitoring_parent_run_id: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""
@@ -912,6 +913,7 @@ class MonitoringManager:
         operation_name: str = "agent.run",
         *,
         start_time: Optional[int] = None,
+        run_timing=None,
     ) -> Iterator[Optional[Any]]:
         """Create the SDK-owned top-level Agent span."""
         agent_metadata = _coerce_agent_run_metadata(metadata)
@@ -938,6 +940,7 @@ class MonitoringManager:
                         operation_name,
                         OPENINFERENCE_SPAN_KIND_AGENT,
                         start_time=start_time,
+                        **({"run_timing": run_timing} if run_timing is not None else {}),
                         **attributes,
                     ) as span:
                         with agent_trace_name_scope(span, trace_name, parent_span):
@@ -997,6 +1000,7 @@ class MonitoringManager:
         operation_name: str,
         span_kind: str = OPENINFERENCE_SPAN_KIND_CHAIN,
         start_time: Optional[int] = None,
+        run_timing=None,
         **attributes: Any
     ) -> Iterator[Optional[Any]]:
         """Trace a non-LLM operation using OpenInference span kind semantics."""
@@ -1023,11 +1027,15 @@ class MonitoringManager:
             span_attrs.update(self._trace_payload_attributes("output", output_value))
 
         span_attrs.update(attributes)
+        if run_timing is not None:
+            start_time = run_timing.started_at_ns
+            span_attrs["nexent.agent_run_id"] = run_timing.run_id
 
         with self._tracer.start_as_current_span(
             operation_name,
             attributes=span_attrs,
             start_time=start_time,
+            **({"end_on_exit": False} if run_timing is not None else {}),
         ) as span:
             try:
                 yield span
@@ -1038,6 +1046,20 @@ class MonitoringManager:
                 raise
             else:
                 span.set_status(Status(StatusCode.OK))
+            finally:
+                if run_timing is not None:
+                    result = run_timing.finish()
+                    try:
+                        if result.duration_ms is None:
+                            span.set_attribute("nexent.availability.duration_ms", "unavailable")
+                        else:
+                            span.set_attribute("nexent.duration_ms", result.duration_ms)
+                    except Exception:
+                        logger.debug("Unable to attach shared Agent timing", exc_info=True)
+                    try:
+                        span.end(end_time=result.ended_at_ns)
+                    except Exception:
+                        logger.debug("Unable to archive completed Agent span", exc_info=True)
 
     def set_openinference_output(
         self,

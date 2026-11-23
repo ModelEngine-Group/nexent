@@ -5,7 +5,8 @@
 from sqlalchemy import exists, or_, select
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
-from management.db.models import AgentInfo, ConversationRecord
+from management.db.agent.models import AgentInfo
+from management.db.conversation.models import ConversationRecord
 
 
 def _public_identity_filters():

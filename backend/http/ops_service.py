@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Launch the independent operations backend using the shared backend image."""
+"""Launch the standalone Operations HTTP service."""
 
 import uvicorn
 

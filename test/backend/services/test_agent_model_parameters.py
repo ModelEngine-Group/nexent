@@ -182,6 +182,75 @@ def test_agent_read_projection_normalizes_only_profile_llm_without_writing_versi
     assert old == before
 
 
+def _lightweight_list_record(full: dict) -> dict:
+    """The list projection returned by get_model_records_by_ids (columns only)."""
+    return {
+        "model_type": "llm",
+        "display_name": "LLM",
+        "profile_schema_version": full["profile_schema_version"],
+    }
+
+
+def test_agent_read_projection_refetches_lightweight_model_records(monkeypatch, profile):
+    from management.services.agent import read
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+
+    data = profile.model_dump(mode="json")
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 1
+    full = encode_resolved_model_profile(
+        profile.__class__.model_validate(data),
+        registered_references=model_service_references(),
+    )
+    full["display_name"] = "LLM"
+    lightweight = _lightweight_list_record(full)
+    resolved = []
+
+    def resolve(model_id, tenant, cache=None):
+        # detail reads pass tenant=None; the refetch passes the real tenant.
+        resolved.append(tenant)
+        return lightweight if tenant is None else full
+
+    monkeypatch.setattr(read, "get_valid_model_ids", lambda ids, tenant: ids)
+    monkeypatch.setattr(read, "resolve_model_record", resolve)
+    monkeypatch.setattr(read, "is_model_configured", lambda record: True)
+    old = {"model_ids": [1], "model_params_override": {
+        "1": {"temperature": 0, "extra_params": {"enable_thinking": False}}}}
+
+    view = read.project_agent_models(old, "tenant", detail=True).fields
+
+    assert resolved == [None, "tenant"]
+    assert view["model_params_override"]["1"] == {
+        "parameter_values": {"temperature": 0, "enable_thinking": False}}
+
+
+def test_agent_read_projection_keeps_raw_entry_when_refetch_misses(monkeypatch, profile):
+    from management.services.agent import read
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+
+    data = profile.model_dump(mode="json")
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 1
+    full = encode_resolved_model_profile(
+        profile.__class__.model_validate(data),
+        registered_references=model_service_references(),
+    )
+    lightweight = _lightweight_list_record(full)
+
+    def resolve(model_id, tenant, cache=None):
+        return lightweight if tenant is None else None
+
+    monkeypatch.setattr(read, "get_valid_model_ids", lambda ids, tenant: ids)
+    monkeypatch.setattr(read, "resolve_model_record", resolve)
+    monkeypatch.setattr(read, "is_model_configured", lambda record: True)
+    raw = {"temperature": 0, "extra_params": {"enable_thinking": False}}
+    old = {"model_ids": [1], "model_params_override": {"1": raw}}
+
+    view = read.project_agent_models(old, "tenant", detail=True).fields
+
+    assert view["model_params_override"]["1"] == raw
+
+
 @pytest.mark.parametrize("window", [0, True, 1, 64000])
 def test_scb03_historical_agent_length_values_inherit_outlet(profile, window):
     from management.services.agent.model_parameters import merge_runtime_model_parameters

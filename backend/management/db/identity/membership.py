@@ -7,7 +7,7 @@ from sqlalchemy import func, select, text
 
 from contracts.errors.exceptions import RoleAssignmentConflict
 from infrastructure.rdb.client import get_db_session
-from management.db.models import UserAccount, UserTenant
+from management.db.identity.models import UserAccount, UserTenant
 from infrastructure.rdb.orm import as_dict
 
 

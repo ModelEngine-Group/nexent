@@ -59,7 +59,7 @@ def project_runtime_history(content, units):
                 event = _restore_duplicate_runtime_envelope(event)
             event = dict(event)
             kind = event.get("type")
-            if kind in {"model_output", "model_output_deep_thinking"}:
+            if kind in {"model_output", "model_output_thinking", "model_output_deep_thinking"}:
                 key = (event.get("turn_id"), event.get("invocation_id"), event.get("block_id"), kind)
                 event["content"] = filters.setdefault(key, PublicTextFilter()).push(event.get("content", ""))
             elif kind == "run_terminal" and event.get("status") == "completed":

@@ -1,12 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""MCP tool call monitoring facts, mappings and metrics (OPS-MCP-TOOL-MONITORING-20261118)."""
+"""MCP tool call monitoring mappings and metrics (OPS-MCP-TOOL-MONITORING-20261118)."""
 
 from collections.abc import Iterable
-from typing import Literal
 
-from pydantic import Field
-
-from ops.monitoring.contracts import MAX_LONG, Fact, MonitoringKind, stable_key
+from infrastructure.monitoring.facts import McpToolFact
+from ops.monitoring.contracts import MonitoringKind, stable_key
 
 
 DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
@@ -14,17 +12,6 @@ DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state"
               "tool_name", "agent_id", "has_agent_run")
 COUNTERS = ("request_count", "error_count", "error_eligible_count",
             "duration_ms_sum", "duration_ms_sample_count")
-
-
-class McpToolFact(Fact):
-    fact_kind: Literal["mcp_tool"] = "mcp_tool"
-    tool_name: str = Field(min_length=1, max_length=200)
-    mcp_server_id: int | None = Field(default=None, gt=0, le=2147483647)
-    mcp_server_name: str | None = Field(default=None, max_length=200)
-    mcp_server_type: Literal["container", "remote", "api_convert", "builtin", "unknown"]
-    error_category: str | None = Field(default=None, pattern=r"^[A-Z0-9_]{1,50}$")
-    trace_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
-    span_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
 
 
 def accumulate_mcp_tool(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:

@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Runtime factory arguments preserve both service and Gateway authentication."""
+"""Runtime factory arguments preserve Gateway identity and monitoring lifetime."""
 
 import ast
 from contextlib import asynccontextmanager
@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from backend.http.server import app_factory
 from gateway.downstream import identity, internal_tokens, middleware
-from runtime.api.identity_routes import is_runtime_service_request
 
 
 @pytest.mark.parametrize("monitoring_enabled", [False, True])
@@ -30,9 +29,9 @@ def test_real_runtime_factory_call_preserves_identity_and_lifespan(monkeypatch, 
         events.append("runtime-stop")
 
     key = "runtime-factory-isolated-gateway-signature"
-    monkeypatch.setattr(app_factory, "OPS_MONITORING_ENABLED", monitoring_enabled)
+    monkeypatch.setattr("contracts.constants.environment.OPS_MONITORING_ENABLED", monitoring_enabled)
     monkeypatch.setattr(app_factory, "monitoring_manager", None)
-    monkeypatch.setattr("ops.monitoring.runtime.producer_lifespan", producer)
+    monkeypatch.setattr("infrastructure.monitoring.runtime.producer_lifespan", producer)
     monkeypatch.setattr(middleware, "enabled", lambda: True)
     monkeypatch.setattr(middleware, "signing_key", lambda: key)
     monkeypatch.setattr(identity, "signing_key", lambda: key)
@@ -44,21 +43,20 @@ def test_real_runtime_factory_call_preserves_identity_and_lifespan(monkeypatch, 
                 and any(isinstance(target, ast.Name) and target.id == "app" for target in node.targets))
     app = eval(compile(ast.Expression(call), str(source), "eval"), {
         "create_app": app_factory.create_app, "runtime_lifespan": business,
-        "is_runtime_service_request": is_runtime_service_request,
     })
 
     def current_identity():
         return identity.identity_context.get()
 
-    internal_path = "/agent-evaluations/internal/run"
-    public_path = "/agent/run"
+    internal_path = "/legacy-service-probe"
+    public_path = "/factory-probe"
     app.add_api_route(internal_path, current_identity, methods=["POST"])
     app.add_api_route(public_path, current_identity, methods=["POST"])
     service_token = internal_tokens.generate_internal_runtime_jwt("user", "tenant")
     with TestClient(app) as client:
         response = client.post(internal_path, headers={"Authorization": f"Bearer {service_token}"})
-        assert response.status_code == 200
-        assert response.json() == {"kind": "internal", "user_id": "user", "tenant_id": "tenant"}
+        # AgentOS owns service authentication; the shared factory must not admit legacy JWTs.
+        assert response.status_code == 401
         assert client.post(internal_path).status_code == 401
         assert client.post(internal_path, headers={"Authorization": "Bearer invalid"}).status_code == 401
         assert client.post(public_path, headers={"Authorization": f"Bearer {service_token}"}).status_code == 401

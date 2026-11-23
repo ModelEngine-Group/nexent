@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-DAILY-20261118
+  change_type: requirement
+  requirement_id: OPS-AGENT-DAILY-20261118
+  title: Publish Agent daily execution counts and duration samples
+  description: Roll up confirmed Agent facts by start day through the shared monitoring publisher.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/backend/ops/test_agent_monitoring.py]
+    behaviors:
+    - Count each confirmed Agent fact once and group by tenant, start day, initiating groups and Agent ID.
+    - Sum exact integer durations of ended runs, including zero and measured failures or cancellations.
+    - Preserve the existing model reducer and the generic behavior for kinds without publication.
+    reason: Existing Agent UT verifies fact identity and routing. The new reducer needs focused metric and dimension assertions.
+  notes: Reuse the model publisher and assert Agent daily visibility through real PostgreSQL and Elasticsearch. The scope covers execution counts and duration sums and samples.

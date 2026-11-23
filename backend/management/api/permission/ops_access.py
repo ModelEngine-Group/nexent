@@ -4,7 +4,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from management.services.permission.identity.session import authenticate
-from ops.services.access import resource_inventory
+from management.services.permission.ops_access import resource_inventory
 from permissions.models import CurrentUser
 from permissions.operations import authorization_metadata, operations_scope
 

@@ -121,14 +121,14 @@ def test_web_features_are_exposed_only_to_sessions(method, path):
 
 WEB_CREATOR_OPERATIONS = [
     ("GET", "/api/users/{user_id}/assignable_roles", "management"),
-    ("POST", "/api/conversation/{conversation_id}/creation_mode_responses", "runtime"),
-    ("GET", "/api/conversation/creator_histories", "runtime"),
-    ("PATCH", "/api/conversation/{conversation_id}/target", "runtime"),
-    ("POST", "/api/conversation/branch", "runtime"),
-    ("GET", "/api/conversation/{conversation_id}/model_preferences", "runtime"),
-    ("PATCH", "/api/conversation/{conversation_id}/model_preferences", "runtime"),
-    ("GET", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "runtime"),
-    ("PATCH", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "runtime"),
+    ("POST", "/api/conversation/{conversation_id}/creation_mode_responses", "management"),
+    ("GET", "/api/conversation/creator_histories", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/target", "management"),
+    ("POST", "/api/conversation/branch", "management"),
+    ("GET", "/api/conversation/{conversation_id}/model_preferences", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/model_preferences", "management"),
+    ("GET", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "management"),
+    ("PATCH", "/api/conversation/{conversation_id}/model_preferences/{model_id}", "management"),
 ]
 
 

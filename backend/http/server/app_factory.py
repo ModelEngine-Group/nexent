@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from contracts.constants.environment import OPS_MONITORING_ENABLED
 from backend.http.server.exception_handlers import register_exception_handlers
 from backend.http.server.health import install_health_contract
 
@@ -25,18 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def _with_ops_monitoring(lifespan):
-    try:
-        from ops.monitoring.runtime import producer_lifespan
-    except ImportError:
-        # Slim service images (e.g. the Runtime image target) ship without the
-        # ops package; degrade to no fact production instead of failing startup.
-        logger.warning(
-            "event=ops_monitoring_producer_unavailable "
-            "detail=ops.monitoring package absent; monitoring fact production disabled in this process")
-        return lifespan
-
     @asynccontextmanager
     async def combined(app):
+        from infrastructure.monitoring.runtime import producer_lifespan
+
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(producer_lifespan())
             state = await stack.enter_async_context(lifespan(app)) if lifespan is not None else None
@@ -75,12 +66,18 @@ def create_app(
     Returns:
         Configured FastAPI application
     """
+    if enable_monitoring:
+        from contracts.constants.environment import OPS_MONITORING_ENABLED
+
+        if OPS_MONITORING_ENABLED:
+            lifespan = _with_ops_monitoring(lifespan)
+
     app = FastAPI(
         title=title,
         description=description,
         version=version,
         root_path=root_path,
-        lifespan=_with_ops_monitoring(lifespan) if OPS_MONITORING_ENABLED else lifespan,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware

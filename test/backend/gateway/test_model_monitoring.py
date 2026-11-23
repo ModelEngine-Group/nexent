@@ -15,7 +15,8 @@ from permissions import rbac
 
 
 @pytest.mark.asyncio
-async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monkeypatch):
+@pytest.mark.parametrize("resource", ["models", "agents"])
+async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monkeypatch, resource):
     secret = "isolated-ops-model-gateway-signature"
     actor = {"kind": "session", "user_id": "operator", "tenant_id": "tenant", "roles": ["OPS"]}
     monkeypatch.setattr("gateway.downstream.middleware.enabled", lambda: True)
@@ -28,6 +29,9 @@ async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monke
     monkeypatch.setattr(monitoring, "read_models", lambda *args, **kwargs: (
         [], [], [], {"data_as_of": None, "coverage_state": "uncovered", "is_stale": False},
     ))
+    status = {"data_as_of": None, "coverage_state": "uncovered", "is_stale": False}
+    monkeypatch.setattr(monitoring, "read_agents", lambda *args, **kwargs: ({}, status))
+    monkeypatch.setattr(monitoring, "read_agent_tokens", lambda *args, **kwargs: SimpleNamespace(tokens={}, status=status))
     ops = ops_application.create_app()
     ops.state.monitoring = SimpleNamespace()
 
@@ -35,7 +39,7 @@ async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monke
         return actor
 
     monkeypatch.setattr("gateway.application.resolve_identity", resolve)
-    path = "/api/ops/v1/monitoring/models/summary"
+    path = f"/api/ops/v1/monitoring/{resource}/summary"
     params = {"start_date": "2026-11-18", "end_date": "2026-11-19"}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ops), base_url="http://ops") as downstream:
         async def forward(request):
@@ -58,11 +62,13 @@ async def test_monitoring_requires_an_ops_session_and_a_signed_gateway_hop(monke
         assert (await downstream.get(path, params=params)).status_code == 401
 
 
-@pytest.mark.parametrize("method,suffix", [
-    ("GET", ""), ("GET", "/summary"), ("GET", "/trends"), ("GET", "/rankings"),
-    ("POST", "/refresh"), ("GET", "/refreshes/example"),
+@pytest.mark.parametrize("method,resource,suffix", [
+    ("GET", resource, suffix) for resource in ("models", "agents")
+    for suffix in ("", "/summary", "/trends", "/rankings")
+] + [
+    ("POST", "models", "/refresh"), ("GET", "models", "/refreshes/example"),
 ])
-def test_monitoring_exposure_is_limited_to_declared_ops_session_routes(method, suffix):
-    match = default_registry().match(method, "/api/ops/v1/monitoring/models" + suffix)
+def test_monitoring_exposure_is_limited_to_declared_ops_session_routes(method, resource, suffix):
+    match = default_registry().match(method, f"/api/ops/v1/monitoring/{resource}" + suffix)
     assert match.target == "ops"
     assert match.credential_kinds == ("session",)

@@ -23,7 +23,7 @@ from ops.monitoring.mcp_tool import (
     summarize as summarize_mcp_tool,
 )
 from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, summarize
-from ops.monitoring.runtime import MONITORING_KINDS, Producer
+from infrastructure.monitoring.runtime import Producer
 from ops.monitoring.search import delete_documents, install_templates
 from ops.monitoring.service import CLEANUP_INTERVAL_SECONDS, Monitoring, _apply_revision
 
@@ -61,7 +61,7 @@ def test_producer_persists_distinct_dates_from_the_fact_contract():
         def statistic_day(self, zone):
             return super().statistic_day(zone) + timedelta(days=1)
 
-    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), {"skill": MonitoringKind(SkillFact, lambda _: ())})
+    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), {"skill": SkillFact})
     event = {
         "tenant_id": "tenant", "fact_kind": "skill", "fact_id": "attempt", "call_context_id": "request",
         "started_at": "2026-10-31T17:00:00Z", "record_revision": 1, "outcome": "started",
@@ -333,7 +333,7 @@ def test_mcp_tool_templates_merge_alongside_model_fields_without_conflict():
 
 
 def test_producer_drain_groups_mcp_tool_batches_separately_from_model():
-    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), MONITORING_KINDS)
+    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), {"model": ModelFact, "mcp_tool": McpToolFact})
     producer.emit({
         "tenant_id": "tenant", "fact_kind": "model", "fact_id": "attempt", "call_context_id": "request",
         "model_type": "llm", "started_at": "2026-10-31T17:00:00Z", "record_revision": 1, "outcome": "started",

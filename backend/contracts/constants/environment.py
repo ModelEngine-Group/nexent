@@ -227,11 +227,6 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # Ops reuses the Nexent PostgreSQL connection and changes only the database name.
 OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_ops"
-if OPS_MONITORING_ENABLED:
-    if OPS_POSTGRES_DB == (POSTGRES_DB or 'nexent'):
-        raise ValueError('OPS_POSTGRES_DB must differ from POSTGRES_DB')
-    if len(OPS_POSTGRES_DB.encode('utf-8')) > 63:
-        raise ValueError('OPS_POSTGRES_DB must not exceed 63 UTF-8 bytes')
 
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
