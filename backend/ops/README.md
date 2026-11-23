@@ -107,6 +107,10 @@ those dates.
 Unconfirmed failed Elasticsearch batches mark affected query scopes stale until
 they recover and the replacement statistics are published.
 
+Shared collection lives in `infrastructure.monitoring`; producer services do not
+import or package Ops business modules. Register producer schemas in
+`infrastructure.monitoring.facts.FACT_MODELS`. Ops consumes those same schemas.
+
 Define a `MonitoringKind` with the typed fact and Elasticsearch fields. Supply
 a reducer when daily publication is available. Add the kind to `MONITORING_KINDS` in
 `ops.monitoring.runtime`. Ops installs the compatible mappings on its shared
@@ -402,6 +406,11 @@ Normal Docker and Kubernetes application selection includes ops. Docker ops
 loads both `deploy/env/.env` and `deploy/env/monitoring.env`, mounts the shared
 logs and trajectory directories, and publishes `${OPS_PORT:-5016}`. Gateway
 uses the corresponding `GATEWAY_OPS_URL`.
+
+Build local service images with `bash build.sh --images mcp-service,ops --version latest --load`.
+The deployment uses `NEXENT_OPS_IMAGE` for Ops and `NEXENT_MCP_SERVICE_IMAGE`
+for the MCP backend. The existing `NEXENT_MCP_DOCKER_IMAGE` is the MCP proxy
+image used for separately provisioned proxy containers.
 
 ```shell
 docker compose --env-file deploy/env/.env -p nexent -f deploy/docker/compose/docker-compose-ops.yml up -d nexent-ops

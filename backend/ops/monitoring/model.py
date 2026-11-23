@@ -2,11 +2,10 @@
 """Model monitoring facts, mappings and metrics."""
 
 from collections.abc import Iterable
-from typing import Literal
 
-from pydantic import Field
-
-from ops.monitoring.contracts import MAX_LONG, Fact, MonitoringKind, SkillFact, stable_key
+from infrastructure.monitoring.contracts import stable_key
+from infrastructure.monitoring.facts import ModelFact
+from ops.monitoring.contracts import MonitoringKind
 
 
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
@@ -20,20 +19,6 @@ DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state"
 COUNTERS = ("request_count", "error_count", "error_eligible_count") + tuple(
     field for names in SAMPLE_FIELDS.values() for field in names
 ) + tuple(f"{field}_{suffix}" for field in TOKEN_FIELDS for suffix in ("sum", "known_count"))
-
-
-class ModelFact(Fact):
-    fact_kind: Literal["model"] = "model"
-    model_id: int | None = Field(default=None, gt=0, le=2147483647)
-    model_type: str = Field(min_length=1, max_length=30)
-    error_category: str | None = Field(default=None, pattern=r"^[A-Z0-9_]{1,50}$")
-    ttft_ms: int | None = Field(default=None, ge=0, le=MAX_LONG)
-    input_tokens: int | None = Field(default=None, ge=0, le=MAX_LONG)
-    output_tokens: int | None = Field(default=None, ge=0, le=MAX_LONG)
-    total_tokens: int | None = Field(default=None, ge=0, le=MAX_LONG)
-    generation_rate: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    trace_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
-    span_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
 
 
 def accumulate_model(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
@@ -90,30 +75,4 @@ MODEL_MONITORING = MonitoringKind(
                  **dict.fromkeys((*TOKEN_FIELDS, "ttft_ms"), "long"), "generation_rate": "double"},
     daily_fields={"model_id": "integer", "model_type": "keyword", "has_agent_run": "boolean",
                   **dict.fromkeys(COUNTERS, "long"), "generation_rate_sum": "double"},
-)
-
-
-def accumulate_skill(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:
-    """Accumulate one usage row per Skill/run identity."""
-    groups: dict[str, dict] = {}
-    dimensions_fields = (
-        "tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
-        "initiator_group_ids", "skill_id", "skill_name", "agent_id",
-    )
-    for fact in documents:
-        dimensions = {field: fact.get(field) for field in dimensions_fields if field in fact}
-        key = stable_key(*(dimensions.get(field) for field in dimensions_fields))
-        if key not in groups:
-            groups[key] = {**dimensions, "usage_count": 0}
-        groups[key]["usage_count"] += 1
-    return groups.items()
-
-
-SKILL_MONITORING = MonitoringKind(
-    fact_model=SkillFact,
-    aggregate=accumulate_skill,
-    fact_fields={"skill_id": "keyword", "skill_name": "keyword", "triggered_at": "date",
-                 "trigger_kind": "keyword"},
-    daily_fields={"skill_id": "keyword", "skill_name": "keyword", "agent_id": "integer",
-                  "usage_count": "long"},
 )

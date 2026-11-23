@@ -13,7 +13,9 @@ from nexent.monitor.facts import emit_fact, get_fact_sink, set_fact_sink
 from ops.monitoring.agent import AgentFact, accumulate_agent, summarize_agent
 from ops.monitoring.contracts import MonitoringKind
 from ops.monitoring.model import accumulate_model
-from ops.monitoring.runtime import MONITORING_KINDS, Producer
+from infrastructure.monitoring.facts import FACT_MODELS
+from infrastructure.monitoring.runtime import Producer
+from ops.monitoring.runtime import MONITORING_KINDS
 from ops.monitoring.service import Monitoring, _apply_revision
 
 
@@ -51,7 +53,7 @@ def test_agent_fact_accepts_child_with_distinct_identity(started):
 
 
 def test_registered_agent_fact_keeps_start_partition_on_finish_and_replay(started):
-    producer = Producer(Mock(), ZoneInfo("UTC"), MONITORING_KINDS)
+    producer = Producer(Mock(), ZoneInfo("UTC"), FACT_MODELS)
     finished = dict(
         started, record_revision=2, outcome="succeeded", ended_at="2026-11-01T00:00:00.150Z", duration_ms=350
     )

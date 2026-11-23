@@ -133,6 +133,17 @@ def claim_agent_evaluation_run(
         return updated == 1
 
 
+def release_agent_evaluation_claim(agent_evaluation_id: int, tenant_id: str, user_id: str) -> None:
+    """Return an unsubmitted claim to the durable pending queue."""
+    with get_db_session() as session:
+        session.query(AgentEvaluation).filter(
+            AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
+            AgentEvaluation.tenant_id == tenant_id,
+            AgentEvaluation.status == EvalRunStatus.RUNNING,
+            AgentEvaluation.updated_by == user_id,
+        ).update({"status": EvalRunStatus.PENDING}, synchronize_session=False)
+
+
 def update_agent_evaluation_analysis_report(
     agent_evaluation_id: int,
     tenant_id: str,

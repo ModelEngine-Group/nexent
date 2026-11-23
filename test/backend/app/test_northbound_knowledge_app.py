@@ -409,8 +409,9 @@ class TestDeleteDocuments:
 
         assert response.status_code == 200
         body = response.json()
-        assert "Redis cleanup encountered an error" in body["message"]
-        assert "redis_cleanup_error" in body
+        assert body["redis_cleanup_error"] == "Redis cleanup could not be completed."
+        assert "Redis cleanup could not be completed" in body["message"]
+        assert "redis down" not in response.text
 
 
 class TestGetIndexChunks:

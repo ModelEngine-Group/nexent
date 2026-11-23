@@ -4,9 +4,9 @@
 from fastapi import FastAPI
 
 from contracts.constants.environment import APP_VERSION, OPS_MONITORING_ENABLED
+from backend.http.server.exception_handlers import register_exception_handlers
 from gateway.downstream.middleware import GatewayIdentityMiddleware
-from management.utils.exception_handlers import register_exception_handlers
-from ops.api.access import router as access_router
+from management.api.permission.ops_access import router as access_router
 from ops.api.health import router as health_router
 from ops.api.system_configurations import router as system_configuration_router
 from ops.lifespan import ops_lifespan, trajectory_enabled

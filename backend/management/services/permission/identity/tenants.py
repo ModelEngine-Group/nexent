@@ -11,13 +11,21 @@ import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.constants import (
-    ASSET_OWNER_TENANT_ID,
-    DEFAULT_GROUP_ID,
-    DEFAULT_TENANT_ID,
-    TENANT_ID,
-    TENANT_NAME,
-)
+from management.db.skill import repository as skill_db
+from management.db.configuration.tenant import create_tenant_with_default_group, get_single_config_info, insert_config, update_config_by_tenant_config_id, get_all_tenant_ids, delete_config_by_tenant_config_id, get_all_configs_by_tenant_id
+from management.db.identity.user_tenant import get_users_by_tenant_id, soft_delete_users_by_tenant_id
+from management.db.identity.group import query_groups_by_tenant, remove_group
+from management.services.model.commands import deactivate_tenant_models
+from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
+from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
+from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
+from management.db.tool.repository import delete_tools_by_agent_id
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from contracts.constants.environment import CONTAINER_SKILLS_PATH, IS_SPEED_MODE, ENABLE_AGENT_WORKBENCH
+from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UserRegistrationException, ValidationError
+from management.services.skill.transfer import install_skills_from_zip_for_tenant
 from contracts.constants.environment import CONTAINER_SKILLS_PATH
 from contracts.errors.exceptions import (
     ForbiddenError,
@@ -479,6 +487,9 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
 
     try:
+        # Stop before the local cascade if Runtime cannot confirm model cleanup.
+        await deactivate_tenant_models(deleted_by or "system", tenant_id)
+
         # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
@@ -511,18 +522,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete group {group.get('group_id')}: {str(e)}")
 
-        # 3. Delete all models in the tenant
-        logger.info(f"Deleting models for tenant {tenant_id}")
-        models = get_model_records({"tenant_id": tenant_id}, tenant_id)
-        for model in models:
-            try:
-                delete_model_record(
-                    model["model_id"], deleted_by or "system", tenant_id)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete model {model.get('model_id')}: {str(e)}")
-
-        # 4. Delete all knowledge bases in the tenant
+        # 3. Delete all knowledge bases in the tenant
         logger.info(f"Deleting knowledge bases for tenant {tenant_id}")
         knowledge_list = get_knowledge_info_by_tenant_id(tenant_id)
         for kb in knowledge_list:
@@ -535,7 +535,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete knowledge base {kb.get('knowledge_id')}: {str(e)}")
 
-        # 5. Delete all agents in the tenant (including related data)
+        # 4. Delete all agents in the tenant (including related data)
         logger.info(f"Deleting agents for tenant {tenant_id}")
         agents = query_all_agent_info_by_tenant_id(tenant_id, version_no=0)
         for agent in agents:
@@ -591,7 +591,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         # 5b. Delete all skills, skill instances, and local skill files for the tenant
         _delete_skills_for_tenant(tenant_id, deleted_by or "system")
 
-        # 6. Delete all MCP configurations in the tenant
+        # 5. Delete all MCP configurations in the tenant
         logger.info(f"Deleting MCP records for tenant {tenant_id}")
         mcp_list = get_mcp_records_by_tenant(tenant_id)
         for mcp in mcp_list:
@@ -606,7 +606,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete MCP {mcp.get('mcp_id')}: {str(e)}")
 
-        # 7. Delete all invitation codes in the tenant
+        # 6. Delete all invitation codes in the tenant
         logger.info(f"Deleting invitations for tenant {tenant_id}")
         invitations = query_invitations_by_tenant(tenant_id)
         for invitation in invitations:
@@ -616,7 +616,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete invitation {invitation.get('invitation_id')}: {str(e)}")
 
-        # 8. Delete all tenant configurations (must be done last)
+        # 7. Delete all tenant configurations (must be done last)
         logger.info(f"Deleting tenant configurations for tenant {tenant_id}")
         # Delete all config records for this tenant
         all_configs = get_all_configs_by_tenant_id(tenant_id)

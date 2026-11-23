@@ -195,6 +195,7 @@ class AutomationTaskContent:
 @dataclass(frozen=True)
 class AutomationIntentContext:
     tenant_id: str
+    user_id: str
     message: str
     timezone: str = "Asia/Shanghai"
     model_id: Optional[int] = None

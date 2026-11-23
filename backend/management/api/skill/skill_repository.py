@@ -8,7 +8,7 @@ from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, Una
 from contracts.skill import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from contracts.tag import TagAssignmentFilter
 from fastapi import APIRouter, Body, Header, HTTPException, Query
-from services.skill_repository_service import (
+from management.services.skill.skill_repository import (
     count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
     ensure_skill_repository_access,

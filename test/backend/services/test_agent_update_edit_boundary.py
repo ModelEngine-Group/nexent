@@ -5,7 +5,6 @@
 from contracts.authentication import AuthenticatedIdentity
 import pytest
 
-from test.backend.services import test_agent_service as legacy
 from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
 from contracts.agent import AgentInfoRequest
 from management.services.agent import service
@@ -15,6 +14,7 @@ from management.services.agent import service
 def boundary(mocker):
     mocker.patch.object(service, 'is_system_agent', return_value=False)
     mocker.patch.object(service, 'build_reasoning_snapshot', return_value=None)
+    mocker.patch.object(service, 'get_user_tenant_by_user_id', return_value={})
     lookup = mocker.patch.object(service, 'search_agent_info_by_agent_id', return_value={'agent_id': 1})
     permission = mocker.patch.object(service, 'resolve_agent_list_permission', return_value='EDIT')
     writes = [mocker.patch.object(service, name) for name in ('update_agent', 'update_related_agents', 'create_or_update_tool_by_tool_info')]

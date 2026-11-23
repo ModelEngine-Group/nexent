@@ -25,5 +25,3 @@ def is_public_request(method: str, path: str) -> bool:
         re.fullmatch(r"/nb/a2a/[^/]+/\.well-known/agent-card\.json", path)
         or re.fullmatch(r"/share/[^/]+(?:/assets/[^/]+/(?:download|preview))?", path)
     )
-
-

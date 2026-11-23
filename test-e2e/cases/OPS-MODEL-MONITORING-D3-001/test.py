@@ -41,7 +41,7 @@ from ops.api import monitoring as monitoring_api
 from ops.monitoring import query
 from ops.monitoring.contracts import Fact, MonitoringKind, stable_key
 from ops.monitoring.model import MODEL_MONITORING, summarize
-from ops.monitoring.runtime import Producer
+from infrastructure.monitoring.runtime import Producer
 from ops.monitoring.search import DAILY, FACTS, PointInTime, filters, install_templates, partition, snapshot
 from ops.monitoring.service import Monitoring, bulk_write
 from ops.monitoring.store import DAY, ControlStore
@@ -147,7 +147,7 @@ def model_profile(root, tenant):
 
 
 def enqueue_facts(service, events):
-    producer = Producer(service.store, service.zone, service.kinds)
+    producer = Producer(service.store, service.zone, {kind: definition.fact_model for kind, definition in service.kinds.items()})
     for event in events:
         producer.emit(event)
     for batch in producer.drain():
