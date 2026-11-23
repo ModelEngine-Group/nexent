@@ -28,15 +28,17 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from psycopg2 import sql
 from sqlalchemy import URL, create_engine, text
 
+from infrastructure.monitoring.facts import FACT_MODELS
+from infrastructure.monitoring.runtime import Producer
 from ops.api import application as ops_application
 from ops.api import monitoring as monitoring_api
 from ops.monitoring.mcp_tool import MCP_TOOL_MONITORING
 from ops.monitoring.model import MODEL_MONITORING
-from ops.monitoring.runtime import MONITORING_KINDS, Producer
+from ops.monitoring.runtime import MONITORING_KINDS
 from ops.monitoring.search import DAILY, FACTS, filters, install_templates, partition
 from ops.monitoring.service import Monitoring
 from ops.monitoring.store import ControlStore
-from gateway.authentication.auth import authenticate
+from management.services.permission.identity.session import authenticate
 from permissions import rbac
 from permissions.models import CurrentUser
 
@@ -150,8 +152,8 @@ def ops_store():
     try:
         with admin.cursor() as cursor:
             cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
-        migration_env = {**os.environ, "OPS_POSTGRES_HOST": host, "OPS_POSTGRES_USER": "postgres",
-                         "OPS_POSTGRES_DB": database, "POSTGRES_DB": "nexent"}
+        migration_env = {**os.environ, "POSTGRES_HOST": host, "POSTGRES_USER": "postgres",
+                         "POSTGRES_DB": "nexent", "OPS_POSTGRES_DB": database}
         if shutil.which("psql"):
             # Host has a PostgreSQL client: run the migration script directly.
             subprocess.run(["bash", str(project / "deploy/common/run-ops-sql-migrations.sh")], check=True,
@@ -162,7 +164,7 @@ def ops_store():
             # reachable from containers as host.docker.internal on Docker Desktop.
             subprocess.run(
                 ["docker", "run", "--rm", "-v", f"{project}:/repo",
-                 "-e", f"OPS_POSTGRES_HOST=host.docker.internal", "-e", "OPS_POSTGRES_USER=postgres",
+                 "-e", "POSTGRES_HOST=host.docker.internal", "-e", "POSTGRES_USER=postgres",
                  "-e", f"OPS_POSTGRES_DB={database}", "-e", "POSTGRES_DB=nexent",
                  "postgres:16", "bash", "/repo/deploy/common/run-ops-sql-migrations.sh"],
                 check=True, timeout=120, env=migration_env, stdout=subprocess.DEVNULL,
@@ -204,7 +206,7 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
     tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
     tracer = tracer_provider.get_tracer("ops-mcp-monitoring-integration")
 
-    producer = Producer(ops_store.store, ops_store.zone, ops_store.kinds)
+    producer = Producer(ops_store.store, ops_store.zone, FACT_MODELS)
     observations = []
 
     def sink(event):
@@ -247,6 +249,7 @@ def test_mcp_tool_call_publication(ops_store, stub_mcp, manager, monkeypatch):
 
         # -- Case step 2: tenant-scoped endpoints agree with the stored facts.
         monkeypatch.setattr(ops_application, "OPS_MONITORING_ENABLED", True)
+        monkeypatch.setattr("ops.lifespan.config.OPS_MONITORING_ENABLED", False)
         app = ops_application.create_app()
         app.state.monitoring = ops_store
         app.dependency_overrides[authenticate] = lambda: CurrentUser("operator", tenant, "OPS")
