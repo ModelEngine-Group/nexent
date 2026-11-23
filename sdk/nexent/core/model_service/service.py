@@ -103,6 +103,12 @@ class _Call:
             json_body=json.loads(self.prepared.body_bytes),
             timeout_seconds=self.timeout(),
         )
+        self.monitoring.set_span_attributes(**{
+            "llm.invocation_parameters": json.dumps(
+                {"stop": prepared.json_body["stop"]} if prepared.json_body.get("stop") is not None else {},
+                ensure_ascii=False,
+            ),
+        })
         tracker = self.capture.begin(
             json.loads(prepared.body_bytes),
             config={

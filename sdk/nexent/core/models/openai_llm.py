@@ -383,13 +383,7 @@ class OpenAIModel(OpenAIServerModel):
             trusted_budget_snapshot = (
                 context_budget_snapshot or self.context_budget_snapshot
             )
-            invocation_parameters = {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))},
-            }
             trace_attributes = {
-                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
                 "model_id": self.model_id,
             }
             input_attr_key = (
@@ -527,8 +521,17 @@ class OpenAIModel(OpenAIServerModel):
         # and assembles the result. Drop a stale construction-time ``stream``
         # so it cannot collide with the explicit ``stream=True`` at dispatch.
         dispatch_kwargs.pop("stream", None)
+        invocation_parameters = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) and k != "stop"},
+        }
+        actual_stop = (dispatch_kwargs.get("extra_body") or {}).get("stop", dispatch_kwargs.get("stop"))
+        if actual_stop is not None:
+            invocation_parameters["stop"] = actual_stop
         self._monitoring.set_span_attributes(
             **{
+                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
                 "llm.prompt_cache.mode": cache_advice.mode,
                 "llm.prompt_cache.supported": cache_advice.supported,
                 "llm.prompt_cache.directive_reason": cache_advice.reason,
