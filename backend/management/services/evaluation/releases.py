@@ -58,26 +58,43 @@ def _materials(tenant, ctx, prepared):
         releases.reject("This release requires independently pinned child resources")
     _verify_released_guides(tenant, base)
     prompt = None
-    target = None
+    targets = {}
     removed = ()
-    if kind == "prompt":
-        prompt = resolve_prompt_candidate(
-            tenant, ctx["submitted_by"], agent, version, recipe["candidate_id"]
-        )["result_text"]
-    elif kind == "tool_set":
-        removed = _confirmed_tool_exclusions(prepared)
-    elif kind == "skill_new":
-        old_ref, new_ref = (prepared[arm].new_skill_trial for arm in ("base", "result"))
-        if (not old_ref or not new_ref or old_ref.arm != "base" or new_ref.arm != "result"
-                or new_ref.candidate_id != recipe["candidate_id"] or old_ref.model_copy(update={"arm": "result"}) != new_ref):
-            releases.reject("Independent results do not identify a single new Skill package")
-        load_new_skill_package(tenant, agent, new_ref.digest)
-    elif kind in {"skill_step", "skill_discovery"}:
-        target = read_bound_skill_candidate(tenant, agent, version, recipe["candidate_id"])
-        if not target or target["method"] != {"skill_step": "S2", "skill_discovery": "S1"}[kind]:
-            releases.reject("The independently tested Skill candidate is unavailable")
-    else:
-        releases.reject("This candidate does not yet have a live resource binding")
+    parts = recipe["components"] if kind == "combination" else [recipe]
+    if kind == "combination" and len(parts) != 2:
+        releases.reject("A combined release requires two confirmed revisions")
+    for part in parts:
+        part_kind, candidate_id = part["candidate_type"], part["candidate_id"]
+        if part_kind == "prompt":
+            if prompt is not None:
+                releases.reject("Two candidates cannot replace the same prompt")
+            prompt = resolve_prompt_candidate(
+                tenant, ctx["submitted_by"], agent, version, candidate_id
+            )["result_text"]
+        elif part_kind == "tool_set":
+            if removed:
+                releases.reject("Two candidates cannot replace the same tool catalog")
+            removed = _confirmed_tool_exclusions(prepared)
+        elif part_kind == "skill_new" and kind == "skill_new":
+            old_ref, new_ref = (prepared[arm].new_skill_trial for arm in ("base", "result"))
+            if (not old_ref or not new_ref or old_ref.arm != "base" or new_ref.arm != "result"
+                    or new_ref.candidate_id != candidate_id or old_ref.model_copy(update={"arm": "result"}) != new_ref):
+                releases.reject("Independent results do not identify a single new Skill package")
+            load_new_skill_package(tenant, agent, new_ref.digest)
+        elif part_kind in {"skill_step", "skill_discovery"}:
+            target = read_bound_skill_candidate(tenant, agent, version, candidate_id)
+            if not target or target["method"] != {"skill_step": "S2", "skill_discovery": "S1"}[part_kind]:
+                releases.reject("The independently tested Skill candidate is unavailable")
+            instance = target["instance_id"]
+            if instance in targets or any(
+                not any(ref.instance_id == instance and ref.package_candidate_id == candidate_id
+                        and ref.package_variant == arm for ref in prepared[arm].resource.skill_refs)
+                for arm in ("base", "result")
+            ):
+                releases.reject("The tested Skill revisions require distinct, confirmed bindings")
+            targets[instance] = target
+        else:
+            releases.reject("This candidate does not yet have a live resource binding")
     with get_db_session() as session:
         skills = dict(
             session.execute(
@@ -103,7 +120,8 @@ def _materials(tenant, ctx, prepared):
         instance = row["instance_id"]
         skill = skills[instance]
         result_row = row
-        if target and target["instance_id"] == instance:
+        target = targets.get(instance)
+        if target:
             try:
                 result_row = candidate_skill_row(row, target, "result")
             except ValueError as exc:
@@ -136,7 +154,7 @@ def _materials(tenant, ctx, prepared):
     ]
     if kind == "skill_new":
         baseline.new_skill_trial = None
-    if kind in {"skill_new", "skill_discovery"}:
+    if any(part["candidate_type"] in {"skill_new", "skill_discovery"} for part in parts):
         baseline.observe_root_skill_choices = None
     baseline.tool_set_check = None
     return pins, prompt, snapshot_digest(baseline), removed

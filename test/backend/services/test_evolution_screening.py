@@ -113,3 +113,46 @@ def test_discovery_measures_choice_separately_from_delivery(old, new, gain):
         DevelopmentExperimentRequest(request_id="scope", agent_id=1, version_no=1, candidate_id=2,
                                      candidate_type="prompt", case_ids=[1, 2], evaluator_id=7,
                                      screening=plan["request"]["screening"])
+
+
+def test_screen_measures_value_relative_to_both_single_revisions():
+    from copy import deepcopy
+    plan, pairs = fixture()
+    plan["request"].update(candidate_type="combination", components=[
+        {"candidate_type": "prompt", "candidate_id": 5}, {"candidate_type": "skill_step", "candidate_id": 7}])
+    for arm in ("only_a", "only_b"):
+        plan["snapshots"][arm] = arm
+        for pair in pairs.values():
+            pair[arm] = deepcopy(pair["base"])
+            pair[arm]["result"]["snapshot_digest"] = arm
+    def reads(arm, count):
+        pairs[1][arm]["result"]["skills"] = [
+            {"candidate_id": 8, "guide_reads": 1}, {"candidate_id": 7, "guide_reads": count}]
+    reads("result", 1)
+    reads("only_a", 0)
+    assert screen_development(plan, pairs, cancelled=False)["failures"] == {"redundant_combination": [1]}
+    reads("only_a", 1)
+    assert screen_development(plan, pairs, cancelled=False)["status"] == "eligible"
+    pairs[1]["only_a"]["result"]["judgment"]["status"] = pairs[1]["only_a"]["status"] = "pass"
+    assert "redundant_combination" in screen_development(plan, pairs, cancelled=False)["failures"]
+    pairs[1]["result"]["result"]["judgment"]["status"] = pairs[1]["result"]["status"] = "fail"
+    assert screen_development(plan, pairs, cancelled=False)["failures"]["lost_single_pass"] == [1]
+    del pairs[1]["only_b"]["receipt_id"]
+    assert screen_development(plan, pairs, cancelled=False)["missing"] == {"unverified_trials": [1]}
+
+
+def test_combination_token_target_compares_against_each_single_revision():
+    from copy import deepcopy
+    plan, pairs = fixture("input_token_reduction_pct")
+    plan["request"].update(candidate_type="combination", components=[
+        {"candidate_type": "prompt", "candidate_id": 5}, {"candidate_type": "tool_set", "candidate_id": 7}])
+    for arm in ("only_a", "only_b"):
+        plan["snapshots"][arm] = arm
+        for pair in pairs.values():
+            pair[arm] = deepcopy(pair["result"])
+            pair[arm]["result"].update(snapshot_digest=arm, reported_step_input_tokens=85)
+    assert screen_development(plan, pairs, cancelled=False)["status"] == "eligible"
+    pairs[1]["only_b"]["result"]["reported_step_input_tokens"] = None
+    assert screen_development(plan, pairs, cancelled=False)["missing"] == {"missing_component_tokens": [1]}
+    pairs[1]["only_b"]["result"]["reported_step_input_tokens"] = 78
+    assert screen_development(plan, pairs, cancelled=False)["failures"] == {"redundant_combination": [1]}

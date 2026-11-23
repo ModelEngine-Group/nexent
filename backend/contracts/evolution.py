@@ -238,6 +238,11 @@ class DevelopmentExperimentRequest(BaseModel):
     timeout_seconds: int = Field(default=300, ge=1, le=3600)
     screening: DevelopmentScreening | None = Field(default=None, exclude_if=lambda value: value is None)
 
+    def evaluates_skill_choices(self):
+        return self.candidate_type in {"skill_discovery", "skill_new"} or any(
+            part.candidate_type == "skill_discovery" for part in self.components or ()
+        )
+
     @field_validator("case_ids")
     @classmethod
     def unique_cases(cls, values):

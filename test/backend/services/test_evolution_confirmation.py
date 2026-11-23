@@ -196,3 +196,18 @@ async def test_confirmation_recipe_rejects_drift_and_omits_private_fields(monkey
     monkeypatch.setattr(service,"regression_members",lambda *args:[{"digest":"later","scoring":{}}])
     with pytest.raises(AppException,match="current fixed regression"):
         await service.verified_recipe("tenant","editor",44,plan)
+
+
+def test_private_combination_needs_observed_reads_for_each_confirmed_step():
+    from management.services.evaluation.confirmation_results import arm_measurement, comparison_summary
+    policy = ConfirmationPolicy(minimum_valid_pairs=1, minimum_valid_percent=100,
+                                family_minimums={"heldout":1}, minimum_quality_gain_pp=1)
+    def measure(status, ids):
+        skills = [{"candidate_id": cid, "guide_reads": 2} for cid in ids]
+        return arm_measurement(status, {"judgment":{"status":status}, "skills":skills}, step_ids={41, 42})
+    old = measure("fail", [41, 42])
+    def compare(new):
+        return comparison_summary(policy, [("heldout", old, new)], required_step_ids={41,42})
+    assert compare(measure("pass",[41,42]))["decision"] == "passed"
+    decision = compare(measure("pass",[41,99]))
+    assert decision["decision"] == "insufficient" and decision["missing"] == ["combined_step_not_read"]

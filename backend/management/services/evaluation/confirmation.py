@@ -47,7 +47,8 @@ async def verified_recipe(tenant, editor, eid, plan, *, prepared=None):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The compiled resources differ from the tested candidate")
         if prepared is not None:
             prepared[arm] = spec
-    return {"format":"nexent-confirmation-candidate-v1", "tenant_id":tenant,"experiment_id":eid,
+    return {**({"combination_policy_version": 1} if request.components else {}),
+            "format":"nexent-confirmation-candidate-v1", "tenant_id":tenant,"experiment_id":eid,
             **request.model_dump(include={"agent_id","version_no","candidate_type","candidate_id","components",
                                           "language","timeout_seconds","evaluator_id","judge_model_id"}),
             "plan_digest":task_digest(plan),"snapshots":snapshots,"rubric_digest":task_digest(plan["evaluator"]),"judges":judges}

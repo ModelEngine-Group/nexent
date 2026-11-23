@@ -115,3 +115,25 @@ def test_grade_and_compare(monkeypatch):
     rows[-1]["result"]["file_state"] = state
     decision = service.experiment_report("tenant", "editor", 9)["screening"]
     assert decision["status"] == "failed" and decision["failures"] == {"forbidden_action":[2],"protection_failed":[2]}
+
+    # Reuse the same business task and fixed regression rubric in all four arms.
+    from copy import deepcopy
+    protected = rows[-1]
+    protected["status"] = "pass"
+    del protected["result"]["file_state"]
+    parts = [{"experiment_id": 4, "candidate_type": "prompt", "candidate_id": 5},
+             {"experiment_id": 5, "candidate_type": "tool_set", "candidate_id": 8}]
+    scope.update(planned_arms=arms, components=parts)
+    plan["request"].update(candidate_type="combination", components=parts)
+    for arm in ("only_a", "only_b"):
+        plan["snapshots"][arm] = arm
+        for base in [r for r in rows if r["variant"] == "base"]:
+            single = deepcopy(base)
+            single.update(variant=arm, receipt_id=f"{base['case_id']}-{arm}")
+            single["result"]["snapshot_digest"] = arm
+            rows.append(single)
+    assert service.experiment_report("tenant", "editor", 9)["screening"]["status"] == "eligible"
+    single = next(row for row in rows if row["variant"] == "only_b" and row["case_id"] == 1)
+    single["status"] = single["result"]["judgment"]["status"] = "pass"
+    decision = service.experiment_report("tenant", "editor", 9)["screening"]
+    assert decision["status"] == "failed" and decision["failures"] == {"redundant_combination": [1]}

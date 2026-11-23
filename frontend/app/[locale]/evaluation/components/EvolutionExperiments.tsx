@@ -306,7 +306,8 @@ function Experiments({
   const development = report.data && { ...report.data, pairs: Object.fromEntries(
     Object.entries(report.data.pairs).filter(([id]) => !fixedIds.has(Number(id)))) };
   const proposed = choices?.candidates.find(c => c.kind === "skill_new" && candidate === `skill_new:${c.candidate_id}`);
-  const discoveryRun = candidate?.startsWith("skill_discovery:") || !!proposed;
+  const discoveryRun = discoveryCandidate || !!proposed || (candidate === "combination" &&
+    eligible.some(e => sourceIds.includes(e.experiment_id) && e.candidate_type === "skill_discovery"));
   const scopeLabels = new Set(choices?.cases.filter(c => caseIds.includes(c.case_id) &&
     !fixedDigests.has(c.digest ?? "") && c.expected_skill_names != null).map(c => c.expected_skill_names!.includes(proposed?.name ?? "")));
   const baselineReport = report.data?.total_pairs === 0;

@@ -77,6 +77,18 @@ export default function ReleasePage() {
                   current: data.current_version,
                 })}
               </Typography.Text>
+              {!!data.components?.length && (
+                <ul aria-label={t("evolution.chooseComponents")}>
+                  {data.components.map(part => (
+                    <li key={part.experiment_id}>
+                      {t("evolution.release.component", {
+                        kind: t(`evolution.kind.${part.candidate_type}`),
+                        candidate: part.candidate_id, experiment: part.experiment_id,
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {data.skill_description && (
                 <section>
                   <Typography.Text strong>{data.skill_description.name}</Typography.Text>

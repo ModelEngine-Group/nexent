@@ -232,7 +232,7 @@ async def create_experiment(request, tenant, user):
                       request.version_no, case, rule, request.language, request.judge_model_id, trace_baseline_digest)
         if excluded.intersection(sources):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the examples used to generate the candidate")
-        if (request.candidate_type in {"skill_discovery", "skill_new"} and case_id in request.case_ids
+        if (request.evaluates_skill_choices() and case_id in request.case_ids
                 and case["task"].get("expected_skill_names") is None):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Label the acceptable Skill choices for each task")
         if proposed_name and case_id in request.case_ids and str(case_id) not in fixed:

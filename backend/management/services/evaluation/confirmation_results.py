@@ -20,7 +20,7 @@ def new_skill_use(evidence):
     return "skipped" if not selection["reads"].get(name) else "incorrect"
 
 
-def arm_measurement(status, result, *, task=None, require_selection=False):
+def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=()):
     task = task or {}
     file_grade = result.get("file_state") or {}
     tool_grade = result.get("tool_use") or {}
@@ -47,6 +47,10 @@ def arm_measurement(status, result, *, task=None, require_selection=False):
     }:
         status = "fail"
     return {
+        **({"read_step_ids": sorted({
+            skill["candidate_id"] for skill in (result.get("skills") or [result.get("skill") or {}])
+            if skill.get("candidate_id") in step_ids and skill.get("guide_reads", 0) > 0
+        })} if step_ids else {}),
         **({"new_skill_use": new_skill_use(result)} if result.get("new_skill_trial") else {}),
         "status": status,
         "forbidden": forbidden,
@@ -63,7 +67,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False):
     }
 
 
-def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False):
+def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=()):
     # Private family names and individual task outcomes never appear in the returned object.
     valid, families, timings, token_pairs = [], Counter(), [], []
     failed, missing = [], []
@@ -88,6 +92,13 @@ def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=
             timings.append(candidate["ms"])
         if base["status"] == candidate["status"] == "pass":
             token_pairs.append((base["tokens"], candidate["tokens"]))
+    if required_step_ids:
+        exercised = set()
+        for _, old, new in pairs:
+            if old["status"] in {"pass", "fail"} and new["status"] == "pass":
+                exercised.update(set(old.get("read_step_ids", ())).intersection(new.get("read_step_ids", ())))
+        if set(required_step_ids).difference(exercised):
+            missing.append("combined_step_not_read")
     if require_new_skill:
         uses = {new.get("new_skill_use") for _, old, new in pairs
                 if old["status"] in {"pass", "fail"} and new["status"] in {"pass", "fail"}}

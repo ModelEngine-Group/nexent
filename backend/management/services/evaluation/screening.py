@@ -17,6 +17,48 @@ def _verified(row, case_digest, arm_digest, rubric):
             and row["status"] == ("fail" if "fail" in judgments else "pass"))
 
 
+def _read_step(trial, candidate_id):
+    evidence = trial["result"]
+    skills = evidence.get("skills") or [evidence.get("skill") or {}]
+    return any(skill.get("candidate_id") == candidate_id and skill.get("guide_reads", 0) > 0 for skill in skills)
+
+
+def _measure_combination(criteria, parts, targets, pairs, gaps, failures):
+    # Removing A leaves only B, and vice versa. Compare both reduced versions with the joint version.
+    lost, missing_costs = set(), set()
+    for part, without in zip(parts, ("only_b", "only_a"), strict=True):
+        gained = used = False
+        total_without = total_with = 0
+        for cid in sorted(targets):
+            reduced, joint = pairs[cid][without], pairs[cid]["result"]
+            if joint["status"] != "pass":
+                if reduced["status"] == "pass":
+                    lost.add(cid)
+                continue
+            active = part["candidate_type"] != "skill_step" or all(
+                _read_step(trial, part["candidate_id"]) for trial in (reduced, joint)
+            )
+            used |= active
+            if reduced["status"] == "fail":
+                gained |= active
+            elif part["candidate_type"] == "skill_discovery":
+                old, new = ((trial["result"].get("selection") or {}).get("outcome") for trial in (reduced, joint))
+                gained |= old in {"missed", "wrong"} and new in {"hit", "correct_skip"}
+            if reduced["status"] == "pass" and criteria["metric"] == "input_token_reduction_pct":
+                costs = [trial["result"].get("reported_step_input_tokens") for trial in (reduced, joint)]
+                if any(type(cost) is not int or cost < 0 for cost in costs):
+                    missing_costs.add(cid)
+                else:
+                    total_without += costs[0]
+                    total_with += costs[1]
+        if not gained and not missing_costs and not (used and total_with < total_without):
+            failures["redundant_combination"] = sorted(targets)
+    if lost:
+        failures["lost_single_pass"] = sorted(lost)
+    if missing_costs:
+        gaps["missing_component_tokens"] = sorted(missing_costs)
+
+
 def screen_development(plan, pairs, *, cancelled):
     request = plan["request"]
     criteria = request["screening"]
@@ -84,6 +126,8 @@ def screen_development(plan, pairs, *, cancelled):
                 base_tokens += counts[0]
                 candidate_tokens += counts[1]
 
+    if request["candidate_type"] == "combination" and not gaps:
+        _measure_combination(criteria, request["components"], targets, pairs, gaps, failures)
     if request["candidate_type"] == "skill_new" and not {"used", "skipped"} <= skill_uses:
         gaps["new_skill_scope_coverage"] = []
     if not regression:

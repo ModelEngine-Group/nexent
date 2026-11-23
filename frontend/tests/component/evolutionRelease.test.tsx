@@ -11,7 +11,8 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, values?: { names?: string; name?: string; digest?: string }) =>
+    t: (key: string, values?: { names?: string; name?: string; digest?: string; candidate?: number; experiment?: number }) =>
+      key === "evolution.release.component" ? `#${values?.candidate} from ${values?.experiment}` :
       key === "evolution.release.addedGuide" ? `${values?.name} ${values?.digest}` : values?.names ?? key,
   }),
 }));
@@ -122,4 +123,17 @@ it("shows the old and proposed catalog description", async () => {
   open();
   expect(await screen.findByText("Summarize meetings")).toBeInTheDocument();
   expect(screen.getByText("Summarize meetings and handovers")).toBeInTheDocument();
+});
+
+it("identifies both tested revisions in a combined release", async () => {
+  vi.mocked(api.release).mockResolvedValue({
+    ...passed, candidate_type: "combination", components: [
+      {experiment_id: 12, candidate_type: "prompt", candidate_id: 5},
+      {experiment_id: 16, candidate_type: "tool_set", candidate_id: 8},
+    ], excluded_tools: ["file_analysis"],
+  });
+  open();
+  expect(await screen.findByText("#5 from 12")).toBeInTheDocument();
+  expect(screen.getByText("#8 from 16")).toBeInTheDocument();
+  expect(screen.getByText("file_analysis")).toBeInTheDocument();
 });

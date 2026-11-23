@@ -169,3 +169,45 @@ def test_runtime_rejects_guide_from_another_agent_version_before_staging(monkeyp
         prepared_skills.mount_released_guides(resource,SimpleNamespace(tenant_id="tenant"),"workspace",{},"en")
     reader.assert_called_once_with("tenant",2,4)
     mount.assert_not_called()
+
+
+def test_combined_skill_release_keeps_each_tested_instance_and_rollback_metadata(monkeypatch):
+    from contextlib import nullcontext
+    from copy import deepcopy
+    from contracts.agentos import SkillExecutionBinding
+
+    rows = [{"instance_id": i, "name": f"skill-{i}", "description": "old", "config": {}} for i in (1, 2)]
+    targets = {
+        41: dict(instance_id=1, method="S1", source_text="old", result_text="new", base_digest="a", result_digest="a"),
+        42: dict(instance_id=2, method="S2", base_digest="b", result_digest="c"),
+    }
+    def revision(tenant, agent, version, row, files):
+        return ({"a": "1" if row["description"] == "old" else "2", "b": "3", "c": "4"}[files["SKILL.md"]]) * 64
+    prepared = {}
+    for arm in ("base", "result"):
+        refs = [SkillExecutionBinding(instance_id=i, package_candidate_id=i+40, package_variant=arm,
+                revision=revision("t", 4, 1, {**row, "description": "new" if i==1 and arm=="result" else "old"},
+                                  {"SKILL.md":targets[i+40][arm+"_digest"]})) for i,row in enumerate(rows,1)]
+        resource = SimpleNamespace(skill_refs=refs, released_skill_guides=[], subagents=[], external_a2a=[])
+        prepared[arm] = SimpleNamespace(resource=resource, observe_root_skill_choices=True)
+    prepared["base"].model_copy = lambda **kwargs: deepcopy(prepared["base"])
+    session = Mock()
+    session.execute.return_value.all.return_value = [(1, 101), (2, 102)]
+    monkeypatch.setattr(releases, "get_db_session", lambda: nullcontext(session))
+    monkeypatch.setattr(releases, "read_bound_skills", lambda *_: rows)
+    monkeypatch.setattr(releases, "read_bound_skill_candidate", lambda *args: targets[args[-1]])
+    monkeypatch.setattr(releases, "load_skill_package", lambda t, skill, digest: {"SKILL.md": digest})
+    monkeypatch.setattr(releases, "skill_execution_revision", revision)
+    snapshot = Mock(return_value="rollback")
+    monkeypatch.setattr(releases, "snapshot_digest", snapshot)
+    ctx = {"agent_id":4, "version_no":1, "recipe":{"candidate_type":"combination","components":[
+        {"candidate_type":"skill_discovery","candidate_id":41}, {"candidate_type":"skill_step","candidate_id":42}]}}
+    pins, prompt, baseline, removed = releases._materials("t", ctx, prepared)
+    assert prompt is None and baseline == "rollback" and not removed
+    assert [p["result"][0] for p in pins] == ["a", "c"]
+    assert pins[0]["result_description"] == "new" and "result_description" not in pins[1]
+    clean = snapshot.call_args.args[0]
+    assert clean.observe_root_skill_choices is None and all(r.package_candidate_id is None for r in clean.resource.skill_refs)
+    targets[42]["instance_id"] = 1
+    with pytest.raises(AppException):
+        releases._materials("t", ctx, prepared)

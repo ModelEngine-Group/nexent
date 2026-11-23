@@ -381,6 +381,7 @@ def release_view(tenant, actor, lock):
             session.execute(
                 text("""
             SELECT e.agent_id,e.version_no AS base_version,e.experiment_id,c.digest AS candidate_digest,
+                   c.recipe->'components' AS components,
                    c.recipe->>'candidate_type' AS candidate_type,(c.recipe->>'candidate_id')::bigint AS resource_candidate_id,
                    a.current_version_no AS current_version,
                    r.summary,COALESCE(s.paused,false) AS paused,
@@ -392,9 +393,15 @@ def release_view(tenant, actor, lock):
               JOIN nexent.evolution_confirmation_candidate_t c USING(experiment_id)
               JOIN nexent.ag_tenant_agent_t a ON a.tenant_id=e.tenant_id AND a.agent_id=e.agent_id AND a.version_no=0
               LEFT JOIN nexent.evolution_candidate_t tools
-                ON c.recipe->>'candidate_type'='tool_set' AND tools.resource_field='agent.tools'
+                ON tools.resource_field='agent.tools'
                AND tools.tenant_id=e.tenant_id AND tools.agent_id=e.agent_id AND tools.base_version_no=e.version_no
-               AND tools.candidate_id=CAST(c.recipe->>'candidate_id' AS bigint)
+               AND tools.candidate_id=CASE c.recipe->>'candidate_type'
+                   WHEN 'tool_set' THEN CAST(c.recipe->>'candidate_id' AS bigint)
+                   WHEN 'combination' THEN (
+                       SELECT CAST(part->>'candidate_id' AS bigint)
+                       FROM jsonb_array_elements(c.recipe->'components') part
+                       WHERE part->>'candidate_type'='tool_set'
+                   ) END
               LEFT JOIN nexent.evolution_confirmation_result_t r ON r.lock_id=l.lock_id AND r.lock_digest=l.digest
               LEFT JOIN nexent.evolution_release_scope_t s ON s.tenant_id=e.tenant_id AND s.agent_id=e.agent_id
              WHERE e.tenant_id=:t AND l.lock_id=:id AND (NOT e.cancelled OR EXISTS (
