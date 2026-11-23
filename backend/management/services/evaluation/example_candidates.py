@@ -2,39 +2,26 @@
 """Select complementary verified demonstrations from a development experiment."""
 
 import json
-import unicodedata
 from itertools import combinations
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.db.evaluation import experiments as jobs
-from management.db.evaluation.candidates import store_prompt_candidates, text_digest
+from contracts.evolution_sources import example_source_keys, normalized_text
+from management.db.evaluation.candidates import store_prompt_candidates
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.replay_cases import approved_example_input, get_development_case
 
 
-def _normalized(value):
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
-
-
-def example_source_keys(task):
-    keys = {"file:" + file["sha256"] for file in task["attachments"]}
-    if not keys:
-        keys.add("query:" + text_digest(_normalized(task["query"])))
-    if task.get("source_group"):
-        keys.add("group:" + text_digest(_normalized(task["source_group"])))
-    return keys
-
-
 def select_examples(examples, target_behavior):
-    target = _normalized(target_behavior)
-    ranked = sorted(examples, key=lambda ex: (_normalized(ex["behavior"]) != target, ex["case_id"]))
+    target = normalized_text(target_behavior)
+    ranked = sorted(examples, key=lambda ex: (normalized_text(ex["behavior"]) != target, ex["case_id"]))
     # At most 20 approved examples and three slots. A greedy first choice may
     # consume the only source available for another behavior.
     for size in range(min(3, len(ranked)), 0, -1):
         options = []
         for group in combinations(ranked, size):
-            behaviors = {_normalized(ex["behavior"]) for ex in group}
+            behaviors = {normalized_text(ex["behavior"]) for ex in group}
             sources = [key for ex in group for key in ex["source_keys"]]
             if target in behaviors and len(behaviors) == size and len(set(sources)) == len(sources):
                 options.append(group)

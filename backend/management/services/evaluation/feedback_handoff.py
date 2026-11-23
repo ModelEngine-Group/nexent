@@ -3,6 +3,7 @@
 
 from hashlib import sha256
 import json
+import re
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -12,6 +13,7 @@ from infrastructure.skill_execution import capture_skill_files
 from infrastructure.skill_package import encode_skill_package
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import text_digest
+from management.db.evaluation.replay_cases import contains_fixed_cases
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.experiments import _io, _snapshot, snapshot_digest
@@ -46,6 +48,12 @@ def _require_baseline_guide(target, skill_id, candidate_id, trials):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "S2 requires observed reads of the selected baseline guide in both trials")
 
 
+def require_development_sources(tenant, agent, case_ids, plan):
+    fixed = plan.get("regression_cases") or {}
+    if any(str(cid) in fixed for cid in case_ids) or contains_fixed_cases(tenant, agent, case_ids, list(map(int, fixed))):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Fixed regression tasks cannot be shared with a generator")
+
+
 def _prepare_handoff(tenant, user, eid, request):
     scope = jobs.scope(tenant, eid)
     if not scope:
@@ -53,6 +61,9 @@ def _prepare_handoff(tenant, user, eid, request):
     agent_id, version = scope["agent_id"], scope["version_no"]
     require_business_agent_edit(agent_id, tenant, user)
     plan = jobs.read_plan(tenant, eid)
+    fields = ("missed", "overused", "correct") if request.method == "S1" else ("failure", "protection")
+    source_ids = [getattr(request, field).case_id for field in fields]
+    require_development_sources(tenant, agent_id, source_ids, plan)
     records = jobs.trials(tenant, eid)
     trials = {r["case_id"]: r for r in records if r["variant"] == "base"}
     if request.method == "S1":
@@ -66,7 +77,7 @@ def _prepare_handoff(tenant, user, eid, request):
         skill = get_skill_by_id(request.skill_id, tenant)
         if not skill:
             raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
-        feedback = dict(method="S1", agent_id=agent_id, version_no=version, skill_id=request.skill_id,
+        feedback = dict(method="S1", source_case_ids=source_ids, agent_id=agent_id, version_no=version, skill_id=request.skill_id,
                         skill_name=skill["name"], source_text=skill.get("description") or "", goal=request.goal)
         files = capture_skill_files(tenant, skill["name"])
         feedback["source_digest"] = sha256(encode_skill_package(files)).hexdigest()
@@ -75,7 +86,7 @@ def _prepare_handoff(tenant, user, eid, request):
             case = get_development_case(tenant, user, agent_id, version, excerpt.case_id)
             feedback[category] = _selection_excerpt(skill["name"], category, excerpt, trials.get(excerpt.case_id), case)
         return plan, feedback
-    feedback = dict(method=request.method, agent_id=agent_id, version_no=version, skill_id=request.skill_id,
+    feedback = dict(method=request.method, source_case_ids=source_ids, agent_id=agent_id, version_no=version, skill_id=request.skill_id,
                     goal=request.goal, source_passage=request.source_passage)
     for field, status in (("failure", "fail"), ("protection", "pass")):
         excerpt = getattr(request, field)
@@ -169,6 +180,8 @@ async def examples_from_experiment(tenant, user, eid, request):
     agent, version = scope["agent_id"], scope["version_no"]
     await _io("authorize-example-source", require_business_agent_edit, agent, tenant, user)
     plan = await _io("read-example-plan", jobs.read_plan, tenant, eid)
+    await _io("check-prompt-example-partition", require_development_sources, tenant, agent,
+              [request.target_case_id, *(ex.case_id for ex in request.examples)], plan)
     released = await _io("read-example-prompt", published_business_agent, tenant, agent, version)
     snapshot = await _snapshot(DevelopmentExperimentRequest.model_validate(plan["request"]), tenant, user, "base")
     if snapshot_digest(snapshot) != plan["snapshots"]["base"]:
@@ -184,6 +197,8 @@ async def tool_sets_from_experiment(tenant, user, eid, request):
     agent, version = scope["agent_id"], scope["version_no"]
     await _io("authorize-tool-set-source", require_business_agent_edit, agent, tenant, user)
     plan = await _io("read-tool-set-plan", jobs.read_plan, tenant, eid)
+    await _io("check-tool-set-partition", require_development_sources, tenant, agent,
+              request.failure_case_ids + request.protection_case_ids, plan)
     if plan["request"]["candidate_type"] != "baseline":
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select an observed released baseline")
     spec = await _snapshot(DevelopmentExperimentRequest.model_validate(plan["request"]), tenant, user, "base")
@@ -198,6 +213,16 @@ def generate_from_handoff(tenant, user, feedback_id, model_id):
     feedback = jobs.read_handoff(tenant, feedback_id)
     if not feedback:
         raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+    source_ids = feedback.get("source_case_ids")
+    if source_ids is None:
+        fields = ("missed", "overused", "correct") if feedback["method"] == "S1" else ("failure", "protection")
+        source_ids = []
+        for field in fields:
+            match = re.fullmatch(r"case-(\d+)-trial-.+", feedback[field]["example_id"])
+            if not match:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Cannot verify original feedback task")
+            source_ids.append(int(match[1]))
+    require_development_sources(tenant, feedback["agent_id"], source_ids, {})
     if feedback["method"] == "S1":
         return generate_skill_discovery_candidate(feedback, feedback_id, model_id, tenant, user)
     common = {key: feedback[key] for key in ("goal", "source_passage", "failure", "protection")}

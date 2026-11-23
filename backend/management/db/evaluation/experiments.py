@@ -62,14 +62,17 @@ def submit(tenant, user, request, plan):
                 WHERE suggestion_id=:sid"""), link)
         session.execute(text("""
             INSERT INTO nexent.evolution_trial_t (experiment_id, case_id, variant) VALUES (:eid, :case, :variant)
-        """), [dict(eid=eid, case=case, variant=v) for case in request.case_ids for v in plan["snapshots"]])
+        """), [dict(eid=eid, case=int(case), variant=v) for case in plan["cases"] for v in plan["snapshots"]])
         return eid
 
 
 def scope(tenant, eid):
     with get_db_session() as session:
         row = session.execute(text("""
-            SELECT agent_id, version_no FROM nexent.evolution_experiment_t WHERE tenant_id=:tenant AND experiment_id=:eid
+            SELECT agent_id, version_no, plan->'regression_cases' AS regression_cases,
+                   ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
+                   ARRAY(SELECT jsonb_object_keys(plan->'snapshots')) AS planned_arms
+              FROM nexent.evolution_experiment_t WHERE tenant_id=:tenant AND experiment_id=:eid
         """), dict(tenant=tenant, eid=eid)).mappings().one_or_none()
         return dict(row) if row else None
 
@@ -172,7 +175,7 @@ def workspace_choices(tenant, agent_id, version):
             ORDER BY suggestion_id DESC LIMIT 100
         """,
         "cases": """
-            SELECT case_id, task->>'family' AS family, left(task->>'query', 160) AS query,
+            SELECT case_id, digest, task->>'family' AS family, left(task->>'query', 160) AS query,
                 task->'expected_skill_names' AS expected_skill_names
             FROM nexent.evolution_replay_case_t WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version
             ORDER BY case_id DESC LIMIT 200

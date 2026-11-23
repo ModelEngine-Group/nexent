@@ -20,11 +20,11 @@ from management.db.conversation.evolution_review import recent_reviews
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import prompt_example_sources
 from management.db.evaluation.evaluator import get_evaluator
-from management.db.evaluation.replay_cases import task_digest
+from management.db.evaluation.replay_cases import regression_members, task_digest
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.example_candidates import example_source_keys
-from management.services.evaluation.replay_cases import get_development_case, remove_trial_inputs, stage_case_input
+from management.services.evaluation.replay_cases import freeze_regression_members, get_development_case, remove_trial_inputs, stage_case_input
 from management.services.evaluation.scoring import grade_observed_case
 from management.services.evaluation.tool_use import judge_tool_use
 from management.services.evaluation.tool_set_candidates import resolve_tool_set
@@ -111,15 +111,30 @@ async def create_experiment(request, tenant, user):
         method = "S1" if request.candidate_type == "skill_discovery" else "S2"
         if not bound or bound["method"] != method:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose the experiment matching the Skill candidate")
+    fixed = {}
+    if request.candidate_type != "baseline":
+        fixed = await _io("freeze-fixed-regression-suite", freeze_regression_members, tenant, user,
+                          request.agent_id, request.version_no)
     cases = {}
-    for case_id in request.case_ids:
+    development_sources, fixed_sources = set(), set()
+    for case_id in dict.fromkeys([*request.case_ids, *map(int, fixed)]):
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
-        if excluded.intersection(example_source_keys(case["task"])):
+        sources = example_source_keys(case["task"])
+        if excluded.intersection(sources):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
-        if request.candidate_type == "skill_discovery" and case["task"].get("expected_skill_names") is None:
+        if (request.candidate_type == "skill_discovery" and case_id in request.case_ids
+                and case["task"].get("expected_skill_names") is None):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Label the acceptable Skill choices for each task")
         cases[str(case_id)] = case["digest"]
+        if str(case_id) in fixed and case["digest"] != fixed[str(case_id)]["digest"]:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Fixed regression task no longer matches its source")
+        if str(case_id) in fixed:
+            fixed_sources.update(sources)
+        else:
+            development_sources.update(sources)
+    if development_sources & fixed_sources:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose development materials outside the fixed regression suite")
     snapshots = {}
     arms = {"baseline": ("base",), "skill_step": ("base", "result", "no_skill")}.get(
         request.candidate_type, ("base", "result"))
@@ -127,7 +142,23 @@ async def create_experiment(request, tenant, user):
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
+    if request.candidate_type != "baseline":
+        plan["regression_cases"] = fixed
     return await _io("submit-development-experiment", jobs.submit, tenant, user, request, plan)
+
+
+def regression_coverage(frozen, pairs):
+    failed, incomplete = [], []
+    for key in frozen:
+        case_id = int(key)
+        pair = pairs.get(case_id, {})
+        baseline = pair.get("base", {}).get("status")
+        candidate = pair.get("result", {}).get("status")
+        if baseline not in {"pass", "fail"} or candidate not in {"pass", "fail"}:
+            incomplete.append(case_id)
+        elif candidate == "fail":
+            failed.append(case_id)
+    return {"case_ids": sorted(map(int, frozen)), "failed": sorted(failed), "incomplete": sorted(incomplete)}
 
 
 def experiment_report(tenant, user, eid, *, cancel=False):
@@ -137,10 +168,15 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     require_business_agent_edit(scope["agent_id"], tenant, user)
     if cancel:
         jobs.cancel(tenant, eid)
+    fixed = scope.get("regression_cases")
     rows = jobs.trials(tenant, eid)
     pairs = {}
     for row in rows:
         pairs.setdefault(row["case_id"], {})[row["variant"]] = row
+    for key in scope.get("planned_cases", fixed or {}):
+        pair = pairs.setdefault(int(key), {})
+        for arm in scope.get("planned_arms", ("base", "result")):
+            pair.setdefault(arm, {"status": "missing_evidence", "result": {"error": "missing_planned_trial"}})
     counts = Counter(improved=0, regressed=0, both_pass=0, both_fail=0, inconclusive=0)
     labels = {("fail", "pass"): "improved", ("pass", "fail"): "regressed",
               ("pass", "pass"): "both_pass", ("fail", "fail"): "both_fail"}
@@ -152,6 +188,10 @@ def experiment_report(tenant, user, eid, *, cancel=False):
             selection = (row.get("result") or {}).get("selection")
             if selection and row["status"] in {"pass", "fail"}:
                 selection_counts.setdefault(arm, Counter())[selection["outcome"]] += 1
+        if "base" not in pair:
+            counts["inconclusive"] += 1
+            pair["comparison"] = "inconclusive"
+            continue
         if "result" not in pair:
             valid_baselines += int(pair["base"]["status"] in {"pass", "fail"})
             pair["comparison"] = "baseline_only"
@@ -170,14 +210,16 @@ def experiment_report(tenant, user, eid, *, cancel=False):
                 arm: labels[(control, pair[arm]["status"])] if complete else "inconclusive" for arm in ("base", "result")
             }
     states = {row["status"] for row in rows}
-    if states <= {"pending"}:
+    if states == {"pending"}:
         status = "pending"
     elif states & {"running", "pending"}:
         status = "running"
     else:
         status = "cancelled" if "cancelled" in states else "finished"
     pair_count = sum("result" in p for p in pairs.values())
-    return {"experiment_id": eid, **scope, "status": status, "total_pairs": pair_count,
+    return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
+            **({"fixed_regression": regression_coverage(fixed, pairs)} if fixed is not None else {}),
+            "status": status, "total_pairs": pair_count,
             "total_tasks": len(pairs), "valid_baselines": valid_baselines, "selection_counts": selection_counts,
             **({"valid_triplets": valid_triplets, "verified_guide_pairs": verified_guide_pairs}
                if any("no_skill" in p for p in pairs.values()) else {}),
@@ -187,21 +229,31 @@ def experiment_report(tenant, user, eid, *, cancel=False):
 def workspace_choices(tenant, user, agent_id, version):
     require_business_agent_edit(agent_id, tenant, user)
     published_business_agent(tenant, agent_id, version)
-    return {**jobs.workspace_choices(tenant, agent_id, version),
+    fixed = regression_members(tenant, agent_id)
+    for member in fixed:
+        scoring = member.pop("scoring")
+        if scoring:
+            rule = scoring["evaluator"]
+            member["rubric"] = {"name": rule["name"], "version_no": rule["version_no"]}
+    return {**jobs.workspace_choices(tenant, agent_id, version), "fixed_regression": fixed,
             "reviews": recent_reviews(tenant, agent_id, version)}
 
 
 def _grade(request, job, task, observed):
     plan = job["plan"]
-    eid = request.evaluator_id
+    scoring = (plan.get("regression_cases", {}).get(str(job.get("case_id"))) or {}).get("scoring")
+    rule = scoring["evaluator"] if scoring else plan["evaluator"]
+    eid = rule["evaluator_id"] if scoring else request.evaluator_id
     closed = any(e.get("type") == "final_answer" for e in observed.events)
-    rule = plan["evaluator"]
-    system = compose_auxiliary_prompt(request.language, "evaluation_judge").system if rule["evaluator_type"] != "code" else ""
-    return grade_observed_case(
+    language = scoring["language"] if scoring else request.language
+    judge_model_id = scoring["judge_model_id"] if scoring else request.judge_model_id
+    system = compose_auxiliary_prompt(language, "evaluation_judge").system if rule["evaluator_type"] != "code" else ""
+    grade = grade_observed_case(
         {eid: rule}, tenant_id=job["tenant_id"], user_id=job["created_by"], query=task["query"],
         expected=task["expected"], actual=observed.answer if closed else None, runtime_events=observed.events,
-        required_evidence={eid: {"actual", "expected"}}, judge_model_id=request.judge_model_id, judge_system_prompt=system,
+        required_evidence={eid: {"actual", "expected"}}, judge_model_id=judge_model_id, judge_system_prompt=system,
     )[eid]
+    return {**grade, "evaluator_id": eid, "evaluator_version": rule.get("version_no")}
 
 
 def reported_step_input_tokens(events):
@@ -323,7 +375,8 @@ async def execute_trial(job):
                              **({"selection": selection} if selection else {}),
                              "reported_step_input_tokens": reported_step_input_tokens(observed.events),
                              "events_digest": task_digest(observed.events), "case_digest": case["digest"],
-                             "snapshot_digest": digest, "evaluator_version": job["plan"]["evaluator"]["version_no"]}
+                             "snapshot_digest": digest, "evaluator_id": grade["evaluator_id"],
+                             "evaluator_version": grade["evaluator_version"]}
 
 
 async def _work_one(job):

@@ -1,4 +1,13 @@
 {
+  "evolution.fixedSuite": "Fixed regression tasks ({{count}})",
+  "evolution.fixedAutoInclude": "Every candidate comparison for this Agent includes these tasks, including on later releases.",
+  "evolution.chooseFixed": "Select a confirmed business task",
+  "evolution.fixedRubric": "Regression evaluator",
+  "evolution.fixedJudge": "Regression judge model",
+  "evolution.usedRubric": "Evaluator #{{id}} · V{{version}}",
+  "evolution.addFixed": "Add to regression suite",
+  "evolution.removeFixed": "Remove from suite",
+  "evolution.fixedCoverage": "Fixed regression tasks: {{total}}. Failed case IDs: {{failed}}. Incomplete pairs: {{incomplete}}.",
   "evolution.proposeToolSets": "Propose tool sets from unnecessary calls",
   "evolution.excessCalls": "Tasks with observed unnecessary calls",
   "evolution.protectTools": "Passing tasks whose required tools must be retained",

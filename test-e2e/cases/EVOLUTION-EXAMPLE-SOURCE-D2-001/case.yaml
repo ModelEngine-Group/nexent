@@ -18,13 +18,21 @@ case:
   - order: 1
     action: 通过 HTTP 保存一条仅空格和大小写变化的示例原题，再保存一条不同措辞的同源业务题。分别发起候选对照。
     expected: 两次请求均返回业务校验错误，提示另选新材料。
-  expected_results: [原题和同源改写题均被拦截。]
-  forbidden_side_effects: [未创建任何实验或试跑作业。]
+  - order: 2
+    action: 通过接口把一条业务题两次加入固定回归，在下一版装载题单，提交只选无关专项题的候选。再移出该固定题，用旧实验中同源材料请求生成候选。
+    expected: 题单及指定评估器版本跨版本保留。同源开发材料被拒；无关专项题会带上固定题。移出后旧实验仍按冻结分区拒绝生成。
+  expected_results: [原题和同源改写题均被拦截。, 固定题按智能体复用、自动纳入对比且历史分区受保护。]
+  forbidden_side_effects: [拒绝的请求均未创建任何实验或试跑作业。]
   acceptance:
   - id: AC-01
     description: 通过已登录用户的真实 API 请求和事后数据库查询验证来源隔离。
     steps: [1]
     expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 真实登录、题目来源隔离、跨发布版本和冻结后移出题集。
+    steps: [2]
+    expected_results: [2]
     forbidden_side_effects: [1]
   contract:
     protocol: HTTP API

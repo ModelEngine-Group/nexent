@@ -40,7 +40,8 @@ def test_resource_editor_generation_uses_referenced_target_and_provenance(monkey
 
     excerpts = {"failure":{"example_id":"bad", "observed":"omitted", "expected":"retained"},
                 "protection":{"example_id":"good", "observed":"named", "expected":"named"}}
-    record = {"method":"S2", "skill_id":84, "agent_id":45, "version_no":2, "goal":"keep all",
+    monkeypatch.setattr(service, "contains_fixed_cases", lambda *args: False)
+    record = {"source_case_ids":[1, 2], "method":"S2", "skill_id":84, "agent_id":45, "version_no":2, "goal":"keep all",
               "source_passage":"keep named", "source_digest":"d"*64, **excerpts}
     reader = Mock(return_value=record)
     generate = Mock(return_value={"candidate_id":13})

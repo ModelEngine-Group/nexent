@@ -17,7 +17,8 @@ from management.services.evaluation.replay_cases import freeze_development_case,
 from management.services.evaluation.experiments import create_experiment, experiment_report, workspace_choices
 from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
 from management.services.evaluation.feedback_handoff import tool_sets_from_experiment
-from contracts.evolution import ToolSetProposal
+from contracts.evolution import RegressionMembershipRequest, ToolSetProposal
+from management.services.evaluation.replay_cases import update_regression_case
 from management.services.permission.identity.session import get_current_user_id
 from nexent.core.concurrency import run_blocking
 
@@ -100,6 +101,16 @@ async def read_development_case(agent_id: int, version_no: int, case_id: int, au
     user_id, tenant_id = get_current_user_id(authorization)
     result = await run_blocking("read-development-case", get_development_case, tenant_id, user_id,
                                 agent_id, version_no, case_id, lane="control-io", owner="management")
+    return {"data": result}
+
+
+@router.post("/agents/{agent_id}/versions/{version_no}/development-cases/{case_id}/regression")
+async def set_fixed_regression_case(agent_id: int, version_no: int, case_id: int, request: RegressionMembershipRequest,
+                                    authorization: str | None = Header(None)):
+    user_id, tenant_id = get_current_user_id(authorization)
+    result = await run_blocking("update-fixed-regression-case", update_regression_case, tenant_id, user_id,
+                                agent_id, version_no, case_id, request.enabled, request.evaluator_id, request.judge_model_id,
+                                request.language, lane="control-io", owner="management")
     return {"data": result}
 
 

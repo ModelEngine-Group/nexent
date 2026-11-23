@@ -34,7 +34,8 @@ def test_online_scope_http(runtime):
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
         for name in ("003_conversation_run_admission", "006_prepared_conversation_turn", "015_conversation_evolution",
                      "016_evolution_candidates", "017_evolution_skill_candidates", "018_evolution_replay_cases",
-                     "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions"):
+                     "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
+                     "025_evolution_regression_cases"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for cid, user in [(17,owner),(18,"other")]:

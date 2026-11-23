@@ -20,16 +20,20 @@ interface Rule {
   status: string;
 }
 export interface Workspace {
+  fixed_regression?: { source_case_id: number; source_version: number; digest: string; family: string; query: string;
+    rubric?: { name: string; version_no: number } }[];
   skills?: { skill_id: number; name: string }[];
   suggestions?: { suggestion_id: number; expected_behavior: string; skill_id: number; experiment_id: number | null }[];
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[] }[];
   candidates: { candidate_id: number; kind: string; name: string }[];
-  cases: { case_id: number; family: string; query: string; expected_skill_names?: string[] | null }[];
+  cases: { case_id: number; digest?: string; family: string; query: string; expected_skill_names?: string[] | null }[];
   experiments: { experiment_id: number; create_time: string }[];
 }
 export interface Trial {
   status: string;
   result?: {
+    evaluator_id?: number;
+    evaluator_version?: number;
     answer?: string;
     reported_step_input_tokens?: number | null;
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
@@ -43,6 +47,7 @@ export interface Trial {
   };
 }
 export interface ExperimentReport {
+  fixed_regression?: { case_ids: number[]; failed: number[]; incomplete: number[] };
   experiment_id: number;
   status: string;
   valid_pairs: number;
@@ -115,6 +120,10 @@ export const evolutionService = {
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  setFixedRegression: (agent: number, version: number, id: number, enabled: boolean,
+    scoring?: { evaluator_id: number; judge_model_id?: number; language: string }) =>
+    read<{ case_id: number; enabled: boolean }>(
+      `${root}/agents/${agent}/versions/${version}/development-cases/${id}/regression`, { enabled, ...scoring }),
   toolSetCandidates: (id: number, failure_case_ids: number[], protection_case_ids: number[]) =>
     read<{ variants: { candidate_id: number | null; removed: string[]; retained: string[] }[] }>(
       `${root}/experiments/${id}/tool-set-candidates`, { failure_case_ids, protection_case_ids }),

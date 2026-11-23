@@ -24,6 +24,7 @@ import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedba
 import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRules";
 import LocalEditFeedback from "./LocalEditFeedback";
 import ToolSetCandidates from "./ToolSetCandidates";
+import FixedRegressionCases from "./FixedRegressionCases";
 
 function CaseForm({
   agent,
@@ -202,6 +203,11 @@ function Experiments({
     },
   });
   const choices = workspace.data;
+  const fixedIds = new Set(report.data?.fixed_regression?.case_ids ?? []);
+  const fixedDigests = new Set(choices?.fixed_regression?.map(c => c.digest));
+  choices?.cases.forEach(c => { if (c.digest && fixedDigests.has(c.digest)) fixedIds.add(c.case_id); });
+  const development = report.data && { ...report.data, pairs: Object.fromEntries(
+    Object.entries(report.data.pairs).filter(([id]) => !fixedIds.has(Number(id)))) };
   const discoveryRun = candidate?.startsWith("skill_discovery:");
   const baselineReport = report.data?.total_pairs === 0;
   const active = ["pending", "running"].includes(report.data?.status || "");
@@ -234,6 +240,9 @@ function Experiments({
               }))}
             />
           )}
+          <FixedRegressionCases agent={agent} version={version} workspace={choices} refresh={workspace.refetch}
+            rubrics={(rules.data || []).filter(r => r.status === "PUBLISHED")}
+            models={availableLlmModels.map(m => ({ value: m.id, label: m.displayName || m.name }))} />
           {!!choices.reviews?.length && (
             <details>
               <summary>{t("evolution.recentObservations")}</summary>
@@ -357,6 +366,11 @@ function Experiments({
             {report.data.valid_triplets !== undefined && <Typography.Text>{t("evolution.skillCoverage", {
               valid: report.data.valid_triplets, total: report.data.total_pairs, read: report.data.verified_guide_pairs,
             })}</Typography.Text>}
+            {report.data.fixed_regression && <Typography.Text>{t("evolution.fixedCoverage", {
+              total: report.data.fixed_regression.case_ids.length,
+              failed: report.data.fixed_regression.failed.join(", ") || "—",
+              incomplete: report.data.fixed_regression.incomplete.join(", ") || "—",
+            })}</Typography.Text>}
             {active && (
               <Button
                 onClick={() => cancel.mutate()}
@@ -366,8 +380,8 @@ function Experiments({
               </Button>
             )}
           </Flex>
-          {report.data.status === "finished" && !baselineReport && (
-            <ExampleCandidates key={report.data.experiment_id} report={report.data} cases={choices?.cases || []}
+          {development && report.data.status === "finished" && !baselineReport && (
+            <ExampleCandidates key={report.data.experiment_id} report={development} cases={choices?.cases || []}
               onGenerated={(id) => {
                 setCandidate(`prompt:${id}`);
                 setCases([]);
@@ -376,12 +390,12 @@ function Experiments({
               }}
             />
           )}
-          {report.data.status === "finished" && choices && Object.values(report.data.pairs).some(p => p.base.result?.selection) &&
-            <DiscoveryFeedback key={report.data.experiment_id} report={report.data} workspace={choices} />}
-          {report.data.status === "finished" && choices && <LocalEditFeedback key={report.data.experiment_id}
-            report={report.data} workspace={choices} agent={agent} version={version} viewer={viewer} />}
-          {report.data.status === "finished" && baselineReport && <ToolSetCandidates key={report.data.experiment_id}
-            report={report.data} cases={choices?.cases || []} onSelect={id => {
+          {development && report.data.status === "finished" && choices && Object.values(development.pairs).some(p => p.base.result?.selection) &&
+            <DiscoveryFeedback key={report.data.experiment_id} report={development} workspace={choices} />}
+          {development && report.data.status === "finished" && choices && <LocalEditFeedback key={report.data.experiment_id}
+            report={development} workspace={choices} agent={agent} version={version} viewer={viewer} />}
+          {development && report.data.status === "finished" && baselineReport && <ToolSetCandidates key={report.data.experiment_id}
+            report={development} cases={choices?.cases || []} onSelect={id => {
               setCandidate(`tool_set:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
             }} />}
           <Table
@@ -395,9 +409,10 @@ function Experiments({
               {
                 title: t("evolution.cases"),
                 dataIndex: "id",
-                render: (id) =>
-                  choices?.cases.find((c) => String(c.case_id) === id)
-                    ?.family || id,
+                render: (id) => {
+                  const task = choices?.cases.find(c => String(c.case_id) === id);
+                  return task ? `#${id} · ${task.family}` : `#${id}`;
+                },
               },
               ...(baselineReport ? ["base"] : report.data.valid_triplets === undefined ? ["base", "result"] : ["no_skill", "base", "result"]).map((key) => ({
                 title: t(`evolution.${key}`),
@@ -405,6 +420,9 @@ function Experiments({
                 render: (trial?: Trial) => trial && (
                   <div>
                     <strong>{t(`evolution.state.${trial.status}`)}</strong>
+                    {trial.result?.evaluator_id && <div>{t("evolution.usedRubric", {
+                      id: trial.result.evaluator_id, version: trial.result.evaluator_version,
+                    })}</div>}
                     <div className="whitespace-pre-wrap">
                       {trial.result?.answer || trial.result?.error}
                     </div>

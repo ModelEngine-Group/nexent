@@ -81,6 +81,43 @@ def test_replay_paths_are_portable(name):
         ReplayAttachmentSource(name=name, object_name="attachments/editor/object")
 
 
+def test_fixed_regression_report_accounts_for_missing_trials_and_unresolved_failures(monkeypatch):
+    from management.services.evaluation import experiments as service
+
+    frozen = {str(i): {"source_case_id": i, "digest": str(i)} for i in range(1, 6)}
+    monkeypatch.setattr(service.jobs, "scope", lambda *args: {"agent_id": 12, "version_no": 1, "regression_cases": frozen})
+    monkeypatch.setattr(service, "require_business_agent_edit", lambda *args: None)
+    rows = [{"case_id": i, "variant": arm, "status": status, "result": {}}
+            for i, statuses in enumerate([("pass", "fail"), ("fail", "fail"), ("fail", "pass"),
+                                          ("pass", None), (None, None)], 1)
+            for arm, status in zip(("base", "result"), statuses) if status is not None]
+    monkeypatch.setattr(service.jobs, "trials", lambda *args: rows)
+    report = service.experiment_report("tenant", "editor", 1)
+    assert report["fixed_regression"] == {"case_ids": [1, 2, 3, 4, 5], "failed": [1, 2], "incomplete": [4, 5]}
+    assert report["total_pairs"] == 5 and report["valid_pairs"] == 3
+    assert report["pairs"][5]["comparison"] == "inconclusive"
+
+
+def test_same_answer_uses_the_rubric_frozen_for_its_task():
+    from contracts.agentos import EvaluationAgentResult
+    from management.services.evaluation.experiments import _grade
+
+    def rule(eid, version, score):
+        return {"evaluator_id": eid, "version_no": version, "name": "rule", "evaluator_type": "code",
+                "pass_threshold": 1.0, "code": f"def evaluate(query, expected, actual, runtime_events):\n    return {{'score': {score}}}"}
+
+    request = SimpleNamespace(evaluator_id=1, judge_model_id=None, language="en")
+    observed = EvaluationAgentResult(answer="[]", events=[{"type": "final_answer"}])
+    task = {"query": "list rows", "expected": "[]"}
+    frozen = {"evaluator": rule(3, 7, 0), "judge_model_id": None, "language": "zh"}
+    job = {"plan": {"evaluator": rule(1, 4, 1), "regression_cases": {"2": {"scoring": frozen}}},
+           "tenant_id": "tenant", "created_by": "editor"}
+    general = _grade(request, {**job, "case_id": 1}, task, observed)
+    fixed = _grade(request, {**job, "case_id": 2}, task, observed)
+    assert (general["status"], general["evaluator_id"], general["evaluator_version"]) == ("pass", 1, 4)
+    assert (fixed["status"], fixed["evaluator_id"], fixed["evaluator_version"]) == ("fail", 3, 7)
+
+
 def test_snapshot_digest_normalizes_only_generated_binding_names():
     from management.services.evaluation.experiments import snapshot_digest
 

@@ -6,6 +6,7 @@ import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperimen
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
 import ToolSetCandidates from "@/app/evaluation/components/ToolSetCandidates";
+import FixedRegressionCases from "@/app/evaluation/components/FixedRegressionCases";
 import { evolutionService } from "@/services/evolutionService";
 
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
@@ -32,6 +33,7 @@ vi.mock("@/services/evolutionService", () => ({
     developmentCase: vi.fn(),
     shareLocalEdit: vi.fn(),
     toolSetCandidates: vi.fn(),
+    setFixedRegression: vi.fn(),
   },
 }));
 
@@ -202,6 +204,26 @@ it("requires both an unwanted call and a protection case before trying a narrowe
   fireEvent.click(await screen.findByRole("button", { name: "evolution.tryToolSet" }));
   expect(evolutionService.toolSetCandidates).toHaveBeenCalledWith(55, [1], [2]);
   expect(select).toHaveBeenCalledWith(27);
+});
+
+it("maintains the shared regression suite from a published version", async () => {
+  const refresh = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(evolutionService.setFixedRegression).mockResolvedValue({ case_id: 13, enabled: true });
+  render(<QueryClientProvider client={new QueryClient()}><FixedRegressionCases agent={7} version={2}
+    models={[]} rubrics={[{ evaluator_id: 15, name: "owner rule", evaluator_type: "code" }]}
+    workspace={{ experiments: [], candidates: [], cases: [{ case_id: 13, digest: "new", family: "minutes", query: "all owners" }],
+      fixed_regression: [{ source_case_id: 9, source_version: 1, digest: "old", family: "minutes", query: "protect read" }] }}
+    refresh={refresh} /></QueryClientProvider>);
+  fireEvent.click(screen.getByText("evolution.fixedSuite"));
+  await choose("evolution.chooseFixed", "minutes · all owners");
+  expect(screen.getByRole("button", { name: "evolution.addFixed" })).toBeDisabled();
+  await choose("evolution.fixedRubric", "owner rule");
+  fireEvent.click(screen.getByRole("button", { name: "evolution.addFixed" }));
+  await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.removeFixed" }));
+  await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+  expect(evolutionService.setFixedRegression).toHaveBeenNthCalledWith(1, 7, 2, 13, true, { evaluator_id: 15, language: "zh", judge_model_id: undefined });
+  expect(evolutionService.setFixedRegression).toHaveBeenNthCalledWith(2, 7, 1, 9, false, undefined);
 });
 
 it("shares only the three approved request excerpts for a discovery rewrite", async () => {

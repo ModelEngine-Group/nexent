@@ -155,6 +155,14 @@ class PromptEdit(BaseModel):
     evidence_ids: list[str] = Field(min_length=2, max_length=2)
 
 
+class RegressionMembershipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    enabled: bool
+    evaluator_id: int | None = Field(default=None, gt=0)
+    judge_model_id: int | None = Field(default=None, gt=0)
+    language: Literal["zh", "en"] = "zh"
+
+
 class DevelopmentExperimentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     suggestion_id: int | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)

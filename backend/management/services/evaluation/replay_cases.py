@@ -11,7 +11,8 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import ReplayCaseRequest
 from infrastructure.object_storage.client import minio_client
-from management.db.evaluation.replay_cases import read_replay_case, save_replay_case
+from management.db.evaluation.replay_cases import read_replay_case, regression_members, save_replay_case, set_regression_membership
+from management.db.evaluation.evaluator import get_evaluator
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
@@ -78,6 +79,40 @@ def get_development_case(tenant_id, user_id, agent_id, version_no, case_id):
     if not row:
         raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Replay case is outside this Agent version")
     return row
+
+
+def update_regression_case(tenant, user, agent, version, case_id, enabled, evaluator_id=None, judge_model_id=None, language="zh"):
+    get_development_case(tenant, user, agent, version, case_id)
+    published_business_agent(tenant, agent, version)
+    scoring = None
+    if enabled:
+        rule = get_evaluator(evaluator_id, tenant) if evaluator_id is not None else None
+        if not rule or rule["status"] != "PUBLISHED":
+            raise AppException(ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED)
+        if rule["evaluator_type"] != "code" and judge_model_id is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select a judge model for this fixed regression task")
+        scoring = {"evaluator": rule, "judge_model_id": judge_model_id if rule["evaluator_type"] != "code" else None,
+                   "language": language}
+    set_regression_membership(tenant, agent, version, case_id, user, enabled, scoring)
+    return {"case_id": case_id, "enabled": enabled}
+
+
+def freeze_regression_members(tenant, user, agent, version):
+    require_business_agent_edit(agent, tenant, user)
+    published_business_agent(tenant, agent, version)
+    frozen = {}
+    for member in regression_members(tenant, agent):
+        case_id = member["source_case_id"]
+        if member["source_version"] != version:
+            source = get_development_case(tenant, user, agent, member["source_version"], case_id)
+            copy = save_replay_case(tenant, agent, version, user, source["task"])
+            if copy["digest"] != member["digest"]:
+                raise ValueError("Fixed regression task changed while copying the release manifest")
+            case_id = copy["case_id"]
+        if not member["scoring"]:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose a published rubric for each fixed regression task")
+        frozen[str(case_id)] = {"source_case_id": member["source_case_id"], "digest": member["digest"], "scoring": member["scoring"]}
+    return frozen
 
 
 def approved_example_input(tenant, agent_id, task, selection):

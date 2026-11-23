@@ -1,4 +1,13 @@
 {
+  "evolution.fixedSuite": "固定回归题（{{count}}）",
+  "evolution.fixedAutoInclude": "这个智能体的每次候选对比都会自动带上这些题，后续版本继续使用。",
+  "evolution.chooseFixed": "选择已确认的业务题",
+  "evolution.fixedRubric": "固定题的评估器",
+  "evolution.fixedJudge": "固定题的裁判模型",
+  "evolution.usedRubric": "评估器 #{{id}} · V{{version}}",
+  "evolution.addFixed": "加入固定回归",
+  "evolution.removeFixed": "移出固定回归",
+  "evolution.fixedCoverage": "固定回归共 {{total}} 题；候选未通过题号 {{failed}}；缺少有效对照题号 {{incomplete}}",
   "evolution.proposeToolSets": "从误调记录生成工具集候选",
   "evolution.excessCalls": "选择不应调用却实际调用的题",
   "evolution.protectTools": "选择工具行为正确的保护题",
