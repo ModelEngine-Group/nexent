@@ -201,6 +201,8 @@ class LLMSummary:
                 if isinstance(block, dict) and block.get("type") == "text"
             )
         if not isinstance(raw_output, str):
+            if call_type.startswith(("history_summary", "history_incremental")):
+                raise ValueError("History summary response must contain text")
             raw_output = str(raw_output)
 
         summary = _strip_code_fences(raw_output)

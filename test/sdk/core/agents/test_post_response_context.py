@@ -300,11 +300,14 @@ def _maintain_history(manager, turns, current, model, *, provider_delta=0):
 
 @pytest.mark.parametrize("message_format", ["codeagent", "openai_chat_completions"])
 @pytest.mark.parametrize("provider_delta", [0, 800], ids=["fits-window", "usage-requires-reduction"])
-def test_ac008_stored_arguments_cannot_make_a_larger_rendered_summary_acceptable(message_format, provider_delta):
+@pytest.mark.parametrize("later", [None, "", "failed"], ids=["three-valid", "then-empty", "then-failed"])
+def test_history_summary_adopts_larger_rendered_candidate_with_bounded_attempts(message_format, provider_delta, later):
     from nexent.core.agents.context import ContextItem, ContextItemInput
     from test_persisted_codeagent_actions import history_turn
 
-    manager = runtime(3000, message_format=message_format).context_manager
+    manager = runtime(1200, message_format=message_format).context_manager
+    manager.config.compaction_trigger_threshold_tokens = 1
+    manager.config.compaction_target_tokens = 500
     sink = manager.config.history_summary_sink = Mock()
     source = history_turn() if message_format == "codeagent" else history_turn(
         execution_records=[], answer="history fact " * 40)
@@ -313,16 +316,21 @@ def test_ac008_stored_arguments_cannot_make_a_larger_rendered_summary_acceptable
         "## " + key.replace("_", " ").title() + "\n" + "retained fact " * 12
         for key in manager.config.summary_json_schema)
     model = Mock(spec=[], return_value=SimpleNamespace(content=summary))
-    task = ContextItem.from_input(ContextItemInput(id="task", type="current_task", content={"text": "x" * 1900}))
+    if later is not None:
+        model.side_effect = [SimpleNamespace(content=summary),
+                             RuntimeError("summary failed") if later == "failed" else SimpleNamespace(content=later)]
+    task = ContextItem.from_input(ContextItemInput(id="task", type="current_task", content={"text": "x" * 100}))
     before, result = _maintain_history(manager, [turn], [task], model, provider_delta=provider_delta)
 
     if message_format == "codeagent":
         assert turn.token_estimate > 60000
     assert manager._message_tokens(manager.build_context_messages([turn])) < 1000
-    assert result.final_token_estimate <= before.evidence.final_token_estimate
-    assert manager._history_candidate is None and manager._pending_history_summary_event is None
-    sink.assert_not_called()
-    assert model.call_count <= 1
+    assert result.final_token_estimate > before.evidence.final_token_estimate
+    assert manager._history_candidate.summary == {"markdown": summary.strip()}
+    assert manager._pending_history_summary_event["status"] == "accepted"
+    sink.assert_called_once()
+    assert model.call_count == (3 if later is None else 2)
+    assert result.compaction_stop_reason == ("compaction_attempts_exhausted" if later is None else "invalid_candidate")
 
 
 @pytest.mark.parametrize("with_history", [False, True], ids=["no-history", "valid-history-summary"])

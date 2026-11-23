@@ -43,8 +43,9 @@ change:
         and transport cleanup without inference/tool replay or new retention/RPC limits.
       - Keep persistence/failure contracts and source authority; stored legacy summary text grants no source authority.
         Completion input estimates never reject a send or trigger compression in either runtime.
-      - Measure summary gain by rendered request cost in both formats; preserve recent-action boundaries, immutable native
-        actions and valid history summaries.
+      - Accept any completed nonempty history-summary text without fixed headings, literal-preservation or size-gain gates;
+        preserve bounded attempts, prior valid candidates, cancellation and authorized advancing coverage.
+      - Keep tool-result representation checks, recent-action boundaries and immutable native actions unchanged.
       - Replay accepted visible code as assistant then user runtime results, without synthetic actions; cross-turn execution
         evidence stays user data and actual final answers stay assistant.
       - AgentOS HTTP fixtures keep retired output-limit inputs as negative tests and the existing authorization allowlist
@@ -81,6 +82,7 @@ change:
       - test/sdk/core/agents/test_jiuwen_context.py
       - test/sdk/core/agents/test_jiuwen_errors.py
       - test/sdk/core/agents/test_jiuwen_context_admission.py
+      - test/backend/database/test_conversation_db.py
       - test/sdk/core/agents/test_history_context_runtime.py
       - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
       - test/sdk/core/agents/test_jiuwen_tool_spans.py
@@ -91,6 +93,6 @@ change:
       - test/sdk/core/model_service/test_legacy_chat_model.py
   notes: SPEC10 Scope Reduction defines retained behavior; SPEC09 retains original failure evidence. Recovery/catalog
     extensions and independent Ops fixes remain withdrawn. Raw journal/DB/context history and current mapper contracts
-    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03/04 in the current technical design
+    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03/04/05 in the current technical design
     cover bounded maintenance admission, backend-authorized originals after summaries and exact root native-result
-    correlation; AC-REVIEW-04 supersedes both runtimes' estimate-based rejection and compression triggers. Existing D3 preparation is reused.
+    correlation; AC-REVIEW-04 supersedes both runtimes' estimate-based rejection and compression triggers. AC-REVIEW-05 removes history-summary format/gain adoption gates only. Existing D3 preparation is reused.

@@ -81,12 +81,13 @@ def test_saved_adaptive_mode_calls_shared_summary_and_persists_accepted_candidat
     assert info.agent_config.context_manager_config.history_summary_sink is sink
 
 
-def test_invalid_summary_does_not_persist_checkpoint():
+@pytest.mark.parametrize("content", ["", "   ", None])
+def test_empty_or_nontext_summary_does_not_persist_checkpoint(content):
     sink = Mock()
     bridge, info = make_bridge("adaptive_compact", [turn()], sink)
     original_model = bridge.summary_model.model
     bridge.summary_model = Mock(spec=["__call__", "model"], model=original_model,
-        return_value=SimpleNamespace(content="Invalid summary"))
+        return_value=SimpleNamespace(content=content))
     bridge._assemble([{"role": "user", "content": info.query}], [])
     execute_pending_maintenance(bridge)
     sink.assert_not_called()

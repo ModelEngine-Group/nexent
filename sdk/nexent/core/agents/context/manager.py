@@ -259,8 +259,10 @@ class ContextManager:
                 # If it is within the useful history target, fixed request
                 # content is the remaining excess and cannot be reclaimed by
                 # repeatedly summarizing the same checkpoint.
-                should_compress_history = original_history_tokens > history_target
-                if not should_compress_history:
+                should_compress_history = bool(turns) and original_history_tokens > history_target
+                if not turns:
+                    compaction_stop_reason = "no_uncovered_turns"
+                elif not should_compress_history:
                     compaction_stop_reason = "history_target_reached"
                 else:
                     history_triggered = True
@@ -283,20 +285,10 @@ class ContextManager:
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
                     candidate_item = candidate.as_item()
-                    previous_tokens = self._history_token_cost(
-                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
                     replacement = [item for item in final_items if item.type not in {
                         ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
                     candidate_tokens = self._history_token_cost(
                         replacement, purpose_stable, purpose_dynamic, canonical_tools)
-                    required_saving = max(
-                        self.config.minimum_history_reduction_tokens,
-                        math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
-                    )
-                    saving = previous_tokens - candidate_tokens
-                    if saving <= 0 or saving < required_saving:
-                        compaction_stop_reason = "insufficient_candidate_reduction"
-                        break
                     last_valid = candidate
                     final_items = [
                         item for item in final_items

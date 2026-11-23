@@ -146,12 +146,12 @@ def test_malformed_execution_channels_are_not_granted(bad):
     assert decode_execution_fields({"content": bad}) is None
 
 
-def test_original_summary_contract_does_not_add_a_missing_title():
+def test_summary_adoption_preserves_text_without_requiring_or_adding_a_title():
     keys = tuple(ContextManagerConfig().summary_json_schema)
     body = "\n\n".join(
         "## " + key.replace("_", " ").title() + "\nRetained facts." for key in keys
     )
-    assert _validate_summary_contract(body, keys) is None
+    assert _validate_summary_contract(body, keys) == body
     assert _validate_summary_contract("# Compact Result of History\n\n" + body, keys)
 
 
