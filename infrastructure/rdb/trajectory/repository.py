@@ -9,12 +9,11 @@ from uuid import NAMESPACE_URL, uuid5
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
-# isort: split
+from infrastructure.rdb.account_record import UserTenant
 from infrastructure.rdb.client import get_db_session
-from management.db.conversation.models import ConversationRecord
-from management.db.identity.models import UserTenant
-from management.db.trajectory.models import TrajectoryExecution as Execution
-from management.db.trajectory.models import TrajectoryStatistics as Statistics
+from infrastructure.rdb.conversation_record import ConversationRecord
+from infrastructure.rdb.trajectory.models import TrajectoryExecution as Execution
+from infrastructure.rdb.trajectory.models import TrajectoryStatistics as Statistics
 
 
 def scope_uuid(kind, identity):

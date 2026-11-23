@@ -94,6 +94,10 @@ def test_smoke_retains_monitoring_and_prepares_its_dependencies(smoke, full):
     mcp, = [call for call in runs if "backend.http.mcp_service" in call]
     assert "management-image" in mcp and "OPS_MONITORING_ENABLED=false" in mcp
     assert all("OPS_MONITORING_ENABLED=false" not in call for call in runs if call != mcp)
+    runtime_runs = [call for call in runs if "backend.http.runtime_service" in call]
+    assert len(runtime_runs) == 2
+    assert any({"MONITORING_PROVIDER=local_file", "ENABLE_TELEMETRY=true"} <= set(call) for call in runtime_runs)
+    assert any({"TRAJECTORY_READ_ENABLED=true", "ENABLE_TELEMETRY=false"} <= set(call) for call in runtime_runs)
     if full:
         es, = [call for call in runs if "--network-alias" in call and "elasticsearch" in call]
         assert "discovery.type=single-node" in es and "xpack.security.enabled=false" in es

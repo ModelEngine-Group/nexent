@@ -3,11 +3,15 @@
 
 from contextlib import contextmanager
 
+from sqlalchemy import select, text
+
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from contracts.errors.trajectory import QueryError
+from contracts.roles import has_any_role, roles_from_record
 from infrastructure.rdb.client import get_db_session
-from management.db.conversation.models import ConversationMessage, ConversationRecord
-from management.db.identity.models import UserAccount, UserTenant
-from sqlalchemy import text
+from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
+from infrastructure.rdb.account_record import UserAccount, UserTenant
+from infrastructure.rdb.orm import as_dict
 
 
 @contextmanager
@@ -18,6 +22,28 @@ def _session():
 
 
 class CaptureCatalog:
+    def authorize(self, identity):
+        """Check the active membership, effective tenant, and live conversation owner."""
+        with _session() as session:
+            memberships = select(UserTenant).where(
+                UserTenant.user_id == identity.owner_user_id, UserTenant.delete_flag == "N",
+            )
+            member = session.scalars(memberships.where(UserTenant.tenant_id == identity.tenant_id)).first()
+            if member is None:
+                raise PermissionError("Trajectory capture owner is not an active tenant member")
+            current = session.scalars(memberships).first()
+            if current is not None:
+                effective = current.tenant_id or (
+                    ASSET_OWNER_TENANT_ID
+                    if has_any_role(roles_from_record(as_dict(current)), {ASSET_OWNER_ROLE})
+                    else DEFAULT_TENANT_ID
+                )
+                if effective == identity.tenant_id and not self._conversation_deleted(
+                    session, identity.conversation_id, identity.owner_user_id,
+                ):
+                    return
+            raise PermissionError("Trajectory capture conversation ownership differs")
+
     @staticmethod
     def _query(session, tenants):
         return (
@@ -39,18 +65,22 @@ class CaptureCatalog:
             )
         )
 
+    @staticmethod
+    def _conversation_deleted(session, conversation_id, owner):
+        return (
+            session.query(ConversationRecord.conversation_id)
+            .filter(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == owner,
+                ConversationRecord.delete_flag == "N",
+            )
+            .first()
+            is None
+        )
+
     def conversation_deleted(self, conversation_id, owner):
         with _session() as session:
-            return (
-                session.query(ConversationRecord.conversation_id)
-                .filter(
-                    ConversationRecord.conversation_id == int(conversation_id),
-                    ConversationRecord.created_by == owner,
-                    ConversationRecord.delete_flag == "N",
-                )
-                .first()
-                is None
-            )
+            return self._conversation_deleted(session, conversation_id, owner)
 
     def source_messages(
         self, tenant_id, user_id, conversation_id, *, upper=None, limit=10_000

@@ -70,7 +70,7 @@ def context_database(monkeypatch):
             ConversationSourceSearch,
             ConversationSourceImage,
         )
-        from management.db.trajectory.models import TrajectoryExecution
+        from infrastructure.rdb.trajectory.models import TrajectoryExecution
 
         monkeypatch.setattr(client.db_client, "session_maker", sessionmaker(bind=engine))
 

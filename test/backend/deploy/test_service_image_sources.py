@@ -184,7 +184,7 @@ def test_offline_application_collects_independent_service_images_and_mcp_proxy()
 def test_ops_dockerfile_includes_dependencies_without_other_launchers():
     dockerfile = ROOT / "deploy/images/dockerfiles/ops/Dockerfile"
     instructions = dockerfile.read_text(encoding="utf-8").replace("\\\n", " ").splitlines()
-    for directory in ("backend/management/api/permission", "backend/management/db/trajectory", "infrastructure/trace"):
+    for directory in ("backend/management/api/permission", "infrastructure/rdb/trajectory", "infrastructure/trace"):
         assert f"COPY {directory} /opt/{directory}" in instructions
     sources = [
         ROOT / path

@@ -17,7 +17,7 @@ prefix="nexent-image-smoke-$$"
 password="$(openssl rand -hex 16)"
 signing_key="$(openssl rand -hex 32)"
 containers=("$prefix-management" "$prefix-runtime" "$prefix-postgres" "$prefix-redis")
-containers+=("$prefix-mcp")
+containers+=("$prefix-mcp" "$prefix-runtime-read")
 if [ "$#" -eq 3 ]; then
   containers+=("$prefix-ops" "$prefix-elasticsearch")
 fi
@@ -111,7 +111,9 @@ docker exec "$prefix-management" sh -ec '
 '
 
 docker run -d --name "$prefix-runtime" --network "$prefix" --network-alias runtime \
-  "${env_args[@]}" --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
+  "${env_args[@]}" -e MONITORING_PROVIDER=local_file -e ENABLE_TELEMETRY=true -e TRAJECTORY_READ_ENABLED=false \
+  --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory \
+  --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
 wait_ready "$prefix-runtime" 5014
 check_shared_monitoring "$prefix-runtime"
 docker exec "$prefix-runtime" sh -ec '
@@ -129,6 +131,73 @@ try:
 finally:
     store.engine.dispose()
 '
+
+docker run -d --name "$prefix-runtime-read" --network "$prefix" "${env_args[@]}" \
+  -e MONITORING_PROVIDER=otlp -e ENABLE_TELEMETRY=false -e TRAJECTORY_READ_ENABLED=true \
+  --tmpfs /tmp/nexent-trajectory -e TRAJECTORY_ROOT_DIR=/tmp/nexent-trajectory \
+  --entrypoint /opt/nexent/scripts/start-backend.sh "$2" python -m backend.http.runtime_service >/dev/null
+wait_ready "$prefix-runtime-read" 5014
+
+for runtime in "$prefix-runtime" "$prefix-runtime-read"; do
+  docker exec -i "$runtime" python - <<'PY'
+import asyncio
+
+from sqlalchemy import select
+
+from contracts.constants.environment import ENABLE_TELEMETRY
+from infrastructure.rdb.account_record import UserAccount, UserTenant
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.conversation_record import ConversationRecord
+from infrastructure.rdb.trajectory.models import TrajectoryExecution
+from infrastructure.trace.bootstrap import monitoring_manager
+from infrastructure.trace.trajectory_store import CaptureIdentity
+from nexent.core.concurrency import LanePolicy, ManagedThreadSpec, ThreadManager
+from nexent.monitor import AgentRunMetadata
+from runtime.trajectory import configure_runtime_trajectory
+
+owner = "trajectory-capture" if ENABLE_TELEMETRY else "trajectory-read"
+tenant = "trajectory-smoke"
+with get_db_session() as session:
+    session.add_all([
+        UserAccount(user_id=owner),
+        UserTenant(user_id=owner, tenant_id=tenant),
+    ])
+    conversation = ConversationRecord(conversation_title="trajectory smoke", created_by=owner)
+    session.add(conversation)
+    session.flush()
+    conversation_id = conversation.conversation_id
+
+processor = configure_runtime_trajectory()
+assert processor is not None
+manager = ThreadManager("trajectory-smoke", {"background-service": LanePolicy("background-service", 1, 0)})
+manager.start()
+processor.start(manager, ManagedThreadSpec("trajectory-file-writer", "smoke", close_hook=processor.request_stop))
+try:
+    metadata = AgentRunMetadata(tenant_id=tenant, user_id=owner, agent_id=42, conversation_id=conversation_id)
+    with monitoring_manager.start_agent_run(metadata):
+        monitoring_manager.set_openinference_agent_context(
+            tenant_id=tenant, user_id=owner, agent_id=42, conversation_id=conversation_id, query="trajectory smoke",
+        )
+    assert processor.force_flush(5000)
+    with get_db_session() as session:
+        execution = session.scalars(
+            select(TrajectoryExecution).where(TrajectoryExecution.conversation_id == conversation_id)
+        ).one()
+        assert execution.turn_no == 1
+        assert execution.status == ("unarchived" if ENABLE_TELEMETRY else "not_captured")
+        execution_id = str(execution.trajectory_id)
+    if ENABLE_TELEMETRY:
+        manifest = processor.store.manifest(CaptureIdentity(tenant, owner, str(conversation_id), "42"))
+        assert any(run["trajectory_id"] == execution_id for run in manifest["runs"])
+        assert any(processor.store.root.rglob("*.otlp.jsonl"))
+    else:
+        assert not any(processor.store.root.rglob("*.otlp.jsonl"))
+    print("Runtime trajectory registration and archive checks passed")
+finally:
+    processor.shutdown()
+    asyncio.run(manager.shutdown(timeout=3))
+PY
+done
 
 docker run -d --name "$prefix-mcp" --network "$prefix" "${env_args[@]}" \
   -e "NEXENT_MCP_INTERNAL_TOKEN=$signing_key" -e NEXENT_SQL_STARTUP_MODE=off -e OPS_MONITORING_ENABLED=false -e PYTHON_DOTENV_DISABLED=1 \

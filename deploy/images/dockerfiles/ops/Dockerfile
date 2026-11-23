@@ -58,7 +58,6 @@ COPY \
     backend/management/db/conversation/models.py \
     backend/management/db/conversation/projection_receipt.py \
     backend/management/db/conversation/repository.py \
-    backend/management/db/conversation/trajectory_capture.py \
     /opt/backend/management/db/conversation/
 COPY \
     backend/management/db/identity/__init__.py \
@@ -78,7 +77,6 @@ COPY \
     /opt/backend/management/db/knowledge_base/
 COPY backend/management/db/mcp/__init__.py backend/management/db/mcp/models.py /opt/backend/management/db/mcp/
 COPY backend/management/db/model/__init__.py backend/management/db/model/models.py /opt/backend/management/db/model/
-COPY backend/management/db/trajectory /opt/backend/management/db/trajectory
 COPY backend/management/services/__init__.py /opt/backend/management/services/
 COPY \
     backend/management/services/permission/__init__.py \
@@ -118,6 +116,7 @@ COPY \
     infrastructure/rdb/skill_execution_records.py \
     infrastructure/rdb/tenant_config_record.py \
     /opt/infrastructure/rdb/
+COPY infrastructure/rdb/trajectory /opt/infrastructure/rdb/trajectory
 COPY infrastructure/trace /opt/infrastructure/trace
 COPY sdk/nexent /opt/nexent
 COPY VERSION /opt/nexent/VERSION
