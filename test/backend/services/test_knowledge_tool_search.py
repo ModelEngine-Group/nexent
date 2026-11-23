@@ -78,6 +78,22 @@ async def test_fixed_files_and_single_group_preserve_scores_and_model_rerank(ser
 
 
 @pytest.mark.asyncio
+async def test_native_tool_uses_pinned_file_versions_and_rechecks_native_snapshot_after_rerank(service):
+    resource, model = binding()
+    service.search.return_value = _response(hits=[hit()])
+    service.client.authorize_knowledge_search.return_value = KnowledgeSearchGrant(knowledge_bases=[resource])
+    service.models.invoke.return_value = ModelResult(revision="v2", output=[{"index": 0, "relevance_score": .95}])
+    tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [(resource, model)],
+        file_refs=[KnowledgeFileReference(knowledge_id=1, file_id="f" * 32, file_version=0)], native_documents=True)
+    assert (await tool.search("query", ["kb-1"], search_mode="semantic", top_k=1,
+                             rerank_model=ModelVersion(model_id=4, revision="v2")))[0].score == .95
+    request = service.search.await_args.args[0]
+    assert request.native_documents and request.include_public_document
+    assert request.file_versions == {"f" * 32: 0}
+    assert service.verify_data_revisions.await_args.kwargs["native_documents"] is True
+
+
+@pytest.mark.asyncio
 async def test_empty_files_deny_all_and_unknown_collection_is_rejected(service):
     tool = KnowledgeToolSearch(service, SimpleNamespace(user_id="user", tenant_id="tenant"), [binding()], file_refs=[])
     assert await tool.search("query", ["kb-1"]) == []

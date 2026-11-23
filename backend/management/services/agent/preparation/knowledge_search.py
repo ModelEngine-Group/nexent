@@ -54,6 +54,7 @@ def _prepare_scope(tool, user_id: str, tenant_id: str, document_paths, *, contex
             allowed=[],
             display_name_to_index={},
             usage=tool.usage,
+            native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED,
             # Match the SDK constructor before the strict wire contract sees the value.
             top_k=max(1, min(int(params.get("top_k") or 3), 100)),
             **{name: params[name] for name in ("search_mode", "rerank", "rerank_model_name") if name in params},

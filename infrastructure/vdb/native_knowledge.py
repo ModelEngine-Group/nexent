@@ -22,6 +22,7 @@ from nexent.storage.errors import (
 )
 from nexent.storage.models import (
     Comparison,
+    Junction,
     OperationContext,
     PageRequest,
     RecordQuery,
@@ -45,25 +46,30 @@ from infrastructure.vdb.vector_store import ElasticsearchVectorStore
 INGEST_GENERATION = "nexent_ingest_generation"
 INGEST_IMAGE = "nexent_ingest_image"
 IMAGE_PROCESS_SOURCE = "UniversalImageExtractor"
-_PRIVATE_FIELDS = frozenset({"embedding", "multi_embedding", INGEST_GENERATION, INGEST_IMAGE})
+_SEARCH_FILE = "nexent_native_file"
+_PRIVATE_FIELDS = frozenset({"embedding", "multi_embedding", INGEST_GENERATION, INGEST_IMAGE, _SEARCH_FILE})
 
 
 def native_file_document_id(file_id, version, generation, position):
     return f"{file_id}-{version}-{generation}-{position}"
 
 
-def _published_generations(actor, resource, *, engine, context):
+def _published_generations(actor, resource, *, engine, context, file_versions=None):
     scope = StorageScope("runtime", resource.resource_tenant_id, actor.user_id, {FILES})
     with closing(bind_knowledge_manifest(scope, resource.knowledge_id, engine)) as records:
         cursor, visible = None, set()
-        query = RecordQuery(where=Comparison("visible_generation", "is_null", False),
-                            fields=("visible_generation", "visible_version", "tombstone_version"))
+        where = Comparison("visible_generation", "is_null", False)
+        if file_versions is not None:
+            where = Junction("and", (where, Comparison("file_id", "in", list(file_versions))))
+        query = RecordQuery(where=where, fields=("file_id", "visible_generation", "visible_version", "tombstone_version"))
         while True:
             page = records.query(FILES, query, PageRequest(limit=500, cursor=cursor), context=context)
             for row in page.items:
                 generation = row["visible_generation"]
                 if row["visible_version"] <= row["tombstone_version"] or not re.fullmatch(r"[0-9a-f]{32}", generation):
                     raise Conflict()
+                if file_versions is not None and file_versions.get(row["file_id"]) != row["visible_version"]:
+                    continue
                 visible.add(generation)
             cursor = page.next_cursor
             if cursor is None:
@@ -87,14 +93,14 @@ def legacy_document_filter():
     return {"bool": {"must_not": {"exists": {"field": INGEST_GENERATION}}}}
 
 
-def _generation_filter(generations):
-    visible = [legacy_document_filter()]
+def _generation_filter(generations, *, include_history=True):
+    visible = [legacy_document_filter()] if include_history else []
     for index, values in generations.items():
         if values:
             visible.append({"bool": {"filter": [
                 {"term": {"_index": index}}, {"terms": {INGEST_GENERATION: sorted(values)}},
             ]}})
-    return {"bool": {"should": visible, "minimum_should_match": 1}}
+    return {"bool": {"should": visible, "minimum_should_match": 1}} if visible else {"match_none": {}}
 
 
 def _visible_generation(source, generations):
@@ -120,6 +126,7 @@ class _NativeHybrid(ElasticSearchCore):
         self.owners, self.context = owners, context
         self.mappings = {}
         self.generations = {}
+        self.include_history = True
 
     def identities(self):
         settings = ElasticsearchVectorStore._call(
@@ -148,7 +155,7 @@ class _NativeHybrid(ElasticSearchCore):
             raise ScopeDenied()
         targets = tuple(self.owners)
         search_query = dict(search_query)
-        visible = _generation_filter(self.generations)
+        visible = _generation_filter(self.generations, include_history=self.include_history)
         if knn := search_query.get("knn"):
             targets = tuple(name for name in targets if _searchable_vector(
                 self.mappings[name].get(knn["field"], {}), len(knn["query_vector"]),
@@ -172,8 +179,13 @@ class _NativeHybrid(ElasticSearchCore):
                 raise ScopeDenied()
             if not _visible_generation(source, self.generations.get(index, ())):
                 raise Conflict()
+            source.pop(_SEARCH_FILE, None)
             if INGEST_GENERATION not in source:
+                if not self.include_history:
+                    raise Conflict()
                 source.pop(INGEST_IMAGE, None)
+            else:
+                source[_SEARCH_FILE] = _search_file(hit["_id"], source[INGEST_GENERATION])
             source.setdefault("id", hit["_id"])
             for field in ("embedding", "multi_embedding", INGEST_GENERATION):
                 source.pop(field, None)
@@ -184,6 +196,13 @@ class _NativeHybrid(ElasticSearchCore):
 
 def _searchable_vector(mapping, dimensions):
     return mapping.get("type") == "dense_vector" and mapping.get("dims") == dimensions and mapping.get("index", True)
+
+
+def _search_file(identity, generation):
+    matched = re.fullmatch(r"([0-9a-f]{32})-(0|[1-9][0-9]*)-([0-9a-f]{32})-(0|[1-9][0-9]*)", identity)
+    if matched is None or matched[3] != generation:
+        raise Conflict()
+    return {"file_id": matched[1], "file_version": int(matched[2]), "chunk_index": int(matched[4])}
 
 
 def _tenant_filter(tenant_id):
@@ -384,7 +403,8 @@ def _native_chunk(hit, resource, generations):
     return hit["_id"], source
 
 
-def search_native_knowledge(actor, resources, query, query_vector, top_k, weight_accurate, multimodal, *, context):
+@contextmanager
+def _native_search_reader(actor, resources, *, context, file_versions=None):
     owners = {resource.collection: resource.resource_tenant_id for resource in resources}
     if len(owners) != len(resources) or not owners or any(
         not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", index) for index in owners
@@ -395,32 +415,72 @@ def search_native_knowledge(actor, resources, query, query_vector, top_k, weight
         for resource in resources:
             require_index_owner(actor, resource, context=context, engine=engine)
         with closing(_configured_client(context.remaining())) as client:
-            search = _NativeHybrid(client, owners, context)
-            identities = search.identities()
-            search.read_mappings()
-            search.generations = _generation_snapshot(search.mappings, actor, resources, engine=engine, context=context)
-            hits = search.hybrid_search(list(owners), query, top_k=top_k, weight_accurate=weight_accurate,
-                query_embedding=list(query_vector),
-                embedding_model=SimpleNamespace(model_type="multimodal" if multimodal else "embedding"))
-            knowledge_ids = {resource.collection: resource.knowledge_id for resource in resources}
-            for hit in hits:
-                document = hit["document"]
-                image = document.pop(INGEST_IMAGE, None)
-                if image is not None:
-                    hit["image"] = _native_image(image, knowledge_ids[hit["index"]], document)
-            if search.identities() != identities or (
-                _generation_snapshot(search.mappings, actor, resources, engine=engine, context=context) != search.generations
+            versions = {resource.collection: _index_revision(client, resource, context) for resource in resources}
+            search = _NativeHybrid(client, {index: tenant for index, tenant in owners.items() if versions[index]}, context)
+            if search.owners:
+                search.read_mappings()
+            mappings = {index: search.mappings.get(index, {}) for index in owners}
+            generations = _generation_snapshot(mappings, actor, resources, engine=engine, context=context)
+            search.generations = generations
+            if file_versions is not None:
+                search.include_history = False
+                search.generations = {resource.collection: (
+                    _published_generations(actor, resource, engine=engine, context=context, file_versions=file_versions)
+                    if file_versions and INGEST_GENERATION in mappings[resource.collection] else frozenset()
+                ) for resource in resources}
+            revisions = {resource.knowledge_id: hashlib.sha256(json.dumps(
+                [resource.revision, versions[resource.collection], sorted(generations[resource.collection])],
+                separators=(",", ":")).encode()).hexdigest() for resource in resources}
+            yield search, revisions
+            if any(_index_revision(client, resource, context) != versions[resource.collection] for resource in resources) or (
+                _generation_snapshot(mappings, actor, resources, engine=engine, context=context) != generations
             ):
                 raise Conflict()
         for resource in resources:
             require_index_owner(actor, resource, context=context, engine=engine)
     finally:
         close_owned(context, [engine.dispose])
-    revisions = {resource.knowledge_id: hashlib.sha256(json.dumps(
-        [resource.revision, identities[resource.collection], sorted(search.generations[resource.collection])],
-        separators=(",", ":")).encode()).hexdigest()
-        for resource in resources}
-    return hits, revisions
+
+
+def native_search_revisions(actor, resources, *, context):
+    with _native_search_reader(actor, resources, context=context) as (_, revisions):
+        return revisions
+
+
+def search_native_knowledge(actor, resources, query, query_vector, top_k, weight_accurate, multimodal, *,
+                            context, mode="hybrid", file_versions=None):
+    with _native_search_reader(actor, resources, context=context, file_versions=file_versions) as (search, revisions):
+        if not search.owners:
+            return [], revisions
+        indices = list(search.owners)
+        model = SimpleNamespace(model_type="multimodal" if multimodal else "embedding")
+        if mode == "accurate":
+            hits = search.accurate_search(indices, query, top_k=top_k)
+        elif mode == "semantic":
+            hits = search.semantic_search(indices, query, embedding_model=model, top_k=top_k,
+                                          query_embedding=list(query_vector))
+            hits = sorted(hits, key=lambda hit: -hit["score"])[:top_k]
+        elif mode == "hybrid":
+            hits = search.hybrid_search(indices, query, top_k=top_k, weight_accurate=weight_accurate,
+                query_embedding=list(query_vector), embedding_model=model)
+        else:
+            raise InvalidInput()
+        knowledge_ids = {resource.collection: resource.knowledge_id for resource in resources}
+        for hit in hits:
+            document = hit["document"]
+            file = document.pop(_SEARCH_FILE, None)
+            image = document.pop(INGEST_IMAGE, None)
+            if file_versions is not None and (
+                file is None or file_versions.get(file["file_id"]) != file["file_version"]
+            ):
+                raise ScopeDenied()
+            if file is not None:
+                hit["file"] = file
+            if image is not None:
+                hit["image"] = _native_image(image, knowledge_ids[hit["index"]], document)
+                if file is None or any(hit["image"][field] != file[field] for field in ("file_id", "file_version")):
+                    raise Conflict()
+        return hits, revisions
 
 
 def _native_image(image, knowledge_id, document):

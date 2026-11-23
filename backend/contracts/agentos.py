@@ -488,6 +488,14 @@ class KnowledgeSearchBinding(RunSpecModel):
     reranker: RevisionedModelBinding | None = None
     default_reranker: RevisionedModelBinding | None = None
     usage: str | None = None
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_search_binding(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        return result
 
 
 class EvaluationAgentOptions(RunSpecModel):

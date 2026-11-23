@@ -30,8 +30,9 @@ def _identity(hit):
 class KnowledgeToolSearch:
     """Bindings and file restrictions come from authorized assembly, never tool input."""
 
-    def __init__(self, service, actor, bindings, *, file_refs=None):
+    def __init__(self, service, actor, bindings, *, file_refs=None, native_documents=False):
         self.service, self.actor = service, actor
+        self.native_documents = native_documents
         self.bindings = {}
         ids = set()
         for resource, model in bindings:
@@ -104,6 +105,7 @@ class KnowledgeToolSearch:
                         file_ids=[f.file_id for f in files or ()],
                         file_versions={f.file_id: f.file_version for f in files or ()},
                         expected_revisions={r.knowledge_id: r.revision for r in scoped},
+                        native_documents=self.native_documents, include_public_document=self.native_documents,
                     ), self.actor, context=context)
                     if any(h.knowledge_id not in scope_ids
                            or (files is not None and not any(h.knowledge_id == f.knowledge_id and h.file_id == f.file_id
@@ -131,7 +133,8 @@ class KnowledgeToolSearch:
                 phase = "content"
                 if revisions:
                     await self.service.verify_data_revisions([r for r in resources if r.knowledge_id in revisions],
-                                                             revisions, self.actor, context=context)
+                                                             revisions, self.actor, context=context,
+                                                             **({"native_documents": True} if self.native_documents else {}))
                 context.remaining()
                 return candidates[:top_k]
         except TimeoutError as error:

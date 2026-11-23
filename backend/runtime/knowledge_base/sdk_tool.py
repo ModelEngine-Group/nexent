@@ -39,8 +39,10 @@ class RuntimeKnowledgeTool:
 
     @staticmethod
     def _row(hit):
+        document = hit.public_document or {}
         return {
-            "content": hit.content, "filename": hit.filename, "source_type": "file", "path_or_url": "",
+            "content": hit.content, "filename": hit.filename, "source_type": "file",
+            "path_or_url": document.get("path_or_url", ""),
             "score": hit.score, "score_details": {**hit.score_details, "score_kind": hit.score_kind},
             "location": hit.location,
             "file_ref": hit.model_dump(include={"knowledge_id", "file_id", "file_version"}),

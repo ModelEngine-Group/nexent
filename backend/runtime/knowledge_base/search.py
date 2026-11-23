@@ -36,7 +36,10 @@ from runtime.knowledge_base.jobs import KnowledgeJobs
 
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.knowledge_runtime import knowledge_search_ports
-from infrastructure.vdb.native_knowledge import search_native_knowledge
+from infrastructure.vdb.native_knowledge import (
+    native_search_revisions,
+    search_native_knowledge,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +148,10 @@ class KnowledgeSearchService:
             raise InvalidInput()
         self.client, self.models, self.ports, self.operation_seconds = authorization_client, models, ports, operation_seconds
 
-    async def _blocking(self, method, *args, context):
+    async def _blocking(self, method, *args, context, **kwargs):
         def execute():
             context.remaining()
-            value = method(*args, context=context)
+            value = method(*args, context=context, **kwargs)
             context.remaining()
             return value
         return await run_blocking("knowledge-search", execute, lane="control-io", owner="runtime.knowledge_base")
@@ -176,10 +179,11 @@ class KnowledgeSearchService:
             raise Conflict()
         return result.output
 
-    async def _native_search(self, request, actor, grant, query_vector, *, context):
+    async def _native_search(self, request, actor, grant, query_vector, *, multimodal, context):
         hits, revisions = await self._blocking(
             search_native_knowledge, actor, grant.knowledge_bases, request.query, query_vector,
-            request.top_k, request.weight_accurate, request.split_multimodal_candidates, context=context,
+            request.top_k, request.weight_accurate, multimodal, context=context,
+            mode=request.search_mode, file_versions=request.file_versions or None,
         )
         if await self._grant(request, actor) != grant:
             raise Conflict()
@@ -190,14 +194,24 @@ class KnowledgeSearchService:
             scores = dict(hit.get("scores", {}))
             if hit.get("highlight_terms"):
                 scores["retrieval_highlight_terms"] = hit["highlight_terms"]
+            file = hit.get("file", {})
+            media = hit.get("image", {})
+            location = dict(media.get("location", {}))
+            if file:
+                location["chunk_index"] = file["chunk_index"]
             projected = KnowledgeSearchHit(
                 knowledge_id=by_collection[hit["index"]], chunk_id=str(document["id"]),
                 content=document.get("content", ""), filename=document.get("filename", ""),
-                score=hit["score"], score_kind="legacy.hybrid", score_details=scores, public_document=document,
-                **hit.get("image", {}),
+                score=hit["score"], score_kind=f"legacy.{request.search_mode}", score_details=scores,
+                public_document=document if request.include_public_document else None,
+                file_id=file.get("file_id", media.get("file_id")), file_version=file.get("file_version", media.get("file_version")),
+                image_ref=media.get("image_ref"), location=location,
             )
             target = image_hits if image_hits is not None and document.get("process_source") == "UniversalImageExtractor" else text_hits
             target.append(projected)
+        if image_hits is None and multimodal:
+            text_hits.sort(key=lambda hit: -hit.score)
+            text_hits = text_hits[:request.top_k]
         return KnowledgeSearchResult(hits=text_hits, image_hits=image_hits, data_revisions=revisions,
                                      embedding_model=request.embedding_model)
 
@@ -276,12 +290,17 @@ class KnowledgeSearchService:
                                                               context=context)
                 for resource in grant.knowledge_bases}
 
-    async def verify_data_revisions(self, resources, expected, actor, *, context):
+    async def verify_data_revisions(self, resources, expected, actor, *, context, native_documents=False):
         grant = KnowledgeSearchGrant(knowledge_bases=resources)
         if set(expected) != {resource.knowledge_id for resource in resources}:
             raise ScopeDenied()
         try:
             async with asyncio.timeout(context.remaining()):
+                if native_documents:
+                    revisions = await self._blocking(native_search_revisions, actor, resources, context=context)
+                    if revisions != expected:
+                        raise Conflict()
+                    return
                 with self.ports(actor, grant, None, context=context) as (records, vectors):
                     validate_read_ports(records, vectors, grant, actor)
                     if await self._blocking(self._data_revisions, records, grant, context=context) != expected:
@@ -346,12 +365,16 @@ class KnowledgeSearchService:
         try:
             async with asyncio.timeout(threshold):
                 grant = await self._grant(request, actor)
-                if request.split_multimodal_candidates:
+                multimodal = request.split_multimodal_candidates
+                if multimodal or (request.native_documents and not request.global_hybrid_candidates
+                                  and request.search_mode != "accurate"):
                     binding = request.embedding_model
                     model = await self.models.get(binding.model_id, actor)
-                    if (model.model_type != "multi_embedding" or model.model_id != binding.model_id
+                    if (model.model_type not in ({"multi_embedding"} if multimodal else {"embedding", "multi_embedding"})
+                        or model.model_id != binding.model_id
                         or normalize_model_revision(model.revision) != normalize_model_revision(binding.revision)):
                         raise Conflict()
+                    multimodal = model.model_type == "multi_embedding"
                 dimensions = None if request.search_mode == "accurate" else await self.models.embedding_dimensions(request.embedding_model, actor)
                 if request.rerank_model:
                     binding = request.rerank_model
@@ -366,7 +389,7 @@ class KnowledgeSearchService:
                         input=[request.query]), actor)
                     query_vector = embedding_vectors(output, 1, dimensions)[0]
                 if request.native_documents:
-                    return await self._native_search(request, actor, grant, query_vector, context=context)
+                    return await self._native_search(request, actor, grant, query_vector, multimodal=multimodal, context=context)
                 limit = request.top_k * (RERANK_OVERSEARCH_MULTIPLIER if request.rerank_model else 1)
                 # Public hybrid search can read collections with different mappings using the first query vector.
                 collection_dimensions = None if request.first_collection_embedding else dimensions

@@ -125,7 +125,7 @@ def _materialize_knowledge_search_tool(binding, actor, catalog_name):
     resources = [(resource, ModelVersion(**binding.embedding_models[resource.collection].model_dump()))
                  for resource in grant.knowledge_bases] if grant is not None else []
     backend = KnowledgeToolSearch(KnowledgeSearchService(service.client, service.models), actor, resources,
-                                  file_refs=binding.file_refs)
+                                  file_refs=binding.file_refs, native_documents=binding.native_documents)
     return ToolConfig(
         class_name="KnowledgeBaseSearchTool", name=catalog_name, source="local", usage=binding.usage,
         **binding.description.model_dump(),

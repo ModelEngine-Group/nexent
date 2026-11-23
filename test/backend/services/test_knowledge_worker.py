@@ -284,6 +284,10 @@ async def test_native_worker_commits_publication_only_after_generation_has_been_
     assert await s.db(_published_generations, s.actor, resource, engine=s.engine, context=s.context) == {
         persisted["attempt_id"],
     }
+    assert await s.db(_published_generations, s.actor, resource, engine=s.engine, context=s.context,
+                      file_versions={s.lookup.file_id: s.lookup.file_version}) == {persisted["attempt_id"]}
+    assert not await s.db(_published_generations, s.actor, resource, engine=s.engine, context=s.context,
+                          file_versions={s.lookup.file_id: s.lookup.file_version + 1})
     s.worker.native_ports.assert_called_once()
     assert s.closed == [True] and s.vectors.upsert.call_count == 1
 

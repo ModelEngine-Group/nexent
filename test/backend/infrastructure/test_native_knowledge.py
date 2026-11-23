@@ -18,6 +18,10 @@ def fixture():
     es = Mock()
     es.options.return_value = es
     es.indices.get_settings.return_value = {"kb": {"settings": {"index": {"uuid": "old-uuid"}}}}
+    es.indices.stats.return_value = {"_shards": {"failed": 0}, "indices": {"kb": {"uuid": "old-uuid", "shards": {
+        "0": [{"routing": {"primary": True, "node": "p1"}, "seq_no": {"max_seq_no": 3},
+               "docs": {"count": 4, "deleted": 0}}],
+    }}}}
     es.indices.get_mapping.return_value = {"kb": {"mappings": {"properties": {
         name: {"type": "dense_vector", "dims": 2} for name in ("embedding", "multi_embedding")
     }}}}
@@ -53,6 +57,36 @@ def test_rejects_foreign_document_even_with_authorized_index(fixture):
     ]}}
     with pytest.raises(ScopeDenied):
         search.exec_query("kb", {})
+
+
+@pytest.mark.parametrize(("mode", "calls"), [("accurate", 1), ("semantic", 1), ("hybrid", 2)])
+def test_native_fixed_file_query_only_admits_its_published_generation(monkeypatch, fixture, mode, calls):
+    es, actor, grant, context = fixture
+    monkeypatch.setattr(native_knowledge, "_configured_client", lambda _: es)
+    monkeypatch.setattr(native_knowledge, "record_engine", lambda _: Mock())
+    monkeypatch.setattr(native_knowledge, "require_index_owner", Mock())
+    older, selected, foreign = "a" * 32, "b" * 32, "c" * 32
+    file_id = "f" * 32
+    lookup = Mock(side_effect=lambda *args, file_versions=None, **kwargs: (
+        frozenset({older, selected, foreign}) if file_versions is None else frozenset({selected})))
+    monkeypatch.setattr(native_knowledge, "_published_generations", lookup)
+    marker = native_knowledge.INGEST_GENERATION
+    es.indices.get_mapping.return_value["kb"]["mappings"]["properties"][marker] = {"type": "keyword"}
+    identity = native_knowledge.native_file_document_id(file_id, 2, selected, 0)
+    es.search.return_value = {"hits": {"hits": [{"_index": "kb", "_id": identity, "_score": 2.0,
+        "_source": {"id": identity, "content": "allowed", marker: selected}}]}}
+    hits, revisions = native_knowledge.search_native_knowledge(
+        actor, [grant], "term", None if mode == "accurate" else (1., 0.1), 3, .5, False,
+        file_versions={file_id: 2}, mode=mode, context=context,
+    )
+    assert hits[0]["file"] == {"file_id": file_id, "file_version": 2, "chunk_index": 0}
+    assert hits[0]["document"] == {"id": identity, "content": "allowed"}
+    assert es.search.call_count == calls
+    for call in es.search.call_args_list:
+        query = call.kwargs["body"]
+        assert selected in str(query) and older not in str(query) and foreign not in str(query)
+        assert "must_not" not in str(query)
+    assert native_knowledge.native_search_revisions(actor, [grant], context=context) == revisions
 
 
 @pytest.mark.parametrize(("media", "vector_field"), [("text", "embedding"), ("image", "multi_embedding")])
