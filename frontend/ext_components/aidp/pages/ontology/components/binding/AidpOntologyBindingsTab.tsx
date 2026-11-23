@@ -19,7 +19,6 @@ import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useAidpQueryScope } from "@/ext_components/aidp/shared/hooks/useAidpQueryScope";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
-import AidpOntologyGapNote from "@/ext_components/aidp/shared/components/AidpOntologyGapNote";
 import { formatAidpDateTime } from "@/ext_components/aidp/shared/utils/aidpTime";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
@@ -308,11 +307,6 @@ const AidpOntologyBindingsTab: React.FC<AidpOntologyBindingsTabProps> = ({
 
   return (
     <div className={styles.tab}>
-      <AidpOntologyGapNote
-        title={t("aidpKnowledge.ontologyBindingPathRuleGapTitle")}
-      >
-        {t("aidpKnowledge.ontologyBindingPathRuleGapBody")}
-      </AidpOntologyGapNote>
       <div className={styles.toolbar}>
         <Input
           allowClear

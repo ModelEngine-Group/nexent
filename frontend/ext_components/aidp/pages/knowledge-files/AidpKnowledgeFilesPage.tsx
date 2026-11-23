@@ -278,7 +278,6 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           canConfigureGroupPermissions={canConfigureGroupPermissions}
           detailFetching={detailQuery.isFetching}
           onEditPermissions={() => setEditingKbMode("permissions")}
-          onEditMetadata={() => setEditingKbMode("metadata")}
           onRefreshDetail={() => detailQuery.refetch()}
         />
       )}

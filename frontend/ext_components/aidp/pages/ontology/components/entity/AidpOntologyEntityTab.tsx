@@ -748,9 +748,6 @@ const AidpOntologyEntityTab: React.FC<AidpOntologyEntityTabProps> = ({
         </div>
       </div>
       <AidpOntologyGapNote>
-        {t("aidpKnowledge.ontologyEntitySearchGap")}
-      </AidpOntologyGapNote>
-      <AidpOntologyGapNote>
         {t("aidpKnowledge.ontologyEntityRelationScanGap")}
       </AidpOntologyGapNote>
       {query.isError && entities.length > 0 && (
