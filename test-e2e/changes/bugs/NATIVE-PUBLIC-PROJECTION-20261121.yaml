@@ -38,8 +38,6 @@ change:
     - test/backend/utils/test_nexent_output.py
     - test/backend/utils/test_nexent_error_diagnostics.py
   notes: >-
-    Existing remove-output-budget SPEC09 records direct pre-migration mapper wiring and the approved minimal design.
-    Coordinator approved autonomous implementation under the user's delegation, including one additional signed transport
-    open and streaming retained-prefix warm-up only for explicit nonempty cursors. No new RPC, retention limit,
-    model/tool replay, provider IDs, event allowlist or raw-storage changes. Reuse the owning self-contained HTTP/SSE/SDK/
-    PostgreSQL Case with owned preparation/cleanup. Full Case and real model/Phoenix/container acceptance remain separate.
+    SPEC09 NATIVE-PUBLIC-PROJECTION and current SPEC10 preserve the approved existing public contract.
+    Explicit cursor resumes may read the authorized prefix through ACK once, never replay models/tools
+    or add RPC/retention limits. Preparation/cleanup belongs to JIUWEN-OUTPUT-D3-001; real acceptance is separate.

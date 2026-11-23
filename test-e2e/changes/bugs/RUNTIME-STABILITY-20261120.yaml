@@ -52,8 +52,7 @@ change:
     - test/backend/database/test_conversation_history_stopped.py
     - test/sdk/core/agents/test_jiuwen_tool_spans.py
     - test/backend/services/test_agentos_conversation_projection.py
-  notes: Current approved scope is SPEC10 Scope Reduction 20261123.md. Keep strict canonical completed action/results
-    and accepted compact views, actual Jiuwen TOOL spans, schema default association and original raw history. Rejection
-    recovery/shared budget/correction feedback/structured original catalog are withdrawn; earlier diagnostics and
-    failure evidence remain in SPEC09 and task artifacts. Existing Cases remain; no new D1. New-source container/real-model/Phoenix
-    acceptance pending; do not resume48.
+  notes: >-
+    SPEC10 Scope Reduction 20261123.md defines the retained actions/default provenance/TOOL spans;
+    SPEC09 preserves original diagnostics and failures. Recovery/catalog extensions are withdrawn.
+    Reuse existing Case preparation/cleanup; new-source real-model/container evidence remains separate.

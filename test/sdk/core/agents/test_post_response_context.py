@@ -12,11 +12,11 @@ from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.context.usage import ContextUsageBaseline
 
 
-def runtime(window=2000):
+def runtime(window=2000, *, message_format="codeagent"):
     config = ContextManagerConfig(context_window_tokens=window, effective_input_limit_tokens=window,
         compaction_trigger_threshold_tokens=int(window * .8), compaction_target_tokens=int(window * .6),
         chars_per_token=1, policy_layers={"platform": {"processing_mode": "adaptive_compact"}})
-    return ManagedContextRuntime(ContextManager(config))
+    return ManagedContextRuntime(ContextManager(config, message_format=message_format))
 
 
 def test_ac009_usage_calibrates_delta_instead_of_summing_billing_totals():
@@ -241,40 +241,28 @@ def test_ac010_estimated_legacy_token_usage_is_not_a_provider_anchor():
     assert managed.last_maintenance_evidence is None
 
 
-@pytest.mark.parametrize('overlay_kind', ['request_system_messages', 'request_tail_messages'])
-def test_ac008_post_response_uses_the_same_request_overlay_basis(monkeypatch, overlay_kind):
+@pytest.mark.parametrize("overlay_kind", ["request_system_messages", "request_tail_messages"])
+@pytest.mark.parametrize("clear", [False, True], ids=["retained", "cleared"])
+def test_ac008_post_response_uses_the_same_request_overlay_basis(monkeypatch, overlay_kind, clear):
     managed = runtime(window=10000)
-    memory = SimpleNamespace(steps=[TaskStep(task='x' * 500)])
-    model = SimpleNamespace(model_id='controlled')
+    memory = SimpleNamespace(steps=[TaskStep(task="x" * 500)])
+    model = SimpleNamespace(model_id="controlled")
     compact = Mock(side_effect=lambda items, *args, **kwargs: items)
-    monkeypatch.setattr(managed.context_manager, '_compact_to_compaction_target', compact)
-    overlay = [{'role': 'system' if overlay_kind=='request_system_messages' else 'user',
-                'content': [{'type': 'text', 'text': 'overlay ' * 375}]}]
-    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0,
-                         **{overlay_kind: overlay})
+    monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", compact)
+    role = "system" if overlay_kind == "request_system_messages" and not clear else "user"
+    overlay = [{"role": role, "content": [{"type": "text", "text": "overlay " * 375}]}]
+    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0, **{overlay_kind: overlay})
     compact.assert_not_called()
-    memory.steps.append(ActionStep(step_number=1, model_output='accepted', observations='R' * 2000,
+    memory.steps.append(ActionStep(step_number=1, model_output="accepted", observations="R" * 2000,
                                    timing=Timing(start_time=0)))
-    response = SimpleNamespace(token_usage=SimpleNamespace(input_tokens=7000, output_tokens=20))
-    managed.complete_step(model=model, memory=memory, current_run_start_idx=0, response=response)
-    assert compact.call_count == 1
-
-
-@pytest.mark.parametrize('overlay_kind', ['request_system_messages', 'request_tail_messages'])
-def test_ac008_explicitly_cleared_overlays_are_removed_from_next_input(monkeypatch, overlay_kind):
-    managed = runtime(window=10000)
-    memory = SimpleNamespace(steps=[TaskStep(task='x' * 500)])
-    model = SimpleNamespace(model_id='controlled')
-    compact = Mock(side_effect=lambda items, *args, **kwargs: items)
-    monkeypatch.setattr(managed.context_manager, '_compact_to_compaction_target', compact)
-    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0,
-        **{overlay_kind: [{'role': 'user', 'content': [{'type': 'text', 'text': 'overlay ' * 375}]}]})
-    memory.steps.append(ActionStep(step_number=1, model_output='accepted', observations='R' * 2000,
-                                   timing=Timing(start_time=0)))
+    usage = {"input_tokens": 7000} if clear else {"input_tokens": 7000, "output_tokens": 20}
     managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=7000)),
-        request_system_messages=(), request_tail_messages=())
-    compact.assert_not_called()
+        response=SimpleNamespace(token_usage=SimpleNamespace(**usage)),
+        **({"request_system_messages": (), "request_tail_messages": ()} if clear else {}))
+    assert compact.call_count == (0 if clear else 1)
+
+
+
 
 
 def test_ac008_core_passes_fresh_framing_after_clearing_protocol_repairs(monkeypatch):

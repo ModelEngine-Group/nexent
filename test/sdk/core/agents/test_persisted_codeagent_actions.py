@@ -10,42 +10,30 @@ from nexent.core.agents.context.execution_history import ExecutionHistory
 
 
 def records():
+    call = {"id": "call-1", "name": "python_interpreter", "arguments": "write_file(body=computed)"}
+    payload = {
+        "content": "<STDOUT>actual stdout</STDOUT>",
+        "model_action": {"schema_version": 1, "agent_core": "smolagents",
+                         "dispatch_state": "dispatched", "step_number": 1, "tool_calls": [call]},
+        "covered_unit_indices": [3, 4],
+    }
     return [
-        {
-            "record_type": "tool",
-            "unit_index": 3,
-            "content": json.dumps(
-                {
-                    "tool_name": "write_file",
-                    "tool_arguments": {"body": "EXPANDED" * 12000},
-                }
-            ),
-        },
+        {"record_type": "tool", "unit_index": 3, "content": json.dumps({
+            "tool_name": "write_file", "tool_arguments": {"body": "EXPANDED" * 12000}})},
         {"record_type": "execution_logs", "unit_index": 4, "content": "actual stdout"},
-        {
-            "record_type": "execution_result",
-            "unit_index": 5,
-            "content": json.dumps(
-                {
-                    "content": "<STDOUT>actual stdout</STDOUT>",
-                    "model_action": {
-                        "schema_version": 1,
-                        "agent_core": "smolagents",
-                        "dispatch_state": "dispatched",
-                        "step_number": 1,
-                        "tool_calls": [
-                            {
-                                "id": "call-1",
-                                "name": "python_interpreter",
-                                "arguments": "write_file(body=computed)",
-                            }
-                        ],
-                    },
-                    "covered_unit_indices": [3, 4],
-                }
-            ),
-        },
+        {"record_type": "execution_result", "unit_index": 5, "content": json.dumps(payload)},
     ]
+
+
+def history_turn(message=42, *, execution_records=None, question="prior question", answer="actual answer"):
+    """One authorized completed turn, shared by history and owner-boundary regressions."""
+    from nexent.core.agents.context import ContextItemInput
+
+    return ContextItemInput(id=f"turn:{message}", type="conversation_turn", content={
+        "user_message_id": message - 1, "assistant_message_id": message,
+        "user_message": question, "assistant_final_answer": answer,
+        "execution_records": records() if execution_records is None else execution_records,
+    })
 
 
 def test_fix01_canonical_action_preserves_source_results_and_original_records():

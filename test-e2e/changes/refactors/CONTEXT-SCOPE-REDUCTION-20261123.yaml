@@ -43,6 +43,7 @@ change:
     - test/backend/database/test_conversation_history_stopped.py
     - test/backend/services/test_agentos_conversation_projection.py
     - test/backend/app/test_history_source_contracts.py
-  notes: SPEC10 approved 2026-11-23. Manual Agent history real acceptance pending a dedicated new-source window.
-    Existing self-contained POST-RESPONSE HTTP/SSE provider and OUTPUT SDK/PostgreSQL fixtures retain owned cleanup;
-    no shared factories or 48-task dispatch.
+  notes: >-
+    SPEC10 Scope Reduction 20261123.md owns approved scope and test-only fixture/overlay/wire cleanup.
+    Preserve all variants and assertions; no new Cases/framework. Existing self-contained HTTP/PostgreSQL
+    Case preparation/cleanup is reused; manual real-model acceptance remains pending and48 paused.

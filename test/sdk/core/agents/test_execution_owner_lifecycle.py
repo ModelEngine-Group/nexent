@@ -8,11 +8,12 @@ import pytest
 from smolagents.agents import EMPTY_PROMPT_TEMPLATES
 from smolagents.models import Model
 
-from nexent.core.agents.context import ContextItemInput, ContextManager
+from nexent.core.agents.context import ContextManager
 from nexent.core.agents.context.execution_history import ExecutionHistory, result_text
 from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.utils.observer import MessageObserver
+from test_persisted_codeagent_actions import records, history_turn
 
 
 class NoInference(Model):
@@ -21,62 +22,15 @@ class NoInference(Model):
 
 
 def historical_turn(message=98):
-    fields = {
-        "STDOUT": "SOURCE_ALPHA\n",
-        "OUTPUT": json.dumps({"rows": [{"id": "row-1", "amount": 10}]}),
-    }
-    action = {
-        "schema_version": 1,
-        "agent_core": "smolagents",
-        "step_number": 1,
-        "dispatch_state": "dispatched",
-        "tool_calls": [
-            {
-                "id": "call_1",
-                "name": "python_interpreter",
-                "arguments": "print(source())",
-            }
-        ],
-    }
-    return ContextItemInput(
-        id=f"turn:{message}",
-        type="conversation_turn",
-        content={
-            "user_message_id": message - 1,
-            "assistant_message_id": message,
-            "user_message": "Original task",
-            "assistant_final_answer": "Source saved",
-            "execution_records": [
-                {
-                    "record_type": "tool",
-                    "unit_index": 5,
-                    "content": "source call",
-                    "tool_call_id": "local-source",
-                    "invocation_id": None,
-                },
-                {
-                    "record_type": "execution_logs",
-                    "unit_index": 6,
-                    "content": "SOURCE_ALPHA",
-                    "tool_call_id": None,
-                    "invocation_id": None,
-                },
-                {
-                    "record_type": "execution_result",
-                    "unit_index": 7,
-                    "content": json.dumps(
-                        {
-                            "content": result_text(fields),
-                            "model_action": action,
-                            "covered_unit_indices": [5, 6],
-                        }
-                    ),
-                    "tool_call_id": None,
-                    "invocation_id": None,
-                },
-            ],
-        },
-    )
+    source = records()
+    source[0].update(unit_index=5, content="source call", tool_call_id="local-source", invocation_id=None)
+    source[1].update(unit_index=6, content="SOURCE_ALPHA", tool_call_id=None, invocation_id=None)
+    fields = {"STDOUT": "SOURCE_ALPHA\n", "OUTPUT": json.dumps({"rows": [{"id": "row-1", "amount": 10}]})}
+    action = dict(schema_version=1, agent_core="smolagents", step_number=1, dispatch_state="dispatched",
+                  tool_calls=[dict(id="call_1", name="python_interpreter", arguments="print(source())")])
+    source[2].update(unit_index=7, tool_call_id=None, invocation_id=None, content=json.dumps({
+        "content": result_text(fields), "model_action": action, "covered_unit_indices": [5, 6]}))
+    return history_turn(message, execution_records=source, question="Original task", answer="Source saved")
 
 
 def make_agent(items=None, *, history=True):
