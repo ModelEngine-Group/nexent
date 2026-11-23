@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AGENTOS-RUN-HEARTBEAT-20261120
+  change_type: bugfix
+  bug_id: AGENTOS-RUN-HEARTBEAT-20261120
+  title: Remove heartbeat comments from public Agent run streams
+  description: Wait silently for journal events in Runtime.
+  observed_behavior: PR 4280 introduced keep-alive comment frames after empty journal reads. Public run streams forwarded the comments to Workbench.
+  expected_behavior: An empty journal read sends no SSE frame. The next event or error is emitted with the existing framing.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Signed transport coverage verifies replay, output and cursor compatibility. The focused unit tests did not enforce silence between events.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AOS-TRANSPORT-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Empty journal reads maintain the cursor and produce no frame before the next event or terminal state.
+    - A cursor gap or store failure after an empty read emits the corresponding SSE error.
+    reason: The Runtime journal reader owns frame generation. The signed transport case covers the integrated data and cursor contract.
+    test_selectors:
+    - test/backend/app/test_agentos_resume.py
+  notes: 'Design baseline: nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/design.md. Introduced by PR #4280 in 5fea6ae4a, present on develop in 68da44242.'
