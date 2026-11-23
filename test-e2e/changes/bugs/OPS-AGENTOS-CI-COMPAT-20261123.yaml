@@ -10,7 +10,7 @@ change:
   escaped_stage: D3
   coverage_gap:
     type: missing_assertion
-    description: Targeted monitoring regressions omitted production prepared DTO compilers and the full CI process environment; retain those existing tests and add the strict transport-model regression.
+    description: Targeted regressions omitted production prepared DTO compilers and CI process assumptions; the subsequent full run passed but exposed missing patch-level unit proof for batch replay, publication, ES completeness and worker cleanup.
   feature_contract_changed: false
   affected_features:
     existing: [OPS-MODEL-MONITORING, OPS-AGENT-FACTS]
@@ -24,6 +24,6 @@ change:
     retired: []
   traditional_ut:
     decision: strengthen
-    behaviors: [Keep process-local timing out of strict prepared transport models, Preserve real SDK execution clocks, Start shared health without monitoring dependencies, Reject invalid Ops database names before engine creation, Resolve declared source packages in subprocess tests]
-    reason: Actual CI exposed untested preparation DTO compatibility and isolated process assumptions; retain all original failing assertions and add the narrow wire-model regression.
-    test_selectors: [test/sdk/core/agents/observability/test_phase_capture.py, test/sdk/core/agents/test_main_run_timing.py, test/backend/app/test_agentos_evaluation_compiler.py, test/backend/app/test_agentos_prepared_attachments.py, test/backend/management/test_shared_web_boundary.py, test/backend/management/test_preflight_mcp_passthrough.py, test/backend/ops/test_monitoring_producer.py, test/backend/ops/test_monitoring_defaults.py]
+    behaviors: [Keep process-local timing out of strict prepared transport models, Preserve real SDK execution clocks, Start shared health without monitoring dependencies, Reject invalid Ops database names before engine creation, Resolve declared source packages in subprocess tests, Preserve batch replay and publication failure boundaries, Reject incomplete ES reads and mismatched bulk conflicts, Keep store publication guards and worker cleanup]
+    reason: Retain all original failing assertions and the wire-model regression; complete delivery with unit proof of uncovered replay, publication, ES and resource-lifetime contracts already exercised by unchanged formal PG/ES cases.
+    test_selectors: [test/sdk/core/agents/observability/test_phase_capture.py, test/sdk/core/agents/test_main_run_timing.py, test/backend/app/test_agentos_evaluation_compiler.py, test/backend/app/test_agentos_prepared_attachments.py, test/backend/management/test_shared_web_boundary.py, test/backend/management/test_preflight_mcp_passthrough.py, test/backend/ops/test_monitoring_producer.py, test/backend/ops/test_monitoring_defaults.py, test/backend/ops/test_monitoring_writer.py, test/backend/ops/test_monitoring_search.py, test/backend/ops/test_monitoring_store_contracts.py, test/backend/ops/test_monitoring_worker_lifecycle.py]
