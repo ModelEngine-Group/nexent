@@ -30,6 +30,11 @@ def turn_execution_text(content):
     if any(isinstance(record, dict) and record.get("record_type") == "execution_result" for record in records):
         from .action_history import render_persisted_actions
         return render_persisted_actions(records, assistant_message_id=content.get("assistant_message_id"))
+    return _render_legacy_execution_records(records)
+
+
+def _render_legacy_execution_records(records):
+    """Keep unproven legacy records as read-only evidence without guessing an action."""
     records = [{key: value for key, value in record.items() if key != "execution_event"}
                if isinstance(record, dict) else record for record in records]
     return (

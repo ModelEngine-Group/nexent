@@ -4,113 +4,37 @@ module: AGENT-CONTEXT
 case:
   case_id: CONTEXT-POST-RESPONSE-D3-001
   feature_id: F-171
-  business_rule_ids:
-  - F-171-RULE-03
+  business_rule_ids: [F-171-RULE-03]
   title: Accepted response usage drives maintenance without output limits on the wire
   type: INTEGRATION
   priority: P1
   status: active
   automation: automated
-  objective: Exercise real context runtime and model HTTP transport with controlled usage, then verify calibrated
-    continuation and post-response maintenance.
-  preconditions:
-  - Product SDK dependencies installed
-  - Loopback TCP available
+  objective: Exercise real context runtime and model HTTP transport with controlled usage, then verify calibrated continuation and post-response maintenance.
+  preconditions: [Product SDK dependencies installed, Loopback TCP available]
   test_data:
-    configuration: Combined context and output capabilities with varying retired input/reserve values; owned protocol
-      provider returns explicit usage.
+    configuration: Combined context and output capabilities with varying retired input/reserve values; owned protocol provider returns explicit usage.
   steps:
   - order: 1
     action: Prepare and send a model request through real runtime and model service with historical output settings.
-    expected: Normal preparation with a fitting full frame does not compact and captured request has no output-length
-      fields.
+    expected: Preparation does not compact and captured request has no output-length fields.
   - order: 2
     action: Accept the completed response, append its result, and notify the runtime at the safe step boundary.
-    expected: Actual prompt usage calibrates the next input estimate and low remaining space triggers maintenance
-      only after the response.
+    expected: Actual prompt usage calibrates the next input estimate and low remaining space triggers maintenance only after the response.
   - order: 3
-    action: Continue with added content and repeat with changed retired model input/reserve values, then close owned
-      resources.
+    action: Continue with added content and repeat with changed retired model input/reserve values, then close owned resources.
     expected: Retired fields do not change thresholds or request behavior; provider and threads are reclaimed.
-  - order: 4
-    action: Reject an oversized historical full frame against an owned HTTP/SSE provider, then exercise accepted
-      summary, missing fixed title, invalid-format correction, valid but expanded summary with one capacity correction,
-      still-oversized correction, positive-but-unfitting ordinary next iteration, persistently invalid summary
-      and main-request authentication failure. Inspect every recovery summary request's current capacity goal.
-    expected: Only a valid history-only candidate with actual reduction and full-frame fit commits. Invalid candidates
-      leave no checkpoint and prepare reentry makes no extra request. A later main failure retains the accepted
-      old checkpoint. Only the fixed missing H1 is normalized without a model call; other invalid text may use the same single format-or-fact correction claim and strict validation.
-      Every recovery generation, including the first, correction and ordinary next iteration, carries the current
-      local rendered-history capacity target; the next iteration updates history cost. These targets are not provider
-      output allowances, main requests contain no recovery hint, and the existing claim/three-subrequest budget remains.
-      All actual bodies omit output limits and resources close.
-  - order: 5
-    action: Recover source-backed structured bulk over actual HTTP/SSE, then serialize/restore an internal checkpoint
-      for a new owner and continue. Repeat real user_message, native tool_result and canonical execution_result
-      source kinds.
-    expected: Only full source-proven arrays are projected; critical outside facts remain. The compact wire references
-      original data and omits output caps. Typed proof and raw originals survive checkpoint transfer, middle-page
-      numeric values and literal error control characters match exactly, foreign owners reject, and normal continuation makes no auxiliary summary request.
   expected_results:
   - Real wire requests omit max_tokens, max_completion_tokens and max_output_tokens.
-  - Normal preparation is pure and accepted usage anchors subsequent estimates; normal maintenance occurs only after
-    completion. Explicit rejected-capacity recovery is separately covered by AGENT-HISTORY-D3-001 AC-07.
+  - Normal preparation is pure and accepted usage anchors subsequent estimates; maintenance occurs only after completion.
   - Retired capacities do not alter behavior and all owned resources are closed.
-  - Rejected-capacity recovery uses bounded real model transport and preserves transactional old-history semantics
-    on success and failure.
-  - Typed source-backed bulk remains recoverable across checkpoints without requiring every bulk ID inline; outside
-    facts, source identity, bounded reader and owner isolation remain intact.
-  forbidden_side_effects:
-  - No external provider or database use
-  - No mutation of unaccepted history
-  - No orphan provider resources
-  integration_boundary:
-  - Context runtime through LegacyChatModel and ModelService to an owned HTTP protocol provider
-  observations:
-  - Captured request bodies
-  - Usage baseline and maintenance timing
-  - Cleanup assertions
-  cleanup:
-  - Close provider and join owned threads
+  forbidden_side_effects: [No external provider or database use, No mutation of unaccepted history, No orphan provider resources]
+  integration_boundary: [Context runtime through LegacyChatModel and ModelService to an owned HTTP protocol provider]
+  observations: [Captured request bodies, Usage baseline and maintenance timing, Cleanup assertions]
+  cleanup: [Close provider and join owned threads]
   acceptance:
   - id: AC-POST-RESPONSE
-    description: Actual HTTP usage drives post-response maintenance while preparation remains pure and output limits
-      remain absent.
-    steps:
-    - 1
-    - 2
-    - 3
-    expected_results:
-    - 1
-    - 2
-    - 3
-    forbidden_side_effects:
-    - 1
-    - 2
-    - 3
-  - id: AC-CAPACITY-RECOVERY
-    description: Real HTTP transport proves accepted/invalid history recovery, shared format/fact/capacity correction
-      and prepare budget, expanded-candidate correction or rollback, and accepted-old-checkpoint survival after main failure.
-    steps:
-    - 4
-    expected_results:
-    - 1
-    - 3
-    - 4
-    forbidden_side_effects:
-    - 1
-    - 2
-    - 3
-  - id: AC-STRUCTURED-SOURCES
-    description: Actual HTTP model pipeline plus private typed checkpoint roundtrip proves source-backed bulk recovery
-      and continuation for all three source kinds, exact original middle-page recall and owner rejection.
-    steps:
-    - 5
-    expected_results:
-    - 1
-    - 3
-    - 5
-    forbidden_side_effects:
-    - 1
-    - 2
-    - 3
+    description: Actual HTTP usage drives post-response maintenance while preparation remains pure and output limits remain absent.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1, 2, 3]

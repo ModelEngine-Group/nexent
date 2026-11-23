@@ -11,7 +11,7 @@ from test_jiuwen_errors import adapter as _adapter
 from test_jiuwen_tool_spans import spans as _spans
 
 from nexent.core.agents.context.execution_history import ExecutionHistory
-from nexent.core.agents.context.action_history import register_authorized_sources
+from nexent.core.agents.context.action_history import register_historical_results
 from nexent.core.agents.context.native_history import decode_history_event
 from nexent.core.model_service.contracts import AssistantMessage, ToolCall
 from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
@@ -77,9 +77,10 @@ def test_actual_local_function_default_survives_history_and_source_restore(adapt
     assert messages[2] == {"role": "tool", "tool_call_id": original.provider_call_id,
                            "content": "EXACT_SKILL_SOURCE"}
     store = ExecutionHistory()
-    register_authorized_sources([history(records)], store, "owner")
-    sources = store.authorized_sources("owner")
-    assert any(source.source_kind == "tool_result" and source.text == "EXACT_SKILL_SOURCE" for source in sources)
+    register_historical_results([history(records)], store, "owner")
+    result_record = next(record for record in records if record['record_type'] == 'tool_result')
+    reference = f"message:{history(records).content['assistant_message_id']}/unit-index:{result_record['unit_index']}"
+    assert json.loads(store.read('owner', reference))['text'] == 'EXACT_SKILL_SOURCE'
     tool_spans = [span for span in spans[1].get_finished_spans()
                   if span.attributes.get("openinference.span.kind") == "TOOL"]
     assert len(tool_spans) == 1

@@ -10,14 +10,9 @@ from copy import copy
 from types import SimpleNamespace
 
 from nexent.core.agents.context import ContextItem, ContextManager, ContextManagerConfig
-from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.context.models import CurrentActionContextItem
-from nexent.core.agents.context.recovery import ContextRecoveryBudget, recover_history
-from nexent.core.agents.context.usage import (
-    ContextInputCapacityExceeded,
-    ContextUsageBaseline,
-    record_capacity_rejection,
-)
+from nexent.core.agents.context.maintenance import complete_context
+from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
 from nexent.core.agents.contracts.context import ContextItemInput
 from nexent.core.agents.contracts.output import ContextCapacityObservation
 from nexent.core.agents.cores.jiuwen.messages import _mapping, resource_view
@@ -43,10 +38,7 @@ class SummaryModel:
         self.model = model
         self.model_id = model.profile.identity.request_model_id
 
-    def capacity_recovery_call(self, messages, *, deadline, **kwargs):
-        return self(messages, _recovery_deadline=deadline, **kwargs)
-
-    def __call__(self, messages, *, stop_sequences=None, max_tokens=None, _recovery_deadline=None):
+    def __call__(self, messages, *, stop_sequences=None, max_tokens=None):
         if self.model.scope.cancelled:
             raise RunTerminated()
         if stop_sequences:
@@ -60,10 +52,7 @@ class SummaryModel:
         } for message in messages]
         view = resource_view(normalized, [])
         request = self.model.converter.convert(view, profile, stream=False, run_id=self.model.run_id).request
-        deadline = self.model.deadline
-        if _recovery_deadline is not None:
-            deadline = min(deadline, _recovery_deadline) if deadline is not None else _recovery_deadline
-        message = self.model.service.invoke(request, profile, scope=self.model.scope, deadline=deadline)
+        message = self.model.service.invoke(request, profile, scope=self.model.scope, deadline=self.model.deadline)
         if self.model.scope.cancelled:
             raise RunTerminated()
         if message.finish_reason != "stop" or message.tool_calls or message.refusal is not None:
@@ -106,7 +95,6 @@ class JiuwenContextBridge:
         self.executions = []
         self.last_evidence = None
         self.usage_baseline = ContextUsageBaseline()
-        self._capacity_budget = None
         self._pending_calls = []
         self._completed_tool_ids = set()
         self._maintenance_execution = None
@@ -138,10 +126,6 @@ class JiuwenContextBridge:
             effective_input_limit_tokens=manager.effective_input_limit_tokens or None,
             context_processing_mode=manager.processing_mode,
         )
-
-    def begin_request(self):
-        """One recovery allowance across corrections of one native main request."""
-        self._capacity_budget = ContextRecoveryBudget(deadline=self.info.model_deadline)
 
     def _assemble(self, messages, tools):
         if self.scope.cancelled:
@@ -175,11 +159,9 @@ class JiuwenContextBridge:
         if not task_seen:
             raise ValueError("Jiuwen current task is missing")
         definitions = [tool.model_dump() for tool in resource_view(messages, tools).tool_definitions]
-        def assemble(run_context, recovering, selected_model):
-            return self.context_manager.assemble_context_items(
-                model=selected_model, current_items=current, tools=definitions, run_context=run_context,
-                **({"force_compaction": True, "history_only_recovery": True} if recovering else {}))
-        context = assemble(self.run_context, False, self.summary_model)
+        context = self.context_manager.assemble_context_items(
+            model=self.summary_model, current_items=current, tools=definitions, run_context=self.run_context,
+        )
         if self.scope.cancelled:
             raise RunTerminated()
         self._current_items, self._tools = current, definitions
@@ -190,25 +172,7 @@ class JiuwenContextBridge:
         if limit and estimated >= limit:
             record_capacity_rejection(local_tokens=local_estimate, estimated_tokens=estimated, limit=limit,
                                       baseline=self.usage_baseline, model_key=model_key)
-            if self._capacity_budget is None:
-                self.begin_request()
-            def revision():
-                return self.context_manager._fingerprint({
-                    "model": self._model_key(), "query": self.info.query,
-                    "native_messages": messages,
-                    "current": [(item.id, item.content) for item in current],
-                    "history": [(item.id, item.content, item.metadata) for item in self.run_context.items],
-                    "capacity": self.context_manager.effective_input_limit_tokens,
-                    "tools": definitions,
-                })
-            context = recover_history(
-                manager=self.context_manager, run_context=self.run_context, assemble=assemble,
-                model=self.summary_model, budget=self._capacity_budget, cancelled=lambda: self.scope.cancelled,
-                revision=revision, limit=limit,
-                error=ContextInputCapacityExceeded("Jiuwen input exceeds the combined context window"),
-                origin="local_capacity_recovery")
-            self.usage_baseline.invalidate()
-            self.usage_baseline.source = "estimated_after_capacity_recovery"
+            raise ValueError("Jiuwen input exceeds the combined context window")
         self.usage_baseline.capture(self._estimate(context.messages, definitions), self._model_key())
         self.last_evidence = context.evidence
         summary = self.context_manager.consume_history_summary_event()
@@ -304,10 +268,6 @@ class JiuwenContextBridge:
             finally:
                 self._maintenance_execution = None
             timeout = max(0.0, deadline - time.monotonic())
-        if self._capacity_budget is None:
-            self.begin_request()
-        inherited = self._capacity_budget.deadline
-        self._capacity_budget.deadline = min(inherited, deadline) if inherited is not None else deadline
         execution = self.manager.submit(
             "model-tool-io", ManagedTaskSpec(task_name="jiuwen-context", owner=__name__,
                 run_id=self.summary_model.model.run_id, deadline_monotonic=deadline),

@@ -53,9 +53,6 @@ class ContextRuntime(Protocol):
     def prepare_run(self, *, memory: AgentMemory, fallback_system_prompt: str) -> None:
         """Initialize the run's system state before a TaskStep is appended."""
 
-    def begin_request(self, *, model: Model, recovery_finalize=None) -> None:
-        """Start one logical main completion, retaining its budget across rebuilds."""
-
     def prepare_step(
         self,
         *,
@@ -99,7 +96,6 @@ class ContextRuntime(Protocol):
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ModelMessage] = (),
         request_tail_messages: Sequence[ModelMessage] = (),
-        recovery_origin: str = "provider_overflow_recovery",
     ) -> FinalContext:
         """Force a source-backed step rebuild after Provider overflow."""
 
@@ -112,7 +108,6 @@ class ContextRuntime(Protocol):
         task: str,
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
-        recovery_origin: str = "provider_overflow_recovery",
     ) -> FinalContext:
         """Force a source-backed final-answer rebuild after Provider overflow."""
 

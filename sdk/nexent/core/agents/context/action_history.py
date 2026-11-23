@@ -23,66 +23,37 @@ def decode_execution_fields(payload):
         return None
 
 
-def _historical_source(source):
-    kind = source.get("record_type", "execution_result")
-    common = {"message_id": source["message_id"], "unit_index": source.get("unit_index"),
-              "source_kind": kind, "tool_call_id": source.get("tool_call_id")}
-    if kind == "user_message":
-        text = source["content"]
-        return {**common, "text": text, "parts": (text,)}
-    if kind == "execution_result":
-        fields = decode_execution_fields(json.loads(source["content"]))
-        if fields is not None:
-            return {**common, "text": result_text(fields), "parts": tuple(fields.values()), "fields": fields}
-    if kind == "tool_result":
-        from .native_history import decode_history_event
+def register_historical_results(items, history, owner):
+    """Grant only completed execution results present in this authorized run snapshot."""
+    from .native_history import decode_history_event
 
-        event = decode_history_event({**source, "record_type": "tool_result", "invocation_id": None})
-        if event is not None and isinstance(event.get("call_id"), str) and event["call_id"]:
-            return {**common, "text": event["result"], "parts": (event["result"],)}
-    raise PermissionError("Invalid historical source provenance")
-
-
-def register_authorized_sources(items, history, owner):
-    """Restore only authorized private sources; never authorize model-provided references."""
-    sources, refs_by_item, expected_proofs = [], {}, []
+    results, refs_by_item = [], {}
     for item in items:
         selected = []
-        if item.type == "history_summary":
-            selected.extend(item.content.get("execution_sources", []))
-            expected_proofs.extend(item.content.get("structured_source_proofs", []))
-        elif item.type == "conversation_turn":
-            content = item.content
-            if type(content.get("user_message_id")) is int and content["user_message_id"] > 0:
-                selected.append({"record_type": "user_message", "message_id": content["user_message_id"],
-                                 "unit_index": None, "content": content.get("user_source_content") if isinstance(content.get("user_source_content"), str) else content["user_message"]})
-            records = content.get("execution_records") or []
-            for record, _, _ in persisted_actions(records):
-                selected.append({**record, "message_id": content["assistant_message_id"]})
-            from .native_history import decode_history_event
-            for record in records:
-                event = decode_history_event(record) if record.get("record_type") == "tool_result" else None
-                if event is not None and isinstance(event.get("call_id"), str) and event["call_id"]:
-                    selected.append({**record, "message_id": content["assistant_message_id"]})
-        refs = []
-        for source in selected:
-            sources.append(_historical_source(source))
-            suffix = "user-message" if source.get("record_type") == "user_message" else f"unit-index:{source['unit_index']}"
-            refs.append(f"message:{source['message_id']}/{suffix}")
-        refs_by_item[item.id] = list(dict.fromkeys(refs))
-    history.restore_sources(owner, sources, expected_proofs=expected_proofs)
-    index = history.structured_source_index(owner)
-    authorized = []
+        if item.type == "conversation_turn":
+            message = item.content.get("assistant_message_id")
+            if type(message) is int and message > 0:
+                records = item.content.get("execution_records") or []
+                for record, _, fields in persisted_actions(records):
+                    selected.append((message, record["unit_index"], result_text(fields)))
+                for record in records:
+                    event = decode_history_event(record) if record.get("record_type") == "tool_result" else None
+                    index = record.get("unit_index")
+                    if (event is not None and isinstance(event.get("call_id"), str) and event["call_id"]
+                            and type(index) is int and index >= 0):
+                        selected.append((message, index, event["result"]))
+        results.extend(selected)
+        refs_by_item[item.id] = list(dict.fromkeys(
+            f"message:{message}/unit-index:{index}" for message, index, _ in selected))
+    history.restore_results(owner, results)
+    registered = []
     for item in items:
         metadata = {key: value for key, value in item.metadata.items()
                     if key not in {"execution_source_refs", "structured_source_proofs"}}
         if refs_by_item[item.id]:
             metadata["execution_source_refs"] = refs_by_item[item.id]
-            proofs = [proof for proof in index.collections.values() if proof["source_ref"] in refs_by_item[item.id]]
-            if proofs:
-                metadata["structured_source_proofs"] = proofs
-        authorized.append(item if metadata == item.metadata else item.model_copy(update={"metadata": metadata}))
-    return authorized
+        registered.append(item if metadata == item.metadata else item.model_copy(update={"metadata": metadata}))
+    return registered
 
 
 def _payload(record):
@@ -156,7 +127,7 @@ def persisted_actions(records):
 
 def render_persisted_actions(records, *, assistant_message_id, history=None, owner=None):
     """Render native source/result once; raw storage remains independently addressable."""
-    from .history_facts import turn_execution_text
+    from .history_facts import _render_legacy_execution_records
     from .rendering import _render_current_action
 
     if type(assistant_message_id) is not int or assistant_message_id <= 0:
@@ -169,15 +140,13 @@ def render_persisted_actions(records, *, assistant_message_id, history=None, own
 
     def flush():
         if raw:
-            parts.append(turn_execution_text({"execution_records": list(raw)}))
+            parts.append(_render_legacy_execution_records(list(raw)))
             raw.clear()
 
     for record in records:
         accepted = selected.get(id(record))
         if accepted is None:
-            if record.get("record_type") != "execution_result" and (
-                type(record.get("unit_index")) is not int or record["unit_index"] not in covered
-            ):
+            if type(record.get("unit_index")) is not int or record["unit_index"] not in covered:
                 raw.append(record)
             continue
         flush()
