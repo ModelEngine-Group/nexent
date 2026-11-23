@@ -22,6 +22,29 @@ async def _io(name, fn, *args):
     return await run_blocking(name, fn, *args, lane="control-io", owner="management")
 
 
+def _confirmed_tool_exclusions(prepared):
+    base, result = (prepared[arm].tool_set_check for arm in ("base", "result"))
+    if (
+        not base
+        or not result
+        or base.arm != "base"
+        or result.arm != "result"
+        or not base.removed
+        or base.removed != result.removed
+        or len(set(base.removed)) != len(base.removed)
+    ):
+        releases.reject("The two confirmed tool catalogs do not identify the same exclusions")
+
+    def names(arm):
+        options = prepared[arm].resource.evaluation_options
+        return {item["content"]["name"] for item in options.context_items or () if item["type"] == "tool"}
+
+    before, after = names("base"), names("result")
+    if before - after != set(base.removed) or after - before:
+        releases.reject("The confirmed tool catalogs differ outside the tested selection")
+    return tuple(base.removed)
+
+
 def _materials(tenant, ctx, prepared):
     recipe = ctx["recipe"]
     agent, version, kind = ctx["agent_id"], ctx["version_no"], recipe["candidate_type"]
@@ -30,10 +53,13 @@ def _materials(tenant, ctx, prepared):
         releases.reject("This release requires independently pinned child resources")
     prompt = None
     target = None
+    removed = ()
     if kind == "prompt":
         prompt = resolve_prompt_candidate(
             tenant, ctx["submitted_by"], agent, version, recipe["candidate_id"]
         )["result_text"]
+    elif kind == "tool_set":
+        removed = _confirmed_tool_exclusions(prepared)
     elif kind == "skill_step":
         target = read_bound_skill_candidate(tenant, agent, version, recipe["candidate_id"])
         if not target or target["method"] != "S2":
@@ -88,7 +114,8 @@ def _materials(tenant, ctx, prepared):
         r.model_copy(update={"package_candidate_id": None, "package_variant": None})
         for r in baseline.resource.skill_refs
     ]
-    return pins, prompt, snapshot_digest(baseline)
+    baseline.tool_set_check = None
+    return pins, prompt, snapshot_digest(baseline), removed
 
 
 async def promote(tenant, actor, lock, request):
@@ -103,7 +130,7 @@ async def promote(tenant, actor, lock, request):
     )
     if recipe != ctx["recipe"]:
         releases.reject("The tested candidate can no longer be reproduced")
-    pins, prompt, baseline = await _io("verify-release-packages", _materials, tenant, ctx, prepared)
+    pins, prompt, baseline, removed = await _io("verify-release-packages", _materials, tenant, ctx, prepared)
     return await _io(
         "publish-evolution-version",
         releases.publish,
@@ -117,6 +144,7 @@ async def promote(tenant, actor, lock, request):
         pins,
         prompt,
         baseline,
+        removed,
     )
 
 

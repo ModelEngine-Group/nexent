@@ -40,6 +40,7 @@ def test_session_versions(runtime):
             "030_evolution_confirmation_results",
             "031_evolution_session_versions",
             "032_evolution_releases",
+            "033_evolution_release_tools",
         ):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     tenant, owner, agent = "release-pilot", "chat-user", 901
@@ -136,3 +137,17 @@ def test_session_versions(runtime):
             WHERE tenant_id=:t ORDER BY conversation_id"""),
             {"t": tenant},
         ).all() == [(11, 2), (12, 3), (31, 1)]
+
+
+    from management.db.agent.release_tools import excluded_for_version, publish_tool_selection
+    from management.db.agent.repository import search_agent_info_by_agent_id
+
+    with get_db_session() as session:
+        publish_tool_selection(session, tenant, agent, 1, 2, ["analyze_text_file"])
+        publish_tool_selection(session, tenant, agent, 2, 3, ["create_file"])
+        assert excluded_for_version(session, "other-tenant", agent, 3) == []
+        assert excluded_for_version(session, tenant, agent+1, 3) == []
+    assert "released_tool_exclusions" not in search_agent_info_by_agent_id(agent, tenant, 0)
+    assert "released_tool_exclusions" not in search_agent_info_by_agent_id(agent, tenant, 1)
+    assert search_agent_info_by_agent_id(agent, tenant, 2)["released_tool_exclusions"] == ["analyze_text_file"]
+    assert search_agent_info_by_agent_id(agent, tenant, 3)["released_tool_exclusions"] == ["analyze_text_file","create_file"]

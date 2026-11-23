@@ -560,10 +560,14 @@ async def create_agent_config(
         except Exception as e:
             logger.error(f"Failed to load memory tools: {e}", exc_info=True)
 
+    released_exclusions = frozenset(agent_info.get("released_tool_exclusions") or ())
     if excluded_root_tools:
-        if not portable_evaluation or not excluded_root_tools.issubset({tool.name for tool in tool_list}):
+        selectable_names = {tool.name for tool in tool_list} - released_exclusions
+        if not portable_evaluation or not excluded_root_tools.issubset(selectable_names):
             raise ValueError("Tool candidate does not match the compiled evaluation scope")
-        tool_list = [tool for tool in tool_list if tool.name not in excluded_root_tools]
+    hidden_tools = released_exclusions | excluded_root_tools
+    if hidden_tools:
+        tool_list = [tool for tool in tool_list if tool.name not in hidden_tools]
 
     # The final tool params already contain the conversation selection and ACL
     # intersection. Summaries therefore restore semantic routing without
@@ -598,6 +602,9 @@ async def create_agent_config(
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
+    if hidden_tools:
+        # Skill, file and planning tools can be added after the first catalog is built.
+        available_tools = [tool for tool in available_tools if tool.name not in hidden_tools]
     prompt_tools = {tool.name: tool for tool in available_tools}
     prompt_tool_policy_snapshot = agent_info.get("prompt_tool_policy_snapshot")
     if prompt_tool_policy_snapshot is not None:

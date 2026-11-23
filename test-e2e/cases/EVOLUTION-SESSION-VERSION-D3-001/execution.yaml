@@ -7,6 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01: [test_session_versions]
   AC-02: [test_session_versions]
+  AC-03: [test_session_versions]
 preparation:
   families: []
   anchors: false

@@ -21,7 +21,10 @@ case:
   - order: 2
     action: 在选版与提交之间切换默认版本，并发提交同一首轮。检查旧会话的执行回执和无回执分支。
     expected: 拒绝过时编译，重复提交只有一条绑定，已知旧版按实际执行恢复，缺失证据时保留原选版路径。
-  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。]
+  - order: 3
+    action: 为 V2 隐藏一个工具，再从 V2 发布另一项工具调整，逐版读取编译器使用的智能体配置。
+    expected: 草稿和 V1 沿用原清单，V2 只隐藏第一项，V3 同时隐藏两项，其他智能体和租户不受影响。
+  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。, 工具移除按版本保留且不能跨范围读取。]
   forbidden_side_effects: [其他租户不能读取版本绑定；普通会话选版不能更改编辑草稿。]
   acceptance:
   - id: AC-01
@@ -32,6 +35,11 @@ case:
     description: 验证提交前核对、历史来源、并发和所有权。
     steps: [2]
     expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: 后续演进版本继承已确认的工具选择。
+    steps: [3]
+    expected_results: [3]
     forbidden_side_effects: [1]
   execution:
     profiles:

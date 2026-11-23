@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.orm import as_dict, filter_property
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
+from management.db.agent.release_tools import excluded_for_version
 from management.db.agent.version import query_current_version_no
 from management.db.tool.repository import query_tool_knowledge_references
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
@@ -78,7 +79,10 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
             raise AgentNotFoundError("agent not found")
 
         agent_dict = as_dict(agent)
-
+        if version_no > 0 and agent.tenant_id == tenant_id:
+            removed = excluded_for_version(session, tenant_id, agent_id, version_no)
+            if removed:
+                agent_dict["released_tool_exclusions"] = removed
         return agent_dict
 
 

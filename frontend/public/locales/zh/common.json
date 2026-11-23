@@ -1,5 +1,6 @@
 {
   "evolution.release.open": "发布与回退",
+  "evolution.release.excludedTools": "新版移除的工具：{{names}}",
   "evolution.release.scope": "智能体 #{{agent}} · 实验 #{{experiment}} · 受评基线 V{{base}} · 当前默认 V{{current}}",
   "evolution.release.reason": "填写本次上线、回退或停用的原因",
   "evolution.release.publish": "晋升并用于新会话",

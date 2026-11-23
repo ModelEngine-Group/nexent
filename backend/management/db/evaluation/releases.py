@@ -11,6 +11,7 @@ from contracts.roles import has_any_role
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.skill_execution_records import SkillInfo, release_skill
 from infrastructure.skill_execution import skill_execution_revision
+from management.db.agent.release_tools import publish_tool_selection
 from management.db.agent.session_versions import lock_release_scope
 from management.db.evaluation.confirmation import _membership
 from management.db.models import AgentInfo, AgentRelation, AgentVersion, SkillInstance, ToolInstance
@@ -217,7 +218,7 @@ def _pin(session, tenant, agent, version, pin, variant):
         reject("The stable version already has a different Skill package")
 
 
-def publish(tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline):
+def publish(tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed):
     try:
         with get_db_session() as session:
             ctx = _context(session, tenant, actor, lock)
@@ -262,6 +263,7 @@ def publish(tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, 
             for pin in pins:
                 _pin(session, tenant, agent, base, pin, "base")
                 _pin(session, tenant, agent, version, pin, "result")
+            publish_tool_selection(session, tenant, agent, base, version, removed)
             session.add(
                 AgentVersion(
                     tenant_id=tenant,
@@ -333,11 +335,18 @@ def release_view(tenant, actor, lock):
                 text("""
             SELECT e.agent_id,e.version_no AS base_version,e.experiment_id,c.digest AS candidate_digest,
                    c.recipe->>'candidate_type' AS candidate_type,a.current_version_no AS current_version,
-                   r.summary,COALESCE(s.paused,false) AS paused
+                   r.summary,COALESCE(s.paused,false) AS paused,
+                   ARRAY(SELECT jsonb_array_elements_text(CAST(tools.source_text AS jsonb)->'selectable')
+                         EXCEPT SELECT jsonb_array_elements_text(CAST(tools.result_text AS jsonb)->'retained')
+                         ORDER BY 1) AS excluded_tools
               FROM nexent.evolution_confirmation_lock_t l
               JOIN nexent.evolution_experiment_t e USING(experiment_id)
               JOIN nexent.evolution_confirmation_candidate_t c USING(experiment_id)
               JOIN nexent.ag_tenant_agent_t a ON a.tenant_id=e.tenant_id AND a.agent_id=e.agent_id AND a.version_no=0
+              LEFT JOIN nexent.evolution_candidate_t tools
+                ON c.recipe->>'candidate_type'='tool_set' AND tools.resource_field='agent.tools'
+               AND tools.tenant_id=e.tenant_id AND tools.agent_id=e.agent_id AND tools.base_version_no=e.version_no
+               AND tools.candidate_id=CAST(c.recipe->>'candidate_id' AS bigint)
               LEFT JOIN nexent.evolution_confirmation_result_t r ON r.lock_id=l.lock_id AND r.lock_digest=l.digest
               LEFT JOIN nexent.evolution_release_scope_t s ON s.tenant_id=e.tenant_id AND s.agent_id=e.agent_id
              WHERE e.tenant_id=:t AND l.lock_id=:id AND (NOT e.cancelled OR EXISTS (

@@ -10,7 +10,9 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { id: "owner", tenantId: "pilot" } }),
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, values?: { names?: string }) => values?.names ?? key,
+  }),
 }));
 vi.mock("@/services/evolutionService", () => ({
   evolutionService: { release: vi.fn(), promote: vi.fn(), rollback: vi.fn() },
@@ -82,4 +84,20 @@ it("shows authorization failures without release actions", async () => {
     await screen.findByText("Publisher permission required")
   ).toBeInTheDocument();
   expect(screen.queryByRole("textbox")).toBeNull();
+});
+
+it("shows the specific tool removed by a confirmed T3 candidate before promotion", async () => {
+  vi.mocked(api.release).mockResolvedValue({
+    ...passed,
+    candidate_type: "tool_set",
+    excluded_tools: ["analyze_text_file"],
+  });
+  open();
+  expect(await screen.findByText("analyze_text_file")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("textbox"), {
+    target: { value: "Confirmed text intake scope" },
+  });
+  expect(
+    screen.getByRole("button", { name: "evolution.release.publish" })
+  ).toBeEnabled();
 });

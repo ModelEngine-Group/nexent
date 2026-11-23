@@ -1,5 +1,6 @@
 {
   "evolution.release.open": "Release and rollback",
+  "evolution.release.excludedTools": "Tools removed in this version: {{names}}",
   "evolution.release.scope": "Agent #{{agent}} · Experiment #{{experiment}} · Tested baseline V{{base}} · Current default V{{current}}",
   "evolution.release.reason": "Reason for publishing, rolling back or stopping this release",
   "evolution.release.publish": "Promote for new chats",

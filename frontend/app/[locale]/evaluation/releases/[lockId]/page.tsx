@@ -50,7 +50,7 @@ export default function ReleasePage() {
   const error = action.error || report.error;
   const release = data?.release;
   const supported =
-    data && ["prompt", "skill_step"].includes(data.candidate_type);
+    data && ["prompt", "skill_step", "tool_set"].includes(data.candidate_type);
   const canAct =
     data &&
     (release
@@ -77,6 +77,13 @@ export default function ReleasePage() {
                   current: data.current_version,
                 })}
               </Typography.Text>
+              {!!data.excluded_tools?.length && (
+                <Typography.Text>
+                  {t("evolution.release.excludedTools", {
+                    names: data.excluded_tools.join(", "),
+                  })}
+                </Typography.Text>
+              )}
               {data.summary && (
                 <Typography.Text>
                   {t(`evolution.confirmation.${data.summary.decision}`)} ·{" "}

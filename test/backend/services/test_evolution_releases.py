@@ -105,3 +105,24 @@ def test_submitter_receipt_tracks_release_state(state, message):
         session, {"tenant": "tenant", "owner": "submitter", "cid": 8}, "S-11", lambda zh, en: zh
     )
     assert message in actual
+
+
+def tool_comparison(base_names, result_names):
+    def prepared(arm, names):
+        check = SimpleNamespace(arm=arm, removed=["analysis"])
+        context = [{"type": "tool", "content": {"name": name}} for name in names]
+        options = SimpleNamespace(context_items=context)
+        return SimpleNamespace(tool_set_check=check, resource=SimpleNamespace(evaluation_options=options))
+
+    return {"base": prepared("base", base_names), "result": prepared("result", result_names)}
+
+
+def test_promotion_requires_exact_agreement_between_confirmed_catalogs():
+    valid = tool_comparison(["analysis", "read"], ["read"])
+    assert releases._confirmed_tool_exclusions(valid) == ("analysis",)
+    for after in (["analysis", "read"], [], ["read", "write"]):
+        with pytest.raises(AppException):
+            releases._confirmed_tool_exclusions(tool_comparison(["analysis", "read"], after))
+    valid["result"].tool_set_check.removed = ["read"]
+    with pytest.raises(AppException):
+        releases._confirmed_tool_exclusions(valid)
