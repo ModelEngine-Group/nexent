@@ -136,6 +136,9 @@ def budget_only_row(protocol_profile):
 
     data = protocol_profile.model_dump(mode="json")
     data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    for rule in data["parameter_rules"]:
+        if (rule.get("condition") or {}).get("key") == "enable_thinking":
+            rule.pop("condition")
     data["parameter_values"] = {}
     reasoning_capability = data["capabilities"]["reasoning"]
     reasoning_capability["controls"] = [
@@ -163,7 +166,7 @@ def test_explicit_parameter_missing_from_the_profile_is_still_rejected(monkeypat
     monkeypatch.setattr(reasoning, "get_model_by_model_id", lambda *args, **kwargs: budget_only_row)
     with pytest.raises(ParameterValidationError):
         reasoning.snapshot_agent_reasoning_config(
-            [43], {"43": {"extra_params": {"enable_thinking": False}}}, None, "tenant"
+            [43], {"43": {"parameter_values": {"enable_thinking": False}}}, None, "tenant"
         )
 
 

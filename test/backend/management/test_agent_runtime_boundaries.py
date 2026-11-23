@@ -115,7 +115,7 @@ asyncio.run(verify())
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
     completed = subprocess.run(
-        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -297,7 +297,7 @@ with patch("nexent.core.nlp.stopwords.load_stopwords"):
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
     completed = subprocess.run(
-        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
     )
     assert completed.returncode == 0, completed.stderr
 

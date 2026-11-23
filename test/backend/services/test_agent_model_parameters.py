@@ -156,9 +156,13 @@ def test_persisted_thinking_omission_is_repaired_for_budget_only_outlets(profile
 
     data = profile.model_dump(mode="json")
     data["parameter_rules"] = [rule for rule in data["parameter_rules"] if rule["key"] != "enable_thinking"]
+    for rule in data["parameter_rules"]:
+        if (rule.get("condition") or {}).get("key") == "enable_thinking":
+            rule.pop("condition")
     data["parameter_values"].pop("enable_thinking", None)
     data["capabilities"]["reasoning"]["controls"] = [
-        control for control in data["capabilities"]["reasoning"]["controls"] if control.get("type") != "toggle"]
+        control for control in data["capabilities"]["reasoning"]["controls"]
+        if control.get("parameter_key") != "enable_thinking"]
     data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 42
     budget_only = profile.__class__.model_validate(data)
 
