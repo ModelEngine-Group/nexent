@@ -4377,6 +4377,7 @@ class TestChunkMetadataBatchEndpoints:
                 json={
                     "od_id": 2,
                     "metadata_json": {"部门": "研发"},
+                    "tag": ["示例实体"],
                     "chunk_id_list": [1, 2, 3],
                 },
             )
@@ -4385,6 +4386,7 @@ class TestChunkMetadataBatchEndpoints:
         assert mock_perm.call_args.kwargs["required"] == "EDIT"
         assert edit_metadata.call_args.kwargs["od_id"] == 2
         assert edit_metadata.call_args.kwargs["metadata_json"] == {"部门": "研发"}
+        assert edit_metadata.call_args.kwargs["tag"] == ["示例实体"]
         assert edit_metadata.call_args.kwargs["chunk_id_list"] == [1, 2, 3]
         assert response.json() == result
 

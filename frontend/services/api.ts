@@ -520,6 +520,12 @@ export const API_ENDPOINTS = {
     /** DELETE with a `chunk_ids` JSON body; AIDP answers 204 No Content. */
     removeKbChunks: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks`,
+    /** Batch user-metadata/tag edit; sync caps chunk_id_list at 300 ids. */
+    batchUpdateKbChunks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/chunks/batch-metadata`,
+    /** Trigger AIDP's incremental auto-tagging for one knowledge base. */
+    kbTagSync: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/tags/sync`,
     /** One file's AIDP summary (READ). */
     kbFileSummary: (id: string, fileUuid: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/summary`,
@@ -549,6 +555,13 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/${encodeURIComponent(fieldRef)}`,
       metadataBatchUnbind: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata-fields/batch-unbind`,
+      metadataBatchUnbindSync: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/metadata/batch-unbind-sync`,
+      chunkMetadataExport: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/chunks/metadata/export`,
+      chunkMetadataImport: (domainId: string) =>
+        `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/chunks/metadata/import`,
+      tagSync: `${API_BASE_URL}/aidp-mgmt/ontology/tags/sync`,
       rules: (domainId: string) =>
         `${API_BASE_URL}/aidp-mgmt/ontology/domains/${encodeURIComponent(domainId)}/rules`,
       ruleCount: (domainId: string) =>

@@ -118,6 +118,10 @@ class BatchChunkMetadataRequest(BaseModel):
 
     od_id: int = Field(..., ge=0, description="Ontology domain that owns the fields")
     metadata_json: dict = Field(..., description="At least one field/value pair")
+    tag: List[str] | None = Field(
+        default=None,
+        description="Entity tags chosen from the bound ontology domain",
+    )
     chunk_id_list: List[Annotated[int, Field(strict=True, ge=0)]] | None = Field(
         default=None, description="Chunk ids addressed directly"
     )
@@ -140,6 +144,14 @@ class BatchChunkMetadataRequest(BaseModel):
                 raise ValueError(
                     "metadata_json values must be strings of at most 256 bytes"
                 )
+        if self.tag is not None:
+            cleaned: list[str] = []
+            for item in self.tag:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError("tag entries must be non-empty strings")
+                if item.strip() not in cleaned:
+                    cleaned.append(item.strip())
+            self.tag = cleaned
         if (self.chunk_id_list is None) == (self.file_uuid_list is None):
             raise ValueError(
                 "exactly one of chunk_id_list or file_uuid_list is required"
@@ -373,6 +385,7 @@ async def update_chunks_metadata(
         kds_id,
         od_id=body.od_id,
         metadata_json=body.metadata_json,
+        tag=body.tag,
         chunk_id_list=body.chunk_id_list,
         file_uuid_list=body.file_uuid_list,
         lane="control-io",
@@ -400,6 +413,7 @@ async def update_chunks_metadata_async(
         kds_id,
         od_id=body.od_id,
         metadata_json=body.metadata_json,
+        tag=body.tag,
         chunk_id_list=body.chunk_id_list,
         file_uuid_list=body.file_uuid_list,
         async_mode=True,

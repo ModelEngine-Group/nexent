@@ -797,6 +797,96 @@ class AidpKnowledgeService {
     });
   }
 
+  /**
+   * Apply user metadata and/or entity tags to chunks in one call.
+   *
+   * The sync route caps `chunk_id_list` at 300; address a whole file through
+   * `file_uuid_list` (AIDP applies the values to every chunk of those files).
+   */
+  async batchUpdateChunkMetadata(
+    id: string,
+    payload: {
+      od_id: number;
+      metadata_json: Record<string, string>;
+      tag?: string[];
+      chunk_id_list?: number[];
+      file_uuid_list?: string[];
+    },
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.batchUpdateKbChunks(id),
+      {
+        method: "PATCH",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal,
+      }
+    );
+    return response.json();
+  }
+
+  /** Queue AIDP's incremental auto-tagging for this knowledge base. */
+  async syncKnowledgeBaseTags(
+    id: string
+  ): Promise<{ task_id?: number | string | null; message?: string }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbTagSync(id),
+      { method: "POST", headers: getAuthHeaders() }
+    );
+    return response.json();
+  }
+
+  /** Export one chunk's user metadata through its ontology domain. */
+  async exportChunkMetadata(
+    domainId: string,
+    kdsId: string,
+    chunkId: number,
+    signal?: AbortSignal
+  ): Promise<{ metadata_json?: Record<string, unknown> }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.ontology.chunkMetadataExport(domainId),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ kds_id: kdsId, chunk_id: chunkId }),
+        signal,
+      }
+    );
+    return response.json();
+  }
+
+  /** Import user metadata onto chunks through the ontology domain. */
+  async importChunkMetadata(
+    domainId: string,
+    payload: {
+      kds_id: string;
+      metadata_json: Record<string, string>;
+      chunk_id_list: number[];
+    },
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.ontology.chunkMetadataImport(domainId),
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal,
+      }
+    );
+    return response.json();
+  }
+
   /** Read one file's AIDP summary (READ permission). */
   async getFileSummary(
     id: string,

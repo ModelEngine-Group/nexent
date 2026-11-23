@@ -4351,6 +4351,7 @@ class TestChunkImpls:
             "2",
             od_id=5,
             metadata_json={"部门": "研发"},
+            tag=["示例实体"],
             chunk_id_list=[1, 2, 3],
             async_mode=True,
         )
@@ -4362,6 +4363,7 @@ class TestChunkImpls:
         assert captured["json"] == {
             "od_id": 5,
             "metadata_json": {"部门": "研发"},
+            "tag": ["示例实体"],
             "chunk_id_list": [1, 2, 3],
         }
         # Writes must not be replayed on a lost response.

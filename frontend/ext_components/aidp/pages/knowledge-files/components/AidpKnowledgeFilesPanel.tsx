@@ -16,6 +16,7 @@ import {
   FolderOpenOutlined,
   FolderOutlined,
   InfoCircleOutlined,
+  TagsOutlined,
   MoreOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -35,6 +36,11 @@ import log from "@/lib/logger";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpFileDetailView from "@/ext_components/aidp/pages/knowledge-files/AidpFileDetailView";
+import AidpFileMetadataDrawer from "@/ext_components/aidp/pages/knowledge-files/AidpFileMetadataDrawer";
+import {
+  useKbOntologyBinding,
+  useOntologyMetadataSchema,
+} from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpChunkMetadata";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { useAidpFolderTree } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpFolderTree";
@@ -177,6 +183,16 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
   // The file detail replaces the list while open: it hosts the preview, the
   // summary tab and the semantic chunk panel for one file.
   const [detailFile, setDetailFile] = useState<AidpDocumentItem | null>(null);
+  // Whole-file metadata editing through the batch-metadata file_uuid_list
+  // variant; only offered while the KB is bound to an ontology domain.
+  const [metadataFile, setMetadataFile] = useState<AidpDocumentItem | null>(
+    null
+  );
+  const [metadataSubmitting, setMetadataSubmitting] = useState(false);
+  const bindingQuery = useKbOntologyBinding(knowledgeBase.kds_id);
+  const odId = bindingQuery.data?.binding?.od_id ?? null;
+  const metadataSchemaQuery = useOntologyMetadataSchema(odId);
+  const metadataFields = metadataSchemaQuery.data ?? [];
   const [moveFailures, setMoveFailures] = useState<FileMoveFailure | null>(
     null
   );
@@ -196,7 +212,8 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
     fileRenameTarget !== null ||
     deleteConfirmOpen ||
     previewFile !== null ||
-    detailFile !== null;
+    detailFile !== null ||
+    metadataFile !== null;
 
   const treeQuery = useAidpFolderTree(
     knowledgeBase.kds_id,
@@ -1258,6 +1275,22 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
                 onClick={() => setDetailFile(toDocumentItem(record.file))}
               />
             </Tooltip>
+            <Tooltip
+              title={
+                odId === null
+                  ? t("aidpKnowledge.chunkMetadataNoBinding")
+                  : t("aidpKnowledge.fileMetadataEdit")
+              }
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<TagsOutlined />}
+                disabled={!record.file.file_uuid || odId === null}
+                aria-label={t("aidpKnowledge.fileMetadataEdit")}
+                onClick={() => setMetadataFile(toDocumentItem(record.file))}
+              />
+            </Tooltip>
             <Tooltip title={t("aidpKnowledge.download")}>
               <Button
                 type="text"
@@ -1328,6 +1361,38 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
         handleInternalMoveDrop(event, path, () => setBreadcrumbDropPath(null)),
     }),
     [breadcrumbDropPath, handleInternalMoveDrop]
+  );
+
+  const handleSaveFileMetadata = useCallback(
+    async (metadataJson: Record<string, string>) => {
+      if (!metadataFile || odId === null) return;
+      setMetadataSubmitting(true);
+      try {
+        await aidpKnowledgeService.batchUpdateChunkMetadata(
+          knowledgeBase.kds_id,
+          {
+            od_id: Number(odId),
+            metadata_json: metadataJson,
+            file_uuid_list: [metadataFile.file_uuid],
+          }
+        );
+        message.success(t("aidpKnowledge.fileMetadataSaved"));
+        setMetadataFile(null);
+        refreshAll();
+      } catch (error) {
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.chunkMetadataSaveFailed")
+          )
+        );
+        throw error;
+      } finally {
+        setMetadataSubmitting(false);
+      }
+    },
+    [knowledgeBase.kds_id, message, metadataFile, odId, refreshAll, t]
   );
 
   const segments = folderPathSegments(currentPath);
@@ -1671,6 +1736,18 @@ const AidpKnowledgeFilesPanel: React.FC<AidpKnowledgeFilesPanelProps> = ({
           }
           void handleRenameFile(name);
         }}
+      />
+
+      <AidpFileMetadataDrawer
+        open={metadataFile !== null}
+        fileName={metadataFile?.file_name ?? ""}
+        odId={odId}
+        metadataFields={metadataFields}
+        submitting={metadataSubmitting}
+        onClose={() => {
+          if (!metadataSubmitting) setMetadataFile(null);
+        }}
+        onSave={handleSaveFileMetadata}
       />
 
       {previewFile && (

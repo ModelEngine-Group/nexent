@@ -4,10 +4,11 @@
 
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Drawer, Input } from "antd";
+import { Alert, Button, Drawer, Input, Select } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
+import type { AidpOntologyMetadataField } from "@/ext_components/aidp/shared/types/ontology";
 import { normalizeAidpChunkType } from "@/ext_components/aidp/shared/utils/aidpChunkType";
 import { sanitizeAidpTableHtml } from "@/ext_components/aidp/shared/utils/aidpTableHtml";
 import styles from "./AidpSemanticChunks.module.css";
@@ -16,29 +17,64 @@ export const AIDP_CHUNK_TEXT_MAX_LENGTH = 10240;
 
 export type AidpChunkDrawerMode = "create" | "edit";
 
+/** Payload assembled by the drawer; the parent decides how to persist it. */
+export interface AidpChunkFormPayload {
+  text: string;
+  /** True when the user changed tags or metadata; only then is AIDP called. */
+  metadataDirty: boolean;
+  tag: string[];
+  metadata_json: Record<string, string>;
+}
+
 interface AidpChunkDrawerProps {
   open: boolean;
   mode: AidpChunkDrawerMode;
   /** The chunk being edited; null when adding a new one. */
   chunk: AidpChunk | null;
   submitting: boolean;
+  /** Bound ontology domain; null/undefined hides the tag and metadata editors. */
+  odId?: number | string | null;
+  metadataFields: AidpOntologyMetadataField[];
+  /** Entity display names of the bound domain, offered as tag choices. */
+  tagOptions: string[];
   onClose: () => void;
-  /** Rejecting keeps the drawer open with the entered text intact. */
-  onSubmit: (text: string) => Promise<void>;
+  /** Rejecting keeps the drawer open with the entered values intact. */
+  onSubmit: (payload: AidpChunkFormPayload) => Promise<void>;
 }
 
 type AidpChunkFormProps = Omit<AidpChunkDrawerProps, "open">;
 
+const initialMetadataValues = (
+  chunk: AidpChunk | null,
+  fields: AidpOntologyMetadataField[]
+): Record<string, string> => {
+  const raw = chunk?.metadata_json ?? {};
+  const values: Record<string, string> = {};
+  for (const field of fields) {
+    const value = raw[field.field_name];
+    if (value !== null && value !== undefined && value !== "") {
+      values[field.field_name] = String(value);
+    }
+  }
+  return values;
+};
+
 /**
- * Text form for one chunk.
+ * Text, tags and user metadata form for one chunk.
  *
- * It is mounted only while the drawer is open and keyed by the target chunk,
- * so every target starts with its own text and a failed submit keeps the input.
+ * Text is always editable. Tags and metadata are only offered while the
+ * knowledge base is bound to an ontology domain: metadata keys must exist in
+ * that domain, and tag values must be entities of it. Saving calls AIDP only
+ * when the user actually changed one of them, so a plain text edit never
+ * rewrites metadata.
  */
 const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   mode,
   chunk,
   submitting,
+  odId,
+  metadataFields,
+  tagOptions,
   onClose,
   onSubmit,
 }) => {
@@ -48,6 +84,17 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   );
   const [focused, setFocused] = useState(false);
   const [touched, setTouched] = useState(false);
+  const hasOntology = odId !== null && odId !== undefined;
+  const [tags, setTags] = useState<string[]>(() => chunk?.tag ?? []);
+  const [metadataValues, setMetadataValues] = useState<Record<string, string>>(
+    () => initialMetadataValues(chunk, metadataFields)
+  );
+  const initialTags = useMemo(() => chunk?.tag ?? [], [chunk]);
+  const initialValues = useMemo(
+    () => initialMetadataValues(chunk, metadataFields),
+    [chunk, metadataFields]
+  );
+
   // TABLE chunks edit the HTML source; the preview renders it only when it
   // sanitizes cleanly, otherwise the toggle surfaces a format error.
   const isTableChunk =
@@ -61,7 +108,36 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   const trimmed = text.trim();
   const isEmpty = trimmed.length === 0;
   const isTooLong = text.length > AIDP_CHUNK_TEXT_MAX_LENGTH;
-  const canSubmit = !isEmpty && !isTooLong && !submitting;
+
+  const metadataJson = useMemo(() => {
+    const result: Record<string, string> = {};
+    for (const field of metadataFields) {
+      const value = (metadataValues[field.field_name] ?? "").trim();
+      if (value) result[field.field_name] = value;
+    }
+    return result;
+  }, [metadataFields, metadataValues]);
+
+  const metadataDirty = useMemo(() => {
+    if (!hasOntology) return false;
+    const tagsChanged =
+      tags.length !== initialTags.length ||
+      tags.some((tag) => !initialTags.includes(tag));
+    const keys = new Set([
+      ...Object.keys(metadataJson),
+      ...Object.keys(initialValues),
+    ]);
+    const valuesChanged = Array.from(keys).some(
+      (key) => (metadataJson[key] ?? "") !== (initialValues[key] ?? "")
+    );
+    return tagsChanged || valuesChanged;
+  }, [hasOntology, initialTags, initialValues, metadataJson, tags]);
+
+  // AIDP requires a non-empty metadata_json on the batch endpoint; clearing
+  // every field while also changing tags cannot be submitted.
+  const metadataTooEmpty =
+    metadataDirty && Object.keys(metadataJson).length === 0;
+  const canSubmit = !isEmpty && !isTooLong && !submitting && !metadataTooEmpty;
   // UCD values: 1px border, 4px radius, #DFDFDF default and #0067D1 focus.
   // Applied inline because Ant Design's outlined input draws its border with a
   // box-shadow, which overrides a same-specificity CSS module rule.
@@ -74,11 +150,16 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     try {
-      await onSubmit(trimmed);
+      await onSubmit({
+        text: trimmed,
+        metadataDirty,
+        tag: tags,
+        metadata_json: metadataJson,
+      });
     } catch {
-      // The parent reports the failure; keeping the text lets the user retry.
+      // The parent reports the failure; keeping the values lets the user retry.
     }
-  }, [canSubmit, onSubmit, trimmed]);
+  }, [canSubmit, metadataDirty, metadataJson, onSubmit, tags, trimmed]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -212,6 +293,74 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
               </p>
             )}
           </div>
+
+          {hasOntology && (
+            <div>
+              <div className={styles.fieldLabelRow}>
+                <span className={styles.fieldLabel}>
+                  {t("aidpKnowledge.chunkTags")}
+                </span>
+              </div>
+              <Select
+                mode="multiple"
+                allowClear
+                showSearch
+                className={styles.metadataFieldControl}
+                value={tags}
+                onChange={(value: string[]) => setTags(value)}
+                options={tagOptions.map((name) => ({
+                  value: name,
+                  label: name,
+                }))}
+                placeholder={t("aidpKnowledge.chunkTagsPlaceholder")}
+                disabled={submitting}
+                optionFilterProp="label"
+              />
+              <p className={styles.formHint}>
+                {t("aidpKnowledge.chunkTagsHint")}
+              </p>
+            </div>
+          )}
+
+          {hasOntology && metadataFields.length > 0 && (
+            <div>
+              <div className={styles.fieldLabelRow}>
+                <span className={styles.fieldLabel}>
+                  {t("aidpKnowledge.chunkMetadata")}
+                </span>
+              </div>
+              {metadataFields.map((field) => (
+                <div key={field.field_name} className={styles.metadataFieldRow}>
+                  <span className={styles.metadataFieldLabel}>
+                    {field.field_name}
+                  </span>
+                  <Input
+                    className={styles.metadataFieldControl}
+                    value={metadataValues[field.field_name] ?? ""}
+                    onChange={(event) =>
+                      setMetadataValues((current) => ({
+                        ...current,
+                        [field.field_name]: event.target.value,
+                      }))
+                    }
+                    placeholder={
+                      field.field_type === "number"
+                        ? t("aidpKnowledge.chunkMetadataNumberPlaceholder")
+                        : field.field_type === "date"
+                          ? t("aidpKnowledge.chunkMetadataDatePlaceholder")
+                          : t("aidpKnowledge.chunkMetadataTextPlaceholder")
+                    }
+                    disabled={submitting}
+                  />
+                </div>
+              ))}
+              {metadataTooEmpty && (
+                <p className={styles.errorText}>
+                  {t("aidpKnowledge.chunkMetadataAtLeastOne")}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className={styles.drawerFooter}>
@@ -234,15 +383,18 @@ const AidpChunkForm: React.FC<AidpChunkFormProps> = ({
 /**
  * Add or edit one chunk.
  *
- * Only the text is writable: the AIDP contract accepts `chunk_text` alone for
- * an update. The prototype's metadata/entity editors have no backend write
- * capability, so this version does not render those sections.
+ * Only the text, tags and user metadata are writable: AIDP takes `chunk_text`
+ * on the chunk endpoints and applies tags/metadata through the batch-metadata
+ * call. Tag choices and metadata keys come from the bound ontology domain.
  */
 const AidpChunkDrawer: React.FC<AidpChunkDrawerProps> = ({
   open,
   mode,
   chunk,
   submitting,
+  odId,
+  metadataFields,
+  tagOptions,
   onClose,
   onSubmit,
 }) => (
@@ -262,6 +414,9 @@ const AidpChunkDrawer: React.FC<AidpChunkDrawerProps> = ({
         mode={mode}
         chunk={chunk}
         submitting={submitting}
+        odId={odId}
+        metadataFields={metadataFields}
+        tagOptions={tagOptions}
         onClose={onClose}
         onSubmit={onSubmit}
       />

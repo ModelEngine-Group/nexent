@@ -112,7 +112,8 @@ class AidpOntologyService {
     page = 1,
     pageSize = 20,
     keyword?: string,
-    kind?: "type" | "entity"
+    kind?: "type" | "entity",
+    signal?: AbortSignal
   ): Promise<AidpOntologyEntityListResponse> {
     return jsonRequest<AidpOntologyEntityListResponse>(
       buildUrl(API_ENDPOINTS.aidpMgmt.ontology.entities(domainId), {
@@ -120,7 +121,8 @@ class AidpOntologyService {
         size: pageSize,
         keyword: keyword?.trim() || undefined,
         kind,
-      })
+      }),
+      { signal }
     );
   }
 
@@ -221,10 +223,12 @@ class AidpOntologyService {
   }
 
   getKnowledgeBaseBinding(
-    kdsId: string
+    kdsId: string,
+    signal?: AbortSignal
   ): Promise<{ binding: AidpOntologyBinding | null }> {
     return jsonRequest<{ binding: AidpOntologyBinding | null }>(
-      API_ENDPOINTS.aidpMgmt.ontology.bindingByKb(kdsId)
+      API_ENDPOINTS.aidpMgmt.ontology.bindingByKb(kdsId),
+      { signal }
     );
   }
 
@@ -232,14 +236,16 @@ class AidpOntologyService {
     domainId: string,
     page = 1,
     pageSize = 10,
-    search?: string
+    search?: string,
+    signal?: AbortSignal
   ): Promise<AidpOntologyMetadataFieldListResponse> {
     return jsonRequest<AidpOntologyMetadataFieldListResponse>(
       buildUrl(API_ENDPOINTS.aidpMgmt.ontology.metadataFields(domainId), {
         page,
         page_size: pageSize,
         search: search?.trim() || undefined,
-      })
+      }),
+      { signal }
     );
   }
 

@@ -5,7 +5,12 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Checkbox, Tooltip } from "antd";
-import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  ExportOutlined,
+  ImportOutlined,
+} from "@ant-design/icons";
 
 import type { AidpChunk } from "@/ext_components/aidp/shared/types/chunks";
 import {
@@ -24,6 +29,10 @@ interface AidpChunkCardProps {
   onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  /** True when the KB is bound to an ontology domain (metadata is editable). */
+  metadataEnabled: boolean;
+  onExportMetadata: () => void;
+  onImportMetadata: () => void;
 }
 
 const formatMetadataValue = (value: unknown): string => {
@@ -52,6 +61,9 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
   onOpen,
   onEdit,
   onDelete,
+  metadataEnabled,
+  onExportMetadata,
+  onImportMetadata,
 }) => {
   const { t } = useTranslation();
   const text = typeof chunk.chunk_text === "string" ? chunk.chunk_text : "";
@@ -196,31 +208,67 @@ const AidpChunkCard: React.FC<AidpChunkCardProps> = ({
           </div>
         )}
       </div>
-      {canEdit && (
-        <div className={styles.cardActions}>
-          {editable && (
-            <Tooltip title={t("aidpKnowledge.chunkEdit")}>
-              <Button
-                type="text"
-                size="small"
-                aria-label={t("aidpKnowledge.chunkEdit")}
-                icon={<EditOutlined />}
-                onClick={onEdit}
-              />
-            </Tooltip>
-          )}
-          <Tooltip title={t("aidpKnowledge.chunkDelete")}>
+      <div className={styles.cardActions}>
+        <Tooltip
+          title={
+            metadataEnabled
+              ? t("aidpKnowledge.chunkExportMetadata")
+              : t("aidpKnowledge.chunkMetadataNoBinding")
+          }
+        >
+          <Button
+            type="text"
+            size="small"
+            aria-label={t("aidpKnowledge.chunkExportMetadata")}
+            icon={<ExportOutlined />}
+            disabled={!metadataEnabled}
+            onClick={onExportMetadata}
+          />
+        </Tooltip>
+        {canEdit && (
+          <Tooltip
+            title={
+              metadataEnabled
+                ? t("aidpKnowledge.chunkImportMetadata")
+                : t("aidpKnowledge.chunkMetadataNoBinding")
+            }
+          >
             <Button
               type="text"
               size="small"
-              danger
-              aria-label={t("aidpKnowledge.chunkDelete")}
-              icon={<DeleteOutlined />}
-              onClick={onDelete}
+              aria-label={t("aidpKnowledge.chunkImportMetadata")}
+              icon={<ImportOutlined />}
+              disabled={!metadataEnabled}
+              onClick={onImportMetadata}
             />
           </Tooltip>
-        </div>
-      )}
+        )}
+        {canEdit && (
+          <>
+            {editable && (
+              <Tooltip title={t("aidpKnowledge.chunkEdit")}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("aidpKnowledge.chunkEdit")}
+                  icon={<EditOutlined />}
+                  onClick={onEdit}
+                />
+              </Tooltip>
+            )}
+            <Tooltip title={t("aidpKnowledge.chunkDelete")}>
+              <Button
+                type="text"
+                size="small"
+                danger
+                aria-label={t("aidpKnowledge.chunkDelete")}
+                icon={<DeleteOutlined />}
+                onClick={onDelete}
+              />
+            </Tooltip>
+          </>
+        )}
+      </div>
     </div>
   );
 };

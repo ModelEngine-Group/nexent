@@ -512,6 +512,24 @@
 .chunkTableWrap {
   margin-top: 16px;
 }
+.metadataFieldRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.metadataFieldLabel {
+  flex: 0 0 140px;
+  min-width: 0;
+  color: var(--chunk-secondary, #595959);
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-all;
+}
+.metadataFieldControl {
+  flex: 1;
+  min-width: 0;
+}
 .previewToggle {
   margin-left: auto;
   height: 22px;

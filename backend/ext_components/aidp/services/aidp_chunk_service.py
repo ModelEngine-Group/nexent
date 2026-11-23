@@ -420,6 +420,7 @@ def update_chunk_metadata_impl(
     *,
     od_id: int,
     metadata_json: Dict[str, Any],
+    tag: List[str] | None = None,
     chunk_id_list: List[int] | None = None,
     file_uuid_list: List[str] | None = None,
     async_mode: bool = False,
@@ -434,6 +435,8 @@ def update_chunk_metadata_impl(
     and answers with an acceptance snapshot instead of per-chunk counts.
     """
     body: Dict[str, Any] = {"od_id": od_id, "metadata_json": metadata_json}
+    if tag is not None:
+        body["tag"] = list(tag)
     if chunk_id_list is not None:
         body["chunk_id_list"] = list(chunk_id_list)
     if file_uuid_list is not None:
