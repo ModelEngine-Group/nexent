@@ -22,6 +22,7 @@ import type {
   ThinkingDegreeMode,
 } from "@/types/modelProfile";
 
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { ModelParameterField } from "./ModelParameterField";
 
 interface Props {
@@ -100,10 +101,12 @@ function Editor({
     });
   };
   const effective = { ...defaults, ...parameters };
+  const samplingValid = samplingComplete(parameters, rules);
   return (
     <Form
       layout="vertical"
       onFinish={() => {
+        if (!samplingValid) return;
         const next = edited
           ? withAgentParameterValues(value, parameters)
           : { ...value };
@@ -187,7 +190,11 @@ function Editor({
             {t("modelProfile.useOutletDefault")}
           </Button>
         )}
-      <Button type="primary" htmlType="submit" disabled={disabled}>
+      <Button
+        type="primary"
+        htmlType="submit"
+        disabled={disabled || !samplingValid}
+      >
         {t("common.confirm")}
       </Button>
     </Form>

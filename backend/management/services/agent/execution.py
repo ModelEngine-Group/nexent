@@ -93,21 +93,19 @@ from management.services.memory.provider import (
     _build_ingestion_event_service,
     build_memory_service_for_fa_extraction,
 )
-from management.services.agent.run_state import (
+from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
-    runtime_thread_manager,
-)
+from runtime.thread_management import runtime_thread_manager
 from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )
 
-from infrastructure.runtime_output import RuntimeOutputState, is_runtime_event
-from infrastructure.nexent_output import NexentSSEAdapter
+from management.services.conversation.runtime_output import RuntimeOutputState, is_runtime_event
+from management.services.conversation.nexent_output import NexentSSEAdapter
 
 logger = logging.getLogger(__name__)
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()

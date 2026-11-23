@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
     DEFAULT_TOOL_CALL_TIMEOUT,
-    MCP_REQUEST_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_FAILURE_POLICY,
     NEXENT_SANDBOX_WORKSPACE_MODE,
@@ -19,15 +18,15 @@ from contracts.constants.environment import (
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     NEXENT_MCP_INTERNAL_TOKEN,
 )
+from management.configuration.runtime import get_config_snapshot
 from contracts.tool import ToolParamsRequest
-from infrastructure.http.client import create_httpx_client
-from infrastructure.redis import get_redis_client
+from backend.http.client import create_httpx_client
+from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
-from management.db.client import minio_client
+from infrastructure.object_storage.client import minio_client
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.preparation.compiler import create_agent_config
 from management.services.agent.preparation.inputs import (
@@ -45,6 +44,7 @@ from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
+from nexent.monitor.phase_capture import capture_preparation
 from runtime.adapters.nexent.factory import build_run_info
 
 logger = logging.getLogger("create_agent_info")
@@ -222,6 +222,7 @@ async def preflight_mcp_header_passthrough(
     validate_mcp_header_passthrough(metadata, agent_record, mcp_host)
 
 
+@capture_preparation
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -340,7 +341,9 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
-    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.profiles.outlet_storage import (
+        encode_resolved_model_profile,
+    )
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
     captured_records = {}
     outlet_profiles = {}
@@ -422,7 +425,9 @@ async def create_agent_run_info(
                                     mc.reasoning_budget_tokens = v
                                 continue
                             if k == "__custom__" and isinstance(v, dict):
-                                from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+                                from nexent.core.model_service.profiles.protocol_parameters import (
+                                    without_outlet_token_limits,
+                                )
 
                                 for custom_key, custom_value in without_outlet_token_limits(v).items():
                                     # A null custom value is an explicit
@@ -562,6 +567,7 @@ async def create_agent_run_info(
     apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
+    configuration = get_config_snapshot()
     if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
         from management.services.model.runtime_options import compile_bound_model_profile
 
@@ -580,11 +586,11 @@ async def create_agent_run_info(
         # Only surface the kwarg when the caller actually sent metadata, so
         # agents without metadata keep the exact pre-existing payload shape.
         **({"runtime_metadata": metadata} if metadata is not None else {}),
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         collaboration_timeout_seconds=RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
         tool_call_timeout_seconds=DEFAULT_TOOL_CALL_TIMEOUT,
+        mcp_request_timeout_seconds=configuration.get("MCP_REQUEST_TIMEOUT_SECONDS"),
         history=converted_history,
-        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_tool_timeout_seconds=configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS"),
         mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
         context_budget_snapshot=getattr(
@@ -610,7 +616,9 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
     """Give the root a private alias; never change a child Agent's model defaults."""
     if not preferences:
         return
-    from management.services.conversation.model_preferences import merge_model_preferences
+    from management.services.conversation.model_preferences import (
+        merge_model_preferences,
+    )
 
     for configured in model_list:
         profile = getattr(configured, "resolved_profile", None)
@@ -621,7 +629,9 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
             return
         original = (outlet_profiles or {}).get(profile.outlet_id)
         if original is not None:
-            from management.services.agent.model_parameters import merge_runtime_model_parameters
+            from management.services.agent.model_parameters import (
+                merge_runtime_model_parameters,
+            )
 
             resolved = merge_runtime_model_parameters(original, (agent_overrides or {}).get(str(profile.outlet_id), {}), values)
         else:

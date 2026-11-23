@@ -6,7 +6,7 @@ import logging
 import time
 
 from contracts.constants.environment import MEMORY_QUERY_TIMEOUT_SECONDS, MEMORY_WRITE_TIMEOUT_SECONDS
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from nexent.core.concurrency import ManagedTaskSpec
 
 logger = logging.getLogger(__name__)

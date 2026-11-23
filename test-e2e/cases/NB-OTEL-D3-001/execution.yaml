@@ -1,0 +1,26 @@
+schema_version: '1.0'
+case_id: NB-OTEL-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: NB-OTEL-D3-001
+acceptance_bindings:
+  AC-STREAM:
+  - test_nb_otel_001_real_stream_and_trace_ancestry
+  AC-AUTH:
+  - test_nb_otel_001_unauthorized_trace_without_runtime
+  AC-DISCONNECT:
+  - test_nb_otel_001_disconnect_ends_http_but_keeps_persisted_run
+timeout_seconds: 360
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Uses an operator-provisioned real Agent, bound skill, model and Phoenix from the
+  private NEXENT_TEST_CREDENTIALS file. No common factory or controlled service
+  creates these real dependencies. The script closes HTTP response contexts and
+  intentionally retains its owned conversations for trace review under the Case
+  cleanup contract. Missing private configuration or live dependencies remains
+  an execution blocker; an empty factory list is not evidence of readiness.

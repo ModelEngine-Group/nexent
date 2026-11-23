@@ -7,11 +7,11 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from contracts.constants.constants import LANGUAGE
 from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
-    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
-from contracts.constants.constants import LANGUAGE
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import (
@@ -46,13 +46,17 @@ from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
 from management.services.model.resolver import is_model_available
-from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
     _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     _resolve_context_budget,
     _resolve_input_budget,
 )
-from nexent.core.agents.contracts.config import AgentConfig, AgentVerificationConfig, ToolConfig
+from management.services.model.run_controls import select_configured_model_id
+from nexent.core.agents.contracts.config import (
+    AgentConfig,
+    AgentVerificationConfig,
+    ToolConfig,
+)
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
@@ -61,8 +65,9 @@ from nexent.core.agents.context import (
 from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.concurrency import ManagedTaskSpec
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from nexent.memory import models as memory_models
+from nexent.monitor.phase_capture import trace_phase
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -236,12 +241,13 @@ async def create_agent_config(
         if tool.name not in memory_tool_names
         and tool.class_name not in {"StoreMemoryTool", "SearchMemoryTool"}
     ]
+    parallel_timeout = get_config_snapshot().get("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS")
 
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
     tool_list.append(
-        _build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
+        _build_parallel_executor_tool_config(parallel_timeout)
     )
 
     if (
@@ -281,18 +287,30 @@ async def create_agent_config(
     long_term_memory_items = []
     pre_run_tool_events = []
     if memory_context is not None:
+        memory_phase_attributes = {
+            "agent.id": str(agent_id), "agent.name": agent_info.get("name", ""),
+        }
+        display_name = agent_info.get("display_name")
+        if isinstance(display_name, str) and display_name.strip():
+            memory_phase_attributes["agent.display_name"] = display_name.strip()
         store_tool = _build_runtime_store_tool(
             memory_context, tenant_id=tenant_id, user_id=user_id, agent_id=str(agent_id),
             version_no=version_no, conversation_id=conversation_id,
+            phase_attributes=memory_phase_attributes,
         )
         if store_tool is not None:
             tool_list.append(store_tool)
-        long_term_memory_items, fixed_search_result = await _prepare_runtime_memory(
-            tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
-            conversation_id=str(conversation_id) if conversation_id is not None else None,
-            query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
-            deadline=memory_query_deadline,
-        )
+        with trace_phase(
+            "memory.presearch", input_value={"query": last_user_query or "", "top_k": 5},
+            attributes=memory_phase_attributes,
+        ) as phase:
+            long_term_memory_items, fixed_search_result = await _prepare_runtime_memory(
+                tenant_id=str(tenant_id), user_id=str(user_id), agent_id=str(agent_id),
+                conversation_id=str(conversation_id) if conversation_id is not None else None,
+                query=last_user_query or "", external_top_k=memory_context.user_config.external_provider_top_k,
+                deadline=memory_query_deadline, phase_attributes=memory_phase_attributes,
+            )
+            phase.set_output(fixed_search_result)
         if fixed_search_result:
             pre_run_tool_events = [
                 {"type": "tool", "content": "", "tool_name": "search_memory",
@@ -547,19 +565,23 @@ def _load_authorized_memory_context(user_id, tenant_id, agent_id):
     return context
 
 
-def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, version_no, conversation_id):
+def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, version_no, conversation_id,
+                              phase_attributes=None):
     try:
         from management.services.memory.provider import build_memory_service_for_agent
 
-        memory_service = build_memory_service_for_agent(
-            tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, version_no=version_no,
-        )
+        with trace_phase(
+            "memory.initialize", input_value={"service": "memory"}, attributes=phase_attributes,
+        ) as phase:
+            memory_service = build_memory_service_for_agent(
+                tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, version_no=version_no,
+            )
+            if memory_service is None:
+                raise RuntimeError("MemoryService builder returned no service")
+            phase.set_output({"service": "memory", "ready": True})
     except Exception as exc:
         logger.warning("event=memory_service_init_failed error_type=%s", type(exc).__name__)
         return None
-    if memory_service is None:
-        return None
-
     memory_metadata = {
         "memory_user_config": memory_context.user_config,
         "tenant_id": tenant_id,
@@ -606,14 +628,23 @@ def _build_runtime_store_tool(memory_context, *, tenant_id, user_id, agent_id, v
     )
 
 
-async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline):
+async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_id, query, external_top_k, deadline,
+                                  phase_attributes=None):
     from management.services.memory.context import get_memory_context_service
     from management.services.memory.records import _resolve_tenant_embedding_model_info
     from management.services.memory.runtime_embedding import compute_runtime_embedding
 
-    service = await optional_memory_io(
-        "memory-context-service", get_memory_context_service, deadline=deadline,
-    )
+    def initialize_context():
+        with trace_phase(
+            "memory.initialize", input_value={"service": "context"}, attributes=phase_attributes,
+        ) as phase:
+            service = get_memory_context_service()
+            if service is None:
+                raise RuntimeError("MemoryContextService provider returned no service")
+            phase.set_output({"service": "context", "ready": True})
+            return service
+
+    service = await optional_memory_io("memory-context-service", initialize_context, deadline=deadline)
     if service is None:
         return [], "Memory search unavailable: retrieval pipeline is not configured. Continuing without memory results."
     scope = dict(tenant_id=tenant_id, user_id=user_id, agent_id=agent_id, conversation_id=conversation_id)
@@ -622,7 +653,12 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
     )
 
     def load_long_term():
-        return asyncio.run(service.build_context(**scope, layers=["tenant", "user"], external_results=[]))
+        with trace_phase(
+            "memory.load_context", input_value={"layers": ["tenant", "user"]}, attributes=phase_attributes,
+        ) as phase:
+            context = asyncio.run(service.build_context(**scope, layers=["tenant", "user"], external_results=[]))
+            phase.set_output(_build_long_term_memory_items(context) if context else [])
+            return context
 
     async def search_vectors():
         if not query:
@@ -643,9 +679,14 @@ async def _prepare_runtime_memory(*, tenant_id, user_id, agent_id, conversation_
         if provider is None or not query:
             return []
         ext_request = request.model_copy(update={"top_k": external_top_k})
-        results = asyncio.run(provider.search_all_enabled(
-            tenant_id=tenant_id, request=ext_request, limit=external_top_k, deadline=deadline - 0.05,
-        ))
+        with trace_phase(
+            "memory.external_search", input_value={"query": query, "top_k": external_top_k},
+            attributes=phase_attributes,
+        ) as phase:
+            results = asyncio.run(provider.search_all_enabled(
+                tenant_id=tenant_id, request=ext_request, limit=external_top_k, deadline=deadline - 0.05,
+            ))
+            phase.set_output(results)
         return [
             memory_models.ExternalMemoryItem(
                 id=str(result.memory_id or result.external_id or ""), content=result.content,

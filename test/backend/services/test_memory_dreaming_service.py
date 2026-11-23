@@ -37,7 +37,14 @@ def test_ac007_lock_busy_skips(monkeypatch):
     finish.assert_called_once_with(41, status="skipped", reason="lock_busy")
 
 
-def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
+@pytest.mark.parametrize(
+    "thresholds, generation_status",
+    [
+        ({}, "summarized"),
+        ({"long_term_length_tolerance_percent": 0}, "mechanical_fallback"),
+    ],
+)
+def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch, thresholds, generation_status):
     now = datetime.utcnow()
     record = {
         "memory_id": 7,
@@ -80,7 +87,7 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     )
     monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_dreaming_db.get_thresholds",
-        lambda *_args: {},
+        lambda *_args: {"long_term_max_chars": 100, **thresholds},
     )
     monkeypatch.setattr(
         "management.services.memory.dreaming.service.memory_retrieval_hit_db.aggregate_dreaming_stats",
@@ -125,12 +132,14 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "management.services.memory.dreaming.service.memory_long_term_db.create_and_activate",
         create_version,
     )
+    text = "## Transaction Preferences\n\n- Always prefer stable transaction rollback behavior"
+    summary = text + "x" * (104 - len(text))
     result = MemoryDreamingService(
         record_service=record_service,
         summarizer=lambda _request: __import__(
             "nexent.memory.dreaming", fromlist=["DreamingSummarizationOutput"]
         ).DreamingSummarizationOutput(
-            markdown="## Transaction Preferences\n\n- Always prefer stable transaction rollback behavior"
+            markdown=summary
         ),
     ).run(
         tenant_id="t",
@@ -153,7 +162,7 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     assert version_payload["expected_active_version_id"] is None
     assert version_payload["evidence_ids"] == ["7"]
     assert version_payload["source"] == "dreaming"
-    assert version_payload["generation_audit"]["status"] == "summarized"
+    assert version_payload["generation_audit"]["status"] == generation_status
     finish_payload = finish.call_args.kwargs
     assert finish_payload["published_version_id"] == 1
     assert finish_payload["decisions"] == result["decisions"]

@@ -90,9 +90,11 @@ services:
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: migrate
@@ -116,7 +118,7 @@ services:
         max-file: "3" # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/config_service.py"]
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.config_service"]
 
   nexent-runtime:
     image: ${NEXENT_IMAGE}
@@ -131,9 +133,11 @@ services:
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
+      - ${ROOT_DIR}/trajectory:/mnt/nexent-data/trajectory
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
@@ -154,7 +158,7 @@ services:
         max-file: "3" # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/runtime_service.py"]
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.runtime_service"]
 
   nexent-mcp:
     image: ${NEXENT_IMAGE}
@@ -170,6 +174,8 @@ services:
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
+      GATEWAY_SERVICE_URL: "http://nexent-gateway:5013"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
@@ -189,42 +195,48 @@ services:
         max-file: "3" # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/mcp_service.py"]
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.mcp_service"]
 
-  nexent-northbound:
-    image: ${NEXENT_IMAGE}
-    container_name: nexent-northbound
+  # Keep the public service name and port for existing clients.
+  nexent-gateway:
+    image: ${NEXENT_GATEWAY_IMAGE:-nexent/nexent-gateway:latest}
+    container_name: nexent-gateway
     restart: always
     ports:
-      - "5013:5013" # Northbound service port
-    volumes:
-      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
-      - ../../sql:/opt/nexent/sql:ro
-      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
-      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
-      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+      - "5013:5013"
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
-      <<: [*minio-vars, *es-vars]
-      NEXENT_SQL_STARTUP_MODE: wait
-      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
-      skip_proxy: "true"
-      UMASK: "0022"
-    env_file:
-      - ../../env/.env
-      - ../../env/monitoring.env
-    user: root
+      POSTGRES_HOST: "${POSTGRES_HOST:-nexent-postgresql}"
+      POSTGRES_PORT: "${POSTGRES_PORT:-5432}"
+      POSTGRES_DB: "${POSTGRES_DB:-nexent}"
+      POSTGRES_USER: "${POSTGRES_USER:-root}"
+      NEXENT_POSTGRES_PASSWORD: "${NEXENT_POSTGRES_PASSWORD:?PostgreSQL password is required}"
+      GATEWAY_AUTH_ENABLED: "true"
+      GATEWAY_PORT: "5013"
+      JWT_ISSUER: "${JWT_ISSUER:-nexent}"
+      JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"
+      GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
+      DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
+      GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
+      GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
+      GATEWAY_OPS_URL: "http://nexent-ops:${OPS_PORT:-5016}"
+      GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
+    entrypoint: ["python", "-m", "backend.http.gateway_service"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "gateway.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
-      nexent-elasticsearch:
-        condition: service_healthy
+      - nexent-config
+      - nexent-runtime
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"
+        max-file: "3"
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/northbound_service.py"]
 
   nexent-web:
     image: ${NEXENT_WEB_IMAGE}
@@ -240,9 +252,9 @@ services:
       - ../../env/.env
     environment:
       - TZ=${TZ:-Asia/Shanghai}
-      - HTTP_BACKEND=http://nexent-config:5010
-      - WS_BACKEND=ws://nexent-runtime:5014
-      - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
+      - HTTP_BACKEND=http://nexent-gateway:5013
+      - WS_BACKEND=ws://nexent-gateway:5013
+      - RUNTIME_HTTP_BACKEND=http://nexent-gateway:5013
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
       - MODEL_ENGINE_ENABLED=${MODEL_ENGINE_ENABLED:-false}
@@ -285,12 +297,13 @@ services:
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
+      ELASTICSEARCH_SERVICE: "http://nexent-gateway:5013/api"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
-      PYTHONPATH: "/opt/backend"
+      PYTHONPATH: "/opt:/opt/backend"
       skip_proxy: "true"
     env_file:
       - ../../env/.env
@@ -303,7 +316,7 @@ services:
       - nexent
     entrypoint: >
       /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py'
+        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python -m backend.http.data_process_service'
       "
 
     logging:

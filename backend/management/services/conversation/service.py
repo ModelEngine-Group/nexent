@@ -27,6 +27,7 @@ from contracts.conversation import (
 )
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
+from infrastructure.trace.trajectory_runtime import request_conversation_cleanup
 from management.db.conversation.repository import branch_conversation, create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 # Public read facade consumed by Agent subscriptions; these are intentional re-exports.
 from management.db.conversation.repository import (  # noqa: F401
@@ -39,8 +40,8 @@ from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
-from infrastructure.runtime_output import is_runtime_event, project_runtime_history
-from infrastructure.nexent_output import normalize_nexent_history
+from management.services.conversation.runtime_output import is_runtime_event, project_runtime_history
+from management.services.conversation.nexent_output import normalize_nexent_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -265,10 +266,8 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist the user-side message (one message row only).
-
-    User text and optional annotations share the atomic turn reservation.
-    """
+    """Reserve one user turn and bind its committed identity to trajectory capture."""
+    request.__dict__.pop("_trajectory_message_receipt", None)
     source = MessageSource(getattr(request, "_message_source", MessageSource.CHAT))
     retry_id = getattr(request, "retry_user_message_id", None)
     if type(retry_id) is int:
@@ -276,19 +275,24 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
             request.conversation_id, user_id, retry_id, request.retry_message_index,
             strip_current_time_prefix(request.query), request.minio_files,
         )
-        request._runtime_user_message_id = message_id
-        request._runtime_user_message_index = message_index
-        return
-    annotations = normalize_message_annotations(getattr(request, "annotations", None))
-    message_id, message_index = append_conversation_user_message(
-        request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
-        **({"message_source": source} if source != MessageSource.CHAT else {}),
-        **({"annotations": annotations} if annotations is not None else {}),
-        **({"clarification_response": request.clarification_response.model_dump(mode="json")}
-           if getattr(request, "clarification_response", None) is not None else {}),
-    )
+    else:
+        annotations = normalize_message_annotations(getattr(request, "annotations", None))
+        message_id, message_index = append_conversation_user_message(
+            request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
+            **({"message_source": source} if source != MessageSource.CHAT else {}),
+            **({"annotations": annotations} if annotations is not None else {}),
+            **({"clarification_response": request.clarification_response.model_dump(mode="json")}
+               if getattr(request, "clarification_response", None) is not None else {}),
+        )
     request._runtime_user_message_id = message_id
     request._runtime_user_message_index = message_index
+    if type(message_id) is int and 0 < message_id <= 2147483647:
+        request.__dict__["_trajectory_message_receipt"] = {
+            "message_id": str(message_id),
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "conversation_id": str(request.conversation_id),
+        }
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -733,6 +737,22 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
         raise Exception(str(e))
 
 
+def _request_trajectory_cleanup(conversation_ids, user_id):
+    """Keep committed deletes successful; maintenance retries a missed handoff."""
+    if not conversation_ids:
+        return
+    try:
+        if request_conversation_cleanup(conversation_ids, user_id):
+            return
+    except Exception as error:  # noqa: BLE001 - A telemetry handoff cannot roll back the committed conversation delete.
+        logger.warning(
+            "trajectory.conversation_cleanup_deferred count=%s exception_type=%s",
+            len(conversation_ids), type(error).__name__,
+        )
+        return
+    logger.warning("trajectory.conversation_cleanup_deferred count=%s", len(conversation_ids))
+
+
 def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     """
     Delete specified conversation
@@ -759,6 +779,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
 
+        _request_trajectory_cleanup([conversation_id], user_id)
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
@@ -800,6 +821,7 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
             )
 
         deleted_ids = delete_conversations_batch(conversation_ids, user_id)
+        _request_trajectory_cleanup(deleted_ids, user_id)
         deleted_set = set(deleted_ids)
         failed_ids = [cid for cid in conversation_ids if cid not in deleted_set]
 

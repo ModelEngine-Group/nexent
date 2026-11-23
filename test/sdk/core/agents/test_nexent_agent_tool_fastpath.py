@@ -36,7 +36,7 @@ def factory_execution(mocker, tmp_path):
     mocker.patch.object(factory, "create_tool", side_effect=lambda config: (
         script_tool if config.class_name == "RunSkillScriptTool" else tool
     ))
-    mocker.patch.object(agent_module, "_wrap_tool_with_monitoring", side_effect=lambda value, _: value)
+    mocker.patch.object(agent_module, "_wrap_tool_with_monitoring", side_effect=lambda value, _, *, observer=None: value)
     mocker.patch.object(agent_module, "CoreAgent", side_effect=lambda **kwargs: SimpleNamespace(
         **kwargs, python_executor=kwargs["executor"],
     ))

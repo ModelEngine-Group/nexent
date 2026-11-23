@@ -30,6 +30,10 @@ feature:
       to 300 seconds); the earliest applicable tool, collaboration, A2A request or parent deadline applies. Concurrent
       and repeated local Jiuwen invocations share one lifecycle-owned Runner loop while retaining independent task/session/cancellation/observer
       ownership; cancelling one invocation must not stop unrelated runs.
+  - rule_id: JIUWEN-RESOURCES-RULE-006
+    description: Only the root run may expose ask_user or publish human_interaction. Local children of either Core
+      return missing information to their parent, including recursive and mixed-Core calls; concurrent roots retain
+      independent clarification permissions.
   required_test_stages:
   - D3
   - D5

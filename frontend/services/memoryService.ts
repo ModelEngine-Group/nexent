@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18next from "i18next";
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
@@ -574,6 +576,7 @@ export interface DreamingAudit {
 export interface DreamingParameters {
   source_limit: number;
   long_term_max_chars: number;
+  long_term_length_tolerance_percent: number;
   summarization_max_attempts: number;
 }
 
@@ -594,6 +597,7 @@ export interface DreamingSchedule {
   min_unique_queries?: number | null;
   source_limit?: number | null;
   long_term_max_chars?: number | null;
+  long_term_length_tolerance_percent?: number | null;
   summarization_max_attempts?: number | null;
 }
 

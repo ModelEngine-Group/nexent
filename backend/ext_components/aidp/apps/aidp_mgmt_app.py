@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
-import gateway.authentication.auth as auth_utils_module
+import management.services.permission.identity.session as auth_utils_module
 from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, UnauthorizedError
@@ -78,6 +78,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
+import management.services.permission.identity.session as auth_utils_module
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.tag.library import TagManagementService

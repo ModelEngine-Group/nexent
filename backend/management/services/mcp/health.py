@@ -3,12 +3,12 @@
 import asyncio
 from contextlib import AsyncExitStack
 
-from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS
+from management.configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
 from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from infrastructure.http.client import create_httpx_client
+from backend.http.client import create_httpx_client
 from management.services.mcp.common import (
     logger,
 )
@@ -117,11 +117,12 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
             )
 
         async def list_mcp_tools() -> list:
+            connection_timeout = get_config_snapshot().get("MCP_REQUEST_TIMEOUT_SECONDS")
             client = Client(transport=transport)
             async with AsyncExitStack() as stack:
                 await asyncio.wait_for(
                     stack.enter_async_context(client),
-                    timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                    timeout=connection_timeout,
                 )
                 # Verify the server can actually serve tools.
                 # This exercises API key validation and end-to-end connectivity,
@@ -166,11 +167,12 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
             )
 
         async def connect_client() -> bool:
+            connection_timeout = get_config_snapshot().get("MCP_REQUEST_TIMEOUT_SECONDS")
             client = Client(transport=transport)
             async with AsyncExitStack() as stack:
                 await asyncio.wait_for(
                     stack.enter_async_context(client),
-                    timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                    timeout=connection_timeout,
                 )
                 return client.is_connected()
 

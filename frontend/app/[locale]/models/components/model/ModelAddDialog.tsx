@@ -2,6 +2,7 @@
 
 "use client";
 
+import { samplingComplete } from "@/lib/modelSamplingParameters";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModelHttpConnectionSettings } from "@/components/model/ModelHttpConnectionSettings";
@@ -1948,6 +1949,7 @@ function RowSettingsDialog({
   const isEmbedding = isEmbeddingModelType(row.model_type);
 
   function handleSave() {
+    if (!samplingComplete(settings)) return;
     onSave({
       displayName: displayName.trim() || undefined,
       settings: Object.keys(settings).length > 0 ? settings : undefined,
@@ -2006,7 +2008,7 @@ function RowSettingsDialog({
           <Button variant="outline" onClick={onClose}>
             {t("common.cancel", { defaultValue: "取消" })}
           </Button>
-          <Button onClick={handleSave}>
+          <Button onClick={handleSave} disabled={!samplingComplete(settings)}>
             {t("common.save", { defaultValue: "保存" })}
           </Button>
         </div>

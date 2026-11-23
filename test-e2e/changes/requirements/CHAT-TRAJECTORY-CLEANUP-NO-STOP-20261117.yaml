@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CLEANUP-NO-STOP-20261117
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-CLEANUP-NO-STOP-20261117
+  title: 移除手动轨迹清理中的停止批次操作
+  description: 确认后自动执行全部批次，执行中无停止提示和关闭入口；成功自动关闭，失败及部分完成保留关闭和重试。
+  affected_features:
+    existing: [CHAT-TRAJECTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-TRAJECTORY-JOURNEY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 执行中不显示停止按钮、关闭按钮或叉号，Esc不取消请求，完成全部批次后关闭并刷新。
+    - 请求失败及部分完成可查看、关闭和重试，组件卸载取消未完成请求且不再续批。
+    reason: 仅修改前端清理交互，使用组件与hook回归；无Python产品变更，浏览器边界加强现有D4。
+    test_selectors:
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryHooks.test.tsx
+  notes: 直接更新现有清理范围SPEC的AC-04，基线824348864；复用runtime责任域和自包含D4路由与浏览器上下文，原teardown释放资源。
+    无新增共享准备资产，完整浏览器、真实PG和部署验收沿用用户暂缓安排，组件结果不代替完整Case验收。

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from contracts.errors.exceptions import IncorrectInviteCodeException
 from contracts.roles import invitation_roles, primary_role
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import create_account
 from management.db.identity.group import add_user_to_group
 from management.db.identity.invitation import query_invitation_by_code
@@ -18,7 +18,7 @@ from management.db.models import (
     TenantInvitationCode,
     TenantInvitationRecord,
 )
-from management.utils.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 from management.utils.serialization import convert_string_to_list
 
 

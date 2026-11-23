@@ -411,7 +411,7 @@ def test_top_p_is_explicit_without_claiming_unknown_capability(sources):
     assert value.capabilities["sampling"]["top_p"]["status"] == "unknown"
 
 
-@pytest.mark.parametrize("value", [0, 1, 0.85])
+@pytest.mark.parametrize("value", [0.005, 0.995, 1])
 def test_top_p_accepts_explicit_values(sources, value):
     from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
 
@@ -422,7 +422,7 @@ def test_top_p_accepts_explicit_values(sources, value):
     assert policy.parameter_values["top_p"] == value
 
 
-@pytest.mark.parametrize("value", [-0.01, 1.01])
+@pytest.mark.parametrize("value", [-0.01, 0, 1.01])
 def test_top_p_rejects_out_of_range_values(sources, value):
     from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
     from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules

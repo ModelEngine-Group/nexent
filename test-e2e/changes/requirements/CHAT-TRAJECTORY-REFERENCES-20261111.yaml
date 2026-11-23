@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-REFERENCES-20261111
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-REFERENCES-20261111
+  title: 移除轨迹密钥并使用服务端引用状态
+  description: 随机引用ID映射有界服务端状态，删除签名与密钥配置，保持各次授权、资源和文件版本核验。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 无需密钥读取服务初始化，删除旧配置。
+    - 随机引用的身份/类型、过期、缓存淘汰、状态副本与字节预算。
+    - 目录/集合/正文/清理原授权与固定范围回归。
+    reason: 既有UT证明签名和业务校验；替换为服务端状态需要新的生命周期单位断言，真实HTTP边界加强原D2，无新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_references.py
+    - test/backend/services/trajectory/test_primitives.py
+    - test/backend/services/trajectory/test_contracts_and_cache.py
+    - test/backend/services/trajectory/test_cleanup.py
+    - test/backend/services/trajectory/test_chat_content.py
+    - test/backend/services/trajectory/test_collection.py
+    - test/backend/utils/test_trajectory_environment.py
+  notes: Ownership runtime. QUERY-D2 owns temporary root, TestClient and managed workers with existing finally teardown
+    and active_count assertion; families=[] remains self-contained. Formal integration acceptance remains deferred
+    by user. Existing uncommitted Agent version implementation is preserved.

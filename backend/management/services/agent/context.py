@@ -6,8 +6,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from contracts.constants.constants import MESSAGE_ROLE
 from contracts.agent import AgentRunContext
+from contracts.constants.constants import MESSAGE_ROLE
+from contracts.constants.environment import APP_VERSION
 from nexent.core.agents.contracts.context import ContextInput, ContextItemInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
@@ -155,13 +156,40 @@ def strip_current_time_prefix(query: str | None) -> str | None:
     return query
 
 
+def trajectory_source_message_id(request, user_id, tenant_id):
+    """Accept only the identity-bound receipt produced by server-side message saving."""
+    receipt = request.__dict__.get("_trajectory_message_receipt")
+    if getattr(request, "is_debug", False) or not isinstance(receipt, dict):
+        return None
+    if (receipt.get("tenant_id"), receipt.get("user_id"), receipt.get("conversation_id")) != (
+        tenant_id, user_id, str(request.conversation_id),
+    ):
+        return None
+    value = receipt.get("message_id")
+    if (
+        type(value) is str and value.isascii() and value.isdecimal()
+        and 0 < len(value) <= 10 and value[0] != "0" and int(value) <= 2147483647
+    ):
+        return value
+    return None
+
+
 def build_agent_run_context(
-    request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict
+    request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict,
+    user_query: str | None = None,
 ):
     """Bind shared monitoring metadata before the compiler resolves memory policy."""
-    from infrastructure.observability.bootstrap import monitoring_manager
+    from infrastructure.trace.bootstrap import monitoring_manager
     from management.services.monitor.identity import resolve_monitoring_user_email
+    from nexent.monitor.local_content import local_capture_enabled
 
+    extra_metadata = {**extra_metadata}
+    extra_metadata.pop("trajectory_source_message_id", None)
+    if local_capture_enabled(monitoring_manager):
+        extra_metadata["app_version"] = APP_VERSION
+        source = trajectory_source_message_id(request, user_id, tenant_id)
+        if source is not None:
+            extra_metadata["trajectory_source_message_id"] = source
     metadata = monitoring_manager.bind_agent_context(
         AgentRunMetadata(
             agent_id=request.agent_id,
@@ -169,7 +197,7 @@ def build_agent_run_context(
             user_id=user_id,
             user_email=resolve_monitoring_user_email(user_id, tenant_id),
             tenant_id=tenant_id,
-            query=request.query,
+            query=user_query if user_query is not None else request.query,
             is_debug=request.is_debug,
             language=language,
             memory_enabled=False if request.is_debug else None,
