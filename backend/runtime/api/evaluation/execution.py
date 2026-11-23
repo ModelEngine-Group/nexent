@@ -12,6 +12,7 @@ from nexent.core.concurrency import ThreadCapacityExceeded, ThreadManagerDrainin
 from contracts.evaluation import EvalRunStatus, EvaluationRunRequest, RuntimeEvaluationTrialRunRequest as TrialRunRequest
 from contracts.errors.exceptions import AppException
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
+from management.services.agent.admission import uses_durable_agent_admission
 from management.services.evaluation.dispatch import read_evaluation_for_dispatch, start_pending_evaluation
 from management.services.execution_coordination import ExecutionAlreadyActiveError, RuntimeCoordinationUnavailableError
 
@@ -25,6 +26,22 @@ def _load_evaluation_executor():
     from management.services.evaluation.runs import execute_agent_evaluation_run
 
     return execute_agent_evaluation_run
+
+
+async def _dispatch_sandbox_evaluation(evaluation_id, tenant_id, user_id, judge_model_id):
+    from management.db.runtime_recovery import claim_owned_evaluation_run, restore_unstarted_evaluation_run
+    from runtime.sandbox_evaluation import dispatch_owned_evaluation
+    from runtime.sandbox_runtime import get_coordinator, require_business_admission
+    from runtime.thread_management import runtime_thread_manager
+
+    claimed = await dispatch_owned_evaluation(
+        tenant_id, user_id, evaluation_id, judge_model_id, _load_evaluation_executor(),
+        manager=runtime_thread_manager, coordinator=get_coordinator(),
+        claim=claim_owned_evaluation_run, restore=restore_unstarted_evaluation_run,
+        admission=require_business_admission,
+    )
+    if not claimed:
+        raise ExecutionAlreadyActiveError("Evaluation is no longer pending")
 
 
 def _load_trial_executor():
@@ -58,6 +75,9 @@ async def trial_run_evaluation_api(
         ) from exc
 
     trial_run_evaluator_impl = _load_trial_executor()
+    from runtime.sandbox_runtime import require_business_admission
+
+    require_business_admission()
     return await trial_run_evaluator_impl(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -102,9 +122,20 @@ async def dispatch_evaluation_run_api(
         if status != EvalRunStatus.PENDING:
             raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"Unsupported evaluation status: {status}")
 
+        from runtime.sandbox_runtime import require_business_admission
+
+        require_business_admission()
+        from runtime.identity import uses_distributed_runtime
+        from runtime.sandbox_coordination import SandboxRunBusy
+
         try:
-            await start_pending_evaluation(evaluation_id, tenant_id, user_id, run.get("judge_model_id"), _load_evaluation_executor())
-        except ExecutionAlreadyActiveError as exc:
+            if uses_distributed_runtime() and not uses_durable_agent_admission():
+                await _dispatch_sandbox_evaluation(evaluation_id, tenant_id, user_id, run.get("judge_model_id"))
+            else:
+                await start_pending_evaluation(
+                    evaluation_id, tenant_id, user_id, run.get("judge_model_id"), _load_evaluation_executor(),
+                )
+        except (ExecutionAlreadyActiveError, SandboxRunBusy) as exc:
             latest = await read_evaluation_for_dispatch(evaluation_id, tenant_id)
             existing = _existing_dispatch_result(evaluation_id, latest.get("status") if latest else None)
             if existing is not None:

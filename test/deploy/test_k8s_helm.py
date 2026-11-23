@@ -701,6 +701,42 @@ def test_startup_recovery_deployments_require_recreate(
     )
 
 
+@pytest.mark.parametrize("network_verified", [False, True])
+def test_fixed_runtime_replicas_render_with_kubernetes_system_sandbox(
+    chart_dirs: dict[str, Path], network_verified: bool,
+) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        [
+            *_application_dynamic_args(),
+            "--set", "global.maintenanceEpoch=abbccdef-1234-4444-8888-abcabcabcabc",
+            "--set", "global.sandboxProvider=kubernetes",
+            "--set", f"global.sandboxNetworkPolicyVerified={str(network_verified).lower()}",
+            "--set", "nexent-runtime.replicaCount=3",
+        ],
+    )
+    if not network_verified:
+        assert rendered.returncode != 0
+        assert "requires an enforced NetworkPolicy" in rendered.stderr
+        return
+
+    assert rendered.returncode == 0, rendered.stderr
+    resources = _documents(rendered.stdout)
+    runtime = next(doc for doc in resources if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "nexent-runtime")
+    assert runtime["spec"]["replicas"] == 3
+    assert runtime["spec"]["strategy"] == {"type": "Recreate"}
+    pod = runtime["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "nexent-runtime-sandbox"
+    env = {entry["name"]: entry for entry in pod["containers"][0]["env"]}
+    assert env["NEXENT_SANDBOX_PROVIDER"]["value"] == "kubernetes"
+    assert env["NEXENT_SANDBOX_DEFAULT_LEVEL"]["value"] == "kubernetes"
+    assert env["NEXENT_SANDBOX_DEFAULT_SCOPE"]["value"] == "system"
+    assert env["NEXENT_RECOVERY_MODE"]["value"] == "maintenance"
+    assert env["NEXENT_RUNTIME_POD_UID"]["valueFrom"]["fieldRef"]["fieldPath"] == "metadata.uid"
+    assert any(doc["kind"] == "NetworkPolicy" and doc["metadata"]["name"] == "nexent-sandbox-control" for doc in resources)
+
+
 def test_stateless_web_can_still_be_scaled(chart_dirs: dict[str, Path]) -> None:
     rendered = _template(
         chart_dirs["application"],

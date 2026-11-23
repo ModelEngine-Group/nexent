@@ -107,6 +107,7 @@ from management.services.conversation.runtime_output import RuntimeOutputState, 
 from management.services.conversation.nexent_output import NexentSSEAdapter
 
 logger = logging.getLogger(__name__)
+from runtime.identity import associate_run_request, execution_conversation_id, reference_options, runtime_journal_call
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
@@ -246,12 +247,12 @@ async def _consume_agent_stream_producer(
                 run_info = agent_run_manager.get_agent_run_info(
                     conversation_id, user_id
                 )
-                _unregister_agent_run_after_execution(
-                    conversation_id,
-                    user_id,
-                    status="failed",
-                    agent_run_info=run_info,
-                )
+                channel_ref = channel.__dict__.get('_runtime_run_reference')
+                info_ref = run_info.__dict__.get('_runtime_run_reference') if run_info is not None else None
+                if channel_ref is None or (info_ref is not None and info_ref.run_id == channel_ref.run_id):
+                    _unregister_agent_run_after_execution(
+                        conversation_id, user_id, status='failed', agent_run_info=run_info,
+                    )
             except Exception:
                 logger.exception(
                     "Failed to unregister incomplete producer conversation=%s",
@@ -263,6 +264,7 @@ async def _consume_agent_stream_producer(
                     user_id=user_id,
                     status="failed",
                     **({"generation": generation} if generation is not None else {}),
+                    **({'expected_channel': channel} if reference_options(channel) else {}),
                 )
             except Exception:
                 logger.exception(
@@ -290,20 +292,24 @@ async def _consume_agent_stream_producer(
         )
 
 
-async def _is_runtime_cancelled(conversation_id, user_id, reservation, generation) -> bool:
+async def _is_runtime_cancelled(conversation_id, user_id, reservation, generation, *, run_ref=None) -> bool:
     if reservation is not None:
         return await runtime_state_service.is_execution_cancelled_async(
             user_id, conversation_id, reservation.execution_id, generation,
         )
-    return await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id)
+    return await runtime_state_service.is_cancelled_async(
+        user_id=user_id, conversation_id=conversation_id,
+        **({"run_ref": run_ref} if run_ref is not None else {}),
+    )
 
 
 async def _poll_runtime_cancel_signal(
     conversation_id: int, user_id: str, stop_event, cancellation_scope=None, *, reservation=None, generation=None,
+    run_ref=None,
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
-        if await _is_runtime_cancelled(conversation_id, user_id, reservation, generation):
+        if await _is_runtime_cancelled(conversation_id, user_id, reservation, generation, run_ref=run_ref):
             stop_event.set()
             if cancellation_scope is not None:
                 cancellation_scope.cancel()
@@ -317,11 +323,11 @@ async def _poll_runtime_cancel_signal(
 
 
 async def _cancel_task_on_runtime_signal(
-    conversation_id: int, user_id: str, task: asyncio.Task, *, reservation=None, generation=None,
+    conversation_id: int, user_id: str, task: asyncio.Task, *, reservation=None, generation=None, run_ref=None,
 ) -> None:
     """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
     while not task.done():
-        if await _is_runtime_cancelled(conversation_id, user_id, reservation, generation):
+        if await _is_runtime_cancelled(conversation_id, user_id, reservation, generation, run_ref=run_ref):
             task.cancel()
             logger.info(
                 "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
@@ -413,7 +419,8 @@ async def _stream_agent_chunks(
     generation_kwargs = {"generation": execution_generation} if execution_generation is not None else {}
     if channel is None:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id, user_id=user_id, **generation_kwargs,
+            conversation_id=execution_conversation_id(agent_request), user_id=user_id,
+            **generation_kwargs, **reference_options(agent_request),
         )
 
     # Persist the parent ConversationMessage row up front with status='streaming'
@@ -449,12 +456,17 @@ async def _stream_agent_chunks(
                 )
             if execution_state is not None:
                 execution_state.assistant_message_id = streaming_message_id
+            if reference_options(agent_request) and streaming_message_id is not None:
+                await runtime_journal_call('associate-assistant-message', associate_run_request,
+                                           agent_request, assistant_message_id=streaming_message_id)
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True
             )
             if execution_state is not None:
                 execution_state.fail("AUTOMATION_MESSAGE_CREATE_FAILED", "Assistant message could not be created.")
+                raise
+            if reference_options(agent_request):
                 raise
 
     # Tracks the unit currently being accumulated in memory. Assistant output
@@ -474,12 +486,13 @@ async def _stream_agent_chunks(
         )
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
-            conversation_id=_agent_run_identifier(agent_request) if execution_generation is not None else agent_request.conversation_id,
+            conversation_id=_agent_run_identifier(agent_request) if execution_generation is not None else execution_conversation_id(agent_request),
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
             cancellation_scope=agent_run_info.cancellation_scope,
             reservation=agent_request.__dict__.get("_runtime_execution_reservation"),
             generation=execution_generation,
+            **reference_options(agent_request),
         )
     )
 
@@ -1135,10 +1148,11 @@ async def _stream_agent_chunks(
 
         if channel is not None:
             await streaming_channel_manager.complete_channel(
-                conversation_id=agent_request.conversation_id,
+                conversation_id=execution_conversation_id(agent_request),
                 user_id=user_id,
                 status=terminal_status,
                 **generation_kwargs,
+                **({'expected_channel': channel} if reference_options(channel) else {}),
             )
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(

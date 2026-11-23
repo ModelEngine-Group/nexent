@@ -69,7 +69,16 @@ class AgentAutomationLeaseStore:
         if self.maintenance_cutoff is not None:
             self._recovery_time = self.maintenance_cutoff
             return
+        from runtime.identity import uses_distributed_runtime
+
         recovery_time = _utcnow()
+        if uses_distributed_runtime():
+            from runtime.sandbox_runtime import get_runtime_recovery
+
+            result = await run_blocking('automation-scoped-recovery', get_runtime_recovery().recover,
+                                        lane='control-io', owner='runtime')
+            self._recovery_time = recovery_time if result['restart_confirmed'] else None
+            return
         await run_blocking(
             "automation-recover-runs",
             agent_automation_db.recover_orphaned_runs,

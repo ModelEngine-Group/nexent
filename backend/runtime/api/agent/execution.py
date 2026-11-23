@@ -21,6 +21,7 @@ from management.services.permission.identity.session import get_current_user_inf
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from management.services.conversation.creator_execution import start_creation_turn
 from management.services.agent.lifecycle import AgentRunAlreadyActiveError
+from runtime.identity import uses_distributed_runtime
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -96,7 +97,7 @@ async def agent_run_api(
                 "current_version": e.current_version,
             },
         ) from e
-    except AppException:
+    except (AppException, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
@@ -150,7 +151,7 @@ async def northbound_agent_run_api(
     except RuntimeUserMessagePersistenceError as exc:
         logger.exception("Northbound user message persistence failed")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error") from exc
-    except AppException:
+    except (AppException, HTTPException):
         raise
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
@@ -169,6 +170,9 @@ async def nl2agent_run_api(
     resume: bool = Query(False),
 ):
     """Run the shared NL2Agent with the same history path in every UI entrypoint."""
+    from runtime.sandbox_runtime import require_business_admission
+
+    require_business_admission()
     if nl2agent_request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
@@ -246,6 +250,7 @@ async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None
         except RuntimeCoordinationUnavailableError as exc:
             return _runtime_overload_response(exc)
     return stop_agent_tasks(identifier, user_id,
+                            **({"tenant_id": tenant_id} if uses_distributed_runtime() else {}),
                             **({"expected_generation": generation} if generation else {}))
 
 
@@ -262,7 +267,8 @@ async def northbound_agent_stop_api(
         user_id, tenant_id = verify_internal_runtime_jwt(authorization)
         if uses_durable_agent_admission():
             return await stop_shared_agent_tasks(conversation_id, user_id, tenant_id)
-        return stop_agent_tasks(conversation_id, user_id)
+        return stop_agent_tasks(conversation_id, user_id,
+                                **({"tenant_id": tenant_id} if uses_distributed_runtime() else {}))
     except RuntimeCoordinationUnavailableError as exc:
         return _runtime_overload_response(exc)
     except UnauthorizedError as exc:

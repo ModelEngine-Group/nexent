@@ -30,6 +30,10 @@ class GatewayIdentityMiddleware:
         if self.audience == "management" and method == "POST" and path == LOOKUP_PATH:
             # The private endpoint verifies a body-bound service token itself.
             return await self.app(scope, receive, send)
+        if (self.audience == "runtime" and scope["type"] == "http"
+                and method == "POST" and path == "/internal/sandbox/tool-invoke"):
+            # The owner Runtime's callback registry verifies the invocation capability.
+            return await self.app(scope, receive, send)
         try:
             if (self.audience == "runtime" and self.internal_runtime_request is not None
                     and self.internal_runtime_request(method, path)):

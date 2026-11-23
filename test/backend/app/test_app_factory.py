@@ -20,6 +20,7 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
+from contracts.constants import environment
 from backend.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
@@ -126,6 +127,23 @@ class TestCreateApp:
         middleware = next(item for item in app.user_middleware if item.cls is GatewayIdentityMiddleware)
         assert middleware.kwargs["audience"] == "runtime"
         assert middleware.kwargs["internal_runtime_request"] is is_runtime_service_request
+    def test_create_app_forwards_runtime_service_identity_matcher(self, monkeypatch):
+        monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+        monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "runtime-auth-fixture-signing-key")
+        monkeypatch.setattr(
+            "gateway.downstream.internal_tokens.verify_internal_runtime_jwt",
+            lambda _authorization: ("fixture-user", "fixture-tenant"),
+        )
+        app = create_app(
+            enable_monitoring=False,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=lambda method, path: method == "POST" and path == "/service",
+        )
+        app.add_api_route("/service", lambda: {"ok": True}, methods=["POST"])
+        app.add_api_route("/ordinary", lambda: {"ok": True}, methods=["POST"])
+        client = TestClient(app)
+        assert client.post("/service").json() == {"ok": True}
+        assert client.post("/ordinary").status_code == 401
 
 
 class TestRegisterExceptionHandlers:
@@ -914,9 +932,7 @@ class TestGenericHandlerAppExceptionDelegation:
         # Create a request-like object and an AppException
         exc = AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Delegated error")
 
-        response = asyncio.get_event_loop().run_until_complete(
-            generic_handler(None, exc)
-        )
+        response = asyncio.run(generic_handler(None, exc))
 
         assert response.status_code == 400
         body = __import__("json").loads(response.body)

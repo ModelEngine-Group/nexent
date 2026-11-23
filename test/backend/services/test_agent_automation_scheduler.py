@@ -70,7 +70,10 @@ async def test_store_recovers_orphans_before_releasing_all_locks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
+@pytest.mark.parametrize("distributed, restart_confirmed", [(False, True), (True, True), (True, False)])
+async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch, distributed, restart_confirmed):
+    from runtime import identity, sandbox_runtime
+
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     recovery_time = datetime(2026, 7, 20, 3, 0, tzinfo=timezone.utc)
     missed_fire = datetime(2026, 7, 18, 2, 0, tzinfo=timezone.utc)
@@ -91,6 +94,9 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
     }
     update = {}
 
+    monkeypatch.setattr(identity, "uses_distributed_runtime", lambda: distributed)
+    recovery = types.SimpleNamespace(recover=lambda: {"restart_confirmed": restart_confirmed})
+    monkeypatch.setattr(sandbox_runtime, "get_runtime_recovery", lambda: recovery)
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
     monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
     monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: None)
@@ -109,6 +115,10 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
     await store.recover()
     jobs = await store.claim_due("scheduler-a", 2, 120)
 
+    if not restart_confirmed:
+        assert [job.job_id for job in jobs] == [42]
+        assert update == {}
+        return
     assert jobs == []
     assert update["next_fire_at"] == datetime(2026, 7, 21, 2, 0, tzinfo=timezone.utc)
     assert update["misfire_policy"] == "SKIP"

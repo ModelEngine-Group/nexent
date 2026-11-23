@@ -146,6 +146,35 @@ async def test_disconnect_during_preparation_preserves_reservation_and_rejects_d
     assert not env.manager.agent_runs
 
 
+@pytest.mark.parametrize('debug', [False, True])
+@pytest.mark.asyncio
+async def test_admission_identity_reaches_worker_without_changing_response_ids(lifecycle, debug):
+    env = lifecycle
+    env.request.is_debug = debug
+    seen = []
+
+    async def source(request, **_kwargs):
+        seen.append(request.__dict__['_runtime_execution_run_id'])
+        env.channel.complete()
+        env.future.set_result(None)
+        yield 'data: done\n\n'
+
+    response = await env.start(source)
+    run_id = env.request.__dict__['_runtime_execution_run_id']
+    spec = env.service.runtime_thread_manager.submit.call_args.args[1]
+    assert spec.run_id == run_id
+    assert len(run_id) == 32
+    assert run_id != str(env.request.conversation_id)
+    if debug:
+        assert response.headers['run_id'].startswith('debug-')
+        assert response.headers['run_id'] != run_id
+    else:
+        assert response.headers['conversation_id'] == '123'
+        await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    _ = [chunk async for chunk in response.body_iterator]
+    assert seen == [run_id]
+
+
 @pytest.mark.asyncio
 async def test_preparation_failure_releases_reservation_worker_and_capacity(lifecycle):
     env = lifecycle

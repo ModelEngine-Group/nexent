@@ -33,7 +33,7 @@ from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
-from infrastructure.redis.run_state import runtime_state_service
+from infrastructure.redis.run_state import creator_runtime_state_service as runtime_state_service
 from nexent.core.agents.orchestration.entry import DeferredAgentRun
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope, run_blocking
 from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadManagerError, ThreadQueueTimedOut
@@ -183,7 +183,7 @@ class CreatorControl:
 
 
 async def claim_creator(conversation_id, user_id, generation, *, execution_id=None):
-    reservation = agent_run_manager.reserve_agent_run(conversation_id, user_id)
+    reservation = agent_run_manager.reserve_agent_run(conversation_id, user_id, creator=True)
     try:
         claim = runtime_state_service.claim_creator_run_async
         args = (user_id, conversation_id, generation)
@@ -214,8 +214,9 @@ async def launch_creator(stream, *, control, conversation_id, user_id, reservati
         conversation_id, user_id
     )
     channel.generation = control.generation
+    channel.is_creator = True
     info = control.registered_info()
-    agent_run_manager.register_agent_run(conversation_id, info, user_id, reservation)
+    agent_run_manager.register_agent_run(conversation_id, info, user_id, reservation, creator=True)
     started = asyncio.Event()
 
     async def produce():

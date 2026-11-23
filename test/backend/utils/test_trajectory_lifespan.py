@@ -22,6 +22,7 @@ def runtime_module(monkeypatch):
         "runtime.api.agent.execution": {"agent_runtime_router": Mock()},
         "management.api.automation.agent_automation": {"conversation_automation_router": Mock(), "router": Mock()},
         "runtime.api.evaluation.execution": {"router": Mock()},
+        "runtime.api.sandbox": {"router": Mock()},
         "runtime.api.voice.streaming": {"voice_runtime_router": Mock()},
         "management.api.conversation.conversation_management": {"router": Mock()},
         "management.api.conversation.workbench_pins": {"router": Mock()},
@@ -35,7 +36,7 @@ def runtime_module(monkeypatch):
         "runtime.api.exception_handler": {"ExceptionHandlerMiddleware": Mock()},
         "runtime.api.identity_routes": {"is_runtime_service_request": Mock()},
         "runtime.thread_management": {"runtime_thread_manager": manager},
-        "infrastructure.redis.run_state": {"runtime_state_service": Mock()},
+        "infrastructure.redis.run_state": {"runtime_state_service": Mock(), "creator_runtime_state_service": Mock()},
         "infrastructure.trace.bootstrap": {"local_trajectory_processor": processor},
         "management.services.agent.execution": {"shutdown_agent_stream_tasks": AsyncMock(return_value=[])},
         "management.services.conversation.creator_runtime": {"shutdown_creator_streams": AsyncMock(return_value=0)},
@@ -63,7 +64,10 @@ async def test_trajectory_lifespan_always_releases_runtime_manager(runtime_modul
     elif failure == "scheduler_stop":
         module.stop_agent_automation_scheduler.side_effect = RuntimeError("controlled-stop-failure")
     elif failure == "writer_stop":
-        manager.run.side_effect = RuntimeError("controlled-writer-stop-failure")
+        async def fail_writer_stop(_lane, _spec, function, *_args):
+            if function == processor.shutdown:
+                raise RuntimeError("controlled-writer-stop-failure")
+        manager.run.side_effect = fail_writer_stop
     elif failure == "creator_stop":
         sys.modules["management.services.conversation.creator_runtime"].shutdown_creator_streams.side_effect = RuntimeError("controlled-creator-stop-failure")
 
@@ -83,3 +87,38 @@ async def test_trajectory_lifespan_always_releases_runtime_manager(runtime_modul
     assert manager.run.await_args.args[2] == processor.shutdown
     if failure != "scheduler_stop":
         sys.modules["management.services.conversation.creator_runtime"].shutdown_creator_streams.assert_awaited_once()
+        sys.modules["management.services.agent.execution"].shutdown_agent_stream_tasks.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('distributed', [False, True])
+@pytest.mark.parametrize('pool_fails', [False, True])
+async def test_sandbox_shutdown_preserves_trajectory_finalization_and_existing_errors(
+    runtime_module, monkeypatch, distributed, pool_fails,
+):
+    from runtime import identity
+
+    module, manager, processor = runtime_module
+    monkeypatch.setattr(identity, 'uses_distributed_runtime', lambda: distributed)
+    pool = Mock()
+    sys.modules['nexent.core.agents.sandbox.execution'].SandboxPoolManager._instance = pool
+    if pool_fails:
+        pool.shutdown.side_effect = RuntimeError('controlled-pool-failure')
+    async def run(_lane, spec, function, *args):
+        if spec.task_name == 'sandbox-pool-shutdown':
+            return function(*args)
+    manager.run.side_effect = run
+    if pool_fails:
+        with pytest.raises(RuntimeError, match='controlled-pool-failure'):
+            async with module.runtime_lifespan(None):
+                pass
+    else:
+        async with module.runtime_lifespan(None):
+            pass
+    pool.shutdown.assert_called_once()
+    scheduled = [call.args[1].task_name for call in manager.run.await_args_list]
+    assert ('sandbox-pool-shutdown' in scheduled) is distributed
+    assert scheduled[-1] == 'trajectory-file-shutdown'
+    processor.request_stop.assert_called_once()
+    manager.shutdown.assert_awaited_once()
+    module.clear_default_thread_manager.assert_called_once_with(manager)

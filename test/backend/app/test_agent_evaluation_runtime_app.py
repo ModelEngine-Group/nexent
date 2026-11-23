@@ -2,6 +2,7 @@
 
 """Tests for runtime-owned evaluation dispatch."""
 
+from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -212,6 +213,43 @@ async def test_dispatch_rejects_pending_claim_conflict(monkeypatch):
         await dispatch_evaluation_run_api(payload, "internal-token")
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("latest_status", [EvalRunStatus.RUNNING, EvalRunStatus.PENDING])
+@pytest.mark.parametrize("maintenance", [False, True])
+async def test_distributed_dispatch_maps_held_reservation(monkeypatch, latest_status, maintenance):
+    from runtime import identity, sandbox_evaluation, sandbox_runtime
+    from runtime.sandbox_coordination import SandboxRunBusy
+
+    monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
+    lookup = AsyncMock(side_effect=[{"status": EvalRunStatus.PENDING}, {"status": latest_status}])
+    monkeypatch.setattr(runtime_app, "read_evaluation_for_dispatch", lookup)
+    monkeypatch.setattr(runtime_app, "uses_durable_agent_admission", lambda: maintenance)
+    monkeypatch.setattr(runtime_app, "_load_evaluation_executor", MagicMock())
+    monkeypatch.setattr(identity, "uses_distributed_runtime", lambda: True)
+    monkeypatch.setattr(sandbox_runtime, "require_business_admission", lambda: None)
+    monkeypatch.setattr(sandbox_runtime, "get_coordinator", MagicMock())
+    dispatch = AsyncMock(side_effect=SandboxRunBusy("already reserved"))
+    monkeypatch.setattr(sandbox_evaluation, "dispatch_owned_evaluation", dispatch)
+    durable_dispatch = AsyncMock(side_effect=ExecutionAlreadyActiveError())
+    monkeypatch.setattr(runtime_app, "start_pending_evaluation", durable_dispatch)
+
+    payload = EvaluationRunRequest(agent_evaluation_id=7)
+    if latest_status == EvalRunStatus.RUNNING:
+        assert await dispatch_evaluation_run_api(payload, "internal-token") == {
+            "accepted": True, "already_running": True, "agent_evaluation_id": 7,
+        }
+    else:
+        with pytest.raises(HTTPException) as exc_info:
+            await dispatch_evaluation_run_api(payload, "internal-token")
+        assert exc_info.value.status_code == HTTPStatus.CONFLICT
+    if maintenance:
+        durable_dispatch.assert_awaited_once()
+        dispatch.assert_not_called()
+    else:
+        dispatch.assert_awaited_once()
+        durable_dispatch.assert_not_called()
 
 
 @pytest.mark.asyncio

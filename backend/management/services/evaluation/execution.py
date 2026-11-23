@@ -31,6 +31,10 @@ from management.services.evaluation.common import (
 from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from runtime.adapters.nexent.runner import agent_run
+from runtime.identity import (
+    associate_run_request, bind_run_reservation, distributed_run_options, reference_options, uses_distributed_runtime,
+    reserve_runtime_run, runtime_coordination_call, runtime_journal_call,
+)
 
 
 def _is_llm_related_error(exc: Exception) -> bool:
@@ -127,6 +131,7 @@ async def _run_agent_to_final_answer(
     version_no: int,
     history: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
+    *, evaluation_id: int | None = None, evaluation_case_id: int | None = None,
 ) -> tuple[str, list[dict]]:
     """Run agent once; return (final_answer_text, [all_observer_events])."""
     run_conversation_id = conversation_id if conversation_id is not None else 0
@@ -140,23 +145,54 @@ async def _run_agent_to_final_answer(
         is_debug=True,
     )
     agent_run_info = None
+    reservation = None
+    runtime_admission = None
     terminal_status = "failed"
+    from runtime.identity import ensure_request_run_id
+
+    ensure_request_run_id(agent_request, new=True)
     try:
         run_manager = agent_run_manager
         if run_manager is None:
             from management.services.agent.lifecycle import agent_run_manager as run_manager
+
+        options = distributed_run_options(agent_request, tenant_id, kind='EVALUATION')
+        if options:
+            from runtime.sandbox_runtime import begin_owned_agent_admission
+
+            if conversation_id is None:
+                run_conversation_id = 'trial:' + agent_request.__dict__['_runtime_execution_run_id']
+                agent_request.__dict__['_debug_run_id'] = run_conversation_id
+            loop, task = asyncio.get_running_loop(), asyncio.current_task()
+            runtime_admission = await begin_owned_agent_admission(tenant_id, user_id, run_conversation_id,
+                lambda: loop.call_soon_threadsafe(task.cancel), kind='EVALUATION', holder='evaluation')
+            reservation = runtime_admission.reservation_token
+            agent_request.__dict__['_runtime_execution_run_id'] = runtime_admission.run_id
+            agent_request.__dict__['_runtime_execution_future'] = runtime_admission.execution.future
+            await runtime_coordination_call('bind-evaluation-run', bind_run_reservation, agent_request, user_id)
+            associations = {name: value for name, value in (
+                ('evaluation_id', evaluation_id), ('evaluation_case_id', evaluation_case_id),
+            ) if value is not None}
+            if associations:
+                await runtime_journal_call('associate-evaluation-run', associate_run_request, agent_request, **associations)
+            from infrastructure.redis.run_state import runtime_state_service
+
+            await runtime_state_service.reset_stream_async(user_id, run_conversation_id, **reference_options(agent_request))
 
         agent_run_info, _memory_context = await prepare_agent_run(
             agent_request=agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
             allow_memory_search=False,
+            **({'reservation_token': reservation} if reservation is not None else {}),
         )
         final_answer_parts: list[str] = []
         runtime_events: list[dict] = []
         async for chunk in agent_run(
             agent_run_info,
             thread_manager=runtime_thread_manager,
+            **({'execution': runtime_admission.execution, 'deferred_run': runtime_admission.deferred_run}
+               if runtime_admission is not None else {}),
         ):
             try:
                 data = json.loads(chunk)
@@ -190,6 +226,13 @@ async def _run_agent_to_final_answer(
                 status=terminal_status,
                 agent_run_info=agent_run_info,
             )
+        if runtime_admission is not None:
+            from runtime.sandbox_runtime import finish_automation_admission
+
+            await runtime_coordination_call('finish-evaluation-worker-admission',
+                                             finish_automation_admission, runtime_admission)
+        elif reservation is not None:
+            run_manager.release_agent_run_reservation(run_conversation_id, user_id, reservation)
 
 
 def _evaluation_conversation_id(agent_evaluation_id: int, case_id: int) -> int:
@@ -316,6 +359,8 @@ def _execute_single_case(
                 conversation_id=_evaluation_conversation_id(
                     run["agent_evaluation_id"], case_id
                 ),
+                **({'evaluation_id': run['agent_evaluation_id'], 'evaluation_case_id': case_id}
+                   if uses_distributed_runtime() else {}),
             )
         )
         predict = {"answer": answer_text}
@@ -693,6 +738,8 @@ async def _evaluate_query(
     history: list[dict[str, Any]] | None = None,
     expected: str = "",
     conversation_id: int | None = None,
+    evaluation_id: int | None = None,
+    evaluation_case_id: int | None = None,
 ) -> tuple[str, list[dict] | None, dict, dict]:
     """Run agent + score with evaluators. Returns (answer, events, scores, reasons)."""
     if not evaluators:
@@ -708,6 +755,8 @@ async def _evaluate_query(
         version_no=agent_version_no,
         history=history,
         conversation_id=conversation_id,
+        **({'evaluation_id': evaluation_id, 'evaluation_case_id': evaluation_case_id}
+           if evaluation_id is not None else {}),
     )
     score, reason = _score_with_evaluators(
         evaluators=evaluators,

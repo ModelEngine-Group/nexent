@@ -160,6 +160,7 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+_concurrency_module.ManagedThreadSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
 _concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded

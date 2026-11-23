@@ -159,6 +159,11 @@ class DeferredAgentRun:
         if cancelled:
             agent_run_info.cancellation_scope.cancel()
 
+    @property
+    def is_bound(self) -> bool:
+        with self._lock:
+            return self._agent_run_info is not None
+
     def cancel(self) -> None:
         with self._lock:
             self._cancelled = True

@@ -28,6 +28,17 @@
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
 {{- $memoryPluginsStorage := default dict $sharedStorage.memoryPlugins -}}
 {{- $logsStorage := default dict $sharedStorage.logs -}}
+{{- $kubernetesSandbox := and (eq (default "docker" $global.sandboxProvider) "kubernetes") (ne (default "lightweight" $global.sandboxMode) "disabled") -}}
+{{- $networkVerified := default false $global.sandboxNetworkPolicyVerified -}}
+{{- if and $kubernetesSandbox (not (kindIs "bool" $networkVerified)) -}}
+{{- fail "sandboxNetworkPolicyVerified must be a boolean" -}}
+{{- end -}}
+{{- if and $kubernetesSandbox (eq (default "local" $sharedStorage.mode) "local") (not (default false $global.sandboxSingleNodeDevelopment)) -}}
+{{- fail "Kubernetes sandbox requires verified CSI RWX storage; local storage is only allowed with sandboxSingleNodeDevelopment=true" -}}
+{{- end -}}
+{{- if and $kubernetesSandbox (not $networkVerified) -}}
+{{- fail "Kubernetes sandbox requires an enforced NetworkPolicy; run the target-cluster negative probe before setting sandboxNetworkPolicyVerified=true" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -58,6 +69,42 @@ spec:
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
+      enableServiceLinks: false
+{{- if eq (default "docker" $global.sandboxProvider) "kubernetes" }}
+      serviceAccountName: nexent-runtime-sandbox
+{{- end }}
+{{- if $kubernetesSandbox }}
+      initContainers:
+        - name: sandbox-workspace-permissions
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+          envFrom:
+            - configMapRef:
+                name: nexent-config
+            - secretRef:
+                name: nexent-env
+          command:
+            - python
+            - -c
+            - |
+              import os
+              import sys
+              from pathlib import Path
+              sys.path.insert(0, '/opt/backend')
+              from contracts.constants.environment import NEXENT_SANDBOX_EXECUTION_GID
+              root = Path('/mnt/nexent')
+              info = root.stat()
+              if info.st_gid != NEXENT_SANDBOX_EXECUTION_GID:
+                  os.chown(root, -1, NEXENT_SANDBOX_EXECUTION_GID)
+              if info.st_mode & 0o2070 != 0o2070:
+                  root.chmod((info.st_mode & 0o777) | 0o2070)
+          volumeMounts:
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
+{{- end }}
       containers:
         - name: nexent-runtime
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -89,6 +136,30 @@ spec:
             - name: GATEWAY_AUTH_ENABLED
               value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
+            - name: NEXENT_RUNTIME_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NEXENT_RUNTIME_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NEXENT_RUNTIME_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: NEXENT_RUNTIME_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NEXENT_RUNTIME_CONTAINER_NAME
+              value: "nexent-runtime"
+            - name: NEXENT_SANDBOX_WORKSPACE_CLAIM
+              value: {{ default "nexent-workspace" $workspaceStorage.existingClaim | quote }}
+            - name: NEXENT_SANDBOX_WORKSPACE_MOUNT
+              value: "/mnt/nexent"
+            - name: NEXENT_SANDBOX_SINGLE_NODE_DEVELOPMENT
+              value: {{ default false $global.sandboxSingleNodeDevelopment | toString | quote }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "wait"
             - name: NEXENT_RECOVERY_MODE

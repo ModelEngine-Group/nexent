@@ -4,6 +4,7 @@
 import argparse
 import asyncio
 import hashlib
+import html
 import inspect
 import json
 import logging
@@ -58,7 +59,7 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
                 raise ModelInvocationTerminalError(ModelErrorCode.TIMEOUT, attempts=1)
             self.calls += 1
             if self.calls > 1:
-                measurements = re.findall(r'\{"marker": "(?:LEFT|RIGHT)", "start": [0-9.]+, "end": [0-9.]+\}', text)
+                measurements = re.findall(r'\{"marker": "(?:LEFT|RIGHT)", "start": [0-9.]+, "end": [0-9.]+\}', html.unescape(text))
                 assert measurements, 'The real kernel must return its measured execution window'
                 return ChatMessage(role='assistant', content=f'<final_answer>{measurements[-1]}</final_answer>')
             marker = 'LEFT' if 'TASK_MARKER=LEFT' in text else 'RIGHT'

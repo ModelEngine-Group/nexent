@@ -110,6 +110,12 @@ Config, Runtime, and Northbound use `/health/live` startup probes, while Web pro
 
 Config and Data Process remain single-replica workloads. Runtime also defaults to one replica and retains the Kubernetes `Recreate` strategy. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
 
+### Kubernetes SYSTEM Sandbox
+
+Set `global.sandboxProvider: kubernetes` in this chart's `values.yaml` and deploy with the project script. Kubernetes SYSTEM creates one sandbox Pod per Runtime Pod on first use. Existing Agent sandbox policies at the `docker` level select the Kubernetes provider when this setting is enabled. Runtime replicas keep the normal offline maintenance sequence.
+
+Set `global.sandboxNetworkPolicyVerified: true` after verifying that the cluster's CNI enforces the sandbox NetworkPolicy. Use shared RWX workspace storage, or set `global.sandboxSingleNodeDevelopment: true` for a single-node development cluster. The sandbox image configured for Nexent must be available to Kubernetes when the first Agent run needs it.
+
 ### Runtime Maintenance
 
 Use `bash deploy.sh k8s` (or `--release-scope nexent`) to deploy or upgrade Runtime. The script holds a PostgreSQL session lock while it stops old business Pods, runs system bootstrap, and submits the Runtime maintenance Job. It activates the release only after verifying the paused batch and its committed completion marker. Each ordinary Runtime Pod checks that same marker; restarting a Pod does not run global recovery. The selected backend image must include `management.maintenance`.

@@ -104,6 +104,7 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
         ("runtime.api.agent.execution", "agent_runtime_router"),
         ("runtime.api.evaluation.execution", "router"),
         ("runtime.api.file.upload", "file_management_runtime_router"),
+        ("runtime.api.sandbox", "router"),
         ("runtime.api.skill.creation", "skill_creator_router"),
         ("runtime.api.voice.streaming", "voice_runtime_router"),
     ):
@@ -113,7 +114,24 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     monkeypatch.setitem(
         sys.modules,
         "infrastructure.redis.run_state",
-        _module("infrastructure.redis.run_state", runtime_state_service=runtime_state),
+        _module("infrastructure.redis.run_state", runtime_state_service=runtime_state, creator_runtime_state_service=MagicMock()),
+    )
+    agent_run_manager = object()
+    monkeypatch.setitem(
+        sys.modules,
+        "management.services.agent.lifecycle",
+        _module("management.services.agent.lifecycle", agent_run_manager=agent_run_manager),
+    )
+    configure_coordination = MagicMock()
+    monkeypatch.setitem(
+        sys.modules,
+        "runtime.sandbox_runtime",
+        _module("runtime.sandbox_runtime", configure_runtime_coordination=configure_coordination),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "runtime.identity",
+        _module("runtime.identity", uses_distributed_runtime=lambda: False),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -218,8 +236,8 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     shutdown_order.attach_mock(manager.shutdown, "thread_manager")
 
     async def exercise():
-        async with application.runtime_lifespan(None):
-            pass
+        async with application.app.lifespan(application.app):
+            assert application.app.state.configuration_runtime is start_configuration.return_value
 
     if recovery_mode == "unfinished":
         with pytest.raises(RuntimeError, match="maintenance is unfinished"):
@@ -241,6 +259,7 @@ def test_runtime_lifespan_owns_configuration_scheduler_and_shutdown(monkeypatch,
     start_configuration.assert_awaited_once()
     configuration_io = start_configuration.call_args.args[0]
     assert asyncio.run(configuration_io(lambda: "loaded")) == "loaded"
+    configure_coordination.assert_called_once_with(manager, agent_run_manager, runtime_state)
     trajectory_processor.start.assert_called_once()
     assert trajectory_processor.start.call_args.args[0] is manager
     assert (

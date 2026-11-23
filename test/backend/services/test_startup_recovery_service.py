@@ -68,7 +68,11 @@ def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
     )
 
 
-def test_maintenance_redis_failure_leaves_conversation_update_for_transaction_rollback(monkeypatch):
+@pytest.mark.parametrize("sandbox_enabled", [False, True])
+def test_maintenance_redis_failure_leaves_conversation_update_for_transaction_rollback(monkeypatch, sandbox_enabled):
+    from runtime import identity
+
+    monkeypatch.setattr(identity, "uses_distributed_runtime", lambda: sandbox_enabled)
     session = object()
     fail_messages = MagicMock(return_value=[{"message_id": 123, "conversation_id": 10, "user_id": "user-1"}])
     runtime_state = MagicMock()

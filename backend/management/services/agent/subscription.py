@@ -111,6 +111,12 @@ from contracts.runtime_metadata import (
     strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
+from runtime.identity import (
+    bind_run_reservation, current_reference_options, distributed_run_options, execution_conversation_id,
+    reference_options,
+    reserve_runtime_run, runtime_coordination_call, runtime_journal_call,
+    uses_distributed_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +323,10 @@ async def run_agent_stream(
     replay_cursor = agent_request.replay_cursor if "replay_cursor" in supplied_fields else None
     resume_message_id = agent_request.resume_message_id if "resume_message_id" in supplied_fields else None
     resume = resume or replay_cursor is not None or resume_message_id is not None
+    if not resume:
+        from runtime.sandbox_runtime import require_business_admission
+
+        require_business_admission()
     if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
         raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
 
@@ -745,6 +755,7 @@ async def run_agent_stream(
 
     # Resume mode: check for existing streaming message
     if resume:
+        resume_options = current_reference_options(resolved_tenant_id, resolved_user_id, agent_request.conversation_id)
         resume_info = _detect_resume_position(
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id,
@@ -752,6 +763,14 @@ async def run_agent_stream(
         if resume_message_id is not None and resume_info.get("message_id") != resume_message_id:
             return unavailable_agent_replay()
 
+        if resume_options.get('run_ref') is not None:
+            bound_state = await runtime_state_service.get_run_state_async(
+                resolved_user_id, agent_request.conversation_id, **resume_options,
+            )
+            if bound_state.get('status') in ('preparing', 'running'):
+                resume_info = {**resume_info, 'should_resume': True,
+                               'message_id': resume_options['run_ref'].assistant_message_id,
+                               'resume_from_unit_index': 0}
         if not resume_info["should_resume"]:
             # Backend already finished
             return JSONResponse(
@@ -769,18 +788,18 @@ async def run_agent_stream(
         run_state = await runtime_state_service.get_run_state_async(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id,
+            **resume_options,
         )
-        is_remote_running = run_state.get("status") == "running"
+        is_remote_running = run_state.get("status") in ("preparing", "running")
 
         if existing_run_info is None and not is_remote_running:
             # Agent has finished while frontend was disconnected
             # Update message status to completed if it's still streaming
-            try:
-                update_message_status(
-                    message_id=resume_info["message_id"], status="completed"
-                )
-            except Exception:
-                pass
+            if not resume_options:
+                try:
+                    update_message_status(message_id=resume_info["message_id"], status="completed")
+                except Exception:
+                    pass
 
             return JSONResponse(
                 status_code=HTTPStatus.OK,
@@ -794,6 +813,10 @@ async def run_agent_stream(
         channel = streaming_channel_manager.get_channel(
             conversation_id=agent_request.conversation_id, user_id=resolved_user_id
         )
+        if channel is not None and resume_options.get('run_ref') is not None:
+            channel_ref = channel.__dict__.get('_runtime_run_reference')
+            if channel_ref is None or channel_ref.run_id != resume_options['run_ref'].run_id:
+                channel = None
         last_unit_index = resume_info["resume_from_unit_index"] - 1
 
         def _resume_status_chunk(replay_chunk_count: int) -> str:
@@ -816,13 +839,14 @@ async def run_agent_stream(
 
                 async def redis_channel_stream():
                     checkpoint = await runtime_state_service.read_replay_checkpoint_async(
-                        resolved_user_id, agent_request.conversation_id,
+                        resolved_user_id, agent_request.conversation_id, **resume_options,
                     )
                     if checkpoint:
                         yield STREAM_STATUS_EVENT
                         yield _resume_status_chunk(len(checkpoint["entries"]))
                         async for chunk in subscribe_shared_checkpoint(
-                            runtime_state_service, resolved_user_id, agent_request.conversation_id, checkpoint,
+                            runtime_state_service, resolved_user_id, agent_request.conversation_id,
+                            checkpoint, **resume_options,
                         ):
                             yield chunk
                         return
@@ -830,6 +854,7 @@ async def run_agent_stream(
                         await runtime_state_service.read_stream_events_async(
                             user_id=resolved_user_id,
                             conversation_id=agent_request.conversation_id,
+                            **resume_options,
                         )
                     )
                     replay_chunk_count = len(replay_events)
@@ -849,6 +874,7 @@ async def run_agent_stream(
                                 user_id=resolved_user_id,
                                 conversation_id=agent_request.conversation_id,
                                 last_id=last_event_id,
+                                **resume_options,
                             )
                         )
                         for event_id, chunk in events:
@@ -860,12 +886,14 @@ async def run_agent_stream(
                             await runtime_state_service.get_stream_status_async(
                                 user_id=resolved_user_id,
                                 conversation_id=agent_request.conversation_id,
+                                **resume_options,
                             )
                         )
                         latest_run_state = (
                             await runtime_state_service.get_run_state_async(
                                 user_id=resolved_user_id,
                                 conversation_id=agent_request.conversation_id,
+                                **resume_options,
                             )
                         )
                         if stream_status.get("status") or latest_run_state.get(
@@ -937,6 +965,9 @@ async def run_agent_stream(
         )
 
     # Normal mode: start new stream
+    from runtime.identity import ensure_request_run_id
+
+    execution_run_id = ensure_request_run_id(agent_request, new=True)
     deferred_run = DeferredAgentRun()
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
@@ -958,7 +989,7 @@ async def run_agent_stream(
             ManagedTaskSpec(
                 task_name="agent-run",
                 owner="backend.management.services.agent.run",
-                run_id=str(run_identifier),
+                run_id=execution_run_id,
                 close_hook=deferred_run.cancel,
                 pass_cancel_event=True,
             ),
@@ -968,6 +999,8 @@ async def run_agent_stream(
             execution.future.add_done_callback(
                 lambda _future: agent_run_manager.release_agent_capacity(agent_capacity_token)
             )
+        if uses_distributed_runtime():
+            agent_request.__dict__["_runtime_execution_future"] = execution.future
         await runtime_thread_manager.wait_until_started(execution)
     except AgentRunConcurrencyExceededError as exc:
         raise RuntimeCapacityExceededError() from exc
@@ -1017,9 +1050,13 @@ async def run_agent_stream(
             release_preparation(managed_user_save)
 
     try:
-        reservation_token = agent_run_manager.reserve_agent_run(
+        reservation_token = await reserve_runtime_run(agent_run_manager,
             run_identifier,
             resolved_user_id,
+            **distributed_run_options(agent_request, resolved_tenant_id,
+                                      kind='DEBUG' if agent_request.is_debug else
+                                      ('WORKBENCH' if getattr(agent_request, 'entrypoint', None) == 'workbench' else 'CHAT'),
+                                      cancel=deferred_run.cancel),
         )
         durable_admission = await reserve_agent_execution(
             agent_request, run_identifier, resolved_user_id, resolved_tenant_id, execution.future,
@@ -1059,6 +1096,7 @@ async def run_agent_stream(
         raise
 
     try:
+        await runtime_coordination_call("bind-admitted-run", bind_run_reservation, agent_request, resolved_user_id)
         if durable_admission is not None:
             stream_generation = f"execution:{durable_admission.execution_id}"
             agent_request.__dict__["_runtime_execution_reservation"] = durable_admission
@@ -1073,11 +1111,12 @@ async def run_agent_stream(
                 raise asyncio.CancelledError()
             persist_existing_turn_options()
         else:
-            stream_generation = uuid.uuid4().hex
+            stream_generation = execution_run_id
             await runtime_state_service.reset_stream_async(
                 user_id=resolved_user_id,
-                conversation_id=agent_request.conversation_id,
+                conversation_id=execution_conversation_id(agent_request),
                 generation=stream_generation,
+                **reference_options(agent_request),
             )
 
         if not agent_request.is_debug and not skip_user_save:
@@ -1095,7 +1134,7 @@ async def run_agent_stream(
                 except Exception as exc:
                     raise RuntimeUserMessagePersistenceError("Failed to persist the user message") from exc
             else:
-                save_messages(agent_request, **save_options)
+                await runtime_journal_call("save-stream-user-message", save_messages, agent_request, **save_options)
 
         run_context = build_agent_run_context(
             agent_request,
@@ -1115,9 +1154,10 @@ async def run_agent_stream(
         channel = None
         if not agent_request.is_debug:
             channel = await streaming_channel_manager.get_or_create_channel(
-                conversation_id=agent_request.conversation_id,
+                conversation_id=execution_conversation_id(agent_request),
                 user_id=resolved_user_id,
                 **({"generation": stream_generation} if durable_admission is not None else {}),
+                **reference_options(agent_request),
             )
             channel.generation = stream_generation
     except BaseException:

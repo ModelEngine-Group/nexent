@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill script execution tool."""
 import json
 import logging
@@ -7,10 +9,12 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from smolagents.tools import Tool
 
+from nexent.core.agents.sandbox_callbacks import SandboxCallbackPublicError
+
 logger = logging.getLogger(__name__)
 
 
-class SkillScriptExecutionError(RuntimeError):
+class SkillScriptExecutionError(SandboxCallbackPublicError):
     """Raised when a sandboxed skill script exits unsuccessfully."""
 
 

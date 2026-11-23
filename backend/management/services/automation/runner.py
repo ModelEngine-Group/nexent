@@ -17,6 +17,7 @@ from management.services.agent.lifecycle import AgentRunAlreadyActiveError
 from management.services.automation.capabilities import validate_bindings_available
 from management.services.automation.conversation import automation_conversation_adapter
 from contracts.automation import AutomationRunStatus, ScheduleTrigger
+from runtime.identity import runtime_coordination_call, uses_distributed_runtime
 
 
 
@@ -37,16 +38,62 @@ def _parse_dt(value: Any) -> datetime:
 
 class AgentAutomationRunner:
     async def execute_task(
+        self, task, trigger_type='SCHEDULED', scheduled_fire_at=None, lease_owner=None,
+    ):
+        if not uses_distributed_runtime():
+            return await self._execute_task_impl(task, trigger_type, scheduled_fire_at, lease_owner)
+        from management.services.agent.lifecycle import AgentRunAlreadyActiveError
+        from contracts.constants.environment import RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+        from runtime.sandbox_runtime import begin_automation_admission, finish_automation_admission, get_coordinator
+
+        loop, root = asyncio.get_running_loop(), asyncio.current_task()
+
+        def cancel_root():
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(lambda: root.cancel() if not root.done() else None)
+
+        try:
+            admission = await begin_automation_admission(
+                task['tenant_id'], task['user_id'], task['conversation_id'], cancel_root,
+            )
+        except AgentRunAlreadyActiveError:
+            return await self._execute_task_impl(task, trigger_type, scheduled_fire_at, lease_owner, force_busy=True)
+        watcher = None
+        try:
+            reference = await runtime_coordination_call('automation-run-reference', get_coordinator().reference,
+                                                        admission.lease)
+
+            async def watch_cancel():
+                while True:
+                    if await runtime_coordination_call(
+                        "automation-check-owner-cancel", get_coordinator().stream_state.is_cancelled,
+                        task["user_id"], task["conversation_id"], run_ref=reference,
+                    ):
+                        root.cancel()
+                        return
+                    await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+            watcher = asyncio.create_task(watch_cancel(), name='automation-runtime-cancel-' + admission.run_id)
+            return await self._execute_task_impl(task, trigger_type, scheduled_fire_at, lease_owner,
+                                                  runtime_admission=admission)
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+                await asyncio.gather(watcher, return_exceptions=True)
+            await runtime_coordination_call('automation-release-admission', finish_automation_admission, admission)
+
+    async def _execute_task_impl(
         self,
         task: Dict[str, Any],
         trigger_type: str = "SCHEDULED",
         scheduled_fire_at: Optional[datetime] = None,
         lease_owner: Optional[str] = None,
+        *, runtime_admission=None, force_busy=False,
     ) -> Dict[str, Any]:
         scheduled = scheduled_fire_at or _parse_dt(task.get("next_fire_at"))
-        busy = agent_automation_db.has_active_run_for_conversation(task["conversation_id"]) or is_agent_running(
+        busy = force_busy or agent_automation_db.has_active_run_for_conversation(task["conversation_id"]) or (runtime_admission is None and is_agent_running(
             task["conversation_id"], task["user_id"],
-        )
+        ))
         occurrence_started = False
         values = {
             "task_id": task["task_id"], "tenant_id": task["tenant_id"],
@@ -86,10 +133,25 @@ class AgentAutomationRunner:
                 "error_message": "This scheduled occurrence already started before its lease was lost.",
             })
 
+        if runtime_admission is not None:
+            from runtime.sandbox_runtime import get_coordinator
+
+            associations = {'automation_run_id': run['run_id'], 'automation_task_id': task['task_id']}
+            if lease_owner:
+                associations['automation_lock_owner'] = lease_owner
+            try:
+                await runtime_coordination_call('associate-automation-run', get_coordinator().associate,
+                                                runtime_admission.lease, **associations)
+                await runtime_coordination_call('activate-automation-run', get_coordinator().activate,
+                                                runtime_admission.lease)
+            except Exception:
+                return self._fail_run(run, task, 'AUTOMATION_COORDINATION_LOST', 'Execution ownership is unavailable.')
+
         timeout_seconds = float(task.get("timeout_seconds") or AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS)
         try:
             return await asyncio.wait_for(
-                self._execute_active_run(run, task, scheduled, trigger_type),
+                self._execute_active_run(run, task, scheduled, trigger_type,
+                                         **({'runtime_admission': runtime_admission} if runtime_admission is not None else {})),
                 timeout=max(1, timeout_seconds),
             )
         except AgentRunAlreadyActiveError:
@@ -98,7 +160,8 @@ class AgentAutomationRunner:
                 "error_message": "Conversation already has an active run.",
             })
         except asyncio.TimeoutError:
-            self.cancel_for_conversation(task["conversation_id"], task["user_id"], run["run_id"])
+            self.cancel_for_conversation(task["conversation_id"], task["user_id"], run["run_id"],
+                                         **({'tenant_id': task['tenant_id']} if uses_distributed_runtime() else {}))
             return self._finish_run(run, task, AutomationRunStatus.TIMEOUT.value, {
                 "error_code": "AUTOMATION_RUN_TIMEOUT",
                 "error_message": f"Automation run exceeded {timeout_seconds} seconds.",
@@ -112,7 +175,8 @@ class AgentAutomationRunner:
                     and current.get("error_code") == "AUTOMATION_RUN_CANCELED"
                     and (caller is None or not caller.cancelling())):
                 return current
-            self.cancel_for_conversation(task["conversation_id"], task["user_id"], run["run_id"])
+            self.cancel_for_conversation(task["conversation_id"], task["user_id"], run["run_id"],
+                                         **({'tenant_id': task['tenant_id']} if uses_distributed_runtime() else {}))
             self._finish_run(run, task, AutomationRunStatus.CANCELED.value, {
                 "error_code": "AUTOMATION_EXECUTION_INTERRUPTED",
                 "error_message": "Scheduler execution was interrupted before completion.",
@@ -127,6 +191,7 @@ class AgentAutomationRunner:
         task: Dict[str, Any],
         scheduled: datetime,
         trigger_type: str,
+        *, runtime_admission=None,
     ) -> Dict[str, Any]:
         capability_status = await validate_bindings_available(
             agent_id=task["agent_id"],
@@ -167,7 +232,18 @@ class AgentAutomationRunner:
             run_id=run["run_id"],
         )
         durable_admission = uses_durable_agent_admission()
-        turn_history = None if durable_admission else append_prompt()["history"]
+
+        def prepare_prompt():
+            turn = append_prompt()
+            if runtime_admission is not None and turn.get("user_message_id") is not None:
+                from runtime.sandbox_runtime import get_coordinator
+
+                get_coordinator().associate(runtime_admission.lease, user_message_id=turn["user_message_id"])
+            return turn
+
+        turn_history = None
+        if not durable_admission:
+            turn_history = (await runtime_coordination_call("append-automation-prompt", prepare_prompt))["history"]
 
         agent_request = AgentRequest(
             query=generated_prompt,
@@ -184,10 +260,11 @@ class AgentAutomationRunner:
             user_id=task["user_id"],
             tenant_id=task["tenant_id"],
             skip_user_save=True,
+            **({'runtime_admission': runtime_admission} if runtime_admission is not None else {}),
             execution_state=BackgroundExecutionState(
                 runtime_generation=str(run["run_id"]),
                 is_active=partial(self._run_is_active, run, task),
-                prepare_prompt=append_prompt if durable_admission else None,
+                prepare_prompt=prepare_prompt if durable_admission else None,
                 create_assistant=partial(
                 automation_conversation_adapter.append_run_assistant,
                 run_id=run["run_id"], user_id=task["user_id"], tenant_id=task["tenant_id"],
@@ -206,11 +283,17 @@ class AgentAutomationRunner:
         current = agent_automation_db.get_run(run["run_id"], task["tenant_id"], task["user_id"])
         return bool(current and current["status"] == "RUNNING")
 
-    def cancel_for_conversation(self, conversation_id: int, user_id: str, run_id=None) -> None:
+    def cancel_for_conversation(self, conversation_id: int, user_id: str, run_id=None, *, tenant_id=None) -> None:
+        options = {}
+        if uses_distributed_runtime():
+            if tenant_id is None:
+                task = agent_automation_db.get_task_by_conversation(conversation_id, user_id, include_deleted=True)
+                tenant_id = task.get('tenant_id') if task else None
+            options = {'tenant_id': tenant_id}
         if run_id is None:
-            stop_agent_tasks(conversation_id, user_id)
+            stop_agent_tasks(conversation_id, user_id, **options)
         else:
-            stop_agent_tasks(conversation_id, user_id, expected_generation=str(run_id))
+            stop_agent_tasks(conversation_id, user_id, expected_generation=str(run_id), **options)
 
     def cancel_run_by_user(self, run, task):
         transitioned = []
