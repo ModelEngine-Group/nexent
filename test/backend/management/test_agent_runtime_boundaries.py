@@ -150,7 +150,10 @@ async def verify():
 
 asyncio.run(verify())
 """
-    completed = _run_source_check(script)
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
+    )
     assert completed.returncode == 0, completed.stderr
 
 
@@ -329,7 +332,10 @@ sys.meta_path.insert(0, BlockLegacyExecution())
 with patch("nexent.core.nlp.stopwords.load_stopwords"):
     from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 """
-    completed = _run_source_check(script)
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
+    )
     assert completed.returncode == 0, completed.stderr
 
 
