@@ -24,7 +24,10 @@ case:
   - order: 3
     action: 为 V2 隐藏一个工具，再从 V2 发布另一项工具调整，逐版读取编译器使用的智能体配置。
     expected: 草稿和 V1 沿用原清单，V2 只隐藏第一项，V3 同时隐藏两项，其他智能体和租户不受影响。
-  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。, 工具移除按版本保留且不能跨范围读取。]
+  - order: 4
+    action: 在 V2 挂载已确认的新指南，V3 继承。尝试再次加入同名指南并从其他范围读取。
+    expected: V2 和 V3 引用同一包；草稿、V1 和其他范围看不到。重复名称不会产生下一版记录。
+  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。, 工具移除按版本保留且不能跨范围读取。, 新指南按版本和范围装载。]
   forbidden_side_effects: [其他租户不能读取版本绑定；普通会话选版不能更改编辑草稿。]
   acceptance:
   - id: AC-01
@@ -41,6 +44,10 @@ case:
     steps: [3]
     expected_results: [3]
     forbidden_side_effects: [1]
+  - id: AC-04
+    description: 按版本继承候选编号和内容摘要，拒绝同名与跨范围引用。
+    steps: [4]
+    expected_results: [4]
   execution:
     profiles:
     - name: mock

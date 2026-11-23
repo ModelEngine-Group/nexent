@@ -163,6 +163,10 @@ def read_plan(tenant, eid, active_only=False):
 def workspace_choices(tenant, agent_id, version):
     params = dict(tenant=tenant, agent=agent_id, version=version)
     queries = {
+        "released_guides": """
+            SELECT name, candidate_id, digest FROM nexent.evolution_release_guide_t
+             WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version ORDER BY name
+        """,
         "skills": """
             SELECT s.skill_id, s.skill_name AS name FROM nexent.ag_skill_instance_t i
             JOIN nexent.ag_skill_info_t s ON s.skill_id=i.skill_id AND s.tenant_id=i.tenant_id

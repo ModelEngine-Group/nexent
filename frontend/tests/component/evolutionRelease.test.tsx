@@ -11,7 +11,8 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, values?: { names?: string }) => values?.names ?? key,
+    t: (key: string, values?: { names?: string; name?: string; digest?: string }) =>
+      key === "evolution.release.addedGuide" ? `${values?.name} ${values?.digest}` : values?.names ?? key,
   }),
 }));
 vi.mock("@/services/evolutionService", () => ({
@@ -100,4 +101,15 @@ it("shows the specific tool removed by a confirmed T3 candidate before promotion
   expect(
     screen.getByRole("button", { name: "evolution.release.publish" })
   ).toBeEnabled();
+});
+
+it("identifies the exact new Skill package before a publisher changes the default", async () => {
+  vi.mocked(api.release).mockResolvedValue({
+    ...passed,
+    candidate_type: "skill_new",
+    added_guide: {candidate_id: 7, name:"intake", digest:"abcdef12".repeat(8)},
+  });
+  open();
+  expect(await screen.findByText("intake abcdef12abcd")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name:"evolution.release.publish"})).toBeDisabled();
 });

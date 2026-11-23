@@ -97,6 +97,8 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
         names = {row["name"] for row in read_bound_skills(request.agent_id, request.version_no, tenant_id)}
         if set(request.expected_skill_names) - names:
             from infrastructure.rdb.skill_candidate_records import proposed_skill_names
+            from infrastructure.rdb.released_skill_guides import read_released_guides
+            names.update(ref["name"] for ref in read_released_guides(tenant_id,request.agent_id,request.version_no))
             names.update(proposed_skill_names(tenant_id, request.agent_id, request.version_no))
         if not set(request.expected_skill_names) <= names:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select a bound Skill or a new Skill proposed for this Agent version")

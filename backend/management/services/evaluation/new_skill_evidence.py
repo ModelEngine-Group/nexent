@@ -151,7 +151,9 @@ def _collect(tenant, editor, eid, request):
                 invalid("Private values must refer to the selected business sample")
             marks.add(private_mark(value))
     shared = common_steps(sequences)
+    from infrastructure.rdb.released_skill_guides import read_released_guides
     assigned = {s["name"] for s in read_bound_skills(agent, version, tenant)}
+    assigned.update(s["name"] for s in read_released_guides(tenant, agent, version))
     if request.name in assigned or get_skill_by_name(request.name, tenant):
         invalid("A Skill with this name already exists")
     covered = set()

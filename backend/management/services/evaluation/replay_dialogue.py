@@ -36,6 +36,7 @@ def validate_turn(spec, receipt, attempt, expected_names):
         reads = receipt.root_guide_reads
         listed = {item["content"]["name"] for item in (spec.resource.evaluation_options.context_items or [])
                   if item.get("type") == "skill"}
+        listed.update(ref.name for ref in getattr(spec.resource, "released_skill_guides", []))
         eligible = set(listed)
         if proposal:
             eligible.add(proposal.name)

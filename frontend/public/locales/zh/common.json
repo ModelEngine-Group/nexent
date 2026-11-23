@@ -72,6 +72,7 @@
   "evolution.newSkill.heldout": "选两类新材料：一道应使用该 Skill，一道应跳过。",
   "evolution.newSkill.absent": "原版未挂载 {{name}}",
   "evolution.newSkill.mounted": "已挂载 {{name}}，包摘要 {{digest}}",
+  "evolution.release.addedGuide": "本智能体新增 Skill {{name}}，包摘要 {{digest}}",
   "evolution.kind.skill_new": "新 Skill",
   "evolution.kind.skill_discovery": "Skill 说明",
   "evolution.quartets": "四组均有效 {{valid}}/{{total}} 题 · A 来自实验 #{{a}}，B 来自实验 #{{b}}",

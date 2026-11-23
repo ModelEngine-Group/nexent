@@ -810,6 +810,7 @@ def _export_resource(
 
     aliases.setdefault(agent.model_name, None)
     return AgentResource(
+        released_skill_guides=agent.released_skill_guides,
         agent_id=agent.agent_id, version_no=agent.version_no, name=agent.name,
         description=agent.description, prompt_templates=agent.prompt_templates or {},
         max_steps=agent.max_steps, tools=tools, skill_refs=skill_refs, model_alias=agent.model_name,

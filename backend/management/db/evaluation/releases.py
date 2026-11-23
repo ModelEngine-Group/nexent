@@ -12,6 +12,7 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.skill_execution_records import SkillInfo, release_skill
 from infrastructure.skill_execution import skill_execution_revision
 from management.db.agent.release_tools import publish_tool_selection
+from infrastructure.rdb.released_skill_guides import publish_guides
 from management.db.agent.session_versions import lock_release_scope
 from management.db.evaluation.confirmation import _membership
 from management.db.models import AgentInfo, AgentRelation, AgentVersion, SkillInstance, ToolInstance
@@ -218,7 +219,41 @@ def _pin(session, tenant, agent, version, pin, variant):
         reject("The stable version already has a different Skill package")
 
 
-def publish(tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed):
+def _confirmed_new_guide(session, tenant, agent, base, ctx, expected):
+    recipe = ctx["recipe"]
+    if recipe["candidate_type"] != "skill_new":
+        return None
+    from permissions.rbac import has_permission
+
+    row = (
+        session.execute(
+            text("""
+        SELECT candidate_id, name, digest, created_by FROM nexent.evolution_new_skill_candidate_t
+        WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:base AND candidate_id=:cid FOR SHARE
+    """),
+            dict(tenant=tenant, agent=agent, base=base, cid=recipe["candidate_id"]),
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if not row or expected != {key: row[key] for key in ("candidate_id", "name", "digest")}:
+        reject("The confirmed new Skill is no longer available")
+    if not has_permission(_membership(session, tenant, row["created_by"]), "skill:create"):
+        raise AppException(ErrorCode.COMMON_FORBIDDEN)
+    if session.scalar(
+        select(SkillInfo.skill_id)
+        .where(
+            SkillInfo.tenant_id == tenant, SkillInfo.skill_name == row["name"], SkillInfo.delete_flag == "N"
+        )
+        .limit(1)
+    ):
+        reject("The new Skill name is already used by a tenant Skill")
+    return {key: row[key] for key in ("candidate_id", "name", "digest")}
+
+
+def publish(
+    tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed, expected_guide=None
+):
     try:
         with get_db_session() as session:
             ctx = _context(session, tenant, actor, lock)
@@ -263,6 +298,8 @@ def publish(tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, 
             for pin in pins:
                 _pin(session, tenant, agent, base, pin, "base")
                 _pin(session, tenant, agent, version, pin, "result")
+            added_guide = _confirmed_new_guide(session, tenant, agent, base, ctx, expected_guide)
+            publish_guides(session, tenant, agent, base, version, added_guide)
             publish_tool_selection(session, tenant, agent, base, version, removed)
             session.add(
                 AgentVersion(
@@ -334,7 +371,8 @@ def release_view(tenant, actor, lock):
             session.execute(
                 text("""
             SELECT e.agent_id,e.version_no AS base_version,e.experiment_id,c.digest AS candidate_digest,
-                   c.recipe->>'candidate_type' AS candidate_type,a.current_version_no AS current_version,
+                   c.recipe->>'candidate_type' AS candidate_type,(c.recipe->>'candidate_id')::bigint AS resource_candidate_id,
+                   a.current_version_no AS current_version,
                    r.summary,COALESCE(s.paused,false) AS paused,
                    ARRAY(SELECT jsonb_array_elements_text(CAST(tools.source_text AS jsonb)->'selectable')
                          EXCEPT SELECT jsonb_array_elements_text(CAST(tools.result_text AS jsonb)->'retained')
@@ -360,7 +398,21 @@ def release_view(tenant, actor, lock):
         if not row:
             raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
         _require(session, tenant, row["agent_id"], actor)
-        return {**row, "release": _receipt(session, tenant, lock)}
+        data = dict(row)
+        cid = data.pop("resource_candidate_id")
+        receipt = _receipt(session, tenant, lock)
+        if data["candidate_type"] == "skill_new":
+            if receipt:
+                from infrastructure.rdb.released_skill_guides import guides_for_version
+                choices = guides_for_version(session,tenant,row["agent_id"],receipt["new_version"])
+                data["added_guide"] = next((g for g in choices if g["candidate_id"] == cid), None)
+            else:
+                name = session.execute(text("""
+                    SELECT candidate_id, name, digest FROM nexent.evolution_new_skill_candidate_t
+                    WHERE tenant_id=:t AND agent_id=:a AND version_no=:v AND candidate_id=:c
+                """), dict(t=tenant,a=row["agent_id"],v=row["base_version"],c=cid)).mappings().one_or_none()
+                data["added_guide"] = dict(name) if name else None
+        return {**data, "release": receipt}
 
 
 def restore(tenant, actor, lock, request, ready):

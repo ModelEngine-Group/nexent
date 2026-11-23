@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.orm import as_dict, filter_property
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
+from infrastructure.rdb.released_skill_guides import guides_for_version
 from management.db.agent.release_tools import excluded_for_version
 from management.db.agent.version import query_current_version_no
 from management.db.tool.repository import query_tool_knowledge_references
@@ -80,6 +81,9 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
 
         agent_dict = as_dict(agent)
         if version_no > 0 and agent.tenant_id == tenant_id:
+            guides = guides_for_version(session, tenant_id, agent_id, version_no)
+            if guides:
+                agent_dict["released_skill_guides"] = guides
             removed = excluded_for_version(session, tenant_id, agent_id, version_no)
             if removed:
                 agent_dict["released_tool_exclusions"] = removed

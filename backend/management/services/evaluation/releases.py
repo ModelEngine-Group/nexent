@@ -9,7 +9,7 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
 from infrastructure.rdb.skill_execution_records import read_bound_skills, SkillInstance
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
-from infrastructure.skill_package import load_skill_package, released_skill_files, store_skill_package
+from infrastructure.skill_package import load_new_skill_package, load_skill_package, released_skill_files, store_skill_package
 from management.db.evaluation import releases
 from management.services.evaluation.confirmation import verified_recipe
 from management.services.evaluation.experiments import snapshot_digest
@@ -45,12 +45,18 @@ def _confirmed_tool_exclusions(prepared):
     return tuple(base.removed)
 
 
+def _verify_released_guides(tenant, resource):
+    for ref in resource.released_skill_guides:
+        load_new_skill_package(tenant, resource.agent_id, ref.digest)
+
+
 def _materials(tenant, ctx, prepared):
     recipe = ctx["recipe"]
     agent, version, kind = ctx["agent_id"], ctx["version_no"], recipe["candidate_type"]
     base, new = (prepared[arm].resource for arm in ("base", "result"))
     if base.subagents or new.subagents or base.external_a2a or new.external_a2a:
         releases.reject("This release requires independently pinned child resources")
+    _verify_released_guides(tenant, base)
     prompt = None
     target = None
     removed = ()
@@ -60,6 +66,12 @@ def _materials(tenant, ctx, prepared):
         )["result_text"]
     elif kind == "tool_set":
         removed = _confirmed_tool_exclusions(prepared)
+    elif kind == "skill_new":
+        old_ref, new_ref = (prepared[arm].new_skill_trial for arm in ("base", "result"))
+        if (not old_ref or not new_ref or old_ref.arm != "base" or new_ref.arm != "result"
+                or new_ref.candidate_id != recipe["candidate_id"] or old_ref.model_copy(update={"arm": "result"}) != new_ref):
+            releases.reject("Independent results do not identify a single new Skill package")
+        load_new_skill_package(tenant, agent, new_ref.digest)
     elif kind == "skill_step":
         target = read_bound_skill_candidate(tenant, agent, version, recipe["candidate_id"])
         if not target or target["method"] != "S2":
@@ -114,6 +126,9 @@ def _materials(tenant, ctx, prepared):
         r.model_copy(update={"package_candidate_id": None, "package_variant": None})
         for r in baseline.resource.skill_refs
     ]
+    if kind == "skill_new":
+        baseline.new_skill_trial = None
+        baseline.observe_root_skill_choices = None
     baseline.tool_set_check = None
     return pins, prompt, snapshot_digest(baseline), removed
 
@@ -131,6 +146,7 @@ async def promote(tenant, actor, lock, request):
     if recipe != ctx["recipe"]:
         releases.reject("The tested candidate can no longer be reproduced")
     pins, prompt, baseline, removed = await _io("verify-release-packages", _materials, tenant, ctx, prepared)
+    guide = prepared["result"].new_skill_trial.model_dump(exclude={"arm"}) if recipe["candidate_type"] == "skill_new" else None
     return await _io(
         "publish-evolution-version",
         releases.publish,
@@ -145,6 +161,7 @@ async def promote(tenant, actor, lock, request):
         prompt,
         baseline,
         removed,
+        guide,
     )
 
 
@@ -162,6 +179,8 @@ async def rollback(tenant, actor, lock, request):
                 language=record["language"],
             )
             ready = spec is not None and snapshot_digest(spec) == record["baseline_digest"]
+            if ready:
+                await _io("verify-rollback-guides", _verify_released_guides, tenant, spec.resource)
         except (ValueError, OSError, AppException, SnapshotCompilationError):
             ready = False
     return await _io("rollback-evolution-version", releases.restore, tenant, actor, lock, request, ready)

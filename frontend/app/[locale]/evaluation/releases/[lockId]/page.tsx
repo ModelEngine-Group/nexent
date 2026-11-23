@@ -77,6 +77,9 @@ export default function ReleasePage() {
                   current: data.current_version,
                 })}
               </Typography.Text>
+              {data.added_guide && <Typography.Text>
+                {t("evolution.release.addedGuide", {name:data.added_guide.name, digest:data.added_guide.digest.slice(0,12)})}
+              </Typography.Text>}
               {!!data.excluded_tools?.length && (
                 <Typography.Text>
                   {t("evolution.release.excludedTools", {

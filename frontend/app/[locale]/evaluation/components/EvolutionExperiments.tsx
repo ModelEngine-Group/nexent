@@ -677,6 +677,7 @@ function Experiments({
           agent={agent}
           version={version}
           skills={[...new Set([...(choices?.skills || []).map(s => s.name),
+            ...(choices?.released_guides || []).map(s => s.name),
             ...(choices?.candidates || []).filter(c => c.kind === "skill_new").map(c => c.name)])].map(name => ({name}))}
           close={() => setAdding(false)}
           saved={(id) => {

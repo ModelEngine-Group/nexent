@@ -37,6 +37,12 @@ def feedback_skill_files(tenant, name, agent_version):
     if agent_version is not None:
         agent, version = agent_version
         matches = [row for row in read_bound_skills(agent, version, tenant) if row["name"] == name]
+        if not matches:
+            from infrastructure.rdb.released_skill_guides import read_released_guides
+            from infrastructure.skill_package import load_new_skill_package
+            pinned = next((ref for ref in read_released_guides(tenant, agent, version) if ref["name"] == name), None)
+            if pinned:
+                return load_new_skill_package(tenant, agent, pinned["digest"])
         if len(matches) != 1:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Feedback Skill binding is missing or ambiguous")
         if "release_package" in matches[0]:

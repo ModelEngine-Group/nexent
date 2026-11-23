@@ -57,6 +57,14 @@ def test_feedback_reads_published_skill_and_rejects_missing_binding(monkeypatch)
     assert skill_candidates.feedback_skill_files("tenant", "meeting", (2, 3)) == pinned.return_value
     pinned.assert_called_once_with("tenant", 2, 3, binding)
     rows.return_value = []
+    from infrastructure import skill_package
+    from infrastructure.rdb import released_skill_guides
+    scoped = Mock(return_value=[{"name":"new-guide", "digest":"d"*64}])
+    read_guide = Mock(return_value={"SKILL.md": b"approved guide"})
+    monkeypatch.setattr(released_skill_guides,"read_released_guides",scoped)
+    monkeypatch.setattr(skill_package,"load_new_skill_package",read_guide)
+    assert skill_candidates.feedback_skill_files("tenant","new-guide",(2,3)) == read_guide.return_value
+    read_guide.assert_called_once_with("tenant",2,"d"*64)
     with pytest.raises(AppException):
         skill_candidates.feedback_skill_files("tenant", "meeting", (2, 3))
     shared.assert_not_called()
@@ -126,3 +134,38 @@ def test_promotion_requires_exact_agreement_between_confirmed_catalogs():
     valid["result"].tool_set_check.removed = ["read"]
     with pytest.raises(AppException):
         releases._confirmed_tool_exclusions(valid)
+
+
+@pytest.mark.asyncio
+async def test_missing_released_guide_prevents_rollback_to_that_version(monkeypatch):
+    record = dict(new_version=4, base_version=3, agent_id=7, language="en", rollback_at=None, baseline_digest="valid")
+    spec = SimpleNamespace(resource=SimpleNamespace(agent_id=7, released_skill_guides=[SimpleNamespace(digest="package")]))
+    monkeypatch.setattr(releases, "_io", inline_io)
+    monkeypatch.setattr(releases, "prepare_evaluation_snapshot", AsyncMock(return_value=spec))
+    monkeypatch.setattr(releases, "snapshot_digest", Mock(return_value="valid"))
+    monkeypatch.setattr(releases.releases, "rollback_target", Mock(return_value=record))
+    read = Mock(side_effect=OSError("missing guide"))
+    monkeypatch.setattr(releases, "load_new_skill_package", read)
+    restore = Mock(return_value={"new_sessions_paused":True})
+    monkeypatch.setattr(releases.releases, "restore", restore)
+    request = RollbackRequest(expected_version=4, reason="restore")
+    assert (await releases.rollback("tenant","publisher",9,request))["new_sessions_paused"]
+    read.assert_called_once_with("tenant",7,"package")
+    restore.assert_called_once_with("tenant","publisher",9,request,False)
+
+
+def test_runtime_rejects_guide_from_another_agent_version_before_staging(monkeypatch):
+    from contracts.agentos import ReleasedSkillGuide
+    from infrastructure.rdb import released_skill_guides
+    from runtime.agentos import prepared_skills
+
+    wanted = ReleasedSkillGuide(name="intake", candidate_id=9, digest="b"*64)
+    resource = SimpleNamespace(agent_id=2, version_no=4, released_skill_guides=[wanted])
+    reader = Mock(return_value=[{**wanted.model_dump(), "digest":"a"*64}])
+    monkeypatch.setattr(released_skill_guides,"read_released_guides",reader)
+    mount = Mock()
+    monkeypatch.setattr(prepared_skills,"_mount_guide",mount)
+    with pytest.raises(ValueError, match="Agent version"):
+        prepared_skills.mount_released_guides(resource,SimpleNamespace(tenant_id="tenant"),"workspace",{},"en")
+    reader.assert_called_once_with("tenant",2,4)
+    mount.assert_not_called()

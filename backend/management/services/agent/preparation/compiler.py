@@ -747,6 +747,7 @@ async def create_agent_config(
     )
 
     agent_config = AgentConfig(
+        released_skill_guides=agent_info.get("released_skill_guides") or [],
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         display_name=agent_info.get("display_name"),
         description="undefined"

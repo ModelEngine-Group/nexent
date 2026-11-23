@@ -41,6 +41,7 @@ def test_session_versions(runtime):
             "031_evolution_session_versions",
             "032_evolution_releases",
             "033_evolution_release_tools",
+            "035_evolution_release_guides",
         ):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     tenant, owner, agent = "release-pilot", "chat-user", 901
@@ -151,3 +152,19 @@ def test_session_versions(runtime):
     assert "released_tool_exclusions" not in search_agent_info_by_agent_id(agent, tenant, 1)
     assert search_agent_info_by_agent_id(agent, tenant, 2)["released_tool_exclusions"] == ["analyze_text_file"]
     assert search_agent_info_by_agent_id(agent, tenant, 3)["released_tool_exclusions"] == ["analyze_text_file","create_file"]
+
+    from infrastructure.rdb.released_skill_guides import guides_for_version, publish_guides
+
+    first_guide = {"candidate_id": 5, "name": "intake", "digest": "a"*64}
+    with get_db_session() as session:
+        publish_guides(session, tenant, agent, 1, 2, first_guide)
+        publish_guides(session, tenant, agent, 2, 3, None)
+        assert not guides_for_version(session, "other-tenant", agent, 3)
+        assert not guides_for_version(session, tenant, agent+1, 3)
+        with pytest.raises(ValueError, match="already has this name"):
+            publish_guides(session, tenant, agent, 3, 4, first_guide)
+        assert not guides_for_version(session, tenant, agent, 4)
+    assert "released_skill_guides" not in search_agent_info_by_agent_id(agent, tenant, 0)
+    assert "released_skill_guides" not in search_agent_info_by_agent_id(agent, tenant, 1)
+    for version in (2,3):
+        assert search_agent_info_by_agent_id(agent, tenant, version)["released_skill_guides"] == [first_guide]

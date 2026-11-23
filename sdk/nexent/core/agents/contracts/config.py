@@ -310,6 +310,7 @@ class AgentVerificationConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    released_skill_guides: list[dict] = Field(default_factory=list, exclude_if=lambda value: not value)
     response_mode: Literal["chat", "artifact", "python_workflow"] = Field(
         default="chat", description="Application-selected output contract, independent of the execution Core",
     )

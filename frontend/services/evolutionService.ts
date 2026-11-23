@@ -20,6 +20,7 @@ interface Rule {
   status: string;
 }
 export interface Workspace {
+  released_guides?: {name: string; candidate_id: number; digest: string}[];
   fixed_regression?: { source_case_id: number; source_version: number; digest: string; family: string; query: string;
     rubric?: { name: string; version_no: number } }[];
   skills?: { skill_id: number; name: string }[];
@@ -133,6 +134,7 @@ export const evolutionService = {
   release: (id: number) => read<{
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
     candidate_digest: string; candidate_type: string; paused: boolean; excluded_tools?: string[];
+    added_guide?: {candidate_id: number; name: string; digest: string} | null;
     summary: null | {decision: "passed" | "insufficient" | "failed"; valid_pairs: number; total_pairs: number; regressed: number};
     release: null | {new_version: number; rollback_at: string | null; disabled: boolean};
   }>(`${root}/confirmation-locks/${id}/release`),

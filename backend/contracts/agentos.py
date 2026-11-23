@@ -546,7 +546,14 @@ def memory_context_requires_search(item: dict) -> bool:
     )
 
 
+class ReleasedSkillGuide(RunSpecModel):
+    name: str = Field(max_length=80, pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_id: PositiveInt
+
+
 class AgentResource(RunSpecModel):
+    released_skill_guides: list[ReleasedSkillGuide] = Field(default_factory=list, exclude_if=lambda value: not value)
     agent_id: PositiveInt
     version_no: Annotated[int, Field(ge=0)]
     name: str = Field(min_length=1)

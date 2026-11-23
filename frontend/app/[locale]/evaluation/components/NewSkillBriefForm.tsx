@@ -28,6 +28,7 @@ export default function NewSkillBriefForm({
       report.pairs[c.case_id]?.base &&
       !report.fixed_regression?.case_ids.includes(c.case_id)
   );
+  const guides = [...(workspace.skills ?? []), ...(workspace.released_guides ?? [])];
   const options = cases.map((c) => ({
     value: c.case_id,
     label: `#${c.case_id} ${c.query}`,
@@ -184,7 +185,7 @@ export default function NewSkillBriefForm({
                     rules={required}
                   >
                     <Select
-                      options={workspace.skills?.map((s) => ({
+                      options={guides.map((s) => ({
                         value: s.name,
                         label: s.name,
                       }))}
@@ -209,7 +210,7 @@ export default function NewSkillBriefForm({
                   </Button>
                 </div>
               ))}
-              {!!workspace.skills?.length && (
+              {!!guides.length && (
                 <Button onClick={() => add()}>
                   {t("evolution.newSkill.addCovered")}
                 </Button>

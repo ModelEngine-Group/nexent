@@ -72,6 +72,7 @@
   "evolution.newSkill.heldout": "Include fresh tasks where the Skill should be used and where it should be skipped.",
   "evolution.newSkill.absent": "Baseline ran without {{name}}",
   "evolution.newSkill.mounted": "Mounted {{name}}, package {{digest}}",
+  "evolution.release.addedGuide": "New Skill for this Agent: {{name}} (package {{digest}})",
   "evolution.kind.skill_new": "New Skill",
   "evolution.kind.skill_discovery": "Skill description",
   "evolution.quartets": "All four arms valid on {{valid}}/{{total}} tasks · A from #{{a}}, B from #{{b}}",

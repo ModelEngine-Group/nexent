@@ -70,7 +70,7 @@ from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import (
-    mount_new_skill_trial, verify_new_skill_mount, materialize_skill_tools, observe_trial_guide_choices, root_without_target_skill, skill_stage_path, skill_trial_observation,
+    mount_released_guides, mount_new_skill_trial, verify_new_skill_mount, materialize_skill_tools, observe_trial_guide_choices, root_without_target_skill, skill_stage_path, skill_trial_observation,
 )
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
@@ -207,6 +207,8 @@ def _materialize_agent(
         public_reference=public_reference, workbench_version=workbench_version,
         debug_run_id=workbench_debug_run_id,
     )
+    if resource.released_skill_guides:
+        visible = mount_released_guides(visible, actor, workspace_path, local_tools, language)
     if new_skill_trial:
         visible = mount_new_skill_trial(visible, actor, workspace_path, local_tools, new_skill_trial, language)
     try:
