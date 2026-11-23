@@ -28,6 +28,7 @@ from management.services.evaluation.replay_cases import (
     freeze_regression_members, get_development_case, remove_trial_inputs, require_trace_baseline, stage_case_input,
 )
 from management.services.evaluation.scoring import grade_observed_case
+from management.services.evaluation.judge_binding import judge_binding, judges_for_plan
 from management.services.evaluation.screening import screen_development
 from management.services.evaluation.skill_candidates import pin_skill_candidate
 from management.services.evaluation.replay_dialogue import judge_file_state, run_turns, skill_evidence
@@ -230,6 +231,8 @@ async def create_experiment(request, tenant, user):
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
+    if request.screening:
+        plan["judges"] = await _io("freeze-development-judges", judges_for_plan, tenant, rule, request, fixed)
     if request.candidate_type != "baseline":
         plan["regression_cases"] = fixed
     return await _io("submit-development-experiment", jobs.submit, tenant, user, request, plan)
@@ -362,12 +365,21 @@ def _grade(request, job, task, observed):
     closed = any(e.get("type") == "final_answer" for e in observed.events)
     language = scoring["language"] if scoring else request.language
     judge_model_id = scoring["judge_model_id"] if scoring else request.judge_model_id
+    frozen_judges = plan.get("judges")
+    def judge_matches():
+        return (frozen_judges is None or rule["evaluator_type"] == "code" or
+                frozen_judges.get(f"{judge_model_id}/{language}") == judge_binding(job["tenant_id"], judge_model_id, language))
+    changed = {"status":"invalid","reason":"judge_binding_changed","evaluator_id":eid,"evaluator_version":rule.get("version_no")}
+    if not judge_matches():
+        return changed
     system = compose_auxiliary_prompt(language, "evaluation_judge").system if rule["evaluator_type"] != "code" else ""
     grade = grade_observed_case(
         {eid: rule}, tenant_id=job["tenant_id"], user_id=job["created_by"], query=task["query"],
         expected=task["expected"], actual=observed.answer if closed else None, runtime_events=observed.events,
         required_evidence={eid: {"actual", "expected"}}, judge_model_id=judge_model_id, judge_system_prompt=system,
     )[eid]
+    if not judge_matches():
+        return changed
     return {**grade, "evaluator_id": eid, "evaluator_version": rule.get("version_no")}
 
 

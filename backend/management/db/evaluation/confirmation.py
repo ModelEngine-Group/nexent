@@ -38,6 +38,14 @@ def _overlap():
     return AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The materials overlap another evaluation partition")
 
 
+def require_curator(session, tenant, agent, user):
+    if not _membership(session, tenant, user) or not session.scalar(text("""
+        SELECT enabled FROM nexent.evolution_confirmation_curator_t
+         WHERE tenant_id=:tenant AND agent_id=:agent AND user_id=:user FOR SHARE
+    """), {"tenant":tenant, "agent":agent, "user":user}):
+        raise AppException(ErrorCode.COMMON_FORBIDDEN)
+
+
 def _reserve(session, tenant, agent, keys, partition):
     # Both writers take unique-index locks in the same order. A conflict rolls back the entire task or suite.
     params = {"tenant":tenant, "agent":agent, "keys":sorted(keys), "partition":partition}
@@ -64,11 +72,7 @@ def register_suite(tenant, user, manifest):
     digest = task_digest(public)
     params = {"tenant":tenant,"agent":agent,"version":version,"digest":digest,"user":user}
     with get_db_session() as session:
-        if not _membership(session, tenant, user) or not session.scalar(text("""
-                SELECT enabled FROM nexent.evolution_confirmation_curator_t
-                 WHERE tenant_id=:tenant AND agent_id=:agent AND user_id=:user FOR SHARE
-            """), params):
-            raise AppException(ErrorCode.COMMON_FORBIDDEN)
+        require_curator(session, tenant, agent, user)
         existing = text("""
             SELECT suite_id FROM nexent.evolution_confirmation_suite_t
              WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version AND digest=:digest

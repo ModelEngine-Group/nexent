@@ -6,13 +6,15 @@ from functools import partial
 
 from fastapi import APIRouter, Header, Query, Response
 from contracts.agentos import EvaluationAgentRun
-from contracts.confirmation import ConfirmationManifest, CuratorGrant
+from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest, CuratorGrant
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
 from management.db.evaluation.candidates import text_digest
 from management.db.evaluation.confirmation import register_suite, set_curator
+from management.db.evaluation.confirmation_locks import locked_protocol
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
+from management.services.evaluation.confirmation import approve_comparison, nominate_candidate
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, resolve_prompt_candidate
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
@@ -27,6 +29,26 @@ from nexent.core.concurrency import run_blocking
 
 
 router = APIRouter(prefix="/agent-evolution")
+
+
+@router.post("/experiments/{experiment_id}/confirmation-candidate")
+async def submit_confirmation_candidate(experiment_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data":await nominate_candidate(tenant, user, experiment_id)}
+
+
+@router.post("/confirmation-suites/{suite_id}/locks")
+async def lock_independent_comparison(suite_id: int, request: ConfirmationLockRequest, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data":await approve_comparison(tenant, user, suite_id, request)}
+
+
+@router.get("/confirmation-locks/{lock_id}")
+async def read_confirmation_lock(lock_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    protocol = await run_blocking("read-confirmation-protocol", locked_protocol, tenant, user, lock_id,
+                                  lane="control-io", owner="management")
+    return {"data":protocol}
 
 
 @router.put("/agents/{agent_id}/confirmation-curators")

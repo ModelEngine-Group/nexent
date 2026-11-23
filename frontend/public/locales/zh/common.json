@@ -1,4 +1,6 @@
 {
+  "evolution.confirmation.submit": "提交候选给独立评测人",
+  "evolution.confirmation.receipt": "已提交实验 {{id}} 的候选。请将实验编号和候选摘要交给独立评测人。",
   "evolution.screen.skill_selection": "候选漏选或错选 Skill",
   "evolution.screen.unfinished_token_target": "候选未完成要求降低用量的任务",
   "evolution.screen.enable": "按预设条件筛选候选",

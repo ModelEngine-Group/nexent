@@ -33,6 +33,7 @@ vi.mock("@/services/evolutionService", () => ({
     traceCaseDraft: vi.fn(),
     createCase: vi.fn(),
     report: vi.fn(),
+    nominate: vi.fn(),
     submit: vi.fn(),
     exampleCandidates: vi.fn(),
     shareDiscovery: vi.fn(),
@@ -157,6 +158,26 @@ it("selects a published scope and opens its paired results with the original sta
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
     screening: { target_case_ids:[10], metric:"tasks_fixed", minimum:1 },
   })));
+});
+
+it("submits an eligible candidate only when its editor requests independent confirmation", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{agent_id:7,name:"Meeting agent"}]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{version_no:1,version_name:"Pilot"}]);
+  const date = "2026-11-23T00:00:00Z";
+  vi.mocked(evolutionService.workspace).mockResolvedValue({cases:[],candidates:[],experiments:[{experiment_id:41,create_time:date}]});
+  vi.mocked(evolutionService.report).mockResolvedValue({experiment_id:41,status:"finished",valid_pairs:2,total_pairs:2,pairs:{},
+    screening:{status:"eligible",gain:1,criteria:{target_case_ids:[2],metric:"tasks_fixed",minimum:1},failures:{},missing:{}}});
+  const digest = "b".repeat(64);
+  vi.mocked(evolutionService.nominate).mockResolvedValue({experiment_id:41,candidate_digest:digest});
+  render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
+  await choose("agentEvaluation.agentLabel", "Meeting agent");
+  await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  await choose("evolution.history", "#41 · " + new Date(date).toLocaleString());
+  const submit = await screen.findByRole("button", {name:"evolution.confirmation.submit"});
+  expect(evolutionService.nominate).not.toHaveBeenCalled();
+  fireEvent.click(submit);
+  expect(await screen.findByText(digest)).toBeInTheDocument();
+  expect(evolutionService.nominate).toHaveBeenCalledWith(41);
 });
 
 it("requires a business expectation before freezing a trace draft, then selects its baseline", async () => {

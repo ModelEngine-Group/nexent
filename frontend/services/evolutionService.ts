@@ -158,6 +158,8 @@ export const evolutionService = {
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  nominate: (id: number) => read<{ experiment_id: number; candidate_digest: string }>(
+    `${root}/experiments/${id}/confirmation-candidate`, {}),
   setFixedRegression: (agent: number, version: number, id: number, enabled: boolean,
     scoring?: { evaluator_id: number; judge_model_id?: number; language: string }) =>
     read<{ case_id: number; enabled: boolean }>(

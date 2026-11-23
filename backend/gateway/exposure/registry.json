@@ -335,6 +335,33 @@
       "credential_kinds": ["session"]
     },
     {
+      "method": "GET",
+      "path": "/api/agent-evolution/confirmation-locks/{lock_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-confirmation-protocol",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/confirmation-candidate",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-confirmation-submit",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evolution/confirmation-suites/{suite_id}/locks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-confirmation-lock",
+      "credential_kinds": ["session"]
+    },
+    {
       "method": "POST",
       "path": "/api/agent-evolution/confirmation-suites",
       "transport": "http",

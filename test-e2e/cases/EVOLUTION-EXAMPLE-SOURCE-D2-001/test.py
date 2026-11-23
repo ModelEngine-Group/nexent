@@ -39,7 +39,8 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
         for name in ("003_conversation_run_admission", "006_prepared_conversation_turn", "011_trajectory",
                      "015_conversation_evolution", "016_evolution_candidates", "017_evolution_skill_candidates",
                      "018_evolution_replay_cases", "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
-                     "025_evolution_regression_cases", "026_evolution_combination", "028_evolution_confirmation_suites"):
+                     "025_evolution_regression_cases", "026_evolution_combination", "028_evolution_confirmation_suites",
+                     "029_evolution_confirmation_locks"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for version in (0, 1, 2):
@@ -130,7 +131,8 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                     "resource":{"model_alias":"pilot", "subagents":[], "prompt":"base" if arm == "base" else "revised"}})
 
             monkeypatch.setattr(experiments, "_snapshot", fixed_snapshot)
-            response = client.post(root + "/experiments", headers=headers, json={**submission, "case_ids":[fresh["case_id"]]})
+            response = client.post(root + "/experiments", headers=headers, json={**submission, "case_ids":[fresh["case_id"]],
+                "screening":{"target_case_ids":[fresh["case_id"]],"minimum":1}})
             assert response.status_code == 202, response.text
             source_experiment = response.json()["data"]["experiment_id"]
             plan = jobs.read_plan(tenant, source_experiment)
@@ -161,14 +163,17 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
             for single in (source_experiment, tool_experiment):
                 frozen = jobs.read_plan(tenant, single)
                 while trial := jobs.claim(single):
-                    assert jobs.finish(trial, "pass", {"snapshot_digest": frozen["snapshots"][trial["variant"]],
-                                                      "case_digest": frozen["cases"][str(trial["case_id"])]})
+                    status = "fail" if trial["variant"] == "base" and trial["case_id"] == fresh["case_id"] else "pass"
+                    assert jobs.finish(trial, status, {"snapshot_digest": frozen["snapshots"][trial["variant"]],
+                        "case_digest": frozen["cases"][str(trial["case_id"])], "evaluator_id":eid,
+                        "evaluator_version":frozen["evaluator"]["version_no"],"judgment":{"status":status}})
             forged = {**combined, "components": [parts[0], {**parts[1], "candidate_id": 20}]}
             response = client.post(root + "/experiments", headers=headers, json=forged)
             assert 400 <= response.status_code < 500 and "single experiments" in response.text, response.text
             response = client.post(root + "/experiments", headers=headers, json=combined)
             assert response.status_code == 202, response.text
             combo_id = response.json()["data"]["experiment_id"]
+            assert client.post(root + f"/experiments/{combo_id}/confirmation-candidate",headers=headers).status_code == 400
             retry = client.post(root + "/experiments", headers=headers, json=combined)
             assert retry.status_code == 202 and retry.json()["data"]["experiment_id"] == combo_id
             trial_rows = jobs.trials(tenant, combo_id)
@@ -181,13 +186,13 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
             assert 400 <= response.status_code < 500 and "single experiments" in response.text, response.text
             with get_db_session() as session:
                 assert session.scalar(text("SELECT count(*) FROM nexent.evolution_experiment_t")) == 3
-            check_confirmation_space(client, identity, headers, user, tenant, tmp_path)
+            check_confirmation_space(client, identity, headers, user, tenant, tmp_path, source_experiment)
     finally:
         clear_default_thread_manager(config_thread_manager)
         asyncio.run(config_thread_manager.shutdown(timeout=5))
 
 
-def check_confirmation_space(client, identity, editor, editor_id, tenant, private_dir):
+def check_confirmation_space(client, identity, editor, editor_id, tenant, private_dir, experiment):
     import json
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
@@ -208,8 +213,8 @@ def check_confirmation_space(client, identity, editor, editor_id, tenant, privat
     seal_url = root + "/confirmation-suites"
     grant = {"user_id":curator_id,"enabled":True}
     pack = private_dir / "suite.json"
-    def compile_case(query, group):
-        pack.write_text(json.dumps([{"agent_id":7,"version_no":1,"family":"meeting","query":query,
+    def compile_case(query, group, version=1):
+        pack.write_text(json.dumps([{"agent_id":7,"version_no":version,"family":"meeting","query":query,
             "source_group":group,"expected":"PRIVATE ANSWER — customer seven"}]),encoding="utf-8")
         return compile_private_suite(pack)
 
@@ -261,5 +266,31 @@ def check_confirmation_space(client, identity, editor, editor_id, tenant, privat
         return True
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(compete,[False,True])) == [False,True]
+    nomination = client.post(root + f"/experiments/{experiment}/confirmation-candidate",headers=editor)
+    assert nomination.is_success, nomination.text
+    candidate = nomination.json()["data"]
+    private_v2 = compile_case("A new external report", "new-private-series", version=2)
+    receipt = client.post(seal_url,headers=curator,json=private_v2.canonical()).json()["data"]
+    url = seal_url + f"/{receipt['suite_id']}/locks"
+    policy = {"minimum_valid_pairs":1,"minimum_valid_percent":100,"minimum_quality_gain_pp":1,"family_minimums":{"meeting":1}}
+    body = {**candidate,"suite_digest":receipt["digest"],"policy":policy}
+    assert client.post(url,headers=editor,json=body).status_code == 403
+    result = client.post(url,headers=curator,json=body)
+    assert result.is_success, result.text
+    read_url = root + f"/confirmation-locks/{result.json()['data']['lock_id']}"
+    assert client.get(read_url,headers=editor).status_code == 403
+    protocol = client.get(read_url,headers=curator).json()["data"]
+    assert protocol["digest"] == result.json()["data"]["digest"] and protocol["policy"]["family_minimums"] == {"meeting":1}
+    assert protocol["recipe"]["snapshots"].keys() == {"base","result"} and "cases" not in protocol["recipe"]
+    assert client.post(url,headers=curator,json=body).json()["data"] == result.json()["data"]
+    assert client.post(url,headers=curator,json={**body,"policy":{**policy,"minimum_quality_gain_pp":2}}).status_code == 400
+    other = compile_case("Reworded external report", "new-private-series", version=2)
+    second = client.post(seal_url,headers=curator,json=other.canonical()).json()["data"]
+    reuse = client.post(seal_url + f"/{second['suite_id']}/locks",headers=curator,json={**body,"suite_digest":second["digest"]})
+    assert reuse.status_code == 400 and "already assigned" in reuse.text
+    with get_db_session() as session:
+        assert session.scalar(text("SELECT count(*) FROM nexent.evolution_confirmation_lock_t")) == 1
     assert client.put(grant_url,headers=editor,json={**grant,"enabled":False}).is_success
+    assert client.post(url,headers=curator,json=body).status_code == 403
+    assert client.get(read_url,headers=curator).status_code == 403
     assert client.post(seal_url,headers=curator,json=manifest.canonical()).status_code == 403

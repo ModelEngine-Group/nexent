@@ -1,4 +1,6 @@
 {
+  "evolution.confirmation.submit": "Submit candidate for independent evaluation",
+  "evolution.confirmation.receipt": "Candidate submitted. Share experiment {{id}} and this digest with the independent evaluator.",
   "evolution.screen.skill_selection": "Candidate missed or selected an incorrect Skill",
   "evolution.screen.unfinished_token_target": "Candidate did not complete a token reduction target",
   "evolution.screen.enable": "Screen candidate against preset criteria",

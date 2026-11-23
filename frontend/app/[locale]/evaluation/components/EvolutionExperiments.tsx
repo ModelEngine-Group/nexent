@@ -285,6 +285,7 @@ function Experiments({
       void report.refetch();
     },
   });
+  const nomination = useMutation({ mutationFn: (id: number) => api.nominate(id) });
   const choices = workspace.data;
   const eligible = choices?.experiments.filter(e => e.eligible_component && e.candidate_type && e.candidate_id) || [];
   const fixedIds = new Set(report.data?.fixed_regression?.case_ids ?? []);
@@ -499,6 +500,13 @@ function Experiments({
                 {" · "}{t("evolution.screen.observed")} {report.data.screening.gain?.toLocaleString(undefined, {maximumFractionDigits: 2}) ?? "—"}</p>
               {Object.entries({...report.data.screening.failures, ...report.data.screening.missing}).map(([reason, ids]) =>
                 <p key={reason}>{t(`evolution.screen.${reason}`)}{ids.length > 0 && ` (#${ids.join(", #")})`}</p>)}
+              {report.data.screening.status === "eligible" && <Button loading={nomination.isPending}
+                onClick={() => nomination.mutate(report.data!.experiment_id)}>{t("evolution.confirmation.submit")}</Button>}
+              {nomination.data?.experiment_id === report.data.experiment_id && <p>{t("evolution.confirmation.receipt", {
+                id: nomination.data.experiment_id,
+              })} <Typography.Text copyable>{nomination.data.candidate_digest}</Typography.Text></p>}
+              {nomination.variables === report.data.experiment_id && nomination.error instanceof Error &&
+                <Alert type="error" message={nomination.error.message} />}
             </div>}
             {active && (
               <Button
