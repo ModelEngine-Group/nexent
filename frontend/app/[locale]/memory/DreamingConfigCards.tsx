@@ -30,6 +30,12 @@ import {
 
 const { Text } = Typography;
 
+const NO_PUBLICATION_REASONS = new Set([
+  "no_candidates",
+  "no_eligible_candidates",
+  "no_new_evidence",
+]);
+
 type FrequencyMode = "daily" | "weekly" | "interval";
 
 const DEFAULT_VALUES = {
@@ -104,7 +110,9 @@ export function DreamingConfigCards() {
   const [minUniqueQueries, setMinUniqueQueries] = useState<number | null>(null);
   const [sourceLimit, setSourceLimit] = useState<number | null>(null);
   const [longTermMaxChars, setLongTermMaxChars] = useState<number | null>(null);
-  const [lengthTolerancePercent, setLengthTolerancePercent] = useState<number | null>(null);
+  const [lengthTolerancePercent, setLengthTolerancePercent] = useState<
+    number | null
+  >(null);
   const [summarizationMaxAttempts, setSummarizationMaxAttempts] = useState<
     number | null
   >(null);
@@ -140,7 +148,9 @@ export function DreamingConfigCards() {
         setMinUniqueQueries(data.min_unique_queries ?? null);
         setSourceLimit(data.source_limit ?? null);
         setLongTermMaxChars(data.long_term_max_chars ?? null);
-        setLengthTolerancePercent(data.long_term_length_tolerance_percent ?? null);
+        setLengthTolerancePercent(
+          data.long_term_length_tolerance_percent ?? null
+        );
         setSummarizationMaxAttempts(data.summarization_max_attempts ?? null);
       })
       .finally(() => {
@@ -318,6 +328,12 @@ export function DreamingConfigCards() {
     return { status: "warning" as const, text: t("dreaming.run.skipped") };
   })();
   const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
+  const runReason =
+    latestRun?.status === "completed" &&
+    latestRun.reason &&
+    NO_PUBLICATION_REASONS.has(latestRun.reason)
+      ? t(`dreaming.reason.${latestRun.reason}`)
+      : null;
 
   if (loading) {
     return <Card className="memory-config-card" loading />;
@@ -444,7 +460,9 @@ export function DreamingConfigCards() {
           </div>
 
           <div>
-            <Text strong>{t("dreaming.thresholds.lengthTolerancePercent")}</Text>
+            <Text strong>
+              {t("dreaming.thresholds.lengthTolerancePercent")}
+            </Text>
             <InputNumber
               aria-label={t("dreaming.thresholds.lengthTolerancePercent")}
               style={{ width: "100%" }}
@@ -452,7 +470,9 @@ export function DreamingConfigCards() {
               max={INPUT_RANGES.lengthTolerancePercent.max}
               precision={0}
               value={lengthTolerancePercent}
-              placeholder={String(DEFAULT_VALUES.long_term_length_tolerance_percent)}
+              placeholder={String(
+                DEFAULT_VALUES.long_term_length_tolerance_percent
+              )}
               onChange={setLengthTolerancePercent}
               className="mt-1"
             />
@@ -616,6 +636,11 @@ export function DreamingConfigCards() {
                   : t("dreaming.schedule.neverRun"),
               })}
             </Text>
+            {runReason && (
+              <Text type="secondary" className="w-full text-xs">
+                {runReason}
+              </Text>
+            )}
             {latestRun?.status === "failed" && latestRun.error && (
               <Text type="danger" className="w-full text-xs">
                 {latestRun.error}
