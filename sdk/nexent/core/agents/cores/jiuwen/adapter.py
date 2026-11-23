@@ -10,6 +10,7 @@ import time
 import uuid
 from contextlib import aclosing, contextmanager
 from contextvars import ContextVar
+from copy import deepcopy
 from types import SimpleNamespace
 
 from nexent.core.agents.context.models import ContextItem, ContextItemType
@@ -21,12 +22,14 @@ from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
 from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
 from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
 from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
-from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
+from nexent.core.agents.cores.jiuwen.tool_tracing import record_tool_result, tool_execution_trace
+from nexent.core.agents.resources.monitoring import _is_retriever_tool, _wrap_tool_with_monitoring
 from nexent.core.agents.resources.provider import AgentResources
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.tools.prompt_registry import PromptToolPolicySnapshot, filter_effective_prompt_tools
 from nexent.core.utils.observer import ProcessType
+from nexent.monitor import get_monitoring_manager
 
 
 logger = logging.getLogger(__name__)
@@ -172,7 +175,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             raise ValueError("Duplicate tool names in agent configuration")
         from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
 
-        reserved = {EXECUTION_TOOL, NATIVE_EXECUTION_TOOL}
+        reserved = {EXECUTION_TOOL, NATIVE_EXECUTION_TOOL, "read_execution_output"}
         if reserved.intersection(registry):
             raise UnsupportedAgentCoreConfig("Reserved Jiuwen execution tool name")
         self.visible_tool_names = set(registry)
@@ -199,11 +202,21 @@ class JiuwenAdapter(AgentCoreAdapter):
         if getattr(self.run_info.observer, "boundary_reached", False) is True:
             raise asyncio.CancelledError()
         call_id = uuid.uuid4().hex
-        provider_id = self.events.tool_call(name, arguments, call_id)
+        parent = self._active_resource.get()
+        provider_id = self.events.tool_call(name, arguments, call_id, parent_call_id=parent[0] if parent else None)
         source = self._resource_source(name)
         token = self._active_resource.set((call_id, provider_id, name, source))
         try:
-            with self.run_info.observer.tool_call_context(call_id):
+            with self.run_info.observer.tool_call_context(call_id), tool_execution_trace(
+                get_monitoring_manager, name, self.run_info.agent_config.name, {
+                "nexent.runtime.turn_id": self.events.turn_id,
+                "nexent.model.request_id": self.events.model_request_id,
+                "nexent.runtime.step_number": self.events.step_number,
+                "nexent.tool.local_call_id": call_id,
+                "nexent.tool.provider_call_id": provider_id,
+                "nexent.tool.parent_call_id": parent[0] if parent else None,
+                "nexent.tool.source": source,
+            }, tool_input=arguments, tool=self.business_tools.get(name), observer=self.run_info.observer):
                 try:
                     yield
                 except BaseException as error:
@@ -214,6 +227,9 @@ class JiuwenAdapter(AgentCoreAdapter):
                          if diagnostic else "Cancelled"),
                         is_error=diagnostic is not None, error=diagnostic,
                     )
+                    if self.context_bridge is not None:
+                        self.context_bridge.completed_tool(
+                            name, "Resource failed", call_id, provider_call_id=provider_id)
                     raise
         finally:
             self._active_resource.reset(token)
@@ -286,11 +302,15 @@ class JiuwenAdapter(AgentCoreAdapter):
         )
         if active is not None:
             rendered = result if isinstance(result, str) else json.dumps(value, ensure_ascii=False, default=str)
+            record_tool_result(is_error, value)
             diagnostic = (
                 self._resource_failure(RuntimeError("Resource returned failure"), active[3], active[2])
                 if is_error else None
             )
             self.events.tool_result(*active[:2], rendered, is_error, error=diagnostic)
+            if self.context_bridge is not None:
+                self.context_bridge.completed_tool(
+                    active[2], rendered, active[0], provider_call_id=active[1])
         # Keep legacy side channels for artifacts and existing consumers.
         log_text = str(result)
         if getattr(self.run_info.agent_config, "response_mode", "chat") == "python_workflow":
@@ -335,7 +355,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         for config in self.tool_configs:
             if config.source == "mcp" or config.class_name == "ParallelExecutorTool":
                 continue
-            tool = _wrap_tool_with_monitoring(self.resources.create_tool(config), info.agent_config.name)
+            # The shared execution boundary owns one span for this actual call.
+            tool = self.resources.create_tool(config)
+            if _is_retriever_tool(tool):
+                # Retain the distinct retrieval phase, not a second TOOL span.
+                tool = _wrap_tool_with_monitoring(tool, info.agent_config.name, observer=info.observer)
             name = config.name or tool.name
             self.business_tools[name] = tool
             if name in self.visible_tool_names:
@@ -382,11 +406,26 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
+        from nexent.core.agents.context.action_history import register_historical_results
+        from nexent.core.agents.context.execution_history import ExecutionHistory
+        from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
+        self.execution_history = ExecutionHistory()
+        self.context_items = register_historical_results(self.context_items, self.execution_history, self.owner_id)
+        if any(item.metadata.get("execution_source_refs") for item in self.context_items):
+            reader = ReadExecutionOutputTool(self.execution_history, self.owner_id, lambda: None)
+            self.business_tools[reader.name] = reader
+            self.visible_tool_names.add(reader.name)
+            native_tools.append(LocalFunction(
+                self._tool_card(name=reader.name, description=reader.description, input_params=_tool_schema(reader.inputs)),
+                self._business_handler(reader.name, reader.forward),
+            ))
         rails = self._skill_rails()
         model = self._create_model()
         from nexent.core.agents.cores.jiuwen.context import JiuwenContextBridge
 
-        self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items)
+        self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items,
+                                                  message_format="openai_chat_completions")
+        self.context_bridge.context_manager.config.execution_history = self.execution_history
         model.prepare_messages = self._prepare_model_messages
         model.prefix = []
         self.native_agent = create_deep_agent(
@@ -421,6 +460,7 @@ class JiuwenAdapter(AgentCoreAdapter):
 
         card = ToolCard(**values)
         self._set_tool_timeout(card)
+        self.events.local_tool_schemas[card.name] = deepcopy(card.input_params)
         return card
 
     def _set_tool_timeout(self, card):
@@ -431,6 +471,11 @@ class JiuwenAdapter(AgentCoreAdapter):
             "timeout_s": self.run_info.tool_call_timeout_seconds,
         }
         card.properties = properties
+
+    def begin_request(self):
+        """Reset the existing bounded execution reader for one model invocation."""
+        if getattr(self, "execution_history", None) is not None:
+            self.execution_history.reset_read_budget(self.owner_id)
 
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
@@ -493,9 +538,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             {"role": history.role, "content": history.content}
             for history in _get_authorized_history(self.run_info) or ()
         )
-        from nexent.core.agents.prompt.policies import business_system_instructions
-
         from nexent.core.agents.cores.jiuwen.protocol import NATIVE_PROTOCOL_INSTRUCTION
+        from nexent.core.agents.prompt.policies import business_system_instructions
 
         shared = business_system_instructions(
             config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
@@ -526,18 +570,10 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
         from nexent.core.model_service.registry import AuthenticationRegistry
         from nexent.core.model_service.service import ModelService
-        from nexent.core.utils.token_estimation import estimate_tokens_text
 
         info, config = self.run_info, self.model_config
         profile = config.resolved_profile
-        output_cap = profile.parameter_values.get("max_output_tokens", profile.parameter_values.get("max_tokens"))
-        budget = info.context_budget_snapshot or info.agent_config.context_budget_snapshot
-        if (budget is None and info.agent_config.requested_output_tokens is not None
-                and info.agent_config.requested_output_tokens != output_cap):
-            raise UnsupportedAgentCoreConfig(
-                "Resolve the Agent output override into the outlet snapshot before running")
-        if budget is not None and budget.requested_output_tokens != output_cap:
-            raise UnsupportedAgentCoreConfig("Resolve the output budget into the outlet snapshot before running")
+        # Retired output budgets never constrain model dispatch, for any Core.
         service = info.model_service
         if service is None:
             # Capture credentials before any later configuration mutation.
@@ -565,15 +601,13 @@ class JiuwenAdapter(AgentCoreAdapter):
             if event.type == "message_completed":
                 info.observer.add_message(info.agent_config.name, ProcessType.TOKEN_COUNT,
                                           event.message.usage.model_dump_json())
-
-        def validate_input(view):
-            budget = getattr(info.agent_config.context_manager_config, "effective_input_limit_tokens", 0)
-            if budget and estimate_tokens_text(view.model_dump_json()) > budget:
-                raise UnsupportedAgentCoreConfig("Jiuwen input exceeds the resolved Nexent context budget")
+                if self.context_bridge is not None:
+                    self.context_bridge.accepted_response(event.message,
+                        self.context_bridge.summary_model.model.last_native_message)
 
         return JiuwenServiceModel(service, profile, self.scope, prefix=self.prefix_messages,
                                   run_id=self.owner_id, deadline=info.model_deadline,
-                                  on_step=on_step, on_event=on_event, validate_input=validate_input,
+                                  on_step=on_step, on_event=on_event,
                                   on_error=self.events.record_error, on_recovery=self.events.recovery,
                                   delegation=self.delegation, artifact_output=self.artifact_output,
                                   clarification=self.clarification)

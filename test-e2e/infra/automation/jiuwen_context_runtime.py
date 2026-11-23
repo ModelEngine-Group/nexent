@@ -58,8 +58,8 @@ def context_database(monkeypatch):
             raise AssertionError("Isolated history PostgreSQL did not start")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres")
         from infrastructure.rdb import client
-        from management.configuration import runtime as configuration_runtime
-        from management.configuration.catalog import DEFAULT_CATALOG
+        from infrastructure.system_configuration import runtime as configuration_runtime
+        from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
         from management.db.conversation import repository as conversation_db
         from management.db.identity.models import UserTenant
         from management.db.models import (

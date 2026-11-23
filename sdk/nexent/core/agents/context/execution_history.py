@@ -25,6 +25,8 @@ class ExecutionRecord:
     attempted: bool = False
     called: bool = False
     persisted: bool = False
+    model_action: dict | None = None
+    model_view: dict | None = None
     ready: Event = field(default_factory=Event)
     summary_lock: Lock = field(default_factory=Lock)
 
@@ -32,11 +34,22 @@ class ExecutionRecord:
     def text(self) -> str:
         return result_text(self.fields)
 
-    def payload(self) -> dict[str, str]:
+    def payload(self) -> dict[str, Any]:
         payload = {"content": self.text}
         if self.summary:
             payload["summary"] = self.summary
+        if self.model_action is not None:
+            payload["model_action"] = self.model_action
+        if self.model_view is not None:
+            payload["model_view"] = self.model_view
         return payload
+
+
+@dataclass(frozen=True)
+class HistoricalExecutionResult:
+    owner: str
+    text: str
+    persisted: bool = False
 
 
 class ExecutionHistory:
@@ -47,6 +60,7 @@ class ExecutionHistory:
         self._read_persisted = read_persisted
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
+        self._restored: dict[tuple[str, str], HistoricalExecutionResult] = {}
         self._read_chars: dict[str, int] = {}
         self._rendered_budget: dict[str, int | None] = {}
 
@@ -55,6 +69,33 @@ class ExecutionHistory:
         with self._lock:
             self._records[key] = ExecutionRecord(owner, dict(fields))
         return key
+
+    def restore(self, owner: str, message_id: int, unit_index: int, fields: dict[str, str]) -> None:
+        """Register one backend-authorized canonical execution result."""
+        self.restore_many(owner, [(message_id, unit_index, fields)])
+
+    def restore_many(self, owner: str, sources) -> None:
+        self.restore_results(owner, [(message, index, result_text(fields)) for message, index, fields in sources])
+
+    def restore_results(self, owner: str, sources) -> None:
+        """Atomically register only actual results selected by the trusted history loader."""
+        pending = {}
+        for message, index, text in sources:
+            if type(message) is not int or message <= 0 or type(index) is not int or index < 0:
+                raise ValueError("Invalid persisted execution reference")
+            if not isinstance(text, str):
+                raise ValueError("Invalid persisted execution content")
+            reference = f"message:{message}/unit-index:{index}"
+            record = HistoricalExecutionResult(owner, text)
+            if reference in pending and pending[reference] != record:
+                raise PermissionError("Conflicting persisted execution reference")
+            pending[reference] = record
+        with self._lock:
+            for reference, record in pending.items():
+                existing = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
+                if existing is not None and existing.text != record.text:
+                    raise PermissionError("Conflicting persisted execution reference")
+            self._restored.update({(owner, reference): record for reference, record in pending.items()})
 
     def get(self, key: str) -> ExecutionRecord | None:
         with self._lock:
@@ -106,7 +147,7 @@ class ExecutionHistory:
         if isinstance(max_chars, bool) or not isinstance(max_chars, int) or not 0 < max_chars <= 16000:
             raise ValueError("max_chars must be between 1 and 16000")
         with self._lock:
-            record = self._records.get(self._references.get(reference, ""))
+            record = self._restored.get((owner, reference)) or self._records.get(self._references.get(reference, ""))
             if record is None or record.owner != owner:
                 raise PermissionError("Execution result is unavailable or not authorized")
             if record.persisted and self._read_persisted is not None:
@@ -152,6 +193,7 @@ class ExecutionHistory:
 def summarize_record(record: ExecutionRecord, model: Any, input_limit: int) -> str | None:
     """Generate at most once per record; never summarize truncated input."""
     from nexent.core.agents.contracts.context import ContextMessage
+
     from .llm_summary import _summary_model_call_context
 
     with record.summary_lock:

@@ -1,0 +1,57 @@
+schema_version: '1.0'
+change:
+  change_id: CONTEXT-SCOPE-REDUCTION-20261123
+  change_type: refactor
+  title: Reduce context changes to approved capacity and real execution history boundaries
+  description: Withdraw rejection-specific recovery and generic structured original management; preserve ordinary
+    maintenance, provider overflow boundaries, formats and real execution recall.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    modified:
+    - F-171
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - AGENT-HISTORY-D3-001
+    - CONTEXT-POST-RESPONSE-D3-001
+    - JIUWEN-OUTPUT-D3-001
+    - AOS-TRANSPORT-D3-001
+    - AOS-MODEL-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve complete native groups and strict schema-default provenance, real action/compact view restoration,
+      old records and bounded authorized execution reading.
+    - Restore ordinary summary contract, trigger/persistence/failure behavior and existing Smol provider overflow
+      rebuild; local rejection dispatches no new recovery.
+    - Ignore withdrawn checkpoint extras without modifying stored rows or granting user-message/covered-history
+      sources.
+    - Measure summary gains using rendered request cost in both formats; skip noncompactable actions without
+      changing recent-action boundaries or discarding an otherwise valid history summary.
+    - Replay accepted visible code as assistant followed by user runtime results, without synthetic action
+      records; historical execution evidence is user data and actual final answers remain assistant.
+    reason: User-approved removal follows 2c18 behavior boundaries; keep old Cases and only withdraw capability-specific
+      extensions. No duplicate D1 or new framework.
+    test_selectors:
+    - test/sdk/core/agents/test_context_scope_reduction.py
+    - test/sdk/core/agents/test_context_message_format.py
+    - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
+    - test/sdk/core/agents/test_persisted_codeagent_actions.py
+    - test/sdk/core/agents/test_execution_owner_lifecycle.py
+    - test/sdk/core/agents/test_history_context_runtime.py
+    - test/sdk/core/agents/test_post_response_context.py
+    - test/backend/database/test_conversation_history_stopped.py
+    - test/backend/services/test_agentos_conversation_projection.py
+    - test/backend/app/test_history_source_contracts.py
+  notes: >-
+    SPEC10 Scope Reduction 20261123.md owns approved scope and test-only fixture/overlay/wire cleanup.
+    Preserve all variants and assertions; no new Cases/framework. Existing self-contained HTTP/PostgreSQL
+    Case preparation/cleanup is reused; manual real-model acceptance remains pending and48 paused.
+    AgentOS CI contracts retain legacy output-limit input as a negative test and use the existing Skill
+    authorization allowlist in all three fixture tools; no product behavior changes in this test-only follow-up.

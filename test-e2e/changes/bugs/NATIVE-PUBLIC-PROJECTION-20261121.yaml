@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: NATIVE-PUBLIC-PROJECTION-20261121
+  change_type: bugfix
+  bug_id: NATIVE-PUBLIC-PROJECTION-20261121
+  title: Reconnect the existing Native client mapper after AgentOS migration
+  description: Preserve native public presentation and stateful cursor replay without changing original stored events.
+  observed_behavior: AgentOS public presenters bypass the existing mapper, leaking native observations and replacing specific terminal errors with a generic error.
+  expected_behavior: Live and resumed clients receive the established tool, text, usage, final and localized error protocol with truthful terminal confirmation; raw native facts remain unchanged.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: Existing JIUWEN-OUTPUT-D3-001 detects the public contract violation after its obsolete persistence fixture is aligned with current Prepared projection.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-OUTPUT]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-OUTPUT-D3-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Reuse one existing Native mapper per stream for tool/result pairing, step capacity and explicit final/error/stop/waiting semantics.
+    - Reconstruct state from the same authorized retained prefix for cursor resumes; retain cursor failures, group acknowledgement and transport cleanup without inference or tool replay.
+    - Preserve ordinary CodeAgent completion, file ownership, raw journal/DB/context history and already-adapted creator streams.
+    reason: Mapper unit coverage is retained; new AgentOS wiring and replay collaboration tests close the migration gap without duplicate D1 cases.
+    test_selectors:
+    - test/backend/services/test_agentos_native_projection.py
+    - test/backend/services/test_agentos_native_resume.py
+    - test/backend/services/test_agentos_public_events.py
+    - test/backend/services/test_agent_run_final_answers.py
+    - test/backend/services/test_northbound_answer_preview.py
+    - test/backend/utils/test_nexent_output.py
+    - test/backend/utils/test_nexent_error_diagnostics.py
+  notes: >-
+    SPEC09 NATIVE-PUBLIC-PROJECTION and current SPEC10 preserve the approved existing public contract.
+    Explicit cursor resumes may read the authorized prefix through ACK once, never replay models/tools
+    or add RPC/retention limits. Preparation/cleanup belongs to JIUWEN-OUTPUT-D3-001; real acceptance is separate.

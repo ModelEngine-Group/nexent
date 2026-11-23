@@ -9,6 +9,7 @@ runtime only adapts CoreAgent lifecycle calls to the ContextManager API.
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, Mapping
@@ -21,6 +22,8 @@ from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
 from nexent.core.agents.context.run_context import ManagedRunContext
+from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
+from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.contracts.context import ContextEvidence, ContextMessage, ContextToolView, FinalContext
 from nexent.core.agents.cores.smolagents.context_contracts import (
     ContextRuntime as ContextRuntime,
@@ -53,6 +56,10 @@ class ManagedContextRuntime:
         self._run_context: ManagedRunContext | None = None
         self._evidence = ContextEvidenceCollector()
         self._memory_adapter = SmolagentsMemoryAdapter(context_manager)
+        self.usage_baseline = ContextUsageBaseline()
+        self.last_maintenance_evidence = None
+        self._request_system_messages = ()
+        self._request_tail_messages = ()
 
     @property
     def context_manager(self) -> ContextManager:
@@ -63,9 +70,14 @@ class ManagedContextRuntime:
         """Replace this runtime's run-local fine-grained item snapshot."""
         self.items = list(items or ())
         self._run_context = None
+        self.usage_baseline.invalidate()
 
     def prepare_run(self, *, memory: AgentMemory, fallback_system_prompt: str) -> None:
         self._evidence.reset()
+        self.usage_baseline = ContextUsageBaseline()
+        self.last_maintenance_evidence = None
+        self._request_system_messages = ()
+        self._request_tail_messages = ()
         self._run_context = self.context_manager.prepare_items_context(
             fallback_system_prompt=fallback_system_prompt,
             items=self.items,
@@ -89,15 +101,20 @@ class ManagedContextRuntime:
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
+        self._request_system_messages = tuple(context_messages(request_system_messages))
+        self._request_tail_messages = tuple(context_messages(request_tail_messages))
         final_context = self.context_manager.assemble_context_items(
             model=adapt_context_model(model),
             current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
             tools=context_tool_views(tools),
             purpose="step",
             run_context=self._ensure_run_context(memory),
-            request_system_messages=context_messages(request_system_messages),
-            request_tail_messages=context_messages(request_tail_messages),
+            request_system_messages=self._request_system_messages,
+            request_tail_messages=self._request_tail_messages,
         )
+        self.check_input_capacity(final_context.messages, final_context.tools, model)
+        self.capture_request(final_context.messages, final_context.tools, model)
+        final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
         return final_context
 
@@ -112,6 +129,8 @@ class ManagedContextRuntime:
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
         """Force a source-backed rebuild after explicit Provider overflow."""
+        self._request_system_messages = tuple(context_messages(request_system_messages))
+        self._request_tail_messages = tuple(context_messages(request_tail_messages))
         final_context = self.context_manager.assemble_context_items(
             model=adapt_context_model(model),
             current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
@@ -122,6 +141,8 @@ class ManagedContextRuntime:
             request_system_messages=context_messages(request_system_messages),
             request_tail_messages=context_messages(request_tail_messages),
         )
+        self.capture_request(final_context.messages, final_context.tools, model)
+        final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
         return final_context
 
@@ -144,6 +165,9 @@ class ManagedContextRuntime:
             final_answer_templates=final_answer_templates,
             run_context=self._ensure_run_context(memory),
         )
+        self.check_input_capacity(final_context.messages, final_context.tools, model)
+        self.capture_request(final_context.messages, final_context.tools, model)
+        final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
         return final_context
 
@@ -168,8 +192,86 @@ class ManagedContextRuntime:
             run_context=self._ensure_run_context(memory),
             force_compaction=True,
         )
+        self.capture_request(final_context.messages, final_context.tools, model)
+        final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
         return final_context
+
+    def _with_usage_evidence(self, final, model, phase="prepare"):
+        evidence = replace(final.evidence, maintenance_phase=phase,
+            usage_source=self.usage_baseline.source,
+            provider_input_tokens=self.usage_baseline.actual_input_tokens,
+            calibrated_input_estimate=self.usage_baseline.estimate(
+                self._estimate(final.messages, final.tools), self._model_key(model)))
+        return replace(final, evidence=evidence)
+
+    @staticmethod
+    def _model_key(model):
+        profile = getattr(model, "profile", None)
+        if profile is not None:
+            return (profile.identity.tenant_id, profile.outlet_id, profile.config_revision,
+                    profile.identity.request_model_id)
+        return (id(model), getattr(model, "model_id", None))
+
+    def _estimate(self, messages, tools):
+        return self.context_manager._message_tokens(messages) + self.context_manager._tools_tokens(
+            self.context_manager._canonical_tools(context_tool_views(tools) or ()),
+        )
+
+    def capture_request(self, messages, tools, model):
+        """Capture the actual main invocation after overlays and guardrails."""
+        self.usage_baseline.capture(self._estimate(messages, tools), self._model_key(model))
+
+    def check_input_capacity(self, messages, tools, model):
+        local = self._estimate(messages, tools)
+        model_key = self._model_key(model)
+        estimate = self.usage_baseline.estimate(local, model_key)
+        limit = self.effective_input_limit_tokens or self.context_window_tokens
+        if limit and estimate >= limit:
+            record_capacity_rejection(local_tokens=local, estimated_tokens=estimate, limit=limit,
+                                      baseline=self.usage_baseline, model_key=model_key)
+            raise ValueError("Context input exceeds the combined context window; reduce the new input")
+        return estimate
+
+    def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
+                      request_system_messages=None, request_tail_messages=None):
+        """Maintain only accepted steps after all native tool results are present."""
+        if response is None:
+            return None
+        usage = getattr(response, "token_usage", None)
+        stop_event = getattr(model, "stop_event", None)
+        system_messages = (self._request_system_messages if request_system_messages is None
+                           else context_messages(request_system_messages))
+        tail_messages = (self._request_tail_messages if request_tail_messages is None
+                         else context_messages(request_tail_messages))
+        def assemble(maintenance):
+            return self.context_manager.assemble_context_items(
+                model=adapt_context_model(model),
+                current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
+                tools=context_tool_views(tools), run_context=self._ensure_run_context(memory),
+                force_compaction=maintenance, maintenance=maintenance,
+                request_system_messages=system_messages,
+                request_tail_messages=tail_messages,
+            )
+        evidence = complete_context(manager=self.context_manager, baseline=self.usage_baseline,
+            model_key=self._model_key(model),
+            input_tokens=getattr(response, "provider_input_tokens", getattr(usage, "input_tokens", None)),
+            assemble=assemble, cancelled=lambda: stop_event is not None and stop_event.is_set() is True,
+            estimate=self._estimate)
+        if evidence is not None and evidence.maintenance_phase == "post_response":
+            history = self.context_manager.config.execution_history
+            if history is not None:
+                for _, item in self.context_manager._representation_overrides.values():
+                    key = item.content.get("execution_key")
+                    record = history.get(key) if key else None
+                    if record is not None:
+                        for name in ("summary", "preview"):
+                            if isinstance(item.content.get(name), str):
+                                record.model_view = {name: item.content[name]}
+                                break
+            self.last_maintenance_evidence = evidence
+            self._evidence.record_call(evidence)
+        return evidence
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ChatMessage | dict[str, object]]:
         """Return display-only memory messages without compression side effects."""
@@ -215,6 +317,7 @@ class SmolagentsMemoryAdapter:
     """Project native memory while retaining the CM-owned representation cache."""
 
     def __init__(self, manager):
+        self._manager = manager
         self._current_item_cache = manager._current_item_cache
         self._to_json_value = manager._to_json_value
         self.build_context_messages = manager.build_context_messages
@@ -267,20 +370,16 @@ class SmolagentsMemoryAdapter:
                 projected.append(item)
             elif isinstance(step, ActionStep):
                 content = self._neutral_action_content(step, action_index)
-                # Render completed actions from structured fields instead of
-                # smolagents ActionStep.to_messages(). The upstream rendering
-                # injects protocol labels such as "Calling tools:" and
-                # "Observation:" into the next model request, which can prime
-                # reasoning models to emit a configured stop sequence. The
-                # neutral representation preserves the executable action,
-                # outcome, error, result, and ordering without changing how
-                # the live ReAct step is parsed or executed.
                 item = ContextItem.from_input(
                     ContextItemInput(
                         id=f"current_action:{action_index}",
                         type=ContextItemType.CURRENT_ACTION,
                         content=content,
-                        metadata={"layout_order": action_index, "run_order": index},
+                        metadata={
+                            "layout_order": action_index,
+                            "run_order": index,
+                            "use_result_observations": self._manager.use_result_observations,
+                        },
                     )
                 )
                 projected.append(item)

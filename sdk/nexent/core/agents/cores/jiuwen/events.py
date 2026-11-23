@@ -12,6 +12,41 @@ from nexent.core.agents.output.answer import AnswerBoundaryError, PublicTextFilt
 from nexent.core.utils.observer import ProcessType
 
 
+def _matches_schema_defaults(provided, executed, schema=None, *, allow_defaults=True):
+    """Compare without coercion, allowing only declared LocalFunction defaults.
+
+    Jiuwen's SchemaUtils materializes non-required fields as None when their
+    schema has no explicit default. Nested object/array payloads are not
+    materialized by its tool-card formatter and must retain exact values.
+    This comparison never changes execution inputs or original arguments.
+    """
+    if type(provided) is not type(executed):
+        return False
+    schema = schema if isinstance(schema, dict) else {}
+    if isinstance(provided, dict):
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            return False
+        if any(key not in provided for key in required) or not provided.keys() <= executed.keys():
+            return False
+        for key, value in provided.items():
+            if not _matches_schema_defaults(value, executed[key], properties.get(key), allow_defaults=False):
+                return False
+        for key in executed.keys() - provided.keys():
+            declaration = properties.get(key)
+            if not allow_defaults or key in required or not isinstance(declaration, dict):
+                return False
+            if not _matches_schema_defaults(declaration.get("default"), executed[key]):
+                return False
+        return True
+    if isinstance(provided, list):
+        return len(provided) == len(executed) and all(
+            _matches_schema_defaults(left, right, schema.get("items"), allow_defaults=False)
+            for left, right in zip(provided, executed))
+    return provided == executed
+
+
 class JiuwenEventAdapter:
     def __init__(self, observer, agent_name, turn_id=None, *, capacity_provider=None):
         self.observer, self.agent_name = observer, agent_name
@@ -22,8 +57,11 @@ class JiuwenEventAdapter:
         self.resource_error = None
         self.blocks = []
         self.calls = []
+        self.local_tool_schemas = {}
+        self._call_history = {}
         self.sequence = 0
         self.step_number = 0
+        self.model_request_id = None
         self._lock = threading.RLock()
         self.capacity_provider = capacity_provider
         self.artifact_output = False
@@ -47,6 +85,7 @@ class JiuwenEventAdapter:
         if self.final_answer is not None:
             raise RuntimeError("Model step after Runner terminal")
         self.step_number += 1
+        self.model_request_id = getattr(request, "request_id", None)
         self.output(ProcessType.STEP_COUNT, str(self.step_number), step_number=self.step_number)
         self.blocks.append({"id": uuid.uuid4().hex, "text": "", "reasoning": "", "started": time.monotonic(),
                             "filters": {"text": PublicTextFilter(), "reasoning": PublicTextFilter()},
@@ -77,7 +116,14 @@ class JiuwenEventAdapter:
                 if key not in block["received"] and text:
                     self._model_text(block, key, text, kind)
             block["observed"] = True
-            self.calls.extend(message.tool_calls)
+            self.calls = list(message.tool_calls)
+            self._call_history.clear()
+            for index, call in enumerate(message.tool_calls):
+                self._call_history[call.provider_call_id] = {
+                    "source_protocol": "model_native_fc", "call_group_id": block["id"],
+                    "call_index": index, "call_count": len(message.tool_calls),
+                    "raw_arguments": call.raw_arguments,
+                }
             observation = StepObservation(turn_id=self.turn_id, block_id=block["id"],
                 step_number=self.step_number, duration=max(0, time.monotonic() - block["started"]),
                 usage=message.usage, finish_reason=message.finish_reason, context_capacity=self._capacity())
@@ -103,16 +149,23 @@ class JiuwenEventAdapter:
                     phase="intermediate")
         self.last_error = None
 
-    def tool_call(self, name, arguments, call_id):
+    def tool_call(self, name, arguments, call_id, *, parent_call_id=None):
         provider_id = None
+        metadata = {}
         with self._lock:
-            for index, call in enumerate(self.calls):
-                if call.name == name and call.parsed_arguments == arguments:
-                    provider_id = self.calls.pop(index).provider_call_id
-                    break
+            matches = [index for index, call in enumerate(self.calls) if parent_call_id is None
+                       and call.name == name and call.parsed_arguments == arguments]
+            if not matches and parent_call_id is None and name in self.local_tool_schemas:
+                matches = [index for index, call in enumerate(self.calls) if call.name == name
+                           and _matches_schema_defaults(call.parsed_arguments, arguments,
+                                                        self.local_tool_schemas[name])]
+            if len(matches) == 1:
+                provider_id = self.calls.pop(matches[0]).provider_call_id
+                metadata = self._call_history.pop(provider_id, {})
             self.output(ProcessType.TOOL, "", local_call_id=call_id, provider_call_id=provider_id,
                         tool_call_id=call_id, tool_name=name, tool_arguments=arguments,
-                        raw_arguments=json.dumps(arguments, ensure_ascii=False))
+                        parent_call_id=parent_call_id,
+                        **{"raw_arguments": json.dumps(arguments, ensure_ascii=False), **metadata})
         return provider_id
 
     def tool_result(self, call_id, provider_id, result, is_error=False, error=None):

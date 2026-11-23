@@ -41,6 +41,7 @@ class OpenAIStreamDecoder:
         self._content, self._reasoning, self._refusal = [], [], []
         self._calls = {}
         self._usage_raw = None
+        self._usage_diagnostic = {}
         self._unknown = []
 
     def _fail(self, category):
@@ -59,7 +60,14 @@ class OpenAIStreamDecoder:
 
     def _update_usage(self, raw):
         # Each frame reports a cumulative snapshot, not an increment.
-        _usage(raw, self._profile.capabilities.usage.semantics_id)
+        if self._usage_diagnostic:
+            return
+        try:
+            _usage(raw, self._profile.capabilities.usage.semantics_id)
+        except ModelAdapterError as error:
+            self._usage_diagnostic["usage_diagnostic"] = error.category
+            self._usage_raw = None
+            return
         merged = dict(self._usage_raw or {})
         for key, value in raw.items():
             if value is None:
@@ -104,7 +112,11 @@ class OpenAIStreamDecoder:
             update={
                 "message_id": self._message_id,
                 "tool_calls": calls,
-                "provider_metadata": {**complete.provider_metadata, "unmapped_delta_fields": self._unknown},
+                "provider_metadata": {
+                    **complete.provider_metadata,
+                    **self._usage_diagnostic,
+                    "unmapped_delta_fields": self._unknown,
+                },
             }
         )
         self._closed = True

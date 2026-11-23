@@ -207,10 +207,10 @@ def test_complete_tools_preserve_raw_provider_ids_and_invalid_arguments(
     ],
 )
 def test_invalid_usage_is_not_coerced_or_echoed(profile, usage):
-    with pytest.raises(ModelAdapterError, match="^MODEL_USAGE_INVALID$"):
-        OpenAIChatAdapter().decode_response(
-            response(usage=usage), request(profile), profile
-        )
+    result = OpenAIChatAdapter().decode_response(response(usage=usage), request(profile), profile)
+    assert result.content_parts and result.finish_reason == "stop"
+    assert result.usage.origin == "unknown" and result.usage.total_tokens is None
+    assert result.provider_metadata["usage_diagnostic"] == "MODEL_USAGE_INVALID"
 
 
 @pytest.mark.parametrize(

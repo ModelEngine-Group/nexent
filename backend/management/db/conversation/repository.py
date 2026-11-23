@@ -3548,22 +3548,29 @@ def get_historical_context(
             records = session.execute(select(
                 ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
                 ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
-                ConversationMessageUnit.invocation_id,
+                ConversationMessageUnit.invocation_id, ConversationMessageUnit.unit_index,
             ).where(
                 ConversationMessageUnit.conversation_id == conversation_id,
                 ConversationMessageUnit.message_id.in_(assistant_ids),
                 ConversationMessageUnit.unit_type.in_([
-                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result",
                 ]),
                 ConversationMessageUnit.unit_status == "completed",
                 ConversationMessageUnit.delete_flag == "N",
             ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
             by_message = {}
+            from nexent.core.agents.context.native_history import decode_history_event
+
             for record in records:
-                by_message.setdefault(record.message_id, []).append({
+                history_record = {
                     "record_type": record.unit_type, "content": record.unit_content,
                     "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
-                })
+                    "unit_index": record.unit_index,
+                }
+                event = decode_history_event(history_record)
+                if event is not None:
+                    history_record["execution_event"] = event
+                by_message.setdefault(record.message_id, []).append(history_record)
             for turn in turns:
                 if turn["assistant_message_id"] in by_message:
                     turn["execution_records"] = by_message[turn["assistant_message_id"]]
@@ -3572,7 +3579,8 @@ def get_historical_context(
         if summary_record and summary_payload:
             summary_result = {
                 "unit_id": summary_record.unit_id,
-                **summary_payload,
+                **{key: value for key, value in summary_payload.items()
+                   if key not in {"structured_source_proofs", "execution_sources"}},
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
                 "current_user_message_index": before_message_index}

@@ -563,6 +563,15 @@ class AgentRunSpec(RunSpecModel):
 
 
 class HistoryCheckpointCandidate(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_source_extensions(cls, value):
+        """Read older persisted checkpoints without activating withdrawn source catalogs."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items()
+                    if key not in {"structured_source_proofs", "execution_sources"}}
+        return value
+
     summary: dict[str, JsonValue]
     covered_through_message_id: PositiveInt
     previous_summary_unit_id: PositiveInt | None = None
@@ -579,13 +588,23 @@ class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
 
 
 class PreparedHistoryExecutionRecord(RunSpecModel):
-    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact"]
+    record_type: Literal["tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact", "execution_result"]
+    unit_index: int | None = Field(default=None, strict=True, ge=0)
     content: str | None
-    tool_call_id: str | None
-    invocation_id: str | None
+    tool_call_id: str | None = None
+    invocation_id: str | None = None
+    execution_event: dict[str, JsonValue] | None = None
 
 
 class PreparedHistoryTurn(RunSpecModel):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_user_original(cls, value):
+        """Keep older Prepared turns readable without a second user-original channel."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "user_source_content"}
+        return value
+
     user_message: str
     assistant_final_answer: str
     user_message_id: PositiveInt

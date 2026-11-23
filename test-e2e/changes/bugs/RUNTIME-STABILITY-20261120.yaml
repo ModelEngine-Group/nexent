@@ -1,0 +1,58 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-STABILITY-20261120
+  change_type: bugfix
+  bug_id: RUNTIME-STABILITY-20261120
+  title: Preserve real completed action history and actual Jiuwen tool tracing
+  description: Isolated PR4336 follow-up for cross-turn representation and tool-observation defects.
+  observed_behavior: CodeAgent history reinjects executor-expanded arguments and loses accepted action representations;
+    Jiuwen actual tool boundaries lack consistent TOOL spans.
+  expected_behavior: Backend-bound completed actions and committed views survive turns with raw facts retained;
+    actual tool calls have safe correlated spans.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Current-run actions were covered, but cross-turn canonical action restoration was not. Jiuwen SSE
+      proof did not require TOOL spans or full IDs for the actual default-formatted Skill call and cross-turn restore.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - CMSR-005
+    - JIUWEN-OUTPUT
+    - CHAT-TRAJECTORY
+    modified:
+    - F-171
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D3-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    modified:
+    - AGENT-HISTORY-D3-001
+    - JIUWEN-OUTPUT-D3-001
+    - CONTEXT-POST-RESPONSE-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Restore native completed actions and accepted summary or preview through authorized storage and signed transport;
+      keep uncovered facts, errors, owner-scoped originals and hard capacity checks.
+    - Trace actual Jiuwen calls with stable identities and correct parent context, keeping returned structured errors
+      separate from execution exceptions.
+    - Match only actual registered LocalFunction schema defaults after the existing exact path; preserve original
+      provider IDs, group metadata and raw arguments through persisted native history and authorized tool sources.
+    reason: Targeted UT and existing regressions provide isolated proof; container D3 evidence remains separately
+      required. No duplicate D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_tool_default_binding.py
+    - test/sdk/core/agents/test_persisted_codeagent_actions.py
+    - test/backend/services/test_agent_execution_history_stream.py
+    - test/backend/database/test_conversation_history_stopped.py
+    - test/sdk/core/agents/test_jiuwen_tool_spans.py
+    - test/backend/services/test_agentos_conversation_projection.py
+  notes: >-
+    SPEC10 Scope Reduction 20261123.md defines the retained actions/default provenance/TOOL spans;
+    SPEC09 preserves original diagnostics and failures. Recovery/catalog extensions are withdrawn.
+    Reuse existing Case preparation/cleanup; new-source real-model/container evidence remains separate.
