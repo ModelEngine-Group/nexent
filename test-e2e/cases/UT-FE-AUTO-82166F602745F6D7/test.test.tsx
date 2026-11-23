@@ -15,7 +15,6 @@ const h = vi.hoisted(() => ({
   open: vi.fn(),
   citeMarkerProps: [] as any[],
   storageDownload: vi.fn(),
-  aidpDownloadDoc: vi.fn(),
   registered: undefined as any[] | undefined,
 }));
 
@@ -42,10 +41,6 @@ vi.mock('@/services/storageService', () => ({
   fetchImageBlob: () => Promise.reject(new Error('not-implemented')),
   getLocalFilePreviewUrl: () => undefined,
   storageService: { downloadFileWithAuth: h.storageDownload },
-}));
-
-vi.mock('@/ext_components/aidp/shared/services/aidpKnowledgeService', () => ({
-  default: { downloadDoc: h.aidpDownloadDoc },
 }));
 
 vi.mock('@assistant-ui/react-markdown', () => ({
@@ -450,52 +445,16 @@ describe('per-hit attributes and safe citation downloads', () => {
     await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
   });
 
-  it('never enables AIDP downloads without an explicit file locator', () => {
+  it('never enables unsupported AIDP citation downloads', () => {
     const panel = render(<SourcesPanel sources={[
       { ...sources[0], url: '/md_image/chunk.png', downloadUrl: 'https://example.com/chunk.pdf', objectName: 'attachments/same.pdf', sourceMetadata: { kds_id: 'kb-business', file_uuid: 'file-id' }, sourceReference: { chunk_id: 'chunk-id' } },
-      { ...sources[1], searchType: 'ind_aidp_search', toolSign: 'l', citeIndex: 3, sourceReference: { kds_id: 'kb-only' } },
+      { ...sources[1], searchType: 'ind_aidp_search', toolSign: 'l', citeIndex: 3, sourceReference: {} },
     ]} images={[]} open onClose={() => {}} />);
     expect(within(panel.container).queryByRole('button', { name: 'chat.sources.download' })).toBeNull();
     expect(h.storageDownload).not.toHaveBeenCalled();
-    expect(h.aidpDownloadDoc).not.toHaveBeenCalled();
   });
 
-  it('downloads an AIDP original only through its explicit locator', async () => {
-    const fileUuid = '11111111-2222-4333-8444-555555555555';
-    h.aidpDownloadDoc.mockResolvedValueOnce({
-      headers: new Headers({
-        'Content-Disposition': 'attachment; filename="manual.pdf"',
-      }),
-      blob: async () => new Blob(['original-bytes']),
-    } as unknown as Response);
-    const createObjectURL = vi.fn(() => 'blob:aidp-download');
-    const revokeObjectURL = vi.fn();
-    const originalCreate = (URL as any).createObjectURL;
-    const originalRevoke = (URL as any).revokeObjectURL;
-    (URL as any).createObjectURL = createObjectURL;
-    (URL as any).revokeObjectURL = revokeObjectURL;
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-    try {
-      const panel = render(<SourcesPanel sources={[
-        { ...sources[0], sourceReference: { chunk_id: 'chunk-first', kds_id: 'kb-42', file_uuid: fileUuid } },
-      ]} images={[]} open onClose={() => {}} />);
-      fireEvent.click(within(panel.container).getByRole('button', { name: 'chat.sources.download' }));
-      await waitFor(() => expect(h.aidpDownloadDoc).toHaveBeenCalledWith('kb-42', fileUuid));
-      await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
-      expect(createObjectURL).toHaveBeenCalledTimes(1);
-      expect(revokeObjectURL).toHaveBeenCalledWith('blob:aidp-download');
-      expect(h.storageDownload).not.toHaveBeenCalled();
-      expect(panel.container.querySelector('a[download="manual.pdf"]')).toBeNull();
-    } finally {
-      click.mockRestore();
-      if (originalCreate === undefined) delete (URL as any).createObjectURL;
-      else (URL as any).createObjectURL = originalCreate;
-      if (originalRevoke === undefined) delete (URL as any).revokeObjectURL;
-      else (URL as any).revokeObjectURL = originalRevoke;
-    }
-  });
-
-  it('preserves local downloads while AIDP citation downloads remain locator-only', async () => {
+  it('preserves local downloads while AIDP citation downloads remain unsupported', async () => {
     const panel = render(<SourcesPanel sources={[
       { ...sources[0], downloadUrl: 'https://example.com/aidp.pdf', objectName: 'attachments/aidp.pdf' },
       { sourceType: 'document', searchType: 'knowledge_base_search', title: 'local.pdf', filename: 'local.pdf', objectName: 'attachments/local.pdf' },
