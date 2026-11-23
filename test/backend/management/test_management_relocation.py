@@ -10,9 +10,7 @@ BACKEND = ROOT / "backend"
 
 
 def test_flat_service_exclusions_match_remaining_scope():
-    assert {p.name for p in (BACKEND / "services").rglob("*.py")} == {
-        "__init__.py", "skill_repository_service.py",
-    }
+    assert {p.name for p in (BACKEND / "services").rglob("*.py")} == {"__init__.py"}
     assert not list((BACKEND / "utils").glob("*.py"))
     assert (BACKEND / "runtime/api/application.py").is_file()
     assert (BACKEND / "gateway/application.py").is_file()
@@ -35,12 +33,7 @@ def test_production_imports_use_canonical_owners():
                 continue
             for name in names:
                 name = name.removeprefix("backend.")
-                if name.startswith("utils.") or (
-                    name.startswith("services.")
-                    and name not in {
-                        "services.skill_repository_service",
-                    }
-                ):
+                if name.startswith(("utils.", "services.")):
                     unexpected.append((path.relative_to(ROOT).as_posix(), name))
     assert unexpected == []
 
