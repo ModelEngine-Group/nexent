@@ -102,6 +102,7 @@ class TraceCaseApproval(BaseModel):
     inputs_reviewed: Literal[True]
     tools_require_no_reset: bool = False
     use_previous_task: bool = False
+    preceding_turns: int = Field(default=0, ge=0, le=15)
     unused_attachment_slots: list[int] = Field(default_factory=list, max_length=32)
 
     @field_validator("unused_attachment_slots")
@@ -110,6 +111,13 @@ class TraceCaseApproval(BaseModel):
         if any(slot < 1 for slot in values) or len(values) != len(set(values)):
             raise ValueError("Choose distinct positive source attachment numbers")
         return values
+
+
+class ReplayFollowup(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    query: str = Field(min_length=1, max_length=16000)
+    attachment_names: list[str] = Field(default_factory=list, max_length=32)
 
 
 class ReplayCaseRequest(BaseModel):
@@ -122,6 +130,7 @@ class ReplayCaseRequest(BaseModel):
     query: str = Field(min_length=1, max_length=16000)
     expected: str = Field(min_length=1, max_length=16000)
     attachments: list[ReplayAttachmentSource] = Field(default_factory=list, max_length=32)
+    followups: list[ReplayFollowup] = Field(default_factory=list, max_length=15)
     source_group: str | None = Field(default=None, min_length=1, max_length=128)
     expected_skill_names: list[str] | None = Field(default=None, max_length=32)
     tool_use: ToolUseExpectation | None = None
@@ -136,6 +145,9 @@ class ReplayCaseRequest(BaseModel):
         names = [file.name.casefold() for file in self.attachments]
         if len(set(names)) != len(names):
             raise ValueError("Each attachment must have a distinct filename")
+        later = [name for turn in self.followups for name in turn.attachment_names]
+        if len(set(later)) != len(later) or set(later).difference(file.name for file in self.attachments):
+            raise ValueError("Assign each approved attachment to its first turn of use")
         if not all(value.strip() for value in (self.family, self.query, self.expected)):
             raise ValueError("A family, query and expected outcome are required")
         return self

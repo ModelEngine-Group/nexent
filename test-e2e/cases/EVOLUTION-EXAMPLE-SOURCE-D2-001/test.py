@@ -22,7 +22,7 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
     from management.db.evaluation.evaluator import create_evaluator, publish_evaluator
     from management.services.evaluation import experiments
     from management.db.evaluation import experiments as jobs
-    from management.db.evaluation.replay_cases import contains_fixed_cases
+    from management.db.evaluation.replay_cases import contains_fixed_cases, save_replay_case
     from management.services.evaluation.replay_cases import freeze_regression_members
     from management.services.evaluation.example_candidates import example_source_keys
     from management.thread_management import config_thread_manager
@@ -88,6 +88,19 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
                 "expected":"rows", "source_group":"minutes-51"}).json()["data"]
             assert contains_fixed_cases(tenant, 7, [same_group["case_id"]], [])
             assert not contains_fixed_cases("foreign", 7, [same_group["case_id"]], [])
+            dialogue = client.post(root + "/development-cases", headers=headers, json={
+                "agent_id":7, "version_no":2, "family":"meeting", "query":"A different wording",
+                "followups":[{"query":"Continue"}], "expected":"rows"}).json()["data"]
+            assert contains_fixed_cases(tenant, 7, [dialogue["case_id"]], [])
+            fresh_dialogue = client.post(root + "/development-cases", headers=headers, json={
+                "agent_id":7, "version_no":2, "family":"meeting", "query":"Read the quarterly plan",
+                "followups":[{"query":"Continue"}], "expected":"rows"}).json()["data"]
+            assert not contains_fixed_cases(tenant, 7, [fresh_dialogue["case_id"]], [dialogue["case_id"]])
+            trace_cases = [save_replay_case(tenant, 7, 1, user, {
+                "query": wording, "family":"meeting", "expected":"rows", "attachments":[],
+                "trace_source":{"source_group":"same-authorized-chat"}})["case_id"]
+                for wording in ("List decisions", "Report responsibilities")]
+            assert contains_fixed_cases(tenant, 7, trace_cases[:1], trace_cases[1:])
             unrelated = client.post(root + "/development-cases", headers=headers, json={
                 "agent_id":7, "version_no":1, "family":"minutes", "query":"Different source", "expected":"done"}).json()["data"]
             response = client.post(root + "/experiments", headers=headers, json={

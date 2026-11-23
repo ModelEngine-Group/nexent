@@ -73,6 +73,21 @@ def test_foreign_input_rejected_before_storage_access(replay, monkeypatch):
     assert not saved
 
 
+def test_followup_attachment_created_only_when_turn_starts(replay):
+    from contracts.evolution import ReplayFollowup
+
+    service, request, objects, _ = replay
+    request.followups = [ReplayFollowup(query="use the file", attachment_names=["document.bin"])]
+    service.freeze_development_case(request, "editor", "tenant")
+    args = ("tenant", "editor", 3, 2, 1, "2" * 32)
+    with service.stage_case_input(*args, 0) as first:
+        assert not first.attachment_refs and not any("evolution-replay/" in key for key in objects)
+        with service.stage_case_input(*args, 1) as second:
+            assert second.query == "use the file" and second.attachment_refs[0].name == "document.bin"
+            assert sum("evolution-replay/" in key for key in objects) == 1
+    assert not any("evolution-replay/" in key for key in objects)
+
+
 @pytest.mark.parametrize("name", ["../a", "a/b", "C:x", "NUL", "a\x00b"])
 def test_replay_paths_are_portable(name):
     from contracts.evolution import ReplayAttachmentSource

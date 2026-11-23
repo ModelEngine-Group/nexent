@@ -33,7 +33,7 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
         for name in ("003_conversation_run_admission", "004_agent_execution", "006_prepared_conversation_turn",
                      "011_trajectory", "015_conversation_evolution", "018_evolution_replay_cases", "021_evolution_online_reviews"):
             cursor.execute((directory / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
-        for chat in (1, 2, 3):
+        for chat in (1, 2, 3, 4):
             conn.execute(text("""INSERT INTO nexent.conversation_record_t
                 (conversation_id,created_by,updated_by,delete_flag) VALUES (:chat,:owner,:owner,'N')"""),
                 {"chat": chat, "owner": owner})
@@ -46,12 +46,12 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     service = TrajectoryService(store, None, None)
     monkeypatch.setattr(reader, "get_service", lambda: service)
 
-    def seed(chat, ordinal, *, correction=False):
+    def seed(chat, ordinal, *, correction=False, query="整理会议待办"):
         grant = prepared_turn.evolution_setting(chat, owner, tenant)["enabled"]
         run, trajectory = uuid4().hex, str(uuid4())
         source = chat * 100 + ordinal * 2
         params = {"chat": chat, "source": source, "reply": source + 1, "owner": owner, "tenant": tenant,
-                  "query": "你漏了一项" if correction else "整理会议待办", "grant": source if grant else None,
+                  "query": "你漏了一项" if correction else query, "grant": source if grant else None,
                   "run": run, "trajectory": trajectory, "ordinal": ordinal}
         with engine.begin() as conn:
             conn.execute(text("""INSERT INTO nexent.conversation_message_t
@@ -156,3 +156,27 @@ def test_review_batch(runtime, tmp_path, monkeypatch):
     with pytest.raises(AppException):
         freeze_development_case(corrected, owner, tenant)
     assert preview_trace_case(tenant, owner, 7, 1, corrected_turn)["query"] == "你漏了一项"
+    prepared_turn.evolution_setting(4, owner, tenant, True)
+    seed(4, 1, query="先列出议题")
+    seed(4, 2, query="为这些议题补上来源")
+    seed(4, 3, correction=True)
+    registrar.enqueue_review_batches()
+    while worker.tick():
+        pass
+    end = scalar("SELECT max(turn_id) FROM nexent.evolution_review_turn_t WHERE conversation_id=4")
+    draft = preview_trace_case(tenant, owner, 7, 1, end, use_previous_task=True, preceding_turns=1)
+    assert [part["query"] for part in draft["segments"]] == ["先列出议题", "为这些议题补上来源"]
+    assert draft["correction_query"] == "你漏了一项"
+    trace = {"turn_id":end, "purpose":"reproduce", "inputs_reviewed":True, "use_previous_task":True,
+             "preceding_turns":1, "draft_digest":draft["draft_digest"]}
+    request = ReplayCaseRequest(agent_id=7, version_no=1, family="two turns", query="列出合成议题",
+                                expected="附来源", followups=[{"query":"为这些议题补上来源"}], trace=trace)
+    saved = freeze_development_case(request, owner, tenant)
+    with engine.begin() as conn:
+        frozen = conn.scalar(text("SELECT task FROM nexent.evolution_replay_case_t WHERE case_id=:id"), {"id":saved["case_id"]})
+        assert len(frozen["trace_source"]["turn_sources"]) == 2 and "你漏了一项" not in str(frozen)
+        conn.execute(text("UPDATE nexent.evolution_review_turn_t SET valid_until=now() WHERE turn_id=:id"),
+                     {"id":draft["segments"][0]["task_turn_id"]})
+    with pytest.raises(AppException):
+        freeze_development_case(request, owner, tenant)
+    assert preview_trace_case(tenant, owner, 7, 1, end, True)["query"] == "为这些议题补上来源"

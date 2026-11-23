@@ -35,7 +35,24 @@ def _authorized_source(session, tenant, agent, version, turn):
     return source
 
 
-def trace_case_draft(session, tenant, user, agent, version, turn, use_previous_task=False):
+def _preceding(session, tenant, source):
+    if source["message_index"] is None:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Preceding turn is unavailable")
+    # Do not skip an unapproved, deleted, ambiguous, or different-version turn to find an older task.
+    candidates = session.execute(text("""
+        SELECT m.message_id, r.turn_id FROM nexent.conversation_message_t m
+         LEFT JOIN nexent.evolution_review_turn_t r ON r.source_message_id=m.message_id
+              AND r.conversation_id=m.conversation_id AND r.tenant_id=:tenant
+         WHERE m.conversation_id=:chat AND m.message_index=:idx AND m.message_role='user'
+         LIMIT 2
+    """), {"tenant": tenant, "chat": source["conversation_id"],
+           "idx": source["message_index"] - 2}).mappings().all()
+    if len(candidates) != 1 or candidates[0]["turn_id"] is None:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Authorized preceding task is unavailable")
+    return candidates[0]["turn_id"]
+
+
+def _single_draft(session, tenant, user, agent, version, turn, use_previous_task=False):
     source = _authorized_source(session, tenant, agent, version, turn)
     source_turn = turn
     correction = None
@@ -43,18 +60,7 @@ def trace_case_draft(session, tenant, user, agent, version, turn, use_previous_t
         correction = source
         if "user_correction" not in correction["observation"]["signals"] or correction["message_index"] is None:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "No preceding task is identified for this correction")
-        # Do not skip an unapproved, deleted, ambiguous, or different-version turn to find an older task.
-        candidates = session.execute(text("""
-            SELECT m.message_id, r.turn_id FROM nexent.conversation_message_t m
-             LEFT JOIN nexent.evolution_review_turn_t r ON r.source_message_id=m.message_id
-                  AND r.conversation_id=m.conversation_id AND r.tenant_id=:tenant
-             WHERE m.conversation_id=:chat AND m.message_index=:idx AND m.message_role='user'
-             LIMIT 2
-        """), {"tenant": tenant, "chat": correction["conversation_id"],
-               "idx": correction["message_index"] - 2}).mappings().all()
-        if len(candidates) != 1 or candidates[0]["turn_id"] is None:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Authorized preceding task is unavailable")
-        source_turn = candidates[0]["turn_id"]
+        source_turn = _preceding(session, tenant, correction)
         source = _authorized_source(session, tenant, agent, version, source_turn)
     outline = source["observation"].get("case_outline")
     if outline is None:
@@ -84,6 +90,31 @@ def trace_case_draft(session, tenant, user, agent, version, turn, use_previous_t
         "tool_count": outline["tool_count"], "tools": outline["tools"],
         "signals": source["observation"]["signals"],
     }
+
+
+def trace_case_draft(session, tenant, user, agent, version, turn, use_previous_task=False, preceding_turns=0):
+    last = _single_draft(session, tenant, user, agent, version, turn, use_previous_task)
+    if not preceding_turns:
+        return last
+    if not 1 <= preceding_turns <= 15:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select up to 15 preceding user turns")
+    segments = [last]
+    for _ in range(preceding_turns):
+        source = _authorized_source(session, tenant, agent, version, segments[-1]["task_turn_id"])
+        previous = _preceding(session, tenant, source)
+        segments.append(_single_draft(session, tenant, user, agent, version, previous))
+    segments.reverse()
+    if any("user_correction" in part["signals"] for part in segments):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Keep later corrections as evidence; choose the original task")
+    counts = [part["attachment_count"] for part in segments]
+    keys = ("task_turn_id", "trajectory_id", "query", "attachment_names", "attachment_count", "tool_count")
+    return {**last, "query": segments[0]["query"], "preceding_turns": preceding_turns,
+            "segments": [{k: part[k] for k in keys} for part in segments],
+            "attachment_count": sum(counts) if None not in counts else None,
+            "attachment_names": [name for part in segments for name in part["attachment_names"]],
+            "tool_count": sum(part["tool_count"] for part in segments),
+            "tools": [entry for part in segments for entry in part["tools"]][:32],
+            "draft_digest": task_digest([part["draft_digest"] for part in segments])}
 
 
 def verified_baseline(session, tenant, agent, version, case_id, digest, purpose, evaluator, language, judge, snapshot):

@@ -170,9 +170,12 @@ it("requires a business expectation before freezing a trace draft, then selects 
   fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceApproval" }));
   expect(save).toBeDisabled();
   fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceStateless" }));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.addTurn" }));
+  fireEvent.change(screen.getByLabelText("evolution.followup"), { target: { value: "Add a source to each row" } });
   fireEvent.click(save);
   await waitFor(() => expect(evolutionService.createCase).toHaveBeenCalledWith(expect.objectContaining({
     query: "List synthetic actions", expected: "Keep unassigned items", agent_id: 7, version_no: 1,
+    followups: [{query: "Add a source to each row"}],
     trace: { turn_id: 3, purpose: "reproduce", draft_digest: "a".repeat(64),
       inputs_reviewed: true, tools_require_no_reset: true, unused_attachment_slots: [], use_previous_task: false },
   })));

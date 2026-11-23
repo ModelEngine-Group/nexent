@@ -4,7 +4,7 @@ import json
 from typing import Literal
 from functools import partial
 
-from fastapi import APIRouter, Header, Response
+from fastapi import APIRouter, Header, Query, Response
 from contracts.agentos import EvaluationAgentRun
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
@@ -90,10 +90,11 @@ async def cancel_experiment(experiment_id: int, authorization: str | None = Head
 
 @router.get("/agents/{agent_id}/versions/{version_no}/reviews/{turn_id}/case-draft")
 async def review_case_draft(agent_id: int, version_no: int, turn_id: int, response: Response,
-                            use_previous_task: bool = False, authorization: str | None = Header(None)):
+                            use_previous_task: bool = False, authorization: str | None = Header(None),
+                            preceding_turns: int = Query(0, ge=0, le=15)):
     user_id, tenant_id = get_current_user_id(authorization)
     draft = await run_blocking("preview-trace-case", preview_trace_case, tenant_id, user_id, agent_id,
-                               version_no, turn_id, use_previous_task, lane="control-io", owner="management")
+                               version_no, turn_id, use_previous_task, preceding_turns, lane="control-io", owner="management")
     response.headers["Cache-Control"] = "private, no-store"
     return {"data": draft}
 

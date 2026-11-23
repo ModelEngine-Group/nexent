@@ -29,7 +29,8 @@ from management.services.evaluation.replay_cases import (
 )
 from management.services.evaluation.scoring import grade_observed_case
 from management.services.evaluation.skill_candidates import pin_skill_candidate
-from management.services.evaluation.tool_use import judge_tool_use
+from management.services.evaluation.replay_dialogue import run_turns, skill_evidence
+from management.services.evaluation.tool_use import judge_dialogue_tools
 from management.services.evaluation.tool_set_candidates import resolve_tool_set
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
@@ -414,64 +415,48 @@ async def execute_trial(job):
         return "invalid", {"error": "frozen_input_changed"}
     client = AgentOSClient(EVOLUTION_REPLAY_RUNTIME_URL, create_httpx_client)
     stack = ExitStack()
-    stage = asyncio.create_task(_io("stage-development-input", stack.enter_context, stage_case_input(*args, job["receipt_id"])))
-    try:
+    async def load_input(index):
+        stage = asyncio.create_task(_io("stage-development-input", stack.enter_context,
+                                        stage_case_input(*args, job["receipt_id"], index)))
         try:
-            inputs = await asyncio.shield(stage)
+            return await asyncio.shield(stage)
         except asyncio.CancelledError:
             await stage
             raise
-        watch = case["task"].get("tool_use")
-        updates = {"input": inputs, "conversation_id": -job["trial_id"], "replay_trial_id": job["receipt_id"]}
-        if watch:
-            updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
-        payload = spec.model_copy(update=updates)
-        observed = await client.run_prepared_evaluation(payload, user, tenant)
+    try:
+        task = case["task"]
+        observations, turns, error = await run_turns(client, spec, task, load_input, job, user, tenant)
     finally:
         await _io("release-development-input", stack.close)
-    receipt = observed.replay_receipt
-    if not receipt or receipt.trial_id != job["receipt_id"]:
-        return "invalid", {"error": "missing_or_unsuccessful_runtime_receipt"}
-    if receipt.outcome != "completed":
-        return "invalid", {"error": "unsuccessful_runtime", "runtime_outcome": receipt.outcome}
-    skills = [receipt.skill] if receipt.skill else (receipt.skills or [])
-    targets = {ref.package_candidate_id: ref for ref in spec.resource.skill_refs if ref.package_candidate_id}
-    if (len(skills) != len(targets) or {s.candidate_id for s in skills} != set(targets)
-            or receipt.skill and receipt.skills):
-        return "invalid", {"error": "skill_observation_mismatch"}
-    for skill in skills:
-        target = targets[skill.candidate_id]
-        omitted = spec.omit_root_skill_candidate_id == skill.candidate_id
-        if (skill.instance_id != target.instance_id or skill.variant != ("no_skill" if omitted else target.package_variant)
-                or skill.mounted_revision != (None if omitted else target.revision) or omitted and (skill.listed or skill.guide_reads)):
-            return "invalid", {"error": "skill_observation_mismatch"}
-    selection = None
-    if spec.observe_root_skill_choices and case["task"].get("expected_skill_names") is not None:
-        reads = receipt.root_guide_reads
-        listed = {item["content"]["name"] for item in (spec.resource.evaluation_options.context_items or [])
-                  if item.get("type") == "skill"}
-        expected = case["task"].get("expected_skill_names")
-        if reads is None or expected is None or not listed.issuperset(set(reads).union(expected)):
-            return "invalid", {"error": "invalid_skill_choice_receipt"}
-        selection = judge_skill_selection(expected, reads)
+    dialogue = {"turns": turns} if turns else {}
+    if error:
+        return "invalid", {**error, **dialogue}
     await _io("recheck-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
-    grade = await run_blocking("grade-development-trial", _grade, request, job, case["task"], observed,
-                               lane="evaluation", owner="management")
-    absent = set()
+    final = observations[-1]
+    events = [e for obs in observations for e in obs.events]
+    grading_task = task
+    if turns:
+        # Rubrics see the conversation leading to the final deliverable. The runtime never sees the rubric.
+        messages = [message for turn in turns for message in
+                    ({"role": "user", "content": turn["query"]}, {"role": "assistant", "content": turn["answer"]})]
+        grading_task = {**task, "query": json.dumps(messages[:-1], ensure_ascii=False)}
+    grade = await run_blocking("grade-development-trial", _grade, request, job, grading_task,
+                               final.model_copy(update={"events": events}), lane="evaluation", owner="management")
+    receipts = [obs.replay_receipt for obs in observations]
+    receipt = receipts[-1]
+    skills, reads = skill_evidence(receipts)
+    selection = None
+    if spec.observe_root_skill_choices and task.get("expected_skill_names") is not None:
+        selection = judge_skill_selection(task["expected_skill_names"], reads)
     catalog = receipt.tool_catalog
-    if spec.tool_set_check:
-        if catalog is None or not catalog.model_inputs:
-            return "invalid", {"error": "missing_tool_catalog"}
-        removed = set(spec.tool_set_check.removed)
-        actual = set(catalog.executable)
-        if spec.tool_set_check.arm == "result":
-            if removed.intersection(actual.union(catalog.schema_tools, catalog.prompt_tools,
-                                                 catalog.instruction_mentions, catalog.native_definitions)):
-                return "invalid", {"error": "excluded_tool_remains_visible_or_callable", "tool_catalog": catalog.model_dump()}
-            absent = removed
-        elif not removed.issubset(actual.intersection(catalog.schema_tools, catalog.prompt_tools)):
-            return "invalid", {"error": "tool_missing_from_baseline", "tool_catalog": catalog.model_dump()}
-    tool_grade = judge_tool_use(watch, receipt.tool_observation, absent=absent) if watch else None
+    if catalog and turns:
+        catalogs = [r.tool_catalog for r in receipts]
+        catalog = catalog.model_copy(update={field: sorted({name for c in catalogs for name in getattr(c, field)})
+            for field in ("schema_tools", "executable", "instruction_mentions", "native_definitions", "prompt_tools")}
+            | {"model_inputs": sum(c.model_inputs for c in catalogs)})
+    absent = set(spec.tool_set_check.removed) if spec.tool_set_check and spec.tool_set_check.arm == "result" else set()
+    tool_grade = judge_dialogue_tools(task["tool_use"], [r.tool_observation for r in receipts], absent=absent) if task.get("tool_use") else None
+    usage = [reported_step_input_tokens(obs.events) for obs in observations]
     status = grade["status"]
     if tool_grade and status in {"pass", "fail"} and tool_grade["status"] != "pass":
         status = tool_grade["status"]
@@ -483,17 +468,17 @@ async def execute_trial(job):
             ("protect", "pass"): "protection_passed", ("protect", "fail"): "protection_failed",
         }
         trace_review["trace_baseline_outcome"] = outcomes.get((source["purpose"], status), "inconclusive")
-    return status, {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
+    return status, {"judgment": grade, "answer": final.answer, "event_count": len(events), **dialogue,
                              **trace_review,
                              **({"tool_use": tool_grade} if tool_grade else {}),
                              **({"tool_catalog": catalog.model_dump()} if catalog else {}),
-                             **({"guide_reads": receipt.root_guide_reads} if request.candidate_type == "baseline"
-                                and receipt.root_guide_reads is not None else {}),
-                             **({"skill": receipt.skill.model_dump()} if receipt.skill else {}),
-                             **({"skills": [s.model_dump() for s in skills]} if receipt.skills else {}),
+                             **({"guide_reads": reads} if request.candidate_type == "baseline"
+                                and reads is not None else {}),
+                             **({"skill": skills[0]} if receipt.skill else {}),
+                             **({"skills": skills} if receipt.skills else {}),
                              **({"selection": selection} if selection else {}),
-                             "reported_step_input_tokens": reported_step_input_tokens(observed.events),
-                             "events_digest": task_digest(observed.events), "case_digest": case["digest"],
+                             "reported_step_input_tokens": sum(usage) if None not in usage else None,
+                             "events_digest": task_digest(events), "case_digest": case["digest"],
                              "snapshot_digest": digest, "evaluator_id": grade["evaluator_id"],
                              "evaluator_version": grade["evaluator_version"]}
 

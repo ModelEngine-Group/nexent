@@ -44,10 +44,10 @@ def _write(key, data):
         raise OSError("Could not store replay input")
 
 
-def preview_trace_case(tenant, user, agent, version, turn, use_previous_task=False):
+def preview_trace_case(tenant, user, agent, version, turn, use_previous_task=False, preceding_turns=0):
     require_business_agent_edit(agent, tenant, user)
     with get_db_session() as session:
-        return trace_case_draft(session, tenant, user, agent, version, turn, use_previous_task)
+        return trace_case_draft(session, tenant, user, agent, version, turn, use_previous_task, preceding_turns)
 
 
 def _approve_trace(request, draft):
@@ -55,15 +55,28 @@ def _approve_trace(request, draft):
     if trace.draft_digest != draft["draft_digest"]:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Review the updated source before confirming")
     count = draft["attachment_count"]
-    if (count is None or any(slot > count for slot in trace.unused_attachment_slots)
-            or count - len(trace.unused_attachment_slots) > len(request.attachments)):
+    first_files = len(request.attachments) - sum(len(turn.attachment_names) for turn in request.followups)
+    if count is None or any(slot > count for slot in trace.unused_attachment_slots):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide the approved replay attachments")
+    segments = draft.get("segments", [draft])
+    if trace.preceding_turns and len(request.followups) != trace.preceding_turns:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Confirm each selected source turn in order")
+    offset = 0
+    available = [first_files, *(len(turn.attachment_names) for turn in request.followups)]
+    for segment, supplied in zip(segments, available):
+        end = offset + segment["attachment_count"]
+        unused = sum(offset < slot <= end for slot in trace.unused_attachment_slots)
+        if end - offset - unused > supplied:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide the approved replay attachments for each turn")
+        offset = end
     if draft["tool_count"] and not trace.tools_require_no_reset:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Replay needs a verified tool starting state")
     return {"turn_id": trace.turn_id, "task_turn_id": draft["task_turn_id"], "purpose": trace.purpose,
             "trajectory_id": draft["trajectory_id"], "correction_trajectory_id": draft["correction_trajectory_id"],
             "source_group": draft["source_group"], "draft_digest": draft["draft_digest"],
-            "unused_attachment_slots": sorted(trace.unused_attachment_slots)}
+            "unused_attachment_slots": sorted(trace.unused_attachment_slots),
+            **({"turn_sources": [{"turn_id": part["task_turn_id"], "trajectory_id": part["trajectory_id"]}
+                                  for part in segments]} if trace.preceding_turns else {})}
 
 
 def require_trace_baseline(tenant, agent, version, case, rule, language, judge, snapshot=None):
@@ -79,7 +92,7 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
     published_business_agent(tenant_id, request.agent_id, request.version_no)
     if request.trace:
         _approve_trace(request, preview_trace_case(tenant_id, user_id, request.agent_id, request.version_no,
-                                                  request.trace.turn_id, request.trace.use_previous_task))
+                                                  request.trace.turn_id, request.trace.use_previous_task, request.trace.preceding_turns))
     if request.expected_skill_names:
         names = {row["name"] for row in read_bound_skills(request.agent_id, request.version_no, tenant_id)}
         if not set(request.expected_skill_names) <= names:
@@ -96,6 +109,8 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
         _write(_archive_key(tenant_id, request.agent_id, digest), data)
         manifest.append({"name": file.name, "sha256": digest, "size": len(data)})
     task = {"family": request.family, "query": request.query, "expected": request.expected, "attachments": manifest}
+    if request.followups:
+        task["followups"] = [turn.model_dump() for turn in request.followups]
     if request.expected_skill_names is not None:
         task["expected_skill_names"] = sorted(request.expected_skill_names)
     if request.tool_use is not None:
@@ -108,7 +123,7 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
     if request.trace:
         with get_db_session() as session:
             draft = trace_case_draft(session, tenant_id, user_id, request.agent_id, request.version_no,
-                                     request.trace.turn_id, request.trace.use_previous_task)
+                                     request.trace.turn_id, request.trace.use_previous_task, request.trace.preceding_turns)
             task["trace_source"] = _approve_trace(request, draft)
             return save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task, transaction=session)
     return save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task)
@@ -196,15 +211,24 @@ def remove_trial_inputs(user_id, attempt, files):
 
 
 @contextmanager
-def stage_case_input(tenant_id, user_id, agent_id, version_no, case_id, attempt=None):
+def stage_case_input(tenant_id, user_id, agent_id, version_no, case_id, attempt=None, turn_index=0):
     row = get_development_case(tenant_id, user_id, agent_id, version_no, case_id)
     task = row["task"]
+    followups = task.get("followups", [])
+    if turn_index:
+        turn = followups[turn_index - 1]
+        query, names = turn["query"], set(turn["attachment_names"])
+    else:
+        later = {name for turn in followups for name in turn["attachment_names"]}
+        query, names = task["query"], {f["name"] for f in task["attachments"]} - later
     attempt = attempt or uuid4().hex
     prefix = temporary_input_prefix(user_id, attempt)
     copies = []
     files = []
     try:
         for file in task["attachments"]:
+            if file["name"] not in names:
+                continue
             source = _archive_key(tenant_id, agent_id, file["sha256"])
             data = _read_bounded(source, file["size"])
             if len(data) != file["size"] or sha256(data).hexdigest() != file["sha256"]:
@@ -215,6 +239,6 @@ def stage_case_input(tenant_id, user_id, agent_id, version_no, case_id, attempt=
             if sha256(_read_bounded(key, len(data))).hexdigest() != file["sha256"]:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Staged replay attachment changed")
             files.append({"name": file["name"], "object_name": key})
-        yield build_evaluation_input(task["query"], files, [], user_id, tenant_id)
+        yield build_evaluation_input(query, files, [], user_id, tenant_id)
     finally:
         remove_trial_inputs(user_id, attempt, copies)

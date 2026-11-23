@@ -36,6 +36,8 @@ export interface TraceCaseDraft {
   attachment_count: number | null; attachment_names?: string[]; tool_count: number; tools: { node: string; invocation_id?: string }[];
   signals: string[];
   correction_query?: string | null; correction_trajectory_id?: string | null;
+  preceding_turns?: number;
+  segments?: {task_turn_id: number; trajectory_id: string; query: string | null; attachment_count: number | null}[];
 }
 export interface Trial {
   status: string;
@@ -43,6 +45,7 @@ export interface Trial {
     evaluator_id?: number;
     evaluator_version?: number;
     trace_baseline_outcome?: string;
+    turns?: { turn: number; query: string; answer: string | null; outcome: string; attachments: string[] }[];
     answer?: string;
     reported_step_input_tokens?: number | null;
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
@@ -108,8 +111,8 @@ export const evolutionService = {
   evaluators: () => read<Rule[]>(API_ENDPOINTS.evaluators.list),
   workspace: (agent: number, version: number) =>
     read<Workspace>(`${root}/agents/${agent}/versions/${version}/workspace`),
-  traceCaseDraft: (agent: number, version: number, turn: number, previous = false) =>
-    read<TraceCaseDraft>(`${root}/agents/${agent}/versions/${version}/reviews/${turn}/case-draft${previous ? "?use_previous_task=true" : ""}`),
+  traceCaseDraft: (agent: number, version: number, turn: number, previous = false, preceding = 0) =>
+    read<TraceCaseDraft>(`${root}/agents/${agent}/versions/${version}/reviews/${turn}/case-draft?use_previous_task=${previous}&preceding_turns=${preceding}`),
   createCase: (body: {
     agent_id: number;
     version_no: number;
@@ -120,8 +123,10 @@ export const evolutionService = {
     expected_skill_names?: string[];
     tool_use?: ToolExpectation;
     attachments: { name: string; object_name: string }[];
+    followups?: { query: string; attachment_names?: string[] }[];
     trace?: { turn_id: number; draft_digest: string; purpose: "reproduce" | "protect";
-      inputs_reviewed: true; tools_require_no_reset: boolean; unused_attachment_slots?: number[]; use_previous_task?: boolean };
+      inputs_reviewed: true; tools_require_no_reset: boolean; unused_attachment_slots?: number[]; use_previous_task?: boolean;
+      preceding_turns?: number };
   }) => read<{ case_id: number }>(`${root}/development-cases`, body),
   submit: (body: {
     components?: EvaluatedCandidate[];

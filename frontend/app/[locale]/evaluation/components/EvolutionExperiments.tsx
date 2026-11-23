@@ -54,6 +54,7 @@ function CaseForm({
     source_group?: string;
     query: string;
     expected: string;
+    followups?: { query: string; attachment_names?: string[] }[];
   }>();
   const mutation = useMutation({
     mutationFn: async () => {
@@ -83,7 +84,8 @@ function CaseForm({
         expected_skill_names: labelSkill ? expectedSkills : undefined,
         trace: draft && { turn_id: draft.turn_id, draft_digest: draft.draft_digest, purpose,
           inputs_reviewed: true, tools_require_no_reset: stateless, unused_attachment_slots: unused,
-          use_previous_task: !!draft.correction_trajectory_id },
+          use_previous_task: !!draft.correction_trajectory_id,
+          ...(draft.preceding_turns ? { preceding_turns: draft.preceding_turns } : {}) },
       });
     },
     onSuccess: (response) => saved(response.case_id),
@@ -100,11 +102,15 @@ function CaseForm({
       okText={t("evolution.saveCase")}
       cancelText={t("common.cancel")}
     >
-      <Form form={form} layout="vertical" initialValues={{ query: draft?.query || "" }}>
+      <Form form={form} layout="vertical" initialValues={{ query: draft?.query || "",
+        followups: draft?.segments?.slice(1).map(turn => ({ query: turn.query || "" })) }}>
         {draft && <>
           <p>{t("evolution.traceSource", { id: draft.trajectory_id, files: draft.attachment_count ?? "?",
             calls: draft.tool_count })}</p>
           {draft.query === null && <p>{t("evolution.traceRedactedBrief")}</p>}
+          {draft.segments && <ol>{draft.segments.map(turn => <li key={turn.task_turn_id}>
+            {t("evolution.turnSource", { id: turn.task_turn_id, files: turn.attachment_count ?? "?" })}
+          </li>)}</ol>}
           {draft.correction_trajectory_id && <p>{t("evolution.traceCorrection", {
             evidence: draft.correction_query || draft.correction_trajectory_id,
           })}</p>}
@@ -154,6 +160,21 @@ function CaseForm({
             onChange={(e) => setFiles(Array.from(e.target.files || []))}
           />
         </Form.Item>
+        <Form.List name="followups">
+          {(fields, { add, remove }) => <>
+            {fields.map(({ key, name }) => <div key={key}>
+              <Form.Item name={[name, "query"]} label={t("evolution.followup", { turn: name + 2 })}
+                rules={[{ required: true, whitespace: true }]}>
+                <Input.TextArea rows={2} maxLength={16000} />
+              </Form.Item>
+              {files.length > 0 && <Form.Item name={[name, "attachment_names"]} label={t("evolution.followupFiles")}>
+                <Select mode="multiple" options={files.map(file => ({ value: file.name, label: file.name }))} />
+              </Form.Item>}
+              {!draft?.segments && <Button onClick={() => remove(name)}>{t("evolution.removeTurn")}</Button>}
+            </div>)}
+            {!draft?.segments && <Button disabled={fields.length >= 15} onClick={() => add()}>{t("evolution.addTurn")}</Button>}
+          </>}
+        </Form.List>
         {draft && <Checkbox checked={reviewed} onChange={e => setReviewed(e.target.checked)}>
           {t("evolution.traceApproval")}</Checkbox>}
       </Form>
@@ -185,10 +206,11 @@ function Experiments({
   const [selected, setSelected] = useState<number>();
   const [adding, setAdding] = useState<boolean | number>(false);
   const [previousTask, setPreviousTask] = useState(false);
+  const [preceding, setPreceding] = useState(0);
   const source = useQuery({
-    queryKey: ["evolution-trace-case", viewer, agent, version, adding, previousTask],
+    queryKey: ["evolution-trace-case", viewer, agent, version, adding, previousTask, preceding],
     enabled: typeof adding === "number", retry: false, gcTime: 0,
-    queryFn: () => api.traceCaseDraft(agent, version, Number(adding), previousTask),
+    queryFn: () => api.traceCaseDraft(agent, version, Number(adding), previousTask, preceding),
   });
   const previous = useRef({ selection: "", key: "" });
   const workspace = useQuery({
@@ -295,6 +317,8 @@ function Experiments({
           {!!choices.reviews?.length && (
             <details>
               <summary>{t("evolution.recentObservations")}</summary>
+              <label>{t("evolution.includePrevious")} <Select aria-label={t("evolution.includePrevious")}
+                value={preceding} onChange={setPreceding} options={Array.from({length: 16}, (_, n) => ({value:n,label:n}))} /></label>
               <ul>
                 {choices.reviews.map((row) => (
                   <li key={row.turn_id}>
@@ -496,6 +520,14 @@ function Experiments({
                     <div className="whitespace-pre-wrap">
                       {trial.result?.answer || trial.result?.error}
                     </div>
+                    {trial.result?.turns && <details><summary>{t("evolution.turnDetails")}</summary>
+                      <ol>{trial.result.turns.map(turn => <li key={turn.turn}>
+                        <div>{turn.query}</div>
+                        {!!turn.attachments.length && <div>{turn.attachments.join(", ")}</div>}
+                        <div className="whitespace-pre-wrap">{turn.answer}</div>
+                        {turn.outcome !== "completed" && <code>{turn.outcome}</code>}
+                      </li>)}</ol>
+                    </details>}
                     {trial.result && <Typography.Text type="secondary">{t("evolution.stepTokens", {
                       tokens: trial.result.reported_step_input_tokens ?? "—",
                     })}</Typography.Text>}
@@ -556,7 +588,7 @@ function Experiments({
       {typeof adding === "number" && source.isLoading && <Typography.Text>{t("evolution.loadingDraft")}</Typography.Text>}
       {adding && (adding === true || source.data) && (
         <CaseForm
-          key={`${adding}-${previousTask}`}
+          key={`${adding}-${previousTask}-${preceding}`}
           draft={typeof adding === "number" ? source.data : undefined}
           agent={agent}
           version={version}
