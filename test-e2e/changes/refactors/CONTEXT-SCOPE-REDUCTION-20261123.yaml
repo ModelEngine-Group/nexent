@@ -32,6 +32,8 @@ change:
       sources.
     - Measure summary gains using rendered request cost in both formats; skip noncompactable actions without
       changing recent-action boundaries or discarding an otherwise valid history summary.
+    - Replay accepted visible code as assistant followed by user runtime results, without synthetic action
+      records; historical execution evidence is user data and actual final answers remain assistant.
     reason: User-approved removal follows 2c18 behavior boundaries; keep old Cases and only withdraw capability-specific
       extensions. No duplicate D1 or new framework.
     test_selectors:

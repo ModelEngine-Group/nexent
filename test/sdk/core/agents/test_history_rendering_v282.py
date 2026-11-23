@@ -170,7 +170,8 @@ def test_actual_call_executes_once_and_next_request_has_one_real_result(strict):
             assert 'FAKE_SUCCESS_SENTINEL' not in requests[-1]
             assert 'MODEL_NARRATION_SENTINEL' not in requests[-1]
             if strict:
-                assert 'Executed action:' in requests[-1] and 'python_interpreter' in requests[-1]
+                assert 'Executed action:' not in requests[-1]
+                assert '<code>value = actual()' in requests[-1]
                 assert '<RESULT>' in requests[-1]
             else:
                 assert '<completed_action>' in requests[-1] and 'index: 1' in requests[-1]

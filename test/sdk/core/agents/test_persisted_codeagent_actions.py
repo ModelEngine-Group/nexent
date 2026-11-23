@@ -149,6 +149,15 @@ def test_fix01_real_renderer_and_hard_guard_use_restored_representation():
         },
     )
     messages = manager.build_context_messages([turn])
+    assert [message["role"] for message in messages] == ["user", "user", "assistant"]
+    assert "actual stdout" in str(messages[1]["content"])
+    assert "actual stdout" not in str(messages[-1]["content"])
+    from smolagents.models import get_clean_message_list, tool_role_conversions
+    wire = get_clean_message_list(messages, role_conversions=tool_role_conversions)
+    assert "actual stdout" in str(wire[0]["content"])
+    assert "actual stdout" not in str(wire[-1]["content"])
+    assert "actual answer" in str(wire[-1]["content"])
+    assert str(wire).count("actual stdout") == 1
     assert manager._message_tokens(messages) < 2000
     runtime = ManagedContextRuntime(manager)
     manager.config.effective_input_limit_tokens = 2000

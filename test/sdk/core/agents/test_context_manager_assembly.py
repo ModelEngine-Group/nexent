@@ -394,15 +394,28 @@ def test_strict_codeagent_observations_follow_smolagents_message_roles():
     action = ToolCall(name="python_interpreter", arguments="print('actual')", id="call_1")
     step = ActionStep(
         step_number=1, timing=Timing(start_time=0), tool_calls=[action],
-        model_output="MODEL_NARRATION_SHOULD_NOT_BE_REPLAYED",
+        model_output="<code>print('actual')</code>",
         observations="actual", action_output="actual",
     )
     memory.steps = [TaskStep(task="Use a tool"), step]
 
     context = manager.assemble_final_context(model=None, memory=memory, current_run_start_idx=0)
     wire = get_clean_message_list(context.messages, role_conversions=tool_role_conversions)
-    native = get_clean_message_list(step.to_messages(summary_mode=True), role_conversions=tool_role_conversions)
-
     assert [message["role"] for message in wire[-2:]] == ["assistant", "user"]
-    assert _message_text(wire[-2]) == _message_text(native[0]).replace("Calling tools:", "Executed action:", 1)
+    assert _message_text(wire[-2]) == step.model_output
+    assert "Executed action:" not in str(wire)
     assert _message_text(wire[-1]) == "<RESULT>\n<OUTPUT>actual</OUTPUT>\n</RESULT>"
+
+
+def test_strict_unexecuted_step_does_not_replay_rejected_model_output():
+    manager = ContextManager()
+    manager.use_result_observations = True
+    memory = _Memory()
+    memory.steps = [TaskStep(task="Use a tool"), ActionStep(
+        step_number=1, timing=Timing(start_time=0), model_output="REJECTED_OUTPUT_NOT_CONTEXT",
+        observations="Execution was blocked", tool_calls=None)]
+    context = manager.assemble_final_context(model=None, memory=memory, current_run_start_idx=0)
+    wire = get_clean_message_list(context.messages, role_conversions=tool_role_conversions)
+    assert "REJECTED_OUTPUT_NOT_CONTEXT" not in str(wire)
+    assert not any(message["role"] == "assistant" for message in wire)
+    assert "Execution was blocked" in _message_text(wire[-1])

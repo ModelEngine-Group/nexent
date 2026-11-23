@@ -96,7 +96,10 @@ def test_invalid_summary_does_not_persist_checkpoint():
 def test_historical_records_and_attachments_enter_summary_as_facts():
     rendered = ContextItemRenderer().render([turn()])
     source = HistorySummaryInput.from_items(None, [turn()]).render()
-    assert rendered[1]["role"] == "assistant"
+    assert rendered[1]["role"] == "user"
+    from nexent.core.agents.context import ContextManager
+    native = ContextManager(message_format="openai_chat_completions").build_context_messages([turn()])
+    assert native[1]["role"] == "assistant"
     for text in (str(rendered), source):
         assert "s3://files/old.txt" in text and "old-call" in text and "Saved error" in text
         assert "read_only" in text and "HIDDEN" not in text

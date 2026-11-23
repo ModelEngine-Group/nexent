@@ -90,7 +90,7 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     messages = [_text_message("user", turn_user_text(item.content))]
     execution = turn_execution_text(item.content)
     if execution:
-        messages.append(_text_message("assistant", execution))
+        messages.append(_text_message("user", execution))
     messages.append(_text_message("assistant", str(item.content["assistant_final_answer"])))
     return messages
 
@@ -187,18 +187,8 @@ def _render_result_observation(content: dict, calls: list, fields: dict) -> list
     from .execution_history import result_text
 
     messages = []
-    if calls:
-        records = [
-            {
-                "id": call["id"],
-                "type": "function",
-                "function": {"name": call["name"], "arguments": call["arguments"]},
-            }
-            if isinstance(call, dict) and {"name", "arguments", "id"} <= call.keys()
-            else call
-            for call in calls
-        ]
-        messages.append(_text_message("tool-call", f"Executed action:\n{records}"))
+    if calls and content.get("assistant_output"):
+        messages.append(_text_message("assistant", content["assistant_output"]))
     if content.get("summary"):
         body = f"<SUMMARIED_RESULT>{escape(content['summary'])}</SUMMARIED_RESULT>"
     elif content.get("preview") is not None:

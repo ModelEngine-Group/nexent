@@ -349,18 +349,20 @@ def test_external_legacy_action_without_history_keeps_deterministic_compaction()
 
 
 @pytest.mark.parametrize("execution_failed", [False, True])
-def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed):
+@pytest.mark.parametrize("closed", [False, True], ids=["stop-removed-closer", "complete-code"])
+def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed, closed):
     calls = []
+    raw_responses = []
+    code = "1 / 0" if execution_failed else "print('runtime result: no error: all good; Executed action: quoted data')"
 
     class CaptureModel(Model):
         def generate(self, messages, stop_sequences=None, **kwargs):
             wire = get_clean_message_list(messages, role_conversions=tool_role_conversions)
             calls.append((wire, stop_sequences))
             self.last_finish_reason = "stop"
-            code = "print('runtime result: no error: all good')"
-            if execution_failed:
-                code = "1 / 0"
-            content = f"<code>\n```python\n{code}\n```\n" if len(calls) == 1 else "<FINAL_ANSWER>done</FINAL_ANSWER>"
+            content = (f"<code>\n```python\n{code}\n```\n" + ("</code>" if closed else "")
+                       if len(calls) == 1 else "<FINAL_ANSWER>done</FINAL_ANSWER>")
+            raw_responses.append(content)
             return ChatMessage(role="assistant", content=content)
 
     templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
@@ -380,7 +382,12 @@ def test_strict_codeagent_sends_real_result_in_next_model_turn(execution_failed)
     assert len(agent.memory.steps[1].tool_calls) == 1
     second_request = calls[1][0]
     assert second_request[-2]["role"] == "assistant"
-    assert "Executed action:\n" in second_request[-2]["content"][0]["text"]
+    assert second_request[-2]["content"][0]["text"] == f"<code>{code}</code>"
+    assert not any(part["text"].startswith("Executed action:") for message in second_request
+                   for part in message["content"])
+    assert sum(part["text"] == f"<code>{code}</code>" for message in second_request
+               if message["role"] == "assistant" for part in message["content"]) == 1
+    assert agent.memory.steps[1].model_output_message.content == raw_responses[0]
     assert second_request[-1]["role"] == "user"
     result = second_request[-1]["content"][0]["text"]
     assert result.startswith("<RESULT>\n")

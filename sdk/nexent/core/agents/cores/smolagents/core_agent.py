@@ -687,7 +687,7 @@ class CoreAgent(CodeAgent):
                 else "CODE_EXEC_RESULT records"
             )
             runtime_records = (
-                "Executed action: records and <RESULT> tags" if context_manager.use_result_observations
+                "<RESULT> tags" if context_manager.use_result_observations
                 else "CODE_EXEC_RESULT"
             )
             self.context_runtime.items.append(ContextItemInput(
@@ -1790,6 +1790,10 @@ Additional Args:
             id=f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
+        if strict_code_action:
+            # Context replays only the accepted visible code. Keep the original
+            # provider response on model_output_message for audit and usage.
+            memory_step.model_output = f"<code>{classified_output.code}</code>"
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
