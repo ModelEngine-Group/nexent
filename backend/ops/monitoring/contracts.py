@@ -6,17 +6,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from infrastructure.monitoring.contracts import MAX_LONG, Fact, FactKind, Outcome, stable_key
-
-
-class SkillFact(Fact):
-    """A formal Skill guide read or script start."""
-
-    fact_kind: Literal["skill"] = "skill"
-    skill_id: str = Field(min_length=1, max_length=128)
-    skill_name: str = Field(min_length=1, max_length=200)
-    triggered_at: AwareDatetime
-    trigger_kind: Literal["guide_read", "script_started"]
+from infrastructure.monitoring.contracts import Fact, FactKind, Outcome, stable_key
+from infrastructure.monitoring.facts import SkillFact
 
 
 @dataclass(frozen=True)
