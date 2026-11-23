@@ -192,12 +192,15 @@ class KnowledgeFileGrant(KnowledgeAuthorizationRequest):
     collection: str = Field(min_length=1, max_length=100)
     embedding_model_id: int | None = Field(default=None, gt=0)
     legacy_sources: list[str] = Field(default_factory=list, max_length=8)
+    legacy_file_alias: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_serializer(mode="wrap")
     def serialize_file_grant(self, handler):
         result = handler(self)
         if not self.legacy_sources:
             result.pop("legacy_sources", None)
+        if self.legacy_file_alias is None:
+            result.pop("legacy_file_alias", None)
         return result
 
     @model_validator(mode='after')
@@ -206,6 +209,9 @@ class KnowledgeFileGrant(KnowledgeAuthorizationRequest):
         if self.legacy_sources and (self.action != "delete" or len(set(self.legacy_sources)) != len(self.legacy_sources)
             or any(not 0 < len(value) <= 2048 for value in self.legacy_sources)):
             raise ValueError("Legacy sources require exact, distinct deletion addresses")
+        if self.legacy_file_alias is not None and (not self.legacy_sources or self.legacy_file_alias == self.file_id
+                or not self.legacy_file_alias.isprintable() or not self.legacy_file_alias.strip()):
+            raise ValueError("A historical file alias requires a confirmed deletion source")
         if execution and (self.source is None or self.source_display is None):
             raise ValueError('Execution requires source identity and display')
         if not execution and (self.source is not None or self.source_display is not None):

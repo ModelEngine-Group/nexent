@@ -304,10 +304,11 @@ def test_native_file_cleanup_rejects_other_identity_even_with_matching_generatio
 def test_legacy_source_delete_excludes_new_generations_and_checks_exact_absence(fixture):
     es, actor, grant, context = fixture
     grant.file_id, grant.file_version, grant.legacy_sources = "a" * 32, 3, ["files/old.txt"]
+    grant.legacy_file_alias = "old-format-id"
     es.indices.get_mapping.return_value["kb"]["mappings"]["properties"]["path_or_url"] = {"type": "keyword"}
     es.open_point_in_time.return_value = {"id": "pit"}
     es.search.side_effect = [{"hits": {"hits": [{"_index": "kb", "_id": "legacy", "_seq_no": 2, "_primary_term": 1,
-        "_source": {"path_or_url": "files/old.txt"}, "sort": [0]}]}}, {"hits": {"hits": []}}]
+        "_source": {"path_or_url": "files/old.txt", "metadata": {"file_id": grant.legacy_file_alias}}, "sort": [0]}]}}, {"hits": {"hits": []}}]
     es.bulk.return_value = {"items": [{"delete": {"_index": "kb", "status": 200}}]}
     es.count.return_value = {"count": 0, "_shards": {"failed": 0}}
     assert _delete_legacy(es, grant, actor.tenant_id, context=context) == 1
@@ -322,6 +323,7 @@ def test_legacy_source_delete_excludes_new_generations_and_checks_exact_absence(
 @pytest.mark.parametrize(("extra", "error"), [
     ({native_knowledge.INGEST_GENERATION: "b" * 32}, ScopeDenied),
     ({"metadata": {"file_id": "c" * 32}}, ScopeDenied),
+    ({"file_id": "pending-format-id"}, ScopeDenied),
     ({"file_version": 4}, Conflict),
 ])
 def test_legacy_source_delete_rejects_conflicting_lineage(fixture, extra, error):

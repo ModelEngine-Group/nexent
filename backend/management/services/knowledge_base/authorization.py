@@ -14,6 +14,7 @@ from management.services.knowledge_base.file_authorization import (
     KnowledgeFileAuthorization,
 )
 from management.services.knowledge_base.legacy_vector_file_links import (
+    active_file_alias,
     legacy_source_addresses,
     require_unique_source_addresses,
 )
@@ -23,11 +24,12 @@ from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 from pydantic import ValidationError
 
 from infrastructure.knowledge_cleanse import knowledge_cleanse_ports
+from infrastructure.knowledge_deletion import knowledge_deletion_ports
 
 
 class KnowledgeAuthorization:
-    def __init__(self, jobs, resources, *, user_id):
-        self.jobs, self.user_id = jobs, user_id
+    def __init__(self, jobs, resources, *, user_id, file_alias=None):
+        self.jobs, self.user_id, self.file_alias = jobs, user_id, file_alias
         self.resources = KnowledgeFileAuthorization(resources, user_id=user_id)
 
     def authorize(self, request, *, context):
@@ -58,6 +60,8 @@ class KnowledgeAuthorization:
             self._artifact(request, source, context)
         legacy_sources = (self._legacy_sources(file, knowledge, request, context)
                          if request.action == "delete" and environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED else [])
+        legacy_alias = (self.file_alias(request.knowledge_id, request.file_id, context=context)
+                        if legacy_sources and self.file_alias is not None else None)
         return KnowledgeFileGrant(
             action=request.action,
             knowledge_id=request.knowledge_id,
@@ -71,6 +75,7 @@ class KnowledgeAuthorization:
             artifact=request.artifact,
             parser_version=request.parser_version,
             legacy_sources=legacy_sources,
+            legacy_file_alias=legacy_alias,
         )
 
     def _legacy_sources(self, file, knowledge, request, context):
@@ -136,10 +141,14 @@ class KnowledgeAuthorization:
 
 
 def authorize_knowledge(request, actor, *, context):
+    def find_alias(knowledge_id, file_id, *, context):
+        with knowledge_deletion_ports(actor, context=context) as (records, _):
+            return active_file_alias(records, knowledge_id, file_id, context=context)
+
     with knowledge_cleanse_ports(actor.tenant_id, actor.user_id, context=context) as (
         jobs,
         resources,
     ):
-        return KnowledgeAuthorization(jobs, resources, user_id=actor.user_id).authorize(
+        return KnowledgeAuthorization(jobs, resources, user_id=actor.user_id, file_alias=find_alias).authorize(
             request, context=context
         )

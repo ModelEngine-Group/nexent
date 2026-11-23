@@ -137,11 +137,11 @@ def test_delete_can_authorize_history_without_reenabling_cleansing(setup):
 
 
 @pytest.mark.parametrize("reused", [False, True])
-def test_legacy_delete_requires_unique_source_across_file_history(setup, resources, monkeypatch, reused):
-    from contracts.constants import environment
+def test_legacy_delete_requires_unique_source_across_file_history(setup, resources, monkeypatch, reused, mocker):
 
     policy, payload, update, _, _ = setup
     _, _, engine, tables = resources
+    policy.file_alias = mocker.Mock(return_value='activated-format-id')
     monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", True)
     source = knowledge_request().source
     intent = KnowledgeDeletionIntent(knowledge_id=1, file_id=payload.file_id, file_version=0, user_id="user-a",
@@ -158,9 +158,11 @@ def test_legacy_delete_requires_unique_source_across_file_history(setup, resourc
             ))
         with pytest.raises(Conflict):
             policy.authorize(request, context=context())
+        policy.file_alias.assert_not_called()
     else:
         grant = policy.authorize(request, context=context())
-        assert grant.source is None
+        assert policy.file_alias.call_args.args == (request.knowledge_id, request.file_id)
+        assert grant.source is None and grant.legacy_file_alias == 'activated-format-id'
         assert set(grant.legacy_sources) == {source.key, f"/bucket/{source.key}", f"s3://bucket/{source.key}"}
 
 

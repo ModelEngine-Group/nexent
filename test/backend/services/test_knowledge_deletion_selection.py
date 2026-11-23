@@ -11,6 +11,9 @@ from contracts.knowledge_ingestion import (
     LegacyIngestionSnapshot,
 )
 from management.services.knowledge_base.deletion_selection import prepare_deletion
+from management.services.knowledge_base.legacy_vector_file_links import (
+    active_file_alias,
+)
 from management.services.knowledge_base.source_deletion import SourceDeletion
 from nexent.storage.errors import Conflict, ScopeDenied, Unavailable
 from nexent.storage.models import StorageScope
@@ -187,11 +190,15 @@ def test_active_legacy_id_and_northbound_path_choose_the_same_deletion_intent(se
             'plan_sha256': 'd' * 64, 'version': 1, 'created_by': 'user-a', 'updated_by': 'user-a'})
     with pytest.raises(ValueError, match='Invalid file_id'):
         s.select(file_id=original_id)
+    records = s.opened[-2]
+    assert active_file_alias(records, 1, canonical, context=context()) is None
     with s.s.engine.begin() as conn:
         conn.execute(s.aliases.update().values(activated_at=datetime.now(timezone.utc)))
     _, by_old_id, _ = s.select('ignored', file_id=original_id)
     _, by_path, _ = s.select('s3://bucket/source.txt')
     assert by_old_id == by_path and by_old_id.file_id == canonical
+    assert active_file_alias(records, 1, canonical, context=context()) == original_id
+    assert active_file_alias(records, 2, canonical, context=context()) is None
     s.update('cleanse_memberships', delete_flag='Y')
     with pytest.raises(ScopeDenied):
         s.select(file_id=original_id)

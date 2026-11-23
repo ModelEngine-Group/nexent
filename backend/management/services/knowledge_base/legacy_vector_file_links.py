@@ -4,10 +4,10 @@
 from collections import defaultdict
 from urllib.parse import urlsplit
 
-from contracts.knowledge_ingestion import is_historical_file_id
+from contracts.knowledge_ingestion import ACTIVE_LEGACY_FILE_IDS, is_historical_file_id
 from contracts.knowledge_maintenance import LegacyVectorFileLink
 from nexent.storage.errors import Conflict, ScopeDenied
-from nexent.storage.models import Comparison, PageRequest, RecordQuery
+from nexent.storage.models import Comparison, Junction, PageRequest, RecordQuery
 
 FILE_LINK_FIELDS = (
     'file_id', 'public_file_id', 'tenant_id', 'knowledge_id', 'index_name', 'bucket_name',
@@ -75,6 +75,22 @@ def require_unique_source_addresses(records, knowledge_id, addresses, *, context
         cursor = page.next_cursor
         if cursor is None:
             return
+
+
+def active_file_alias(records, knowledge_id, file_id, *, context):
+    query = RecordQuery(where=Junction("and", (Comparison("knowledge_id", "eq", knowledge_id),
+                                               Comparison("standard_file_id", "eq", file_id))))
+    page = records.query(ACTIVE_LEGACY_FILE_IDS, query, PageRequest(limit=2), context=context)
+    if not page.items:
+        return None
+    if page.next_cursor or len(page.items) != 1:
+        raise Conflict()
+    row = page.items[0]
+    alias = row["original_file_id"]
+    if (row["knowledge_id"] != knowledge_id or row["standard_file_id"] != file_id
+        or row["tenant_id"] != records.scope.tenant_id or alias == file_id or not is_historical_file_id(alias)):
+        raise ScopeDenied()
+    return alias
 
 
 class LegacyVectorFileLinks:

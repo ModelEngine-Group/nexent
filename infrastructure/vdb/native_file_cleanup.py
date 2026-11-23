@@ -82,7 +82,7 @@ def _delete(client, grant, tenant_id, generations, *, context):
                             context=context)
 
 
-def _legacy_target(hit, collection, tenant_id, addresses, *, file_id=None, file_version=None):
+def _legacy_target(hit, collection, tenant_id, addresses, *, file_id=None, file_version=None, legacy_alias=None):
     source = hit.get("_source", {})
     if (hit.get("_index") != collection or INGEST_GENERATION in source or not _owns_source(source, tenant_id)
         or source.get("path_or_url") not in addresses):
@@ -92,7 +92,7 @@ def _legacy_target(hit, collection, tenant_id, addresses, *, file_id=None, file_
         raise Conflict()
     for fields in (source, metadata or {}):
         claimed_id, version = fields.get("file_id"), fields.get("file_version")
-        if claimed_id is not None and claimed_id != file_id:
+        if claimed_id is not None and claimed_id not in (file_id, legacy_alias):
             raise ScopeDenied()
         if version is not None and (file_version is None or type(version) is not int or not 0 <= version <= file_version):
             raise Conflict()
@@ -114,10 +114,11 @@ def delete_untracked_native_source(actor, resource, address, *, context):
 
 def _delete_legacy(client, grant, tenant_id, *, context):
     return _delete_legacy_sources(client, grant.collection, tenant_id, grant.legacy_sources,
-                                  file_id=grant.file_id, file_version=grant.file_version, context=context)
+                                  file_id=grant.file_id, file_version=grant.file_version,
+                                  legacy_alias=grant.legacy_file_alias, context=context)
 
 
-def _delete_legacy_sources(client, collection, tenant_id, addresses, *, context, file_id=None, file_version=None):
+def _delete_legacy_sources(client, collection, tenant_id, addresses, *, context, file_id=None, file_version=None, legacy_alias=None):
     reader = _NativeHybrid(client, {collection: tenant_id}, context)
     try:
         identities = reader.identities()
@@ -135,7 +136,8 @@ def _delete_legacy_sources(client, collection, tenant_id, addresses, *, context,
         raise Conflict()
 
     def validate(hit):
-        _legacy_target(hit, collection, tenant_id, addresses, file_id=file_id, file_version=file_version)
+        _legacy_target(hit, collection, tenant_id, addresses, file_id=file_id, file_version=file_version,
+                       legacy_alias=legacy_alias)
 
     query = {"bool": {"filter": [
         legacy_document_filter(), {"terms": {"path_or_url": addresses}},
