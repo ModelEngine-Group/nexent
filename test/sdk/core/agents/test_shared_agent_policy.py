@@ -100,7 +100,7 @@ def smolagent():
 def test_smolagents_complete_response_gate_precedes_final_and_side_effect_branches(response):
     agent = smolagent()
     with pytest.raises(DelegationError, match="DELEGATION_REQUIRED"):
-        agent._validate_delegation_output(response)
+        agent._validate_delegation_output(response, finish_reason="stop")
     assert agent._delegation.pending
 
 
@@ -111,10 +111,12 @@ def test_smolagents_proposal_is_not_dispatch_and_success_unlocks_followup(struct
     agent.code_block_tags = ("<code>", "</code>")
     code = "result = writer(task='Create a document')\nprint(result)"
     response = json.dumps({"code": code}) if structured else f"<code>{code}</code>"
-    agent._validate_delegation_output(response)
+    agent._validate_delegation_output(response, finish_reason="stop")
     assert agent._delegation.pending
     agent._delegation.record_dispatch("writer")
-    agent._validate_delegation_output("<final_answer>Actual worker result</final_answer>")
+    agent._validate_delegation_output(
+        "<final_answer>Actual worker result</final_answer>", finish_reason="stop",
+    )
 
 
 @pytest.mark.parametrize("repeat_bypass", [False, True])
@@ -376,6 +378,82 @@ def test_smolagents_parallel_enters_executor_without_delegation_regeneration(mon
     assert agent.model.call_count == 2
     assert policy.corrections == 0
     assert steps[-1].output == "Verified A and B"
+
+
+_PARALLEL_ACTION_WITH_MARKUP = (
+    'results = parallel_executor(tasks=[\n'
+    '    (smart_city_agent, {"task": """Use <code>...</code> and report the output.\n'
+    'Do not emit <final_answer> until Python executes."""}),\n'
+    '    (sentiment_therapist, {"task": """Use <code>...</code> and report B."""}),\n'
+    '])\nprint(results)'
+)
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_parallel_delegation_validates_the_exact_action_with_quoted_protocol_tags(strict, monkeypatch):
+    from test_pr4005_continuation import _agent_with_responses
+
+    agent, _, _ = _agent_with_responses(
+        [f"思考：分别交付具体任务。\n<code>\n{_PARALLEL_ACTION_WITH_MARKUP}\n</code>",
+         "<final_answer>Verified both workers</final_answer>"],
+        strict=strict, monkeypatch=monkeypatch,
+    )
+    policy = parallel_policy()
+    agent._delegation = policy
+
+    def execute(_code):
+        for name in policy.names:
+            policy.record_dispatch(name)
+        return SimpleNamespace(output="both workers", logs="both workers", is_final_answer=False)
+
+    agent.python_executor.side_effect = execute
+    assert list(agent._run_stream(_PARALLEL_REQUEST, max_steps=5))[-1].output == "Verified both workers"
+    agent.python_executor.assert_called_once_with(_PARALLEL_ACTION_WITH_MARKUP)
+    agent.observer.rollback_model_attempt.assert_not_called()
+
+
+def test_legacy_parallel_delegation_recovers_after_bad_quotes(monkeypatch):
+    from test_pr4005_continuation import _agent_with_responses, _text
+
+    invalid = _PARALLEL_ACTION.replace('{"task": "A"}', '{"task": "Print "missing" if needed"}')
+    agent, _, _ = _agent_with_responses(
+        [f"<code>{invalid}</code>", f"思考：并行执行。\n<code>\n{_PARALLEL_ACTION_WITH_MARKUP}\n</code>",
+         "<final_answer>Verified both workers</final_answer>"],
+        strict=False, monkeypatch=monkeypatch,
+    )
+    agent.model.last_finish_reason = "stop"
+    policy = parallel_policy()
+    agent._delegation = policy
+
+    def execute(_code):
+        for name in policy.names:
+            policy.record_dispatch(name)
+        return SimpleNamespace(output="both workers", logs="both workers", is_final_answer=False)
+
+    agent.python_executor.side_effect = execute
+    assert list(agent._run_stream(_PARALLEL_REQUEST, max_steps=5))[-1].output == "Verified both workers"
+    agent.python_executor.assert_called_once_with(_PARALLEL_ACTION_WITH_MARKUP)
+    agent.observer.rollback_model_attempt.assert_called_once_with("attempt-0", 1)
+    assert "triple-quoted" in _text(agent.model.call_args_list[1].args[0][-1])
+
+
+@pytest.mark.parametrize("strict,finish_reason,output", [
+    (False, "length", f"<code>{_PARALLEL_ACTION_WITH_MARKUP}"),
+    (False, "stop", f"<code>{_PARALLEL_ACTION_WITH_MARKUP}"),
+    (True, "stop", f"<code>{_PARALLEL_ACTION_WITH_MARKUP}"),
+    (False, "stop", f"<code>{_PARALLEL_ACTION_WITH_MARKUP}\nother(task='unsafe')</code>"),
+    (False, "stop", f"<code>{_PARALLEL_ACTION_WITH_MARKUP}</code><final_answer>Premature</final_answer>"),
+    (False, "stop", f"```python\n<code>{_PARALLEL_ACTION}</code>\n```"),
+])
+def test_parallel_delegation_keeps_unverified_outputs_out_of_executor(strict, finish_reason, output, monkeypatch):
+    from test_pr4005_continuation import _agent_with_responses
+
+    agent, _, _ = _agent_with_responses([output, output], strict=strict, monkeypatch=monkeypatch)
+    agent.model.last_finish_reason = finish_reason
+    agent._delegation = parallel_policy()
+    with pytest.raises(ModelOutputProtocolExhaustedError, match="DELEGATION_REQUIRED"):
+        list(agent._run_stream(_PARALLEL_REQUEST, max_steps=5))
+    agent.python_executor.assert_not_called()
 
 
 @pytest.mark.parametrize("code", [

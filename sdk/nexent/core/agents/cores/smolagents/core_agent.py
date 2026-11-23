@@ -1333,22 +1333,27 @@ Additional Args:
                                 f" Unfinished plan steps: {details}.")
         return ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": instruction}])
 
-    def _validate_delegation_output(self, output):
-        """Check the complete proposal before any final-answer or execution branch."""
+    def _validate_delegation_output(self, output, *, finish_reason):
+        """Classify and validate the same action that will reach the executor."""
         policy = getattr(self, "_delegation", None)
         if policy is None or not policy.pending:
-            return False
+            return None, False
         try:
             if self._use_structured_outputs_internally:
                 code = json.loads(output)["code"]
-                code = extract_code_from_text(code, self.code_block_tags) or code
-            else:
-                code = parse_code_blobs(output)
-            if re.search(r"<final_answer>", str(output), re.IGNORECASE):
-                code = None
-        except (ValueError, TypeError, KeyError, AttributeError):
-            code = None
-        return policy.validate_code(_remove_parallel_executor_import(code) if isinstance(code, str) else code)
+                if not isinstance(code, str):
+                    raise ValueError("Structured code must be a string")
+                if not code.lstrip().lower().startswith(("<code>", "```<run>")):
+                    code = extract_code_from_text(code, self.code_block_tags) or code
+                    code = f"<code>{code}</code>"
+                output = code
+            action = classify_model_output(output, protocol="code_action", finish_reason=finish_reason)
+        except (ValueError, TypeError, KeyError, ModelOutputProtocolError) as error:
+            raise DelegationError("DELEGATION_REQUIRED") from error
+        if not isinstance(action, ExecutableAction) or action.final_answer is not None:
+            raise DelegationError("DELEGATION_REQUIRED")
+        parent_preparation = policy.validate_code(_remove_parallel_executor_import(action.code))
+        return action, parent_preparation
 
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
@@ -1552,15 +1557,17 @@ Additional Args:
                 logger=self.logger,
             )
 
-        parent_preparation = self._validate_delegation_output(model_output)
+        finish_reason = getattr(self.model, "last_finish_reason", None)
+        if finish_reason is None:
+            diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
+            finish_reason = diagnostics.get("finish_reason")
+        delegated_action, parent_preparation = self._validate_delegation_output(model_output, finish_reason=finish_reason)
 
         # Parse using the configured closed output protocol.
         try:
-            if legacy_code_action:
-                finish_reason = getattr(self.model, "last_finish_reason", None)
-                if finish_reason is None:
-                    diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
-                    finish_reason = diagnostics.get("finish_reason")
+            if delegated_action is not None:
+                classified_output = delegated_action
+            elif legacy_code_action:
                 try:
                     if not re.search(r"<code>|```<run>", str(model_output), re.IGNORECASE):
                         yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
@@ -1601,10 +1608,6 @@ Additional Args:
                 )
 
             else:
-                finish_reason = getattr(self.model, "last_finish_reason", None)
-                if finish_reason is None:
-                    diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
-                    finish_reason = diagnostics.get("finish_reason")
                 classified_output = classify_model_output(
                     model_output,
                     protocol=getattr(self, "output_protocol", "code_action"),
@@ -2295,9 +2298,15 @@ Additional Args:
                 )
                 if not self._delegation.allow_correction():
                     raise ModelOutputProtocolExhaustedError("DELEGATION_REQUIRED") from error
+                correction = self._delegation.instruction + " " + _ACTION_FORMAT_REMINDER
+                if self._delegation.parallel_required and isinstance(error.__cause__, ModelOutputProtocolError):
+                    correction += (
+                        " The previous action did not parse. Use a valid Python triple-quoted string for each "
+                        "task with embedded quotes or line breaks, and close the outer code block with </code>."
+                    )
                 self._protocol_repair_messages[:] = [ChatMessage(
                     role=MessageRole.USER,
-                    content=[{"type": "text", "text": self._delegation.instruction + " " + _ACTION_FORMAT_REMINDER}],
+                    content=[{"type": "text", "text": correction}],
                 )]
                 continue
 
