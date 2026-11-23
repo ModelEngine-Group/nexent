@@ -29,7 +29,7 @@ from management.services.evaluation.replay_cases import (
 )
 from management.services.evaluation.scoring import grade_observed_case
 from management.services.evaluation.skill_candidates import pin_skill_candidate
-from management.services.evaluation.replay_dialogue import run_turns, skill_evidence
+from management.services.evaluation.replay_dialogue import judge_file_state, run_turns, skill_evidence
 from management.services.evaluation.tool_use import judge_dialogue_tools
 from management.services.evaluation.tool_set_candidates import resolve_tool_set
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -460,6 +460,9 @@ async def execute_trial(job):
     status = grade["status"]
     if tool_grade and status in {"pass", "fail"} and tool_grade["status"] != "pass":
         status = tool_grade["status"]
+    file_grade = judge_file_state(task["file_state"], receipts) if task.get("file_state") else None
+    if file_grade and status == "pass":
+        status = file_grade["status"]
     trace_review = {}
     source = case["task"].get("trace_source")
     if request.candidate_type == "baseline" and source:
@@ -471,6 +474,7 @@ async def execute_trial(job):
     return status, {"judgment": grade, "answer": final.answer, "event_count": len(events), **dialogue,
                              **trace_review,
                              **({"tool_use": tool_grade} if tool_grade else {}),
+                             **({"file_state": file_grade} if file_grade else {}),
                              **({"tool_catalog": catalog.model_dump()} if catalog else {}),
                              **({"guide_reads": reads} if request.candidate_type == "baseline"
                                 and reads is not None else {}),

@@ -473,6 +473,8 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
     if (payload.watch_tool_arguments or payload.tool_set_check) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_TOOL_OBSERVATION_REQUIRES_REPLAY"})
+    if payload.replay_files is not None and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_FILE_STATE_REQUIRES_REPLAY"})
     return prepare_run_snapshot(payload, actor)
 
 
@@ -524,9 +526,14 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
         raise
 
     status = "failed"
+    fixture = None
     try:
         observations = []
         recorder = None
+        if payload.replay_files is not None:
+            from runtime.agentos.replay_file_state import TrialFileState
+            fixture = TrialFileState(info)
+            await fixture.prepare(payload.replay_files)
         if payload.watch_tool_arguments or payload.tool_set_check:
             from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
             recorder = ReplayToolRecorder(info.agent_config, payload.watch_tool_arguments or {},
@@ -544,7 +551,8 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
         if payload.replay_trial_id is not None:
             for skill, path in observations:
                 skill.guide_reads = reads[path].count if path is not None else 0
-            result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id,
+            file_state = await fixture.receipt() if fixture else None
+            result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id, file_state=file_state,
                 outcome=info.attempt_outcome or "unconfirmed",
                 skill=observations[0][0] if len(observations) == 1 else None,
                 skills=[s for s, _ in observations] if len(observations) > 1 else None,
@@ -557,4 +565,8 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
         status = "stopped"
         raise
     finally:
-        release_prepared_run(info, payload.conversation_id, actor.user_id, status)
+        try:
+            if fixture:
+                await fixture.release()
+        finally:
+            release_prepared_run(info, payload.conversation_id, actor.user_id, status)

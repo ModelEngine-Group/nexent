@@ -54,6 +54,18 @@ def require_development_sources(tenant, agent, case_ids, plan):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Fixed regression tasks cannot be shared with a generator")
 
 
+def _file_checks_for_tool(result, tool):
+    grade = result.get("file_state") or {}
+    if grade.get("status") not in {"pass", "fail"}:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose two tasks with verified file states")
+    written = set(grade.get("writes_by_tool", {}).get(tool, []))
+    differences = {key: grade[key] for key in ("wrong_content", "missing", "extra", "protected_writes")}
+    relevant = written.intersection(name for names in differences.values() for name in names)
+    return {"status": grade["status"], "counts": {key: len(names) for key, names in differences.items()},
+            "differences": {key: names[:4] for key, names in differences.items()},
+            "selected_tool_touched": sorted(relevant)[:8]}
+
+
 def _prepare_handoff(tenant, user, eid, request):
     scope = jobs.scope(tenant, eid)
     if not scope:
@@ -101,6 +113,8 @@ def _prepare_handoff(tenant, user, eid, request):
             if not excerpt.input_excerpt.strip() or excerpt.input_excerpt not in case["task"]["query"]:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Approve an exact request excerpt")
             feedback[field]["input_excerpt"] = excerpt.input_excerpt
+        if request.share_file_state and not case["task"].get("tool_use"):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose two tasks with verified tool checks")
         if request.method in {"T1", "T2"} and case["task"].get("tool_use"):
             evidence = trial["result"].get("tool_use") or {}
             rule = next((r for r in case["task"]["tool_use"]["rules"] if r["name"] == request.tool_name), None)
@@ -108,14 +122,17 @@ def _prepare_handoff(tenant, user, eid, request):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose a tool with verified behavior on both tasks")
             issues = [problem for problem in evidence["issues"] if problem.get("tool") == request.tool_name
                       or problem["reason"] == "wrong_order" and request.tool_name in (case["task"]["tool_use"].get("order") or [])]
-            if field == "failure" and not issues:
+            file_evidence = {}
+            if request.share_file_state:
+                file_evidence["file_checks"] = _file_checks_for_tool(trial["result"], request.tool_name)
+            if field == "failure" and not (issues or file_evidence.get("file_checks", {}).get("selected_tool_touched")):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The selected tool met its requirements on the failure task")
             feedback[field]["tool_evidence"] = json.dumps({
                 "name": request.tool_name, "required_min": rule["min_calls"], "required_max": rule["max_calls"],
                 "checked_arguments": list(rule["arguments"]), "calls": evidence["sequence"].count(request.tool_name),
                 "approved_expected_values": {key: rule["arguments"][key] for key in request.share_expected_arguments
                                              if key in rule["arguments"]},
-                "issues": issues[:8]}, ensure_ascii=False)
+                "issues": issues[:8], **file_evidence}, ensure_ascii=False)
             if len(feedback[field]["tool_evidence"]) > 5000:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Reduce the selected argument evidence")
     if request.method == "S2":

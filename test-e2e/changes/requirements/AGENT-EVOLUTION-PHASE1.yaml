@@ -12,7 +12,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001]
+    added: [EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001]
     modified: []
     retired: []
   traditional_ut:
@@ -30,12 +30,14 @@ change:
     - test/backend/services/test_evolution_combinations.py
     - test/backend/services/test_evolution_replay.py
     - test/backend/services/test_evolution_dialogue.py
+    - test/backend/services/test_evolution_file_state.py
     - test/backend/services/test_evolution_examples.py
     - test/backend/services/test_evolution_feedback_handoff.py
     - test/backend/app/test_agentos_prepared_skills.py
     - test/backend/gateway/test_exposure.py
     - test/sdk/core/tools/test_read_skill_md_tool.py
     - test/sdk/core/agents/test_replay_tool_bindings.py
+    - test/sdk/core/agents/test_replay_file_directory.py
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
     behaviors:
@@ -52,5 +54,6 @@ change:
     - 组合引用两个有有效回执的单项实验；原版、A、B 和 A+B 同题运行，缺少任一组不得计为四组均有效。
     - 授权轨迹产生单轮题草稿。出题者确认必要附件和独立预期，系统区分原任务和后续纠正，同源任务不能跨分区。
     - 多轮按用户请求顺序重放，各组只承接自己的回答，附件按轮开放；核对各轮回执，按整题检查工具调用、Skill 使用和交付结果。
+    - 读写文本文件的任务按组重置真实文件工具的独立目录，每轮读取实际内容，另核对受保护文件的写入。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
   notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。随开发增量登记其余 AC 的证明边界。

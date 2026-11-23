@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 import { useState } from "react";
-import { Alert, Button, Form, Input, Modal, Select } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Modal, Select } from "antd";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { evolutionService as api, type ExperimentReport, type LocalFeedback, type Workspace } from "@/services/evolutionService";
@@ -29,6 +29,8 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
   const checked = (id?: number) => report.pairs[String(id)]?.base.result?.tool_use?.checked || [];
   const tools = checked(failed).filter(name => checked(good).includes(name));
   const parameters = Object.keys(failure.data?.task.tool_use?.rules.find(r => r.name === tool)?.arguments || {});
+  const fileChecks = isTool && !!report.pairs[String(failed)]?.base.result?.file_state &&
+    !!report.pairs[String(good)]?.base.result?.file_state;
   const submit = useMutation({ mutationFn: async () => {
     const data = await form.validateFields();
     return api.shareLocalEdit(report.experiment_id, {
@@ -36,6 +38,7 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
       failure: { ...data.failure, observed: data.failure.observed ?? "" },
       protection: { ...data.protection, observed: data.protection.observed ?? "" },
       share_expected_arguments: method === "T2" ? data.share_expected_arguments : undefined,
+      share_file_state: fileChecks ? data.share_file_state : undefined,
     });
   }});
   if (!need("fail").length || !need("pass").length) return null;
@@ -46,7 +49,8 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
       onOk={() => submit.mutate()} destroyOnHidden>
       <Form form={form} layout="vertical" initialValues={{ method: "P1" }} onValuesChange={() => submit.reset()}>
         <Form.Item name="method" label={t("evolution.editMethod")} rules={[{ required: true }]}>
-          <Select options={["P1","P3","T1","T2","S2"].map(value => ({ value, label: t(`evolution.method.${value}`) }))} />
+          <Select options={["P1","P3","T1","T2","S2"].map(value => ({ value, label: t(`evolution.method.${value}`) }))}
+            onChange={() => form.setFieldValue("share_file_state", false)} />
         </Form.Item>
         {method === "S2" && <Form.Item name="skill_id" label={t("evolution.targetSkill")} rules={[{ required: true }]}>
           <Select options={workspace.skills?.map(s => ({ value: s.skill_id, label: s.name }))} />
@@ -65,6 +69,7 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
                 for (const field of ["expected","observed","input_excerpt"] as const) form.setFieldValue([group,field], undefined);
                 form.setFieldValue("tool_name", undefined);
                 form.setFieldValue("share_expected_arguments", []);
+                form.setFieldValue("share_file_state", false);
               }} />
             </Form.Item>
             {details.error && <Alert type="error" message={details.error.message} />}
@@ -80,7 +85,13 @@ export default function LocalEditFeedback({ report, workspace, agent, version, v
           </div>;
         })}
         {isTool && <Form.Item name="tool_name" label={t("evolution.toolName")} rules={[{ required: true }]}>
-          <Select options={tools.map(value => ({ value, label: value }))} onChange={() => form.setFieldValue("share_expected_arguments", [])} />
+          <Select options={tools.map(value => ({ value, label: value }))} onChange={() => {
+            form.setFieldValue("share_expected_arguments", []);
+            form.setFieldValue("share_file_state", false);
+          }} />
+        </Form.Item>}
+        {fileChecks && <Form.Item name="share_file_state" valuePropName="checked">
+          <Checkbox>{t("evolution.shareFileChecks")}</Checkbox>
         </Form.Item>}
         {method === "T2" && !!parameters.length && <Form.Item name="share_expected_arguments" label={t("evolution.shareArgumentValues")}>
           <Select mode="multiple" options={parameters.map(value => ({ value, label: value }))} />

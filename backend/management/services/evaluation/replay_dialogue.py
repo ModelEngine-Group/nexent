@@ -1,11 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Execute the frozen user turns with the history produced by one trial arm."""
 
+import json
 from collections import Counter
 from hashlib import sha256
 
 from contracts.agentos import RunHistoryMessage
+from contracts.errors.exceptions import RuntimeUpstreamError
 from management.db.evaluation.replay_cases import task_digest
+from nexent.core.agents.resources.replay_files import files_digest
 
 
 def validate_turn(spec, receipt, attempt, expected_names):
@@ -49,6 +52,7 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
     history, observations, records = [], [], []
     followups = task.get("followups", [])
     watch = task.get("tool_use")
+    files = task["file_state"]["initial"] if task.get("file_state") else None
     for index in range(len(followups) + 1):
         current = await load_input(index)
         root = job["receipt_id"]
@@ -57,9 +61,30 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
         updates = {"input": current, "conversation_id": -job["trial_id"], "replay_trial_id": attempt}
         if watch:
             updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
-        observed = await client.run_prepared_evaluation(spec.model_copy(update=updates), user, tenant)
+        if files is not None:
+            updates["replay_files"] = files
+        try:
+            observed = await client.run_prepared_evaluation(spec.model_copy(update=updates), user, tenant)
+        except RuntimeUpstreamError as exc:
+            if files is None or exc.status_code != 422:
+                raise
+            try:
+                body = json.loads(exc.content)
+            except (ValueError, UnicodeError):
+                body = {}
+            detail = body.get("detail") if isinstance(body, dict) else None
+            code = detail.get("code") if isinstance(detail, dict) else None
+            if code not in ("AGENTOS_FILE_STATE_UNSUPPORTED_BINDINGS", "AGENTOS_FILE_STATE_UNREADABLE"):
+                raise
+            return [], records, {"error": code.lower(), "turn": index + 1}
         receipt = observed.replay_receipt
         error = validate_turn(spec, receipt, attempt, task.get("expected_skill_names"))
+        if files is not None and not error:
+            state = receipt.file_state
+            if state is None or not state.complete or state.initial_digest != files_digest(files):
+                error = {"error": "unverified_file_state"}
+            else:
+                files = state.files
         if followups and not error and not any(e.get("type") == "final_answer" for e in observed.events):
             error = {"error": "missing_final_answer_event"}
         if followups:
@@ -73,12 +98,33 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
                 records[-1].update(skills=turn_skills, guide_reads=turn_reads)
                 if receipt.tool_observation:
                     records[-1]["tool_observation"] = receipt.tool_observation.model_dump()
+                if files is not None:
+                    records[-1]["file_state_digest"] = files_digest(files)
         if error:
             return [], records, error
         observations.append(observed)
         history.extend([RunHistoryMessage(role="user", content=current.query, attachment_refs=current.attachment_refs),
                         RunHistoryMessage(role="assistant", content=observed.answer)])
     return observations, records, None
+
+
+def judge_file_state(rule, receipts):
+    states = [r.file_state for r in receipts]
+    actual, expected = states[-1].files, rule["expected"]
+    written = {name.casefold() for state in states for name in state.writes}
+    writers = {}
+    for state in states:
+        for tool, names in state.writes_by_tool.items():
+            writers.setdefault(tool, set()).update(names)
+    protected = [n for n in rule["protected"] if n.casefold() in written]
+    missing = sorted(expected.keys() - actual.keys())
+    extra = sorted(actual.keys() - expected.keys())
+    wrong = sorted(n for n in expected.keys() & actual.keys() if actual[n] != expected[n])
+    return {"adapter": rule["adapter"], "status": "fail" if any((missing, extra, wrong, protected)) else "pass",
+            "initial_digest": states[0].initial_digest, "final_digest": files_digest(actual),
+            "expected_digest": files_digest(expected), "missing": missing, "extra": extra,
+            "wrong_content": wrong, "protected_writes": protected,
+            "writes_by_tool": {tool: sorted(names) for tool, names in writers.items()}}
 
 
 def skill_evidence(receipts):

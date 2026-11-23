@@ -69,7 +69,7 @@ def _approve_trace(request, draft):
         if end - offset - unused > supplied:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide the approved replay attachments for each turn")
         offset = end
-    if draft["tool_count"] and not trace.tools_require_no_reset:
+    if draft["tool_count"] and not trace.tools_require_no_reset and request.file_state is None:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Replay needs a verified tool starting state")
     return {"turn_id": trace.turn_id, "task_turn_id": draft["task_turn_id"], "purpose": trace.purpose,
             "trajectory_id": draft["trajectory_id"], "correction_trajectory_id": draft["correction_trajectory_id"],
@@ -115,6 +115,8 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
         task["expected_skill_names"] = sorted(request.expected_skill_names)
     if request.tool_use is not None:
         task["tool_use"] = request.tool_use.model_dump(mode="json")
+    if request.file_state is not None:
+        task["file_state"] = request.file_state.model_dump(mode="json")
     if request.source_group is not None:
         if not request.source_group.strip():
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide a non-empty source group")

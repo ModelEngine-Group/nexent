@@ -22,6 +22,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import ExampleCandidates from "./ExampleCandidates";
 import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedback";
 import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRules";
+import FileStateRules, { fileStateRule, type FileRule } from "./FileStateRules";
 import LocalEditFeedback from "./LocalEditFeedback";
 import ToolSetCandidates from "./ToolSetCandidates";
 import FixedRegressionCases from "./FixedRegressionCases";
@@ -47,10 +48,12 @@ function CaseForm({
   const [expectedSkills, setExpectedSkills] = useState<string[]>([]);
   const [reviewed, setReviewed] = useState(false);
   const [stateless, setStateless] = useState(false);
+  const [verifyFiles, setVerifyFiles] = useState(false);
   const [unused, setUnused] = useState<number[]>([]);
   const [purpose, setPurpose] = useState<"reproduce" | "protect">("reproduce");
   const [form] = Form.useForm<ToolRuleFields & {
     family: string;
+    fileRules?: FileRule[];
     source_group?: string;
     query: string;
     expected: string;
@@ -59,7 +62,7 @@ function CaseForm({
   const mutation = useMutation({
     mutationFn: async () => {
       const values = await form.validateFields();
-      const { toolRules, toolOrder, ...business } = values;
+      const { toolRules, toolOrder, fileRules, ...business } = values;
       const uploaded = files.length
         ? await storageService.uploadFiles(files)
         : undefined;
@@ -77,6 +80,7 @@ function CaseForm({
       return api.createCase({
         ...business,
         tool_use: toolExpectation({ toolRules, toolOrder }),
+        file_state: verifyFiles ? fileStateRule(fileRules || [], t("evolution.duplicateFile")) : undefined,
         source_group: values.source_group?.trim() || undefined,
         agent_id: agent,
         version_no: version,
@@ -98,7 +102,7 @@ function CaseForm({
       onOk={() => mutation.mutate()}
       confirmLoading={mutation.isPending}
       okButtonProps={{ disabled: !!draft && (!reviewed || draft.attachment_count == null ||
-        files.length + unused.length < draft.attachment_count || (draft.tool_count > 0 && !stateless)) }}
+        files.length + unused.length < draft.attachment_count || (draft.tool_count > 0 && !stateless && !verifyFiles)) }}
       okText={t("evolution.saveCase")}
       cancelText={t("common.cancel")}
     >
@@ -127,7 +131,7 @@ function CaseForm({
           </Form.Item>}
           <Select aria-label={t("evolution.tracePurpose")} value={purpose} onChange={setPurpose}
             options={["reproduce", "protect"].map(value => ({value, label: t(`evolution.tracePurpose.${value}`)}))} />
-          {!!draft.tool_count && <p><Checkbox checked={stateless} onChange={e => setStateless(e.target.checked)}>
+          {!!draft.tool_count && !verifyFiles && <p><Checkbox checked={stateless} onChange={e => setStateless(e.target.checked)}>
             {t("evolution.traceStateless")}</Checkbox></p>}
         </>}
         {(["family", "query", "expected"] as const).map((field) => (
@@ -153,6 +157,9 @@ function CaseForm({
             options={skills.map(s => ({ value: s.name, label: s.name }))} />
         </Form.Item>}
         <ToolUseRules />
+        <p><Checkbox checked={verifyFiles} onChange={e => { setVerifyFiles(e.target.checked); setStateless(false); }}>
+          {t("evolution.verifyFiles")}</Checkbox></p>
+        {verifyFiles && <FileStateRules />}
         <Form.Item label={t("evolution.attachments")}>
           <input
             type="file"
@@ -544,6 +551,13 @@ function Experiments({
                       {trial.result.tool_use.issues?.map((issue, i) => <div key={i}>
                         {issue.tool} {t(`evolution.issue.${issue.reason}`)} {issue.fields?.join(", ")}
                       </div>)}
+                    </div>}
+                    {trial.result?.file_state && <div>
+                      {t("evolution.fileVerdict", { status:t(`evolution.state.${trial.result.file_state.status}`) })}
+                      {(["missing","extra","wrong_content","protected_writes"] as const).map(k =>
+                        trial.result!.file_state![k].length > 0 && <div key={k}>
+                          {t(`evolution.fileIssue.${k}`)} · {trial.result!.file_state![k].join(", ")}
+                        </div>)}
                     </div>}
                     {trial.result?.tool_catalog && <details><summary>{t("evolution.actualToolSet")}</summary>
                       {(["prompt_tools","schema_tools","executable"] as const).map(key => <div key={key}>

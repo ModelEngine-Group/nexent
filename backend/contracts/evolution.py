@@ -4,6 +4,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from contracts.replay_files import FileStateCheck
 
 
 class DevelopmentFeedback(BaseModel):
@@ -134,6 +135,7 @@ class ReplayCaseRequest(BaseModel):
     source_group: str | None = Field(default=None, min_length=1, max_length=128)
     expected_skill_names: list[str] | None = Field(default=None, max_length=32)
     tool_use: ToolUseExpectation | None = None
+    file_state: FileStateCheck | None = None
     trace: TraceCaseApproval | None = None
 
     @model_validator(mode="after")
@@ -265,9 +267,12 @@ class FeedbackHandoffRequest(BaseModel):
     protection: FeedbackExcerpt
     tool_name: str | None = Field(default=None, min_length=1, max_length=180)
     share_expected_arguments: list[str] = Field(default_factory=list, max_length=32)
+    share_file_state: bool = False
 
     @model_validator(mode="after")
     def valid_resource(self):
+        if self.share_file_state and (self.method not in {"T1", "T2"} or not self.tool_name):
+            raise ValueError("Choose a measured tool before sharing its file checks")
         if self.tool_name and self.method not in {"T1", "T2"}:
             raise ValueError("Select a tool only for a tool-call improvement")
         if self.share_expected_arguments and (self.method != "T2" or not self.tool_name):

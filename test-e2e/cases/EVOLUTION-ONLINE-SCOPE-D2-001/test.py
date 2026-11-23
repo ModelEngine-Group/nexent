@@ -100,6 +100,14 @@ def test_online_scope_http(runtime):
             form["trace"]["unused_attachment_slots"] = [1]
             res = client.post(cases_path, headers=headers, json=form)
             assert 400 <= res.status_code < 500 and "starting state" in res.text
+            file_rule = {"initial":{"actions.txt":"draft"}, "expected":{"actions.txt":"ready"}, "protected":[]}
+            result = client.post(cases_path, headers=headers, json={**form, "file_state":file_rule})
+            assert result.status_code == 200, result.text
+            file_case = result.json()["data"]["case_id"]
+            detail = client.get(f"/api/agent-evolution/agents/7/versions/1/development-cases/{file_case}", headers=headers)
+            assert detail.json()["data"]["task"]["file_state"] == {**file_rule, "adapter":"text-files-v1"}
+            invalid = client.post(cases_path, headers=headers, json={**form, "file_state":{**file_rule, "protected":["actions.txt"]}})
+            assert invalid.status_code == 422
             form["trace"]["tools_require_no_reset"] = True
             assert client.post(cases_path, headers=headers, json=form).status_code == 200
             for enabled in (True, False):

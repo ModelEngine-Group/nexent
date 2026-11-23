@@ -163,6 +163,17 @@ def test_parallel_registration_limits_calls_to_authorized_bindings(adapter, mock
     card, forward = adapter.native_agent.ability_manager.add_ability.call_args.args
     assert card.name == "parallel_executor" and card.input_params["additionalProperties"] is False
     tasks = [{"tool_name": name, "arguments": {"a": 2}, "result_key": "answer"}]
+    from nexent.core.agents.resources.replay_files import ReplayFileDirectory
+    fixture = ReplayFileDirectory({})
+    try:
+        adapter.run_info.observer.replay_file_directory = fixture
+        with pytest.raises(ValueError, match="different replay state adapter"):
+            forward(tasks)
+        assert not fixture.receipt()["complete"]
+        scheduler.forward.assert_not_called()
+    finally:
+        del adapter.run_info.observer.replay_file_directory
+        fixture.close()
     if name == "lookup":
         assert forward(tasks, timeout=3, max_workers=2) == {"answer": 5}
         scheduler.forward.assert_called_once_with([(lookup, {"a": 2}, "answer")], timeout=3, max_workers=2)

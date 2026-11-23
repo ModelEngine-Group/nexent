@@ -665,6 +665,10 @@ class JiuwenAdapter(AgentCoreAdapter):
         scheduler = ParallelExecutorTool(execution_lane="control-io")
 
         def parallel(tasks, timeout=None, max_workers=4):
+            from nexent.core.agents.resources.replay_files import ReplayFileDirectory
+            fixture = getattr(self.run_info.observer, "replay_file_directory", None)
+            if isinstance(fixture, ReplayFileDirectory):
+                fixture.unsupported()
             bindings = self.resource_bridge.bindings()
             prepared = []
             for task in tasks:

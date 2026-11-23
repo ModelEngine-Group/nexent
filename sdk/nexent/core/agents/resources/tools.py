@@ -10,6 +10,7 @@ from copy import copy, deepcopy
 import nexent.core.tools as tool_types
 from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.agents.resources.compatibility.smolagents_tools import from_langchain
+from nexent.core.agents.resources.replay_files import FILE_CLASSES, ReplayFileDirectory
 from nexent.core.agents.resources.tool_parameters import apply_mcp_tool_parameters
 from nexent.core.agents.resources.tool_user_context import apply_user_context_to_mcp_tool
 
@@ -378,4 +379,10 @@ class ToolResources:
                 setattr(tool_obj, "_nexent_execute_on_host", True)
             except (AttributeError, TypeError):
                 pass
+        fixture = getattr(getattr(self, "observer", None), "replay_file_directory", None)
+        if isinstance(fixture, ReplayFileDirectory):
+            if class_name in FILE_CLASSES:
+                fixture.bind(tool_obj, class_name)
+            else:
+                tool_obj.forward = fixture.unsupported
         return tool_obj

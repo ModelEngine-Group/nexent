@@ -1,0 +1,36 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-FILE-STATE-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-01]
+  title: 跨服务重置文件初态并按独立读取的终态评分
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证 Management 按轮发送已核验的状态，Runtime 运行本地文件工具，再把独立读取的状态交回评分。
+  preconditions: [正式 pytest 环境和可用的临时目录。]
+  test_data:
+    profile: 两轮会议交付，初始一个受保护文件，每组使用相同材料。
+  steps:
+  - order: 1
+    action: 三组首轮都写草稿，末轮分别只回复、写终稿、原样写回受保护文件，三组最终回答相同。
+    expected: 每组均独立从初态开始，第二轮承接本组草稿；只回复和触碰保护文件失败，写终稿通过。
+  expected_results: [六个独立目录均已释放，覆盖文件判分与口头回答不一致。]
+  forbidden_side_effects: [每组的写入不能更改其他组的初始文件或发送到外部服务。]
+  acceptance:
+  - id: AC-01
+    description: 跨边界核对重置、跨轮传递、文件差异、受保护写入及回收。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - 真实 Management 重放、签名 AgentOS HTTP、Runtime 文件目录和 SDK 文件工具；HTTP 使用进程内传输，受控执行器代替模型及模型配置加载。
+  observations: [每轮输入与文件摘要、实际写入、目录归属、独立终态判定。]
+  cleanup: [核对所有试跑临时目录均已删除。]

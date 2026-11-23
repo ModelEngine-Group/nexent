@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer, model_validator
 
 from contracts.model import WorkbenchGenerationConfig
+from contracts.replay_files import FileStateReceipt, TextFiles
 from contracts.runtime_metadata import validate_runtime_metadata
 
 NAMESPACE = "/internal/agentos/"
@@ -742,6 +743,7 @@ class PreparedEvaluationRun(AgentRunSpec):
     watch_tool_arguments: dict[str, list[str]] | None = Field(default=None, min_length=1, max_length=32,
                                                               exclude_if=lambda v: v is None)
     tool_set_check: ToolSetCheck | None = Field(default=None, exclude_if=lambda v: v is None)
+    replay_files: TextFiles | None = Field(default=None, exclude_if=lambda v: v is None)
 
     @model_serializer(mode="wrap")
     def omit_ordinary_replay_reference(self, serialize):
@@ -782,6 +784,7 @@ class ReplayReceipt(RunSpecModel):
     root_guide_reads: dict[str, PositiveInt] | None = Field(default=None, exclude_if=lambda v: v is None)
     tool_observation: ReplayToolObservation | None = Field(default=None, exclude_if=lambda v: v is None)
     tool_catalog: ToolCatalogObservation | None = Field(default=None, exclude_if=lambda v: v is None)
+    file_state: FileStateReceipt | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class EvaluationAgentResult(BaseModel):

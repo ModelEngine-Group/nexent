@@ -85,7 +85,9 @@ it("selects a published scope and opens its paired results with the original sta
           guide_reads: 0, listed: false, mounted_revision: null,
         } } },
         base: { status: "fail", result: { answer: "missing owner" } },
-        result: { status: "pass", result: { answer: "unassigned" } },
+        result: { status: "pass", result: { answer: "unassigned", file_state: {
+          status:"pass", missing:[], extra:[], wrong_content:[], protected_writes:[],
+        } } },
         comparison: "improved",
       },
     },
@@ -108,6 +110,7 @@ it("selects a published scope and opens its paired results with the original sta
     "#42 · " + new Date("2026-11-23T00:00:00Z").toLocaleString()
   );
   expect(await screen.findByText("unassigned")).toBeInTheDocument();
+  expect(screen.getByText("evolution.fileVerdict")).toBeInTheDocument();
   expect(screen.getByText("omitted control")).toBeInTheDocument();
   expect(screen.getByText("evolution.skillCoverage")).toBeInTheDocument();
   expect(screen.getByText("missing owner")).toBeInTheDocument();
@@ -169,15 +172,20 @@ it("requires a business expectation before freezing a trace draft, then selects 
   fireEvent.change(screen.getByLabelText("evolution.expected"), { target: { value: "Keep unassigned items" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceApproval" }));
   expect(save).toBeDisabled();
-  fireEvent.click(screen.getByRole("checkbox", { name: "evolution.traceStateless" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "evolution.verifyFiles" }));
+  fireEvent.click(screen.getByRole("button", { name: "evolution.addFileRule" }));
+  fireEvent.change(screen.getByLabelText("evolution.fileName"), {target:{value:"actions.txt"}});
+  fireEvent.change(screen.getByLabelText("evolution.fileBefore"), {target:{value:"draft"}});
+  fireEvent.change(screen.getByLabelText("evolution.fileAfter"), {target:{value:"ready"}});
   fireEvent.click(screen.getByRole("button", { name: "evolution.addTurn" }));
   fireEvent.change(screen.getByLabelText("evolution.followup"), { target: { value: "Add a source to each row" } });
   fireEvent.click(save);
   await waitFor(() => expect(evolutionService.createCase).toHaveBeenCalledWith(expect.objectContaining({
     query: "List synthetic actions", expected: "Keep unassigned items", agent_id: 7, version_no: 1,
     followups: [{query: "Add a source to each row"}],
+    file_state: {adapter:"text-files-v1", initial:{"actions.txt":"draft"}, expected:{"actions.txt":"ready"}, protected:[]},
     trace: { turn_id: 3, purpose: "reproduce", draft_digest: "a".repeat(64),
-      inputs_reviewed: true, tools_require_no_reset: true, unused_attachment_slots: [], use_previous_task: false },
+      inputs_reviewed: true, tools_require_no_reset: false, unused_attachment_slots: [], use_previous_task: false },
   })));
   expect(await screen.findByText("evolution.baselineSelection")).toBeInTheDocument();
 });
@@ -242,6 +250,7 @@ it("hands off a tool failure when the answer passed, with approved input and arg
   vi.mocked(evolutionService.shareLocalEdit).mockResolvedValue({ feedback_id: 33 });
   const trial = (passed: boolean) => ({ status: passed ? "pass" : "fail", result: {
     answer: "[]", judgment: { status: "pass" }, tool_use: { status: passed ? "pass" : "fail", checked: ["read"] },
+    file_state: {status:passed ? "pass" : "fail", missing:[], extra:[], wrong_content:passed ? [] : ["rows.txt"], protected_writes:[]},
   } });
   render(<QueryClientProvider client={new QueryClient()}><LocalEditFeedback viewer="tenant-editor" agent={1} version={1}
     workspace={{ candidates: [], experiments: [], cases: [
@@ -254,6 +263,9 @@ it("hands off a tool failure when the answer passed, with approved input and arg
   await choose("evolution.feedback.failure", "incorrect argument");
   await choose("evolution.feedback.protection", "correct argument");
   await choose("evolution.toolName", "read");
+  const shareFiles = screen.getByRole("checkbox", {name:"evolution.shareFileChecks"});
+  expect(shareFiles).not.toBeChecked();
+  fireEvent.click(shareFiles);
   await choose("evolution.shareArgumentValues", "mode");
   fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.shareArgumentValues" }), { key: "Escape" });
   for (const [label, value] of [["editGoal","respect supplied mode"],["sourcePassage","read the meeting"]]) {
@@ -266,7 +278,7 @@ it("hands off a tool failure when the answer passed, with approved input and arg
   }
   fireEvent.click(screen.getByRole("button", { name: "evolution.shareFeedback" }));
   await waitFor(() => expect(evolutionService.shareLocalEdit).toHaveBeenCalledWith(24, expect.objectContaining({
-    method: "T2", tool_name: "read", share_expected_arguments: ["mode"],
+    method: "T2", tool_name: "read", share_expected_arguments: ["mode"], share_file_state: true,
     failure: { case_id: 1, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
     protection: { case_id: 2, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
   })));

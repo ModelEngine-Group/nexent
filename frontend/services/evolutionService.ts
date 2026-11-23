@@ -47,6 +47,7 @@ export interface Trial {
     trace_baseline_outcome?: string;
     turns?: { turn: number; query: string; answer: string | null; outcome: string; attachments: string[] }[];
     answer?: string;
+    file_state?: {status: string; missing: string[]; extra: string[]; wrong_content: string[]; protected_writes: string[]};
     reported_step_input_tokens?: number | null;
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
     skills?: { candidate_id: number; guide_reads: number; listed: boolean; mounted_revision: string | null }[];
@@ -83,6 +84,10 @@ export interface ApprovedExample {
   attachment_name?: string;
   input_excerpt: string;
   output_excerpt: string;
+}
+
+export interface FileStateCheck {
+  adapter: "text-files-v1"; initial: Record<string, string>; expected: Record<string, string>; protected: string[];
 }
 
 async function read<T>(url: string, body?: unknown): Promise<T> {
@@ -122,6 +127,7 @@ export const evolutionService = {
     expected: string;
     expected_skill_names?: string[];
     tool_use?: ToolExpectation;
+    file_state?: FileStateCheck;
     attachments: { name: string; object_name: string }[];
     followups?: { query: string; attachment_names?: string[] }[];
     trace?: { turn_id: number; draft_digest: string; purpose: "reproduce" | "protect";
@@ -184,6 +190,7 @@ export interface LocalFeedback {
   tool_name?: string;
   skill_id?: number;
   share_expected_arguments?: string[];
+  share_file_state?: boolean;
   failure: { case_id: number; expected: string; observed: string; input_excerpt?: string };
   protection: { case_id: number; expected: string; observed: string; input_excerpt?: string };
 }

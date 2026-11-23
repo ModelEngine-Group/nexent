@@ -101,6 +101,14 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
                 "trace_source":{"source_group":"same-authorized-chat"}})["case_id"]
                 for wording in ("List decisions", "Report responsibilities")]
             assert contains_fixed_cases(tenant, 7, trace_cases[:1], trace_cases[1:])
+            source_files = []
+            for filename, question in (("original.txt","write the minutes"),("renamed.txt","amend the handoff")):
+                res = client.post(root + "/development-cases", headers=headers, json={
+                    "agent_id":7,"version_no":1,"family":"meeting","query":question,"expected":"ok",
+                    "file_state":{"initial":{filename:"shared meeting notes"},"expected":{filename:"new notes"}}})
+                assert res.is_success, res.text
+                source_files.append(res.json()["data"]["case_id"])
+            assert contains_fixed_cases(tenant, 7, source_files[:1], source_files[1:])
             unrelated = client.post(root + "/development-cases", headers=headers, json={
                 "agent_id":7, "version_no":1, "family":"minutes", "query":"Different source", "expected":"done"}).json()["data"]
             response = client.post(root + "/experiments", headers=headers, json={

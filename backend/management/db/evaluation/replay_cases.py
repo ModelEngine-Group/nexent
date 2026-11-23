@@ -79,7 +79,8 @@ def contains_fixed_cases(tenant, agent, case_ids, frozen_ids):
         rows = session.execute(text("""
             SELECT c.case_id, (r.enabled IS TRUE OR c.case_id=ANY(:frozen)) AS protected,
                    c.task->>'query' AS query, c.task->>'source_group' AS source_group,
-                   c.task->'attachments' AS attachments, c.task->'trace_source' AS trace_source
+                   c.task->'attachments' AS attachments, c.task->'trace_source' AS trace_source,
+                   jsonb_build_object('initial', c.task->'file_state'->'initial') AS file_state
               FROM nexent.evolution_replay_case_t c LEFT JOIN nexent.evolution_regression_case_t r
                 ON c.case_id=r.source_case_id AND c.agent_id=r.agent_id AND c.tenant_id=r.tenant_id
              WHERE c.tenant_id=:tenant AND c.agent_id=:agent
