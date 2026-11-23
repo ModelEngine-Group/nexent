@@ -47,6 +47,6 @@ def test_cancelled_channel_closes_without_marking_lease_unhealthy(monkeypatch):
     channel.recv_data.side_effect = interrupted
     with pytest.raises(CancelledError):
         lease.run_code_raise_errors("controlled execution")
-    channel.shutdown.assert_called_once()
+    channel.abort.assert_called_once()
     channel.close.assert_called_once()
     assert lease._unhealthy is False

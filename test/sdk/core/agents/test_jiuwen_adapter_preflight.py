@@ -3,6 +3,7 @@
 """Jiuwen rejects unsupported policies and untrusted outlets before acquisition."""
 
 from threading import Event
+from types import SimpleNamespace
 
 import pytest
 from jsonschema import validate
@@ -11,6 +12,7 @@ from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
 from nexent.core.agents.contracts.config import AgentConfig, AgentVerificationConfig, ModelConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter, _tool_schema
+from nexent.core.agents.cores.jiuwen.parallel import concurrent_children, is_parallel_child, is_read_only_tool
 from nexent.core.utils.observer import MessageObserver
 from test_jiuwen_model_service import saved_profile
 
@@ -72,6 +74,52 @@ def test_tool_name_and_host_validation_preserves_saved_configuration(info):
     adapter.validate()
     assert adapter.visible_tool_names == {"lookup"}
     assert info.agent_config.model_dump() == before
+
+
+@pytest.mark.parametrize("mode,text,show_legacy", [
+    ("chat", False, False), ("chat", True, True), ("python_workflow", False, True),
+])
+def test_parallel_helper_visibility_is_scoped_to_the_execution_protocol(info, mode, text, show_legacy):
+    info.agent_config.response_mode = mode
+    helper = ToolConfig(name="parallel_executor", class_name="ParallelExecutorTool", source="builtin")
+    info.agent_config.tools = [helper]
+    model = info.model_config_list[0]
+    data = model.resolved_profile.model_dump()
+    data["capabilities"]["tools"]["status"] = "unsupported" if text else "supported"
+    model.resolved_profile = type(model.resolved_profile).model_validate(data)
+    before = info.agent_config.model_dump()
+    adapter = JiuwenAdapter(info)
+    adapter.validate()
+    assert ("parallel_executor" in adapter.visible_tool_names) == show_legacy
+    assert adapter.native_parallel is (not show_legacy)
+    assert info.agent_config.model_dump() == before
+
+
+def test_read_only_child_keeps_only_approved_bindings(info):
+    info.run_role = "subagent"
+    info.parallel_child_mode = "read_only"
+    info.agent_config.agent_core = "jiuwen"
+    read = ToolConfig(name="read_file", class_name="ReadFileTool", source="local")
+    upload = ToolConfig(name="upload_to_s3", class_name="UploadToS3Tool", source="builtin")
+    helper = ToolConfig(name="parallel_executor", class_name="ParallelExecutorTool", source="local")
+    info.agent_config.tools = [read, upload, helper]
+    assert is_parallel_child(info.agent_config, info.model_config_list)
+    adapter = JiuwenAdapter(info)
+    adapter.validate()
+    assert adapter.visible_tool_names == {"read_file"}
+    assert info.agent_config.tools == [read, upload, helper]
+    info.agent_config.tools.append(
+        ToolConfig(name="vendor_read", class_name="ReadFileTool", source="mcp")
+    )
+    assert not is_read_only_tool(info.agent_config.tools[-1])
+    with pytest.raises(UnsupportedAgentCoreConfig, match="read-only leaf"):
+        JiuwenAdapter(info).validate()
+
+
+def test_serial_barrier_does_not_change_standalone_child_execution():
+    calls = [SimpleNamespace(name=name, provider_call_id=str(index))
+             for index, name in enumerate(("a", "write", "a", "read", "write", "c"))]
+    assert concurrent_children(calls, {"a", "c", "read"}, {"a": "sandbox", "c": "read_only"}) == {"2": "sandbox"}
 
 
 def test_tool_schema_retains_defaults_nullable_omission_and_array_items():

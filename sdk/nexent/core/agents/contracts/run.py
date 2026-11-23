@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from threading import Event
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,10 @@ class AgentHistory(BaseModel):
 class AgentRunInfo(BaseModel):
     run_role: RunRole = Field(default="root", exclude=True,
         description="Internal caller-owned run identity; children cannot initiate user clarification")
+    parallel_child_mode: Optional[Literal["read_only", "sandbox"]] = Field(default=None, exclude=True,
+        description="Internal resource mode for a child in a native parallel tool batch")
+    published_child_files: List[Dict[str, Any]] = Field(default_factory=list, exclude=True,
+        description="Authorized output references returned to the parent invocation")
     preparation_trace: List[Dict[str, Any]] = Field(
         default_factory=list, exclude=True, description="Local preparation phase facts awaiting the authorized worker"
     )

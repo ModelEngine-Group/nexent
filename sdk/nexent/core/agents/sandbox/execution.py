@@ -45,8 +45,8 @@ from types import SimpleNamespace
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from nexent.core.agents.resources.workspace import SandboxWorkspace, validate_container_root
 from nexent.core.agent_names import validate_callable_names
+from nexent.core.agents.resources.workspace import SandboxWorkspace, validate_container_root
 from nexent.core.agents.sandbox.compatibility import (
     _AgentLoggerAdapter,
     _LogLevel,
@@ -1713,7 +1713,8 @@ class _DockerKernelLease:
                             "Sandbox WebSocket handshake requires status 101", status,
                         )
                     if scope is not None:
-                        token = scope.register_closer(ws.shutdown)
+                        # Abort wakes a worker blocked in recv_data on another thread.
+                        token = scope.register_closer(ws.abort)
                     self._check_execution_cancelled()
                     self._wait_for_kernel_channel_ready(ws)
                 except (TimeoutError, ConnectionError, WebSocketTimeoutException,

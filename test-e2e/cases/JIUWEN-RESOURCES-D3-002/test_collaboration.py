@@ -3,8 +3,11 @@
 import asyncio
 import runpy
 import json
+import re
+import socket
 import sys
 from pathlib import Path
+from uuid import uuid4
 import pytest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT/'sdk'), str(ROOT/'backend'), str(ROOT/'test-e2e/infra/automation')]
@@ -107,7 +110,162 @@ def test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop(mon
         assert "bound to a different event loop" not in str(events)
         own = info.agent_config.name[-1]
         assert all(f"child_{own}_" in json.loads(event["content"])["invocation_name"] for event in starts)
+        if protocol == "native":
+            _assert_native_parallel_output(info, events)
     assert all(len(requests) == 4 for requests in state["requests"].values())
+    if protocol == "native":
+        assert len(state["overlapping_child_batches"]) == 6
+        assert len(state["overlapping_read_batches"]) == 18
+        for route, requests in state["requests"].items():
+            for request in requests:
+                names = {tool["function"]["name"] for tool in request.get("tools", [])}
+                assert "parallel_executor" not in names
+                if route.startswith("child"):
+                    assert names == {"read_file"}
+            if route.startswith("root"):
+                for request_no in (1, 3):
+                    messages = requests[request_no]["messages"]
+                    ids = {f"call-{route}-{request_no}-{index}" for index in range(3)}
+                    assert {message["tool_call_id"] for message in messages if message["role"] == "tool"} == ids
+
+
+def _assert_native_parallel_output(info, events, *, tool_count=9):
+    from management.services.agent.stream import AssistantMessageProjection, finalize_buffered_unit_fragments
+    from management.services.conversation.nexent_output import NexentOutputAdapter, normalize_nexent_history
+    from management.services.conversation.runtime_output import project_runtime_history
+
+    output = NexentOutputAdapter()
+    storage = AssistantMessageProjection(persist_units=True)
+    live = []
+    for event in events:
+        live.extend(output.push(event))
+        storage.project(json.dumps(event))
+    live.extend(output.close("completed"))
+
+    finalize_buffered_unit_fragments(storage.units)
+    answer, units, invalid = project_runtime_history(info.run_result.final_content, storage.units)
+    restored, status = normalize_nexent_history([
+        {"type": unit["unit_type"], "content": unit["unit_content"], "unit_index": unit["unit_index"],
+         "tool_call_id": unit["tool_call_id"], "invocation_id": unit["invocation_id"]}
+        for unit in units
+    ], "completed")
+    assert not invalid and status == "completed"
+    assert answer == info.run_result.final_content
+
+    def identities(stream, kind):
+        return [(event.get("invocation_id"), event.get("tool_call_id")) for event in stream
+                if event["type"] == kind and (kind != "execution_logs" or event.get("local_call_id"))]
+
+    for stream in (live, restored):
+        calls = identities(stream, "tool")
+        results = identities(stream, "execution_logs")
+        assert len(calls) == len(set(calls)) == len(results) == tool_count
+        assert set(calls) == set(results)
+        starts = identities(stream, "subagent_start")
+        ends = identities(stream, "subagent_end")
+        assert len(starts) == len(ends) == 3
+        assert {item[0] for item in starts} == {item[0] for item in ends}
+        assert not any(event["type"] in {"error", "model_output", "tool_result", "run_terminal"} for event in stream)
+        assert [event["content"] for event in stream
+                if event["type"] == "final_answer" and not event.get("invocation_id")] == [answer]
+
+    for kind in ("tool", "execution_logs", "subagent_start", "subagent_end"):
+        assert identities(live, kind) == identities(restored, kind)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Run the Docker legacy workspace fixture from a Linux worker")
+@pytest.mark.parametrize("scenario", ["overlap", "isolated-timeout", "parent-cancellation"])
+def test_native_python_children_overlap_with_distinct_system_kernel_leases(monkeypatch, tmp_path, scenario):
+    import docker
+
+    from nexent.core.agents.sandbox import execution as sandbox
+
+    pool = sandbox.SandboxPoolManager()
+    suffix = uuid4().hex[:12]
+    network_name = f"jiuwen-parallel-test-{suffix}"
+    monkeypatch.setattr(sandbox, "SANDBOX_CONTAINER_NAME", network_name)
+    monkeypatch.setattr(sandbox, "SANDBOX_NETWORK_NAME", network_name)
+    monkeypatch.setattr(sandbox.SandboxPoolManager, "_instance", pool)
+    acquired = []
+    original = sandbox.build_python_executor
+
+    def capture(config, *args, **kwargs):
+        lease = original(config, *args, **kwargs)
+        acquired.append((config, lease, lease.kernel_id, lease.container.id))
+        return lease
+
+    monkeypatch.setattr(sandbox, "build_python_executor", capture)
+    client = docker.from_env()
+    timeout_child = scenario == "isolated-timeout"
+    cancel_parent = scenario == "parent-cancellation"
+
+    def ready(barrier):
+        if not acquired:
+            return False
+        check = "from pathlib import Path; import sys; assert len(list(Path(sys.argv[1]).glob('*'))) == 3"
+        return acquired[0][1].container.exec_run(["python", "-c", check, barrier]).exit_code == 0
+
+    try:
+        infos, outputs, state = asyncio.run(run_parallel_roots(
+            monkeypatch, "native", sandbox_workspace=tmp_path, sandbox_timeout=timeout_child,
+            cancel_one=cancel_parent, sandbox_ready=ready,
+        ))
+        info, events = infos[0], outputs[0]
+        assert info.attempt_outcome == ("stopped" if cancel_parent else "completed")
+        assert len(acquired) == len({item[2] for item in acquired}) == 4
+        assert len({item[3] for item in acquired}) == 1
+        assert all(config.network_disabled and config.scope.value == "system" for config, *_ in acquired)
+        assert all(lease._closed for _, lease, *_ in acquired)
+        assert not pool._executors and not pool._lease_owners
+        lease = acquired[0][1]
+        kernels = lease._requests.get(f"{lease.base_url}/api/kernels", timeout=5)
+        kernels.raise_for_status()
+        assert kernels.json() == []
+        assert not tmp_path.exists() or not any(tmp_path.iterdir())
+        if cancel_parent:
+            assert not state["uploads"] and len(state["requests"]["root0"]) == 1
+            return
+
+        intervals = {}
+        python_calls = {event["local_call_id"] for event in events
+                        if event.get("tool_name") == "nexent_execute_python" and event["type"] == "tool"}
+        for event in events:
+            if (event["type"] == "tool_result" and event.get("local_call_id") in python_calls
+                    and not event["is_error"] and event["result"].startswith("{")):
+                logs = json.loads(event["result"])["logs"]
+                match = re.search(r"SANDBOX_INTERVAL ([ABC]) ([\d.]+) ([\d.]+)", logs)
+                assert match, logs
+                intervals[match[1]] = float(match[2]), float(match[3])
+        expected = {"B", "C"} if timeout_child else {"A", "B", "C"}
+        assert set(intervals) == expected
+        assert max(start for start, _ in intervals.values()) < min(end for _, end in intervals.values())
+        assert len(state["uploads"]) == len(expected) and set(state["uploads"].values()) == expected
+        assert all(key.endswith("/outputs/same.txt") for key in state["uploads"])
+        returned = [message["content"] for message in state["requests"]["root0"][1]["messages"]
+                    if message["role"] == "tool"]
+        assert all(any(f"s3://fixture/{key}" in result for result in returned) for key in state["uploads"])
+        if timeout_child:
+            failed = [event for event in events if event["type"] == "tool_result"
+                      and not event.get("invocation_id") and event["is_error"]]
+            assert [event["provider_call_id"] for event in failed] == ["call-root0-1-0"]
+            assert not info.stop_event.is_set()
+        else:
+            _assert_native_parallel_output(info, events, tool_count=6)
+    finally:
+        try:
+            pool.shutdown(sandbox.logger)
+            try:
+                network = client.networks.get(network_name)
+            except docker.errors.NotFound:
+                pass
+            else:
+                if sandbox._is_containerized_runtime():
+                    network.disconnect(socket.gethostname(), force=True)
+                network.remove()
+        finally:
+            client.close()
+
+
 @pytest.mark.parametrize("protocol", ["native", "text"])
 def test_configured_deadlines_allow_delayed_a2a_completion(monkeypatch, protocol):
     monkeypatch.setenv("RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", "1.5")

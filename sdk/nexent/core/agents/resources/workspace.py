@@ -553,7 +553,7 @@ class WorkspaceResources:
             )
 
 
-    def _cleanup_file_workspace(self) -> None:
+    def _cleanup_file_workspace(self, *, containers=None) -> None:
         """Delete only the exact run-scoped workspace after upload finalization."""
         if not self.workspace_path or not self.workspace_run_id:
             return
@@ -561,7 +561,10 @@ class WorkspaceResources:
         if workspace.name != self.workspace_run_id:
             return
         try:
-            containers = [] if getattr(self, "workspace_mapping", None) is not None else self._sandbox_containers()
+            if getattr(self, "workspace_mapping", None) is not None:
+                containers = []
+            elif containers is None:
+                containers = self._sandbox_containers()
             for container in containers:
                 try:
                     result = container.exec_run(

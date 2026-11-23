@@ -69,7 +69,7 @@ class SubagentResources:
         )
 
 
-    def _create_subagent_definition(self, config: AgentConfig, tree_context: Dict[str, Any]):
+    def _create_subagent_definition(self, config: AgentConfig, tree_context: Dict[str, Any], *, scope_factory=None):
         """Register a definition; each call builds and owns a separate runtime."""
         from nexent.core.agents.resources.subagents import SubAgentDefinition
 
@@ -77,16 +77,19 @@ class SubagentResources:
         return self._wrap_subagent(
             definition,
             config,
-            invocation_factory=lambda: self._subagent_invocation(config, definition, tree_context),
+            invocation_factory=lambda: self._subagent_invocation(
+                config, definition, tree_context, scope=scope_factory() if scope_factory else None,
+            ),
         )
 
 
     @contextmanager
-    def _subagent_invocation(self, config: AgentConfig, definition: Any, tree_context: Dict[str, Any]):
+    def _subagent_invocation(self, config: AgentConfig, definition: Any, tree_context: Dict[str, Any], *, scope=None):
         """Keep allocation, state, cancellation and cleanup local to one call."""
         from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 
-        scope = RunCancellationScope(parent_stop_event=self.stop_event)
+        if scope is None:
+            scope = RunCancellationScope(parent_stop_event=self.stop_event)
         done = Event()
         with self._subagent_invocations_lock:
             if self._subagent_invocations_closed or self.stop_event.is_set():

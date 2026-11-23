@@ -4,8 +4,12 @@ implementations:
 - framework: pytest
   file: test_collaboration.py
   selector: test_
-timeout_seconds: 180
+timeout_seconds: 240
 acceptance_bindings:
+  AC-05:
+  - test_native_python_children_overlap_with_distinct_system_kernel_leases
+  AC-04:
+  - test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop
   AC-03:
   - test_only_root_clarifies_after_child_returns_missing_information
   AC-02:

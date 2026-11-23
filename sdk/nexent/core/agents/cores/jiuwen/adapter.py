@@ -21,6 +21,12 @@ from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
 from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
 from nexent.core.agents.cores.jiuwen.errors import failure_error, public_error
 from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
+from nexent.core.agents.cores.jiuwen.parallel import (
+    child_parallel_mode,
+    concurrent_children,
+    is_parallel_child,
+    is_read_only_tool,
+)
 from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
 from nexent.core.agents.resources.provider import AgentResources
 from nexent.core.concurrency import ManagedTaskSpec, RunCancellationScope
@@ -30,6 +36,7 @@ from nexent.core.utils.observer import ProcessType
 
 
 logger = logging.getLogger(__name__)
+_PARALLEL_PYTHON_CHILD_LIMIT = 4
 
 
 def _prepend_context_messages(messages, prefix):
@@ -90,6 +97,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.artifact_output = getattr(run_info.agent_config, "response_mode", "chat") == "artifact"
         self.events.artifact_output = self.artifact_output
         self._active_resource = ContextVar("jiuwen_resource", default=None)
+        self._child_context = ContextVar("jiuwen_child_context", default=(None, None))
         self._run_completed = False
         self.tool_configs = []
         self.visible_tool_names = set()
@@ -98,6 +106,10 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._closed = False
         self._tool_executions = []
         self.text_protocol = False
+        self._parallel_children = {}
+        self._parallel_tools = set()
+        self._parallel_child_calls = {}
+        self._python_child_slots = asyncio.BoundedSemaphore(_PARALLEL_PYTHON_CHILD_LIMIT)
         config = getattr(run_info, "agent_config", None)
         from nexent.core.agent_names import resolve_external_agent_configs
 
@@ -167,6 +179,16 @@ class JiuwenAdapter(AgentCoreAdapter):
             raise UnsupportedAgentCoreConfig("Jiuwen model outlet identity mismatch")
         self.text_protocol = not self.artifact_output and profile.capabilities.tools.status != "supported"
         self.tool_configs = list(config.tools)
+        if self.native_parallel:
+            self.tool_configs = [
+                tool for tool in self.tool_configs if tool.class_name != "ParallelExecutorTool"
+            ]
+        if self.run_info.parallel_child_mode == "read_only":
+            if not is_parallel_child(config, self.run_info.model_config_list):
+                raise UnsupportedAgentCoreConfig("Jiuwen parallel child requires a native read-only leaf")
+            self.tool_configs = [tool for tool in self.tool_configs if is_read_only_tool(tool)]
+        if self.run_info.parallel_child_mode == "sandbox" and child_parallel_mode(config, self.run_info) != "sandbox":
+            raise UnsupportedAgentCoreConfig("Jiuwen parallel Python requires a native Docker child with a workspace")
         registry = {tool.name or tool.class_name: tool for tool in self.tool_configs}
         if len(registry) != len(self.tool_configs):
             raise ValueError("Duplicate tool names in agent configuration")
@@ -193,6 +215,10 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.visible_tool_names.update(collaborator_names)
         if any(tool.source == "mcp" for tool in self.tool_configs) and not self.run_info.mcp_host:
             raise ValueError("Authorized MCP tools require resolved MCP hosts")
+
+    @property
+    def native_parallel(self):
+        return not self.text_protocol and self.run_info.agent_config.response_mode == "chat"
 
     @contextmanager
     def _observe_tool(self, name, arguments):
@@ -328,7 +354,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             conversation_id=info.conversation_id, user_id=info.user_id, tenant_id=info.tenant_id,
             workspace_path=info.workspace_path, workspace_run_id=info.workspace_run_id, minio_files=info.minio_files,
             cancellation_scope=self.scope, user_context=info.user_context,
-            child_invocation_factory=child_invocation_factory(info),
+            child_invocation_factory=child_invocation_factory(info, parallel_mode=lambda: self._child_context.get()[1]),
         )
         self.resources.core_run_info = info
         native_tools = []
@@ -341,14 +367,19 @@ class JiuwenAdapter(AgentCoreAdapter):
             if name in self.visible_tool_names:
                 native_tools.append(LocalFunction(
                     self._tool_card(name=name, description=config.description or tool.description,
-                             input_params=_tool_schema(tool.inputs)), self._business_handler(name, tool.forward),
+                             input_params=_tool_schema(tool.inputs), parallel_safe=is_read_only_tool(config)),
+                    self._business_handler(name, tool.forward),
                 ))
         for child in info.agent_config.worker_agents:
-            tool = self.resources._create_subagent_definition(child, {})
+            tool = self.resources._create_subagent_definition(child, {}, scope_factory=lambda: self._child_context.get()[0])
             self.business_tools[tool.name] = tool
+            mode = child_parallel_mode(child, info) if self.native_parallel else None
+            if mode is not None:
+                self._parallel_children[tool.name] = mode
             native_tools.append(LocalFunction(
-                self._tool_card(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
-                self._business_handler(tool.name, tool, lane="control-io"),
+                self._tool_card(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs),
+                                parallel_safe=mode is not None),
+                self._business_handler(tool.name, tool, lane="control-io", local_child=True),
             ))
         for external in self.external_agents:
             from nexent.core.agents.resources.a2a import ExternalA2AAgentWrapper
@@ -379,7 +410,9 @@ class JiuwenAdapter(AgentCoreAdapter):
         if self.clarification is not None:
             # A configured class may expose a different runtime tool name.
             self.clarification = JiuwenClarification(set(self.business_tools) | self.visible_tool_names)
-        self._bind_skill_sandbox()
+        self._parallel_tools = {tool.card.name for tool in native_tools if tool.card.parallel_safe}
+        if info.parallel_child_mode != "read_only":
+            self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
         rails = self._skill_rails()
@@ -397,7 +430,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             enable_task_loop=False, enable_sys_operation=False, enable_read_image_multimodal=False,
             enable_model_anomaly_detection_rail=False, language="cn" if info.observer.lang == "zh" else "en",
             enable_tool_resilience_rail=False, enable_skill_discovery=False,
-            parallel_tool_calls=False,
+            parallel_tool_calls=self.native_parallel,
         )
         if self.clarification is not None:
             # Publish the schema for native callers. The model boundary handles
@@ -409,17 +442,17 @@ class JiuwenAdapter(AgentCoreAdapter):
                             description="Ask for essential missing user information and end this turn awaiting input.",
                             input_params=self.clarification.schema)
             self.native_agent.ability_manager.add_ability(card, LocalFunction(card, terminal_only))
-        if any(config.class_name == "ParallelExecutorTool" and
+        if not self.native_parallel and any(config.class_name == "ParallelExecutorTool" and
                (config.name or "parallel_executor") in self.visible_tool_names for config in self.tool_configs):
             self._bind_parallel_tool()
-        if not self.artifact_output:
+        if not self.artifact_output and info.parallel_child_mode != "read_only":
             self._bind_text_executor()
 
-    def _tool_card(self, **values):
+    def _tool_card(self, *, parallel_safe=False, **values):
         """Set the outer invocation limit per run, including A2A exposed as tools."""
         from openjiuwen.core.foundation.tool import ToolCard
 
-        card = ToolCard(**values)
+        card = ToolCard(parallel_safe=parallel_safe, **values)
         self._set_tool_timeout(card)
         return card
 
@@ -432,7 +465,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         }
         card.properties = properties
 
-    def _business_handler(self, name, forward, *, lane="model-tool-io"):
+    def _active_parallel_child(self):
+        active = self._active_resource.get()
+        return self._parallel_child_calls.get(active[1]) if active is not None else None
+
+    def _business_handler(self, name, forward, *, lane="model-tool-io", local_child=False):
         async def execute(**arguments):
             if self.scope.cancelled:
                 raise asyncio.CancelledError()
@@ -440,17 +477,45 @@ class JiuwenAdapter(AgentCoreAdapter):
                 if inspect.iscoroutinefunction(forward):
                     result = await forward(**arguments)
                 else:
-                    execution = self.manager.submit(
-                        lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
-                        forward, **arguments,
-                    )
+                    child_scope = RunCancellationScope(parent_stop_event=self.scope.stop_event) if local_child else None
+                    parallel_mode = self._active_parallel_child() if local_child else None
+                    deadline = None
+                    if lane == "control-io":
+                        deadline = time.monotonic() + self.run_info.collaboration_timeout_seconds
+                        if self.run_info.model_deadline is not None:
+                            deadline = min(deadline, self.run_info.model_deadline)
+                    sandbox_slot = parallel_mode == "sandbox"
+                    if sandbox_slot:
+                        loop = asyncio.get_running_loop()
+                        await asyncio.wait_for(self._python_child_slots.acquire(), max(0.0, deadline - time.monotonic()))
+                    close_hook = child_scope.cancel if child_scope is not None else None
+                    if lane == "sandbox" and self.run_info.parallel_child_mode == "sandbox":
+                        close_hook = self.scope.cancel
+                    token = self._child_context.set((child_scope, parallel_mode))
+                    try:
+                        execution = self.manager.submit(
+                            lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__, close_hook=close_hook,
+                                                  deadline_monotonic=deadline),
+                            forward, **arguments,
+                        )
+                    except BaseException:
+                        if sandbox_slot:
+                            self._python_child_slots.release()
+                        raise
+                    finally:
+                        self._child_context.reset(token)
+                    if sandbox_slot:
+                        # A timed-out caller still owns its slot until the worker has released the kernel.
+                        def release_slot(_):
+                            if not loop.is_closed():
+                                loop.call_soon_threadsafe(self._python_child_slots.release)
+
+                        execution.future.add_done_callback(release_slot)
                     self._tool_executions.append(execution)
                     try:
-                        if lane == "control-io":
-                            timeout = self.run_info.collaboration_timeout_seconds
-                            if self.run_info.model_deadline is not None:
-                                timeout = min(timeout, max(0.0, self.run_info.model_deadline - time.monotonic()))
-                            result = await asyncio.wait_for(asyncio.wrap_future(execution.future), timeout)
+                        if deadline is not None:
+                            result = await asyncio.wait_for(asyncio.wrap_future(execution.future),
+                                                            max(0.0, deadline - time.monotonic()))
                         else:
                             result = await asyncio.wrap_future(execution.future)
                     except TimeoutError:
@@ -459,9 +524,10 @@ class JiuwenAdapter(AgentCoreAdapter):
                         logger.warning(
                             "event=agent_collaboration_timeout agent_name=%s timeout_seconds=%.3f "
                             "phase=queue_or_execution error_type=TimeoutError",
-                            name, timeout,
+                            name, self.run_info.collaboration_timeout_seconds,
                         )
-                        self.scope.cancel()
+                        if parallel_mode is None:
+                            self.scope.cancel()
                         self.manager.cancel(execution.execution_id, reason="Collaboration deadline exceeded",
                                             wait_timeout=0, mark_stuck_on_timeout=False)
                         raise
@@ -493,9 +559,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             {"role": history.role, "content": history.content}
             for history in _get_authorized_history(self.run_info) or ()
         )
-        from nexent.core.agents.prompt.policies import business_system_instructions
-
         from nexent.core.agents.cores.jiuwen.protocol import NATIVE_PROTOCOL_INSTRUCTION
+        from nexent.core.agents.prompt.policies import business_system_instructions
 
         shared = business_system_instructions(
             config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
@@ -503,6 +568,13 @@ class JiuwenAdapter(AgentCoreAdapter):
             is_subagent=not root_clarification_allowed(self.run_info),
         )
         protocol = "" if self.text_protocol or self.artifact_output else NATIVE_PROTOCOL_INSTRUCTION
+        if self.native_parallel:
+            protocol += (
+                "\nFor independent reads or delegations that can run in parallel, emit their individual native tool calls "
+                "in the same response. Keep dependent operations in separate steps."
+            )
+        if self.run_info.parallel_child_mode == "read_only":
+            protocol = "This parallel delegation is read-only. Use only the listed read tools and return your findings."
         if self.artifact_output:
             shared = [config.instructions or "", *(
                 item.content.get("text", "") for item in _get_authorized_context_items(self.run_info) or ()
@@ -563,6 +635,9 @@ class JiuwenAdapter(AgentCoreAdapter):
         def on_event(event):
             self.events.model_event(event)
             if event.type == "message_completed":
+                self._parallel_child_calls = concurrent_children(
+                    event.message.tool_calls, self._parallel_tools, self._parallel_children,
+                )
                 info.observer.add_message(info.agent_config.name, ProcessType.TOKEN_COUNT,
                                           event.message.usage.model_dump_json())
 
@@ -583,14 +658,11 @@ class JiuwenAdapter(AgentCoreAdapter):
 
         from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
         from nexent.core.agents.sandbox.config import SandboxConfig
-        from nexent.core.agents.sandbox.execution import _execute_with_tool_context, build_python_executor
+        from nexent.core.agents.sandbox.execution import _execute_with_tool_context
 
         executor = self.resources.agent.python_executor
         if executor is None:
-            executor = build_python_executor(self.run_info.sandbox_config or SandboxConfig(), logger,
-                                             host_tools_exist=True, cancellation_scope=self.scope)
-            self.resources._sandbox_executors.append(executor)
-            self.resources.agent.python_executor = executor
+            executor = self._allocate_python_executor(self.run_info.sandbox_config or SandboxConfig())
 
         def execute(code):
             # The sandbox lane waits on the run loop, never on another sandbox execution.
@@ -631,14 +703,12 @@ class JiuwenAdapter(AgentCoreAdapter):
 
     def _bind_skill_sandbox(self):
         from nexent.core.agents.sandbox.config import SandboxLevel
-        from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner, build_python_executor
+        from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner
 
         config = self.run_info.sandbox_config
         if config is None or config.level == SandboxLevel.LOCAL:
             return
-        executor = build_python_executor(config, logger, host_tools_exist=True, cancellation_scope=self.scope)
-        self.resources._sandbox_executors.append(executor)
-        self.resources.agent.python_executor = executor
+        executor = self._allocate_python_executor(config)
         runner = SandboxSkillScriptRunner(
             executor, timeout_seconds=int(config.timeout_seconds), workspace_path=self.run_info.workspace_path,
             network_enabled=not config.network_disabled, workspace_mapping=self.resources.workspace_mapping,
@@ -648,6 +718,15 @@ class JiuwenAdapter(AgentCoreAdapter):
             if getattr(tool, "name", None) == "run_skill_script":
                 tool.bind_execution_backend(
                     runner, on_complete=lambda _result: self.resources._pull_file_workspace_from_sandbox())
+
+    def _allocate_python_executor(self, config):
+        from nexent.core.agents.sandbox.execution import build_python_executor
+
+        executor = build_python_executor(config, logger, host_tools_exist=True, cancellation_scope=self.scope)
+        self.resources._sandbox_scope = config.scope.value
+        self.resources._sandbox_executors.append(executor)
+        self.resources.agent.python_executor = executor
+        return executor
 
     def _bind_parallel_tool(self):
         from openjiuwen.core.foundation.tool import LocalFunction
@@ -712,6 +791,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 connect_timeout_seconds=info.mcp_request_timeout_seconds or 10.0,
             )
             for tool in self.mcp.__enter__().tools:
+                tool.card.parallel_safe = False
                 self._set_tool_timeout(tool.card)
                 self.native_agent.ability_manager.add_ability(tool.card, tool)
 
@@ -836,11 +916,26 @@ class JiuwenAdapter(AgentCoreAdapter):
                     Runner.resource_mgr.remove_tool(card.id)
         for execution in self._tool_executions:
             if not execution.future.done():
-                self.manager.cancel(execution.execution_id, reason="Jiuwen tool cleanup",
-                                    wait_timeout=self.run_info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
+                outcome = self.manager.cancel(execution.execution_id, reason="Jiuwen tool cleanup",
+                                              wait_timeout=self.run_info.mcp_close_timeout_seconds,
+                                              mark_stuck_on_timeout=True)
+                if self.run_info.parallel_child_mode == "sandbox" and outcome.stuck:
+                    raise RuntimeError("Child sandbox still has an active operation; retaining its owned resources")
         try:
             if self.mcp:
                 self.mcp.close()
         finally:
             if self.resources:
-                self.resources.close()
+                if self.run_info.parallel_child_mode == "sandbox":
+                    completed = self._run_completed and not self.scope.cancelled
+                    self.resources.close(publish_outputs=completed)
+                    if completed:
+                        self.run_info.published_child_files = [
+                            {key: file[key] for key in ("name", "url")}
+                            for file in self.resources._workspace_uploads
+                            if file.get("name") and file.get("url")
+                        ]
+                elif self.run_info.parallel_child_mode == "read_only":
+                    self.resources.close(publish_outputs=False)
+                else:
+                    self.resources.close()

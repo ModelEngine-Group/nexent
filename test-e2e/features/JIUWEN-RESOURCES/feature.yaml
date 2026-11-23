@@ -34,6 +34,11 @@ feature:
     description: Only the root run may expose ask_user or publish human_interaction. Local children of either Core
       return missing information to their parent, including recursive and mixed-Core calls; concurrent roots retain
       independent clarification permissions.
+  - rule_id: JIUWEN-RESOURCES-RULE-007
+    description: Jiuwen native chat dispatches approved reads and eligible leaf children through its native scheduler.
+      Children with a resolved Docker workspace retain authorized Python execution with individual Kernel leases and
+      output ownership. Read-only children expose only approved reads. Unsafe calls remain barriers. A parallel child
+      deadline cancels its invocation without stopping its peers, and the parent still owns batch cancellation.
   required_test_stages:
   - D3
   - D5
@@ -43,4 +48,5 @@ feature:
     - JIUWEN-M3-20261015
     - JIUWEN-SAVED-SKILLS-20261021
     - JIUWEN-STORAGE-UNIFY-20261116
+    - JIUWEN-NATIVE-PARALLEL-20261123
     spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

@@ -5,7 +5,7 @@
 import asyncio
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock
 
 import pytest
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
@@ -42,7 +42,8 @@ def capture_registration(adapter, mocker):
     return handler
 
 
-def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker):
+@pytest.mark.parametrize("text_protocol", [True, False])
+def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mocker, text_protocol):
     from openjiuwen.harness import factory as native_factory
 
     child = AgentConfig(name="child", description="Child", model_name="child-model", tools=[])
@@ -50,6 +51,7 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
              ToolConfig(name="parallel_executor", class_name="ParallelExecutorTool", source="builtin"),
              ToolConfig(name="remote_lookup", class_name="RemoteLookup", source="mcp")]
     adapter.run_info.agent_config.tools = tools
+    adapter.text_protocol = text_protocol
     adapter.run_info.agent_config.worker_agents = [child]
     adapter.tool_configs, adapter.visible_tool_names = tools, {"lookup", "child", "remote", "parallel_executor"}
     external = SimpleNamespace(invocation_name="remote", description="Remote", name="Remote", agent_id=9,
@@ -82,7 +84,7 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     proxy_type = mocker.patch("nexent.core.agents.resources.a2a.ExternalA2AAgentWrapper", side_effect=proxies)
     adapter.prepare()
     resources.create_tool.assert_called_once_with(tools[0])
-    resources._create_subagent_definition.assert_called_once_with(child, {})
+    resources._create_subagent_definition.assert_called_once_with(child, {}, scope_factory=ANY)
     assert set(adapter.business_tools) == {"lookup", "child", "remote"}
     assert adapter.query == "Authorized latest task" and resources.core_run_info is adapter.run_info
     assert resource_type.call_args.kwargs["tenant_id"] == "tenant"
@@ -94,12 +96,13 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     from openjiuwen.core.single_agent.ability_manager import AbilityManager
     assert all(AbilityManager._resolve_call_timeout(tool.card) == 900 for tool in settings["tools"])
     for key in ("enable_task_loop", "enable_sys_operation", "enable_read_image_multimodal",
-                "enable_model_anomaly_detection_rail", "enable_tool_resilience_rail", "enable_skill_discovery",
-                "parallel_tool_calls"):
+                "enable_model_anomaly_detection_rail", "enable_tool_resilience_rail", "enable_skill_discovery"):
         assert settings[key] is False
+    assert settings["parallel_tool_calls"] is not text_protocol
+    assert not any(tool.card.parallel_safe for tool in settings["tools"])
     assert model.prefix == [] and model.prepare_messages == adapter._prepare_model_messages
     context_type.assert_called_once_with(adapter.run_info, adapter.scope, adapter.manager, model, [])
-    parallel.assert_called_once()
+    assert parallel.call_count == int(text_protocol)
     executor.assert_called_once()
     remote = adapter.business_tools["remote"]
     assert remote.forward("task one") == "first" and remote.forward("task two") == "second"

@@ -156,5 +156,5 @@ def test_native_prompt_and_retry_configuration(monkeypatch, saved_profile):
     assert options["enable_tool_resilience_rail"] is False
     assert options["enable_skill_discovery"] is False
     assert options["rails"] == []
-    assert options["parallel_tool_calls"] is False
+    assert options["parallel_tool_calls"] is True
     retry_factory.assert_not_called()
