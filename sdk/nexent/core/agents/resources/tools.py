@@ -175,6 +175,15 @@ class ToolResources:
                 else:
                     # Whitelist not set by backend → treat as uninstalled.
                     tools_obj.set_allowed_kds(None)
+                # Request-scoped northbound download links are installed by
+                # the runtime's internal northbound entrypoint only. Absent
+                # metadata keeps the ordinary page contract.
+                tools_obj.set_northbound_download(
+                    tool_config.metadata.get("northbound_external_url")
+                    if tool_config.metadata
+                    and tool_config.metadata.get("northbound_run")
+                    else None
+                )
             elif class_name == "IndependentAidpSearchTool":
                 filtered_params = {
                     key: value

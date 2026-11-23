@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from pydantic import Field
 from pydantic.fields import FieldInfo
@@ -64,6 +64,29 @@ def _parse_kds_list(kds_list: str) -> List[str]:
     if not isinstance(parsed_kds, list) or len(parsed_kds) > _MAX_KDS:
         raise ValueError(f"kds_list must be a list of 0-{_MAX_KDS} knowledge base IDs")
     return [str(k) for k in parsed_kds]
+
+
+def _normalize_identity_value(value: Any) -> str:
+    """Return a non-empty string identifier, or ``""`` for a missing value."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def extract_aidp_file_identity(metadata: Any) -> tuple[str, str]:
+    """Read the AIDP original-file locator from one hit's ``metadata``.
+
+    AIDP returns both identifiers in ``metadata``; either one missing means the
+    hit cannot address an original file, and nothing may be inferred from the
+    filename, ``file_url`` or chunk id.
+    """
+    if not isinstance(metadata, dict):
+        return "", ""
+    kds_id = _normalize_identity_value(metadata.get("kds_id"))
+    file_uuid = _normalize_identity_value(metadata.get("file_uuid"))
+    if not kds_id or not file_uuid:
+        return "", ""
+    return kds_id, file_uuid
 
 
 class AidpSearchTool(Tool):
@@ -272,7 +295,37 @@ class AidpSearchTool(Tool):
             verify_ssl=False,
         )
 
+        # Request-scoped northbound download link settings. Only the runtime's
+        # internal northbound entrypoint may install these through tool
+        # configuration; the default page-created tool never exposes the field.
+        self._northbound_download_base_url: str = ""
+
         self.record_ops = 1
+
+    def set_northbound_download(
+        self, external_url: Optional[str] = None
+    ) -> None:
+        """Enable original-file download links for a northbound run.
+
+        ``external_url`` is the configured Nexent northbound base URL. It is
+        deliberately supplied by the backend instead of being read from the
+        environment here. Passing an empty or non-HTTP value disables the
+        field again so a misconfigured run degrades to the page contract.
+        """
+        normalized = str(external_url or "").strip().rstrip("/")
+        if not normalized.lower().startswith(("http://", "https://")):
+            self._northbound_download_base_url = ""
+            return
+        self._northbound_download_base_url = normalized
+
+    def _build_northbound_download_url(self, kds_id: str, file_uuid: str) -> str:
+        """Build the API-key protected download URL for one original file."""
+        if not self._northbound_download_base_url:
+            return ""
+        return (
+            f"{self._northbound_download_base_url}/nb/v1/knowledge-bases/"
+            f"{quote(kds_id, safe='')}/files/{quote(file_uuid, safe='')}/download"
+        )
 
     def _build_retrieve_url(self) -> str:
         path = f"/KnowledgeBase/Tenants/{self.tenant_id}/Retrieval/FusionSearch"
@@ -310,6 +363,21 @@ class AidpSearchTool(Tool):
         score = chunk.get("score")
         pages = chunk.get("pages", [])
         metadata = chunk.get("metadata", {})
+        score_details = {
+            "chunk_id": chunk_id,
+            "chunk_type": chunk_type,
+            "pages": pages,
+            "file_url": file_url,
+            "metadata": metadata,
+            "retrieval_source": chunk.get("retrieval_source"),
+        }
+        kds_id, file_uuid = extract_aidp_file_identity(metadata)
+        if kds_id and file_uuid:
+            # Structured technical locator for the page source card. It is
+            # never written to ``url`` and never inferred from the file name,
+            # image URL or chunk id.
+            score_details["kds_id"] = kds_id
+            score_details["file_uuid"] = file_uuid
         return SearchResultTextMessage(
             title=title,
             text=text,
@@ -318,14 +386,7 @@ class AidpSearchTool(Tool):
             filename=title,
             published_date="",
             score=str(score) if score is not None else None,
-            score_details={
-                "chunk_id": chunk_id,
-                "chunk_type": chunk_type,
-                "pages": pages,
-                "file_url": file_url,
-                "metadata": metadata,
-                "retrieval_source": chunk.get("retrieval_source"),
-            },
+            score_details=score_details,
             cite_index=(self.record_ops if citation_start is None else citation_start) + idx,
             search_type=self.name,
             tool_sign=self.tool_sign,
@@ -379,6 +440,15 @@ class AidpSearchTool(Tool):
                     f"Image marker: {image_marker}. Copy this marker unchanged into "
                     "the final answer immediately after the paragraph that this image illustrates."
                 )
+            kds_id, file_uuid = extract_aidp_file_identity(chunk.get("metadata"))
+            if kds_id and file_uuid:
+                northbound_url = self._build_northbound_download_url(
+                    kds_id, file_uuid
+                )
+                if northbound_url:
+                    # Model-facing only: the page source card keeps the
+                    # structured locator and never receives this API-key URL.
+                    result["northbound_api_download_url"] = northbound_url
             search_results_return.append(result)
 
         return search_results_json, search_results_return, images_url

@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "antd";
+import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
+import { extractFilenameFromContentDisposition } from "@/lib/downloadFilename";
 import { cn } from "@/lib/utils";
 import { getCitationKey } from "@/lib/citationDisplay";
 import {
@@ -86,6 +88,23 @@ export function getCitationLabel(
     return `${labels.web} ${index}`;
   }
   return `${labels.source} ${index}`;
+}
+
+/**
+ * Read the explicit AIDP original-file locator from a source's technical
+ * reference. Both identifiers are required; nothing is inferred from a file
+ * name, image URL or chunk id, and old records without them stay undownloadable.
+ */
+export function getAidpFileIdentity(
+  item: Pick<PanelSourceItem, "sourceReference">
+): { kdsId: string; fileUuid: string } | undefined {
+  const reference = item.sourceReference;
+  if (!reference) return undefined;
+  const normalize = (value: unknown) =>
+    typeof value === "string" ? value.trim() : "";
+  const kdsId = normalize(reference.kds_id);
+  const fileUuid = normalize(reference.file_uuid);
+  return kdsId && fileUuid ? { kdsId, fileUuid } : undefined;
 }
 
 export interface SourcesPanelProps {
@@ -488,6 +507,8 @@ const SourceListItem = memo(function SourceListItem({
     }
   }, [selected, selectionToken]);
 
+  const aidpFileIdentity = getAidpFileIdentity(item);
+
   const handleDocumentDownload = async () => {
     if (isDownloading) return;
 
@@ -495,6 +516,25 @@ const SourceListItem = memo(function SourceListItem({
     setDownloadError(null);
     try {
       const filename = item.filename || item.title || "download";
+      if (isAidp && aidpFileIdentity) {
+        const response = await aidpKnowledgeService.downloadDoc(
+          aidpFileIdentity.kdsId,
+          aidpFileIdentity.fileUuid
+        );
+        const blobUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download =
+          extractFilenameFromContentDisposition(
+            response.headers.get("Content-Disposition")
+          ) || filename;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
       if (item.downloadUrl) {
         const link = document.createElement("a");
         link.href = item.downloadUrl;
@@ -598,7 +638,7 @@ const SourceListItem = memo(function SourceListItem({
               />
             </div>
           </button>
-          {!isAidp && (
+          {(!isAidp || aidpFileIdentity) && (
             <button
               type="button"
               onClick={() => void handleDocumentDownload()}
