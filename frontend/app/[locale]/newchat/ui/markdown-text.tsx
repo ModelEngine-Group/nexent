@@ -2,6 +2,7 @@
 
 "use client";
 
+import { knowledgeImageRequest } from "@/lib/knowledgeReference";
 import { getSourceLabel } from "@/lib/source";
 
 import "@assistant-ui/react-markdown/styles/dot.css";
@@ -365,11 +366,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
       >
         <AuthenticatedImage
           src={image.url}
-          knowledgeReference={
-            image.fileRef && image.imageRef
-              ? { ...image.fileRef, image_ref: image.imageRef }
-              : undefined
-          }
+          knowledgeReference={knowledgeImageRequest(image)}
           alt={alt || image.title}
           className="max-h-[32rem] w-full cursor-zoom-in object-contain"
           preview

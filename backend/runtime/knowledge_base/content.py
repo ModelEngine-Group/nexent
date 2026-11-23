@@ -6,10 +6,14 @@ import logging
 from dataclasses import replace
 from threading import Event
 
+from contracts.agentos_knowledge import KnowledgeLegacyImageRequest
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 
-from infrastructure.knowledge_content import read_knowledge_content
+from infrastructure.knowledge_content import (
+    read_knowledge_content,
+    read_legacy_attachment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,8 @@ class KnowledgeContentReader:
         )
         try:
             async with asyncio.timeout(context.remaining()):
+                if isinstance(request, KnowledgeLegacyImageRequest):
+                    return await self._read_legacy(request, context=read_context)
                 grant = await self.client.authorize_knowledge_content(
                     request, self.actor.user_id, self.actor.tenant_id
                 )
@@ -66,3 +72,15 @@ class KnowledgeContentReader:
         finally:
             if owned_cancel is not None:
                 owned_cancel.set()
+
+    async def _read_legacy(self, request, *, context):
+        authorize = self.client.authorize_legacy_knowledge_image
+        identity = (self.actor.user_id, self.actor.tenant_id)
+        if await authorize(request, *identity) != request:
+            raise ScopeDenied()
+        data = await run_blocking("legacy-knowledge-content", read_legacy_attachment, self.actor, request,
+                                  context=context, role="runtime", lane="control-io", owner="runtime.knowledge_base")
+        if await authorize(request, *identity) != request:
+            raise ScopeDenied()
+        context.remaining()
+        return data, request.image_ref.key.rsplit("/", 1)[-1]

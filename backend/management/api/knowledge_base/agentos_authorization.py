@@ -11,6 +11,7 @@ from contracts.agentos_knowledge import (
     KnowledgeAuthorizationRequest,
     KnowledgeChunksAuthorization,
     KnowledgeContentRequest,
+    KnowledgeLegacyImageAuthorization,
     KnowledgeSearchAuthorization,
 )
 from contracts.knowledge_base_deletion import KnowledgeBaseDeleteAuthorization
@@ -39,6 +40,9 @@ from management.services.knowledge_base.collection_metadata_authorization import
 )
 from management.services.knowledge_base.content_authorization import (
     authorize_knowledge_content,
+)
+from management.services.knowledge_base.legacy_image import (
+    authorize_legacy_image_access,
 )
 from management.services.knowledge_base.search_authorization import (
     authorize_knowledge_search,
@@ -102,6 +106,11 @@ def create_knowledge_authorization_router(service=authorize_knowledge, search_se
     @router.post(ManagementOperation.KNOWLEDGE_CHUNKS_AUTHORIZE.value, include_in_schema=False)
     async def authorize_chunks(request: Request):
         return await dispatch(request, ManagementOperation.KNOWLEDGE_CHUNKS_AUTHORIZE, KnowledgeChunksAuthorization, chunks_service)
+
+    @router.post(ManagementOperation.KNOWLEDGE_LEGACY_IMAGE_AUTHORIZE.value, include_in_schema=False)
+    async def authorize_legacy_image(request: Request):
+        return await dispatch(request, ManagementOperation.KNOWLEDGE_LEGACY_IMAGE_AUTHORIZE,
+                              KnowledgeLegacyImageAuthorization, authorize_legacy_image_access)
 
     @router.post(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE.value, include_in_schema=False)
     async def authorize_content(request: Request):

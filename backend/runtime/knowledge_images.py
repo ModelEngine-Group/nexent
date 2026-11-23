@@ -6,7 +6,10 @@ import logging
 from time import monotonic
 from uuid import uuid4
 
-from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeLegacyImageRequest,
+)
 from contracts.errors.exceptions import RuntimeUpstreamError
 from nexent.core.concurrency import get_current_thread_manager
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -31,7 +34,7 @@ class KnowledgeImageFilter:
         if manager is None:
             raise RuntimeError("KB image filtering requires managed tool execution")
         if any(
-            not isinstance(ref, KnowledgeContentRequest) or ref.image_ref is None
+            not isinstance(ref, (KnowledgeContentRequest, KnowledgeLegacyImageRequest)) or ref.image_ref is None
             for ref in references
         ):
             raise ValueError(

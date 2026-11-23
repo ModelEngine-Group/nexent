@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getKnowledgeSourceAttributes,
+  knowledgeImageRequest,
   knowledgeReferenceKey,
   parseKnowledgePictures,
 } from "@/lib/knowledgeReference";
@@ -76,4 +77,29 @@ describe("versioned knowledge references", () => {
       })
     );
   });
+});
+
+it("restores a selected historical image without a file ID and rejects unrelated keys", () => {
+  const legacy_image_ref = {
+    knowledge_id: 7,
+    chunk_key: "physical",
+    index_uuid: "origin",
+    sequence: 2,
+    primary_term: 1,
+    image_ref: { ...image_ref, key: "images_in_attachments/old.png" },
+  };
+  const picture = { legacy_image_ref, cite_index: 4, tool_sign: "a" };
+  const parsed = parseKnowledgePictures({
+    images_ref: [
+      picture,
+      { ...picture, legacy_image_ref: { ...legacy_image_ref, image_ref } },
+    ],
+  });
+  expect(parsed).toEqual([
+    { legacyImageRef: legacy_image_ref, citeIndex: 4, toolSign: "a" },
+  ]);
+  expect(knowledgeImageRequest(parsed[0])).toEqual(legacy_image_ref);
+  expect(knowledgeImageRequest(getKnowledgeSourceAttributes(picture))).toEqual(
+    legacy_image_ref
+  );
 });

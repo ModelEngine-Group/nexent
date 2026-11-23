@@ -46,6 +46,14 @@ def authorize_legacy_image(request, actor, *, context):
     return filename
 
 
+def authorize_legacy_image_access(payload, actor, *, context):
+    request = payload.root
+    if isinstance(request, KnowledgeLegacyImageRequest):
+        authorize_legacy_image(request, actor, context=context)
+        return request
+    return pin_legacy_image(request, actor, context=context)
+
+
 def fetch_legacy_image(request, actor, *, context):
     filename = authorize_legacy_image(request, actor, context=context)
     data = read_legacy_attachment(actor, request, context=context)

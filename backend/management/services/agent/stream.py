@@ -12,9 +12,15 @@ from contracts.errors.exceptions import sampling_configuration_error_payload
 from management.services.conversation.runtime_output import is_runtime_event
 
 try:
-    from contracts.constants.constants import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
+    from contracts.constants.constants import (
+        REASONING_CONFIGURATION_ERROR_CODE,
+        SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
+    )
 except ImportError:  # Compatibility with slim test/runtime consts stubs.
-    from contracts.constants.constants import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
+    from contracts.constants.constants import (
+        REASONING_CONFIGURATION_ERROR_CODE,
+        SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -394,8 +400,8 @@ class AssistantMessageProjection:
                         "source_location": result.get("url", ""),
                         "source_content": result.get("text", ""),
                         "knowledge_reference": validate_knowledge_source_reference(
-                            {key: result[key] for key in ("file_ref", "image_ref", "location") if key in result}
-                            if result.get("file_ref") is not None else None
+                            {key: result[key] for key in ("file_ref", "image_ref", "legacy_image_ref", "location") if key in result}
+                            if result.get("file_ref") is not None or result.get("legacy_image_ref") is not None else None
                         ),
                         "aidp_metadata": result.get(
                             "score_details", {}

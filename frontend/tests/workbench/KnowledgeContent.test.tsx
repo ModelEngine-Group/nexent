@@ -146,3 +146,27 @@ it("never reuses a revoked URL when a reference changes away and back before loa
   expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:first");
   expect(result.current.url).toBeUndefined();
 });
+
+it("reads a historical image through the existing authenticated content endpoint", async () => {
+  const legacy = {
+    knowledge_id: 7,
+    chunk_key: "physical",
+    index_uuid: "origin",
+    sequence: 2,
+    primary_term: 1,
+    image_ref: {
+      space: "files",
+      key: "images_in_attachments/old.png",
+      version: "etag:one",
+      sha256: "a".repeat(64),
+    },
+  };
+  const blob = new Blob(["old image"]);
+  request.mockResolvedValueOnce({ blob: async () => blob } as Response);
+  expect(await fetchKnowledgeContent(legacy)).toBe(blob);
+  expect(request).toHaveBeenCalledOnce();
+  expect(request).toHaveBeenCalledWith(
+    API_ENDPOINTS.storage.knowledgeContent,
+    expect.objectContaining({ method: "POST", body: JSON.stringify(legacy) })
+  );
+});

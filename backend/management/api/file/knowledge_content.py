@@ -4,7 +4,10 @@
 import mimetypes
 from typing import Annotated
 
-from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeLegacyImageRequest,
+)
 from fastapi import APIRouter, Header, HTTPException, Response
 from management.api.file.http import build_content_disposition_header
 from management.services.knowledge_base.content import fetch_knowledge_content
@@ -20,7 +23,7 @@ router = APIRouter(prefix="/file/knowledge")
 
 @router.post("/content")
 async def read_content(
-    payload: KnowledgeContentRequest,
+    payload: KnowledgeContentRequest | KnowledgeLegacyImageRequest,
     authorization: Annotated[str | None, Header()] = None,
 ):
     user_id, tenant_id = get_current_user_id(authorization)

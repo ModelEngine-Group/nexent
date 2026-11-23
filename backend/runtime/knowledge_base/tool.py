@@ -3,7 +3,10 @@ import json
 import logging
 from typing import List, Optional
 
-from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeLegacyImageRequest,
+)
 from contracts.knowledge_tool import knowledge_tool_info
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.core.utils.pydantic_utils import unwrap_field_info
@@ -330,10 +333,14 @@ class KnowledgeBaseSearchTool(Tool):
             )
 
             stored = search_result_message.to_dict()
-            for field in ("file_ref", "image_ref", "location"):
+            for field in ("file_ref", "image_ref", "legacy_image_ref", "location"):
                 if field in single_search_result:
                     stored[field] = single_search_result[field]
-            if single_search_result.get("image_ref") is not None:
+            if single_search_result.get("legacy_image_ref") is not None:
+                reference = KnowledgeLegacyImageRequest.model_validate(single_search_result["legacy_image_ref"])
+                image_references.append({"legacy_image_ref": reference.model_dump(),
+                                         "cite_index": self.record_ops + index, "tool_sign": self.tool_sign})
+            elif single_search_result.get("image_ref") is not None:
                 reference = KnowledgeContentRequest(
                     **single_search_result["file_ref"],
                     image_ref=single_search_result["image_ref"],
@@ -372,7 +379,8 @@ class KnowledgeBaseSearchTool(Tool):
                 "Runtime knowledge images require their bound content reader"
             )
         references = [
-            KnowledgeContentRequest(**image["file_ref"], image_ref=image["image_ref"])
+            KnowledgeLegacyImageRequest.model_validate(image["legacy_image_ref"]) if "legacy_image_ref" in image
+            else KnowledgeContentRequest(**image["file_ref"], image_ref=image["image_ref"])
             for image in image_references
         ]
         try:

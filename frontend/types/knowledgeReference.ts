@@ -13,13 +13,31 @@ export interface KnowledgeObjectReference {
   sha256: string;
 }
 
-export interface KnowledgeContentRequest extends KnowledgeFileReference {
+export interface KnowledgeLegacyImageReference {
+  knowledge_id: number;
+  chunk_key: string;
+  index_uuid: string;
+  sequence: number;
+  primary_term: number;
+  image_ref: KnowledgeObjectReference;
+}
+
+interface KnowledgeFileContentRequest extends KnowledgeFileReference {
   image_ref?: KnowledgeObjectReference;
 }
 
-export interface KnowledgePictureReference {
-  fileRef: KnowledgeFileReference;
-  imageRef: KnowledgeObjectReference;
-  citeIndex: number;
-  toolSign: string;
-}
+export type KnowledgeContentRequest =
+  KnowledgeFileContentRequest | KnowledgeLegacyImageReference;
+
+export type KnowledgePictureReference = (
+  | {
+      fileRef: KnowledgeFileReference;
+      imageRef: KnowledgeObjectReference;
+      legacyImageRef?: never;
+    }
+  | {
+      legacyImageRef: KnowledgeLegacyImageReference;
+      fileRef?: never;
+      imageRef?: never;
+    }
+) & { citeIndex: number; toolSign: string };

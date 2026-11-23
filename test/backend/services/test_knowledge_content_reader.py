@@ -10,6 +10,7 @@ import pytest
 from contracts.agentos_knowledge import (
     KnowledgeContentGrant,
     KnowledgeContentRequest,
+    KnowledgeLegacyImageRequest,
     ObjectReference,
 )
 from nexent.storage.errors import ScopeDenied
@@ -96,3 +97,22 @@ async def test_reader_timeout_cancels_http_without_retry(setup):
     closed.assert_called_once()
     assert client.authorize_knowledge_content.await_count == 1
     read.assert_not_called()
+
+
+@pytest.mark.parametrize("changed", [False, True])
+async def test_runtime_legacy_attachment_read_checks_signed_reference_before_and_after(setup, mocker, changed):
+    service, _, _, client, _ = setup
+    request = KnowledgeLegacyImageRequest(knowledge_id=1, chunk_key="old", index_uuid="index", sequence=4, primary_term=1,
+        image_ref=ObjectReference(space="files", key="images_in_attachments/old.png", version="etag:v1", sha256="a" * 64))
+    client.authorize_legacy_knowledge_image = AsyncMock(side_effect=[
+        request, request.model_copy(update={"sequence": 5}) if changed else request])
+    read = mocker.patch.object(module, "read_legacy_attachment", return_value=b"legacy")
+    context = OperationContext("legacy-read", monotonic() + 5)
+    if changed:
+        with pytest.raises(ScopeDenied):
+            await service.read(request, context=context)
+    else:
+        assert await service.read(request, context=context) == (b"legacy", "old.png")
+    read.assert_called_once()
+    assert client.authorize_legacy_knowledge_image.await_count == 2
+    assert client.authorize_legacy_knowledge_image.await_args.args == (request, "user", "tenant")

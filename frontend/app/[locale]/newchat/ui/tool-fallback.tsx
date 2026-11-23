@@ -244,6 +244,7 @@ function ToolFallbackSearchContent({
     sourceReference: item.sourceReference,
     fileRef: item.fileRef,
     imageRef: item.imageRef,
+    legacyImageRef: item.legacyImageRef,
     sourceLocation: item.sourceLocation,
   }));
   const numberedSources = withCitationDisplayIndices(

@@ -59,6 +59,27 @@ const pictures = {
   images_ref: [{ file_ref, image_ref, cite_index: 2, tool_sign: "a" }],
 };
 
+const historicRef = {
+  knowledge_id: 7,
+  chunk_key: "physical",
+  index_uuid: "origin",
+  sequence: 12,
+  primary_term: 1,
+  image_ref: { ...image_ref, key: "images_in_attachments/historical.png" },
+};
+const historicImage = {
+  ...source,
+  file_ref: undefined,
+  legacy_image_ref: historicRef,
+  cite_index: 2,
+};
+const historicPictures = {
+  images_url: [],
+  images_ref: [
+    { legacy_image_ref: historicRef, cite_index: 2, tool_sign: "a" },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   searchSourcesRegistry.clear();
@@ -71,14 +92,22 @@ it.each([
   { pictureFirst: true, tail: undefined },
   { pictureFirst: false, tail: "search_content" },
   { pictureFirst: true, tail: "picture_web" },
+  { pictureFirst: false, tail: undefined, historical: true },
 ])(
   "preserves fixed references when picture-first=$pictureFirst and unterminated tail=$tail",
-  async ({ pictureFirst, tail }) => {
+  async ({ pictureFirst, tail, historical }) => {
     const search = {
       type: "search_content",
-      content: JSON.stringify([source, image, rejectedImage]),
+      content: JSON.stringify([
+        source,
+        historical ? historicImage : image,
+        rejectedImage,
+      ]),
     };
-    const picture = { type: "picture_web", content: JSON.stringify(pictures) };
+    const picture = {
+      type: "picture_web",
+      content: JSON.stringify(historical ? historicPictures : pictures),
+    };
     let events = [
       ...(pictureFirst ? [picture, search] : [search, picture]),
       { type: "final_answer", content: "Report [a1]" },
@@ -126,8 +155,9 @@ it.each([
     });
     expect(all.filter((item) => item.isImage)).toEqual([
       expect.objectContaining({
-        fileRef: file_ref,
-        imageRef: image_ref,
+        ...(historical
+          ? { legacyImageRef: historicRef }
+          : { fileRef: file_ref, imageRef: image_ref }),
         citeIndex: 2,
         toolSign: "a",
         title: "report.pdf",
@@ -138,56 +168,64 @@ it.each([
   }
 );
 
-it("restores history references and selected images into the source panel model", async () => {
-  const detail = {
-    conversation_id: "42",
-    create_time: 0,
-    message: [
-      {
-        role: "assistant",
-        message_id: 10,
-        status: "completed",
-        search: [source, image, rejectedImage],
-        message: [
-          {
-            type: "picture_web",
-            content: JSON.stringify(pictures),
-            unit_index: 0,
-          },
-          { type: "final_answer", content: "Report [a1]", unit_index: 1 },
-        ],
-      },
-    ],
-  } as unknown as ApiConversationDetail;
-  const history = await new RemoteConversationHistoryAdapter(
-    () => "42",
-    async () => ({ remoteId: "42", externalId: "42" }),
-    async () => detail
-  ).load();
-  const message = history.messages[0].message;
-  const model = getMessageSources(
-    message.id,
-    message.content,
-    conversationSourcesRegistry.get(message.id)
-  );
-  expect(model.sources).toEqual([
-    expect.objectContaining({ fileRef: file_ref, sourceLocation: { page: 2 } }),
-  ]);
-  expect(model.images).toEqual([
-    expect.objectContaining({
-      fileRef: file_ref,
-      imageRef: image_ref,
-      citeIndex: 2,
-    }),
-  ]);
-  expect(JSON.stringify(message.content)).toContain("__knowledge_image__/a2");
-  const textParts = message.content.filter((part) => part.type === "text");
-  expect(textParts[0]).toMatchObject({ text: "Report [a1]" });
-  const markerIndex = message.content.findIndex(
-    (part) => part.type === "text" && part.text.includes("__knowledge_image__")
-  );
-  expect(markerIndex).toBeLessThan(
-    message.content.findIndex((part) => part.type === "source")
-  );
-  expect(JSON.stringify(model)).not.toContain("rejected.png");
-});
+it.each([false, true])(
+  "restores history references into the source panel (historical attachment=%s)",
+  async (historical) => {
+    const detail = {
+      conversation_id: "42",
+      create_time: 0,
+      message: [
+        {
+          role: "assistant",
+          message_id: 10,
+          status: "completed",
+          search: [source, historical ? historicImage : image, rejectedImage],
+          message: [
+            {
+              type: "picture_web",
+              content: JSON.stringify(historical ? historicPictures : pictures),
+              unit_index: 0,
+            },
+            { type: "final_answer", content: "Report [a1]", unit_index: 1 },
+          ],
+        },
+      ],
+    } as unknown as ApiConversationDetail;
+    const history = await new RemoteConversationHistoryAdapter(
+      () => "42",
+      async () => ({ remoteId: "42", externalId: "42" }),
+      async () => detail
+    ).load();
+    const message = history.messages[0].message;
+    const model = getMessageSources(
+      message.id,
+      message.content,
+      conversationSourcesRegistry.get(message.id)
+    );
+    expect(model.sources).toEqual([
+      expect.objectContaining({
+        fileRef: file_ref,
+        sourceLocation: { page: 2 },
+      }),
+    ]);
+    expect(model.images).toEqual([
+      expect.objectContaining({
+        ...(historical
+          ? { legacyImageRef: historicRef }
+          : { fileRef: file_ref, imageRef: image_ref }),
+        citeIndex: 2,
+      }),
+    ]);
+    expect(JSON.stringify(message.content)).toContain("__knowledge_image__/a2");
+    const textParts = message.content.filter((part) => part.type === "text");
+    expect(textParts[0]).toMatchObject({ text: "Report [a1]" });
+    const markerIndex = message.content.findIndex(
+      (part) =>
+        part.type === "text" && part.text.includes("__knowledge_image__")
+    );
+    expect(markerIndex).toBeLessThan(
+      message.content.findIndex((part) => part.type === "source")
+    );
+    expect(JSON.stringify(model)).not.toContain("rejected.png");
+  }
+);

@@ -47,7 +47,10 @@ import { SourceMetadata } from "@/components/common/sourceMetadata";
 import log from "@/lib/logger";
 import { fetchKnowledgeContent } from "@/services/knowledgeContentService";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
-import { knowledgeReferenceKey } from "@/lib/knowledgeReference";
+import {
+  knowledgeImageRequest,
+  knowledgeReferenceKey,
+} from "@/lib/knowledgeReference";
 
 export { getCitationKey } from "@/lib/citationDisplay";
 
@@ -817,7 +820,7 @@ const ImageListItem = memo(function ImageListItem({
     }
   }, [selected, selectionToken]);
 
-  if (!imageUrl && !(item.fileRef && item.imageRef)) return null;
+  if (!imageUrl && !knowledgeImageRequest(item)) return null;
   const cardClassName = cn(
     "aui-global-search-image relative overflow-hidden rounded-md border bg-muted/50",
     selected && "border-[#1677ff] ring-1 ring-[#1677ff]"
@@ -862,11 +865,7 @@ const ImageListItem = memo(function ImageListItem({
         className="absolute top-2 right-2 z-10"
       />
       <AuthenticatedImage
-        knowledgeReference={
-          item.fileRef && item.imageRef
-            ? { ...item.fileRef, image_ref: item.imageRef }
-            : undefined
-        }
+        knowledgeReference={knowledgeImageRequest(item)}
         src={resolvedUrl || imageUrl}
         alt={item.title || imageUrl}
         loading="lazy"

@@ -4,13 +4,18 @@
 import asyncio
 from time import monotonic
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from contracts.agentos_knowledge import (
     KnowledgeFileDelete,
+    KnowledgeLegacyImageLocator,
+    KnowledgeLegacyImageRequest,
     KnowledgeSearchGrant,
     KnowledgeSearchResult,
     ModelVersion,
+    ObjectReference,
+    validate_knowledge_source_reference,
 )
 from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
 from nexent.storage.models import OperationContext
@@ -117,3 +122,31 @@ def test_data_revisions_round_trip_decoded_json_response():
 def test_data_revisions_refuse_ambiguous_or_invalid_scope(values):
     with pytest.raises(ValidationError):
         KnowledgeSearchResult(hits=[], data_revisions=values, embedding_model=ModelVersion(model_id=2, revision="v1"))
+
+
+async def test_filtered_legacy_image_can_be_persisted_without_inventing_file_id(service):
+    from runtime.knowledge_base.sdk_tool import RuntimeKnowledgeTool
+
+    locator = KnowledgeLegacyImageLocator(knowledge_id=1, chunk_key="old", index_uuid="index", sequence=5, primary_term=1)
+    reference = KnowledgeLegacyImageRequest(**locator.model_dump(), image_ref=ObjectReference(
+        space="files", key="images_in_attachments/old.png", version="etag:v1", sha256="a" * 64))
+    service.client.authorize_legacy_knowledge_image = AsyncMock(return_value=reference)
+    actor = SimpleNamespace(user_id="user", tenant_id="tenant")
+    tool = KnowledgeToolSearch(service, actor, [binding()])
+    assert await tool.pin_legacy_image(locator, context=OperationContext("pin", monotonic() + 5)) == reference
+    entry = RuntimeKnowledgeTool._row(hit().model_copy(update={"file_id": None, "file_version": None}), reference)
+    assert "file_ref" not in entry
+    assert validate_knowledge_source_reference({"legacy_image_ref": entry["legacy_image_ref"]}) == {
+        "legacy_image_ref": reference.model_dump(), "location": {}}
+
+
+def test_sdk_legacy_pin_deadline_is_not_reported_as_success():
+    from runtime.knowledge_base.sdk_tool import RuntimeKnowledgeTool
+
+    locator = KnowledgeLegacyImageLocator(knowledge_id=1, chunk_key="old", index_uuid="index", sequence=5, primary_term=1)
+    lookup = AsyncMock(return_value=[hit().model_copy(update={"legacy_image": locator})])
+    pin = AsyncMock(side_effect=DeadlineExceeded())
+    tool = RuntimeKnowledgeTool(SimpleNamespace(search=lookup, pin_legacy_image=pin))
+    with pytest.raises(DeadlineExceeded):
+        tool(query="query", index_names=["kb"], search_mode="accurate", top_k=1)
+    assert pin.await_count == 1

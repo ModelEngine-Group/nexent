@@ -3,6 +3,7 @@
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import {
   isKnowledgeFileReference,
+  isKnowledgeLegacyImageReference,
   isKnowledgeObjectReference,
 } from "@/lib/knowledgeReference";
 import type { KnowledgeContentRequest } from "@/types/knowledgeReference";
@@ -14,8 +15,9 @@ export async function fetchKnowledgeContent(
 ): Promise<Blob> {
   const { image_ref, ...file } = reference;
   if (
-    !isKnowledgeFileReference(file) ||
-    (image_ref !== undefined && !isKnowledgeObjectReference(image_ref))
+    !isKnowledgeLegacyImageReference(reference) &&
+    (!isKnowledgeFileReference(file) ||
+      (image_ref !== undefined && !isKnowledgeObjectReference(image_ref)))
   ) {
     throw new TypeError("Invalid knowledge content reference");
   }

@@ -13,6 +13,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    RootModel,
     field_validator,
     model_serializer,
     model_validator,
@@ -91,22 +92,6 @@ class KnowledgeFileReference(Contract):
     file_version: int = Field(ge=0)
 
 
-class KnowledgeSourceReference(Contract):
-    file_ref: KnowledgeFileReference
-    image_ref: ObjectReference | None = None
-    location: dict[str, JsonValue] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def bounded_snapshot(self):
-        if len(self.model_dump_json().encode("utf-8")) > 16384:
-            raise ValueError("Knowledge source reference exceeds 16 KiB")
-        return self
-
-
-def validate_knowledge_source_reference(value):
-    return None if value is None else KnowledgeSourceReference.model_validate(value).model_dump(mode="json", exclude_none=True)
-
-
 class KnowledgeLegacyImageLocator(Contract):
     knowledge_id: int = Field(gt=0)
     chunk_key: str = Field(min_length=1, max_length=512)
@@ -117,6 +102,32 @@ class KnowledgeLegacyImageLocator(Contract):
 
 class KnowledgeLegacyImageRequest(KnowledgeLegacyImageLocator):
     image_ref: ObjectReference
+
+
+class KnowledgeLegacyImageAuthorization(RootModel[KnowledgeLegacyImageRequest | KnowledgeLegacyImageLocator]):
+    pass
+
+
+class KnowledgeSourceReference(Contract):
+    file_ref: KnowledgeFileReference | None = None
+    image_ref: ObjectReference | None = None
+    legacy_image_ref: KnowledgeLegacyImageRequest | None = None
+    location: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def bounded_snapshot(self):
+        if (self.file_ref is None and self.legacy_image_ref is None
+            or self.image_ref is not None and (self.file_ref is None or self.legacy_image_ref is not None)
+            or self.legacy_image_ref is not None and self.file_ref is not None
+                and self.legacy_image_ref.knowledge_id != self.file_ref.knowledge_id):
+            raise ValueError("Knowledge references must identify an authorized file or historical image")
+        if len(self.model_dump_json().encode("utf-8")) > 16384:
+            raise ValueError("Knowledge source reference exceeds 16 KiB")
+        return self
+
+
+def validate_knowledge_source_reference(value):
+    return None if value is None else KnowledgeSourceReference.model_validate(value).model_dump(mode="json", exclude_none=True)
 
 
 class KnowledgeContentRequest(KnowledgeFileReference):

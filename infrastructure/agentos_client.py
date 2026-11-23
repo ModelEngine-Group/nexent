@@ -45,6 +45,7 @@ from contracts.agentos_knowledge import (
     KnowledgeContentGrant,
     KnowledgeFileGrant,
     KnowledgeJobState,
+    KnowledgeLegacyImageRequest,
     KnowledgeOperation,
     KnowledgeSampleResult,
     KnowledgeSearchGrant,
@@ -183,6 +184,10 @@ class AgentOSClient:
 
     async def inspect_knowledge_chunk(self, payload, user_id, tenant_id):
         return await self._record_json(KnowledgeOperation.INSPECT_CHUNK, payload, user_id, tenant_id, ChunkMutationTarget)
+
+    async def authorize_legacy_knowledge_image(self, payload, user_id, tenant_id):
+        return await self._record_json(ManagementOperation.KNOWLEDGE_LEGACY_IMAGE_AUTHORIZE, payload,
+                                       user_id, tenant_id, KnowledgeLegacyImageRequest)
 
     async def authorize_knowledge_content(self, payload, user_id, tenant_id):
         return await self._record_json(ManagementOperation.KNOWLEDGE_CONTENT_AUTHORIZE, payload, user_id, tenant_id, KnowledgeContentGrant)

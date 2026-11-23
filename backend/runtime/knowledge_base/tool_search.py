@@ -9,6 +9,8 @@ from uuid import uuid4
 from contracts.agentos import RerankInvocation
 from contracts.agentos_knowledge import (
     KnowledgeFileReference,
+    KnowledgeLegacyImageLocator,
+    KnowledgeLegacyImageRequest,
     KnowledgeSearch,
     KnowledgeSearchAuthorization,
     ModelVersion,
@@ -61,6 +63,18 @@ class KnowledgeToolSearch:
                                       "model_score_kind": hit.score_kind, "model_rank": position},
                 }))
         return sorted(ranked, key=lambda hit: (-hit.score, _identity(hit)))[:limit]
+
+    async def pin_legacy_image(self, locator, *, context):
+        if not isinstance(locator, KnowledgeLegacyImageLocator):
+            raise ScopeDenied()
+        async with asyncio.timeout(context.remaining()):
+            reference = await self.service.client.authorize_legacy_knowledge_image(
+                locator, self.actor.user_id, self.actor.tenant_id)
+        if not isinstance(reference, KnowledgeLegacyImageRequest) or any(
+            getattr(reference, field) != value for field, value in locator.model_dump().items()
+        ):
+            raise ScopeDenied()
+        return reference
 
     async def _reauthorize(self, resources):
         grant = await self.service.client.authorize_knowledge_search(

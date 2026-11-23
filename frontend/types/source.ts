@@ -2,6 +2,7 @@
 
 import type {
   KnowledgeFileReference,
+  KnowledgeLegacyImageReference,
   KnowledgeObjectReference,
 } from "./knowledgeReference";
 
@@ -15,6 +16,7 @@ export interface JsonObject {
 export interface SourceAttributes {
   fileRef?: KnowledgeFileReference;
   imageRef?: KnowledgeObjectReference;
+  legacyImageRef?: KnowledgeLegacyImageReference;
   sourceLocation?: JsonObject;
   searchType?: string;
   toolSign?: string;

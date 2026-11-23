@@ -2,11 +2,14 @@
 """Actual KB SDK image projection uses only an injected capability."""
 
 import json
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from contracts.agentos_knowledge import KnowledgeContentRequest, ObjectReference
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeLegacyImageRequest,
+    ObjectReference,
+)
 from nexent.core.agents.contracts.config import ToolConfig
 from nexent.core.agents.resources.tools import ToolResources
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -68,3 +71,20 @@ def test_factory_installs_local_image_capability_and_scope():
     assert value.image_filterer is filterer
     assert value.cancellation_scope is scope
     assert value._allowed_index_names == {"allowed"}
+
+
+def test_sdk_filters_and_emits_selected_historical_image_without_file_id():
+    observer = Mock()
+    value = tool(observer)
+    request = KnowledgeLegacyImageRequest(knowledge_id=1, chunk_key="physical", index_uuid="origin",
+        sequence=2, primary_term=1, image_ref=ObjectReference(space="files", key="images_in_attachments/old.png",
+                                                              version="etag:one", sha256="a" * 64))
+    reference = request.model_dump()
+    row = {"content": "caption", "filename": "report.pdf", "legacy_image_ref": reference}
+    rows, _, images = value._build_search_results([row])
+    assert rows[0]["legacy_image_ref"] == reference and "file_ref" not in rows[0]
+    value.image_filterer = Mock(return_value=[request])
+    value._record_search_results(rows, images, "query")
+    assert value.image_filterer.call_args.args == ([request], "query")
+    assert observer.add_message.call_args.args[1] == ProcessType.PICTURE_WEB
+    assert json.loads(observer.add_message.call_args.args[2])["images_ref"][0]["legacy_image_ref"] == reference

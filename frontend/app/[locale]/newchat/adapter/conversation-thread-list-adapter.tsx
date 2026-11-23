@@ -13,6 +13,7 @@ import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
 import {
   getKnowledgeSourceAttributes,
+  knowledgeImageRequest,
   knowledgeReferenceKey,
   parseKnowledgePictures,
 } from "@/lib/knowledgeReference";
@@ -208,7 +209,7 @@ const toToolSearchItem = (value: unknown) => {
         url: resolvedUrl,
         title,
         text:
-          imageMetadata || knowledgeAttributes.imageRef
+          imageMetadata || knowledgeImageRequest(knowledgeAttributes)
             ? undefined
             : typeof item.text === "string"
               ? item.text
@@ -227,7 +228,9 @@ const toToolSearchItem = (value: unknown) => {
           typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
-        isImage: Boolean(imageMetadata || knowledgeAttributes.imageRef),
+        isImage: Boolean(
+          imageMetadata || knowledgeImageRequest(knowledgeAttributes)
+        ),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
         ...getSourceAttributes(item.search_type, item.score_details),
         ...knowledgeAttributes,
@@ -476,7 +479,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (url || filename || title) {
               const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               const isImage =
-                Boolean(getKnowledgeSourceAttributes(item).imageRef) ||
+                Boolean(
+                  knowledgeImageRequest(getKnowledgeSourceAttributes(item))
+                ) ||
                 (item.score_details as Record<string, unknown> | undefined)
                   ?.chunk_type === "image" ||
                 Boolean(imageMetadata) ||
@@ -1351,8 +1356,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         for (const image of restoredImages) {
           if (
-            image.fileRef &&
-            image.imageRef &&
+            knowledgeImageRequest(image) &&
             !answerImageKeys.includes(image.imageKey)
           )
             content.push({
@@ -1375,7 +1379,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               const imageMetadata = parseImageMetadata(item.text);
               if (
-                getKnowledgeSourceAttributes(item).imageRef ||
+                knowledgeImageRequest(getKnowledgeSourceAttributes(item)) ||
                 scoreDetails?.chunk_type === "image" ||
                 imageMetadata ||
                 answerImageKeys.includes(searchImageKey)
@@ -1490,10 +1494,18 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         role: msg.role,
         // A persisted active status is not a live runtime connection. Hydrate it
         // as idle so useConversationResume can establish the actual stream.
-        ...(msg.role === "assistant" ? { status: messageExecutionStatus(
-          msg.status === "streaming" || msg.status === "pending" ? "completed"
-            : msg.status ?? (content.some(part => "isError" in part && part.isError) ? "failed" : "completed")
-        ) } : {}),
+        ...(msg.role === "assistant"
+          ? {
+              status: messageExecutionStatus(
+                msg.status === "streaming" || msg.status === "pending"
+                  ? "completed"
+                  : (msg.status ??
+                      (content.some((part) => "isError" in part && part.isError)
+                        ? "failed"
+                        : "completed"))
+              ),
+            }
+          : {}),
         content,
         // A persisted running flag does not represent an attached local stream.
         // The shared resume hook reconnects it under the original user boundary.

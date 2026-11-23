@@ -33,6 +33,7 @@ import type { SourceAttributes } from "@/types/source";
 import { getSourceAttributes } from "@/lib/source";
 import {
   getKnowledgeSourceAttributes,
+  knowledgeImageRequest,
   knowledgeReferenceKey,
   parseKnowledgePictures,
 } from "@/lib/knowledgeReference";
@@ -492,7 +493,6 @@ export interface VerificationPanelPart {
   results: VerificationContent[];
   completed: boolean;
 }
-
 
 /**
  * Parses a backend `token_count` payload into a `StepTokenCount` entry.
@@ -1415,13 +1415,19 @@ function buildTimingFromTokenCount(
   // Store step data in global registry so the currently-streaming message's
   // `SingleTurnTokenUsage` can render it without subscribing to per-message
   // metadata updates.
-  const identity = chunk.unit_index !== undefined ? `unit:${chunk.unit_index}`
-    : parsed.stepNumber > 0 ? `${chunk.invocation_id ?? ""}:${parsed.stepNumber}` : `event:${counts.size}`;
+  const identity =
+    chunk.unit_index !== undefined
+      ? `unit:${chunk.unit_index}`
+      : parsed.stepNumber > 0
+        ? `${chunk.invocation_id ?? ""}:${parsed.stepNumber}`
+        : `event:${counts.size}`;
   counts.set(identity, parsed);
   clearStepTokenCounts();
   counts.forEach(pushStepTokenCount);
   const timing = buildHistoricalMessageTiming([...counts.values()]);
-  return timing ? { metadata: { timing: { ...timing, firstTokenTime: undefined } } } : null;
+  return timing
+    ? { metadata: { timing: { ...timing, firstTokenTime: undefined } } }
+    : null;
 }
 
 /**
@@ -1821,7 +1827,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
-      if (!("type" in agentResponse) && !isResume) custom?.onMessageAccepted?.(query);
+      if (!("type" in agentResponse) && !isResume)
+        custom?.onMessageAccepted?.(query);
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
@@ -2441,10 +2448,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : part
         )
       ),
-      metadata: { custom: {
-        ...(nl2a ? { nl2a } : {}),
-        stepTokenCounts: [...streamTokenCounts.values()],
-      } },
+      metadata: {
+        custom: {
+          ...(nl2a ? { nl2a } : {}),
+          stepTokenCounts: [...streamTokenCounts.values()],
+        },
+      },
     });
 
     const streamStartTime = Date.now();
@@ -2468,7 +2477,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
           if (chunk.type === "status") {
-            if (["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+            if (["completed", "failed", "stopped"].includes(chunk.content))
+              terminalOutcome = chunk.content;
             continue;
           }
           if (chunk.type === "final_answer") {
@@ -2938,12 +2948,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const knowledgeAttributes =
                   getKnowledgeSourceAttributes(result);
                 const text =
-                  imageMetadata || knowledgeAttributes.imageRef
+                  imageMetadata || knowledgeImageRequest(knowledgeAttributes)
                     ? ""
                     : result.text;
                 const isImage =
                   result.score_details?.chunk_type === "image" ||
-                  Boolean(imageMetadata || knowledgeAttributes.imageRef);
+                  Boolean(
+                    imageMetadata || knowledgeImageRequest(knowledgeAttributes)
+                  );
                 const retrievalHighlightTerms = getRetrievalHighlightTerms(
                   result.score_details
                 );
@@ -3016,7 +3028,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Process any remaining buffered line
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
-        if (chunk?.type === "status" && ["completed", "failed", "stopped"].includes(chunk.content)) terminalOutcome = chunk.content;
+        if (
+          chunk?.type === "status" &&
+          ["completed", "failed", "stopped"].includes(chunk.content)
+        )
+          terminalOutcome = chunk.content;
         if (chunk?.type === "token_count") {
           storedTiming = buildTimingFromTokenCount(chunk, streamTokenCounts);
         }
@@ -3284,12 +3300,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const knowledgeAttributes =
                     getKnowledgeSourceAttributes(result);
                   const text =
-                    imageMetadata || knowledgeAttributes.imageRef
+                    imageMetadata || knowledgeImageRequest(knowledgeAttributes)
                       ? ""
                       : result.text;
                   const isImage =
                     result.score_details?.chunk_type === "image" ||
-                    Boolean(imageMetadata || knowledgeAttributes.imageRef);
+                    Boolean(
+                      imageMetadata ||
+                      knowledgeImageRequest(knowledgeAttributes)
+                    );
                   const retrievalHighlightTerms = getRetrievalHighlightTerms(
                     result.score_details
                   );
@@ -3400,7 +3419,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const matchedImageSources = new Set<SearchSource>();
       for (const [index, image] of searchImagesAccumulator.entries()) {
         const metadata = imageMetadata.find((source) => {
-          if (image.fileRef)
+          if (knowledgeImageRequest(image))
             return (
               knowledgeReferenceKey(source) === knowledgeReferenceKey(image) &&
               source.citeIndex === image.citeIndex &&
@@ -3424,7 +3443,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           url: image.url,
           title: metadata?.title || image.title,
           text: metadata?.text || image.text,
-          sourceType: image.fileRef ? "file" : "url",
+          sourceType: knowledgeImageRequest(image) ? "file" : "url",
           isImage: true,
           imageKey,
         };
@@ -3447,7 +3466,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // grouped source block. AIDP markers and explicit markdown images keep
       // their original inline position and are not duplicated here.
       for (const image of searchImagesAccumulator) {
-        if (image.fileRef && image.imageRef && image.imageKey) {
+        if (knowledgeImageRequest(image) && image.imageKey) {
           if (!answerImageKeys.includes(image.imageKey))
             contentParts.push({
               type: "text",
@@ -3491,6 +3510,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             sourceReference: source.sourceReference,
             fileRef: source.fileRef,
             imageRef: source.imageRef,
+            legacyImageRef: source.legacyImageRef,
             sourceLocation: source.sourceLocation,
             publishedDate: source.publishedDate,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
@@ -3514,6 +3534,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           sourceReference: image.sourceReference,
           fileRef: image.fileRef,
           imageRef: image.imageRef,
+          legacyImageRef: image.legacyImageRef,
           sourceLocation: image.sourceLocation,
           messageId,
         });
@@ -3528,7 +3549,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
       yield {
         ...finalResult,
-        status: messageExecutionStatus(terminalOutcome ?? (contentParts.some(part => part.isError) ? "failed" : "completed")),
+        status: messageExecutionStatus(
+          terminalOutcome ??
+            (contentParts.some((part) => part.isError) ? "failed" : "completed")
+        ),
         messageId,
         metadata: {
           ...finalResult.metadata,

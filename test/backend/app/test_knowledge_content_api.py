@@ -198,3 +198,43 @@ async def test_legacy_image_ticket_uses_existing_get_endpoint_and_current_actor(
     assert success.headers["content-type"] == "image/png"
     assert rejected.status_code == 403
     fetch.assert_awaited_once_with(request, user_id=actor.user_id, tenant_id=actor.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_sdk_authorizes_legacy_image_over_signed_agentos_then_reads_via_existing_post(image_hit, mocker):
+    from contracts.agentos import ManagementOperation
+    from contracts.agentos_knowledge import (
+        KnowledgeLegacyImageLocator,
+        KnowledgeLegacyImageRequest,
+    )
+    from management.api.knowledge_base import agentos_authorization
+    from management.services.knowledge_base import legacy_image
+
+    from infrastructure.agentos_client import AgentOSClient
+
+    locator = KnowledgeLegacyImageLocator(knowledge_id=3, chunk_key="physical", index_uuid="origin", sequence=4, primary_term=1)
+    request = KnowledgeLegacyImageRequest(**locator.model_dump(), image_ref=image_hit.image_ref)
+    actor = ServicePrincipal("user", "tenant")
+    pin = mocker.patch.object(legacy_image, "pin_legacy_image", return_value=request)
+    auth = mocker.patch.object(legacy_image, "authorize_legacy_image", return_value="image.png")
+    app = FastAPI(root_path="/api")
+    app.include_router(agentos_authorization.create_knowledge_authorization_router())
+    app.include_router(module.router)
+
+    async def blocking(_name, fn, *args, **kwargs):
+        return fn(*args, context=kwargs["context"])
+
+    mocker.patch.object(agentos_authorization, "run_blocking", side_effect=blocking)
+    mocker.patch.object(module, "get_current_user_id", return_value=(actor.user_id, actor.tenant_id))
+    fetch = mocker.patch.object(module, "fetch_knowledge_content", return_value=(b"snapshot", "image.png"))
+    agentos = AgentOSClient("http://management", lambda **kw: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), **kw))
+    assert await agentos.authorize_legacy_knowledge_image(locator, actor.user_id, actor.tenant_id) == request
+    assert await agentos.authorize_legacy_knowledge_image(request, actor.user_id, actor.tenant_id) == request
+    assert pin.call_args.args == (locator, actor) and auth.call_args.args == (request, actor)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://management") as client:
+        unsigned = await client.post(ManagementOperation.KNOWLEDGE_LEGACY_IMAGE_AUTHORIZE.value, json=locator.model_dump())
+        restored = await client.post("/file/knowledge/content", json=request.model_dump())
+    assert unsigned.status_code == 401
+    assert restored.status_code == 200 and restored.content == b"snapshot"
+    fetch.assert_awaited_once_with(request, user_id=actor.user_id, tenant_id=actor.tenant_id)

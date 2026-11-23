@@ -118,6 +118,7 @@ export function getMessageSources(
       sourceReference: source.sourceReference,
       fileRef: source.fileRef,
       imageRef: source.imageRef,
+      legacyImageRef: source.legacyImageRef,
       sourceLocation: source.sourceLocation,
     };
   });
