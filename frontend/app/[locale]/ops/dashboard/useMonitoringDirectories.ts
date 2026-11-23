@@ -62,11 +62,7 @@ export function useMonitoringDirectories({
   });
   const inventory = useQuery({
     queryKey: [...queryKey, "inventory", tenant],
-    enabled:
-      tenant !== undefined &&
-      canReadInventory &&
-      tab !== "overview" &&
-      tab !== "skill",
+    enabled: tenant !== undefined && canReadInventory && tab !== "skill",
     queryFn: ({ signal }) => listOperationsResources(tenant ?? null, signal),
   });
   const skills = useQuery({
@@ -95,9 +91,7 @@ export function useMonitoringDirectories({
     scope.isFetching ||
     (canChooseTenant && tenants.isFetching) ||
     (tab !== "overview" && groups.isFetching) ||
-    (tab === "skill"
-      ? skills.isFetching
-      : tab !== "overview" && inventory.isFetching) ||
+    (tab === "skill" ? skills.isFetching : inventory.isFetching) ||
     (canReadTools && tools.isFetching);
 
   return {

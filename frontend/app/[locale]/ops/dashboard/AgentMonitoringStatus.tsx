@@ -1,10 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
-import type {
-  AgentPublication,
-  AgentTokenUsage,
-} from "@/types/agentMonitoring";
+import type { AgentTokenUsage } from "@/types/agentMonitoring";
+import type { MonitoringPublication } from "@/types/operations";
 import { formatAgentMetric } from "./agentMonitoringValues";
 import styles from "./agentMonitoring.module.css";
 
@@ -13,7 +11,7 @@ export function PublicationStatus({
   publication,
 }: {
   label: string;
-  publication: AgentPublication;
+  publication: MonitoringPublication;
 }) {
   const { t } = useTranslation("common");
   return (

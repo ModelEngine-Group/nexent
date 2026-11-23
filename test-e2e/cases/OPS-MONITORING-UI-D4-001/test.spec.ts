@@ -34,6 +34,17 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   const unexpected: string[] = [];
   const listReads: Record<string, string>[] = [];
   const rankingReads: Record<string, string>[] = [];
+  const modelTrendReads: Record<string, string>[] = [];
+  let overviewModelReads = 0;
+  let releaseModelTrend = () => {};
+  const delayedModelTrend = new Promise<void>((resolve) => {
+    releaseModelTrend = resolve;
+  });
+  let holdOverviewScope = false;
+  let releaseOverviewScope = () => {};
+  const delayedOverviewScope = new Promise<void>((resolve) => {
+    releaseOverviewScope = resolve;
+  });
   const stats: {
     view: string;
     tenant: string | null;
@@ -181,6 +192,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       };
     } else if (pathname === "/api/ops/scope") {
       reads.push(`scope:${tenantId ?? "*"}`);
+      if (holdOverviewScope && tenantId === "b") await delayedOverviewScope;
       json = {
         data: {
           tenant_id: tenantId,
@@ -192,6 +204,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       json = { data: tenants, page: 1, page_size: 100, total: tenants.length };
     } else if (pathname === "/api/ops/resources") {
       reads.push(`resources:${tenantId ?? "*"}`);
+      if (searchParams.has("start_date") || searchParams.has("end_date"))
+        unexpected.push("dated resource inventory");
       const items = resources.filter(
         (row) => !tenantId || row.tenant_id === tenantId,
       );
@@ -220,6 +234,36 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
         status: "success",
         tools: [{ name: service === "3" ? "语义检索" : "查阅文件" }],
       };
+    } else if (
+      pathname === "/api/ops/v1/monitoring/models/trends" &&
+      request.method() === "GET"
+    ) {
+      modelTrendReads.push(Object.fromEntries(searchParams));
+      const start = searchParams.get("start_date");
+      const end = searchParams.get("end_date");
+      if (tenantId === null && start === "2026-11-17") await delayedModelTrend;
+      if (tenantId === "b" && start === "2026-11-07") {
+        await route.fulfill({
+          status: 422,
+          json: { detail: "Controlled Model query failure" },
+        });
+        return;
+      }
+      const unavailable = tenantId === "b";
+      const data = [];
+      for (
+        const day = new Date(`${start}T00:00Z`);
+        day <= new Date(`${end}T00:00Z`);
+        day.setUTCDate(day.getUTCDate() + 1)
+      ) {
+        data.push({
+          statistic_date: day.toISOString().slice(0, 10),
+          request_count: unavailable
+            ? null
+            : [2500, 1200, 1800, 0, 2700, 3600, 1600][data.length % 7],
+        });
+      }
+      json = { ...(unavailable ? missing : tokenStatus), data };
     } else if (
       pathname === "/api/ops/v1/monitoring/agents/rankings" &&
       request.method() === "GET"
@@ -443,6 +487,8 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await route.fulfill({ json });
   });
   contract.deferCleanup(async () => {
+    releaseModelTrend();
+    releaseOverviewScope();
     resumeMonth();
     resumeSingleSummary();
     await page.close();
@@ -495,16 +541,139 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
       "MCP",
     ]);
     await expect(select("用户组")).toHaveCount(0);
-    await expect(placeholder).toBeVisible();
+    await expect(select("智能体")).toHaveCount(0);
+    const cards = page.locator('dl[aria-label="信息概览"]');
+    const agentTrend = page.getByRole("region", { name: "智能体执行次数" });
+    const modelTrend = page.getByRole("region", { name: "模型请求数" });
+    const inventoryReads = () =>
+      reads.filter((entry) => entry.startsWith("resources:"));
+    const chart = (panel: typeof agentTrend) =>
+      panel.locator(".recharts-area-curve");
+    await expect(cards.locator("dd")).toHaveText([
+      "2",
+      "1",
+      "暂未接入",
+      "暂未接入",
+    ]);
+    await expect(
+      page.getByRole("region", { name: "MCP 工具调用量" }),
+    ).toHaveText(/暂未接入/);
+    await expect(
+      page.getByRole("region", { name: "Skill 使用次数" }),
+    ).toHaveText(/暂未接入/);
     await expect(page.getByText("2026-11-17 – 2026-11-23")).toBeVisible();
+    await expect(modelTrend).toHaveAttribute("aria-busy", "true");
+    await expect(chart(agentTrend)).toBeVisible();
+    await expect(chart(agentTrend)).toHaveAttribute("d", /M.+M/);
+    releaseModelTrend();
+    await expect(chart(modelTrend)).toBeVisible();
+    await expect(
+      modelTrend.getByText("数据滞后", { exact: true }),
+    ).toBeVisible();
+    await modelTrend.locator("circle.recharts-area-dot").nth(3).hover();
+    await expect(
+      modelTrend.getByText("模型请求数 · 0", { exact: true }),
+    ).toBeVisible();
+    await page.setViewportSize({ width: 1600, height: 1040 });
     await screenshot("overview");
+    await page.setViewportSize({ width: 1600, height: 960 });
+
+    const beforeDate = inventoryReads().length;
     await page.getByText("近一个月", { exact: true }).click();
     await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
+    await expect
+      .poll(() => modelTrendReads.at(-1))
+      .toEqual({
+        start_date: "2026-10-25",
+        end_date: "2026-11-23",
+      });
+    await expect
+      .poll(() => stats.at(-1))
+      .toEqual({
+        view: "trends",
+        tenant: null,
+        from: "2026-10-25",
+        to: "2026-11-23",
+        group: null,
+        agent: null,
+      });
+    await expect(cards.locator("dd")).toHaveText([
+      "2",
+      "1",
+      "暂未接入",
+      "暂未接入",
+    ]);
+    expect(inventoryReads()).toHaveLength(beforeDate);
+
+    holdOverviewScope = true;
+    await choose("租户", "研发中心");
+    await expect(cards.locator("dd")).toHaveText([
+      "加载中",
+      "加载中",
+      "暂未接入",
+      "暂未接入",
+    ]);
+    await expect(chart(agentTrend)).toHaveCount(0);
+    await expect(chart(modelTrend)).toHaveCount(0);
+    releaseOverviewScope();
+    holdOverviewScope = false;
+    await expect(cards.locator("dd")).toHaveText([
+      "1",
+      "0",
+      "暂未接入",
+      "暂未接入",
+    ]);
+    await expect(page.getByText("2026-10-25 – 2026-11-23")).toBeVisible();
+    await expect
+      .poll(() => modelTrendReads.at(-1))
+      .toEqual({
+        start_date: "2026-10-25",
+        end_date: "2026-11-23",
+        tenant_id: "b",
+      });
+    await expect
+      .poll(() => stats.at(-1))
+      .toMatchObject({
+        view: "trends",
+        tenant: "b",
+        from: "2026-10-25",
+        to: "2026-11-23",
+      });
+    await expect(modelTrend.locator(".ant-empty-description")).toHaveText(
+      "暂无数据",
+    );
+    await expect(chart(modelTrend)).toHaveCount(0);
+    expect(inventoryReads().at(-1)).toBe("resources:b");
+
+    const beforeCustom = modelTrendReads.length;
+    const beforeCustomInventory = inventoryReads().length;
     await page.getByText("自定义", { exact: true }).click();
+    await expect(modelTrend.locator(".ant-empty-description")).toHaveText(
+      "请选择起止日期",
+    );
+    expect(modelTrendReads).toHaveLength(beforeCustom);
     await page.getByPlaceholder("请选择开始日期").click();
     await picker.locator('[title="2026-11-07"]').click();
     await picker.locator('[title="2026-11-12"]').click();
     await expect(page.getByText("2026-11-07 – 2026-11-12")).toBeVisible();
+    await expect(modelTrend.getByRole("alert")).toHaveText("加载失败，请重试");
+    await expect(chart(agentTrend)).toBeVisible();
+    await expect(cards.locator("dd")).toHaveText([
+      "1",
+      "0",
+      "暂未接入",
+      "暂未接入",
+    ]);
+    expect(inventoryReads()).toHaveLength(beforeCustomInventory);
+    await choose("租户", "全部租户");
+    await expect(chart(modelTrend)).toBeVisible();
+    await expect(cards.locator("dd")).toHaveText([
+      "2",
+      "1",
+      "暂未接入",
+      "暂未接入",
+    ]);
+    overviewModelReads = modelTrendReads.length;
   });
   await contract.step(scope, async () => {
     await tab("智能体").click();
@@ -670,12 +839,14 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   });
   await contract.step(states, async () => {
     holdMonth = true;
+    const beforeMonth = stats.length;
     await page.getByText("近一个月", { exact: true }).click();
     await expect
       .poll(
         () =>
-          stats.filter((item) => item.from === "2026-10-25" && !item.agent)
-            .length,
+          stats
+            .slice(beforeMonth)
+            .filter((item) => item.from === "2026-10-25" && !item.agent).length,
       )
       .toBe(2);
     await expect(
@@ -934,7 +1105,9 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     await expect(
       distribution.getByText("次纳入统计", { exact: true }),
     ).toBeVisible();
-    await expect(distribution.getByText("1,000", { exact: true })).toBeVisible();
+    await expect(
+      distribution.getByText("1,000", { exact: true }),
+    ).toBeVisible();
     await expect(distribution.locator("dt")).toHaveText([
       "调用量",
       "成功 · 75%",
@@ -967,6 +1140,7 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
     safeRefresh,
     agentDetails,
     agentCharts,
+    monitoringOverview,
   ] = contract.expectedIds("assertions");
   await contract.assertion(dashboard, async () => {
     await expect(heading).toBeVisible();
@@ -1037,6 +1211,16 @@ journey("OPS-MONITORING-UI-D4-001", async ({ page, contract }) => {
   await contract.assertion(agentCharts, async () => {
     expect(new Set(rankingReads.map(({ metric }) => metric))).toEqual(
       new Set(["execution_count", "success_rate", "total_tokens"]),
+    );
+    expect(unexpected).toEqual([]);
+  });
+  await contract.assertion(monitoringOverview, async () => {
+    expect(modelTrendReads).toHaveLength(overviewModelReads);
+    expect(modelTrendReads).toEqual(
+      expect.arrayContaining([
+        { start_date: "2026-11-07", end_date: "2026-11-12", tenant_id: "b" },
+        { start_date: "2026-11-07", end_date: "2026-11-12" },
+      ]),
     );
     expect(unexpected).toEqual([]);
   });

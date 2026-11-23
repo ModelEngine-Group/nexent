@@ -16,3 +16,17 @@ export interface OperationsResourcePage {
   items: OperationsResource[];
   total: number;
 }
+
+export interface MonitoringDateScope {
+  tenantId: string | null;
+  startDate: string;
+  endDate: string;
+}
+
+export type MonitoringCoverage = "covered" | "partial" | "uncovered";
+
+export interface MonitoringPublication {
+  coverage_state: MonitoringCoverage;
+  data_as_of: string | null;
+  is_stale: boolean;
+}

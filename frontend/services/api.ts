@@ -45,6 +45,7 @@ export const API_ENDPOINTS = {
     agentMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/agents/summary`,
     agentMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/agents/trends`,
     agentMonitoringRankings: `${API_BASE_URL}/ops/v1/monitoring/agents/rankings`,
+    modelMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/models/trends`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,

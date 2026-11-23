@@ -1,19 +1,17 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-export interface AgentMonitoringSelection {
-  tenantId: string | null;
+import type {
+  MonitoringCoverage,
+  MonitoringDateScope,
+  MonitoringPublication,
+} from "./operations";
+
+export interface AgentMonitoringSelection extends MonitoringDateScope {
   agentId: number | null;
   groupIds: number[];
-  startDate: string;
-  endDate: string;
 }
 
-export type AgentCoverage = "covered" | "partial" | "uncovered";
-
-export interface AgentPublication {
-  coverage_state: AgentCoverage;
-  data_as_of: string | null;
-  is_stale: boolean;
-}
+export type AgentPublication = MonitoringPublication;
+export type AgentCoverage = MonitoringCoverage;
 
 export interface AgentTokenUsage {
   value: string | null;

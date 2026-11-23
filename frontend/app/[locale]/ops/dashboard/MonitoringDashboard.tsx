@@ -21,6 +21,7 @@ import { hasRole } from "@/lib/roles";
 import { AgentMonitoringDetails } from "./AgentMonitoringDetails";
 import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
 import { agentMonitoringSelection } from "./agentMonitoringValues";
+import { MonitoringOverview } from "./components/overview/MonitoringOverview";
 import {
   dateFormat,
   getMonitoringRange,
@@ -359,23 +360,16 @@ function MonitoringScope({
         <Alert type="error" title={t("ops.loadError")} showIcon />
       )}
       {onOverview ? (
-        <>
-          <h2 className={styles.sectionHeading}>
-            {t("ops.monitoring.inventory")}
-          </h2>
-          <dl className={styles.inventory}>
-            {(["agent", "model", "mcp", "skill"] as const).map((key) => (
-              <div key={key}>
-                <dt>{t(`ops.monitoring.count.${key}`)}</dt>
-                <dd aria-label={t("ops.monitoring.notConnected")}>—</dd>
-              </div>
-            ))}
-          </dl>
-          <h2 className={styles.sectionHeading}>{scopeLabel}</h2>
-          {dateControls}
-          {dateLabel}
-          {placeholder}
-        </>
+        <MonitoringOverview
+          userId={userId}
+          userTenant={userTenant}
+          directories={directories}
+          canReadInventory={canReadInventory}
+          scopeLabel={scopeLabel}
+          range={range}
+          dateControls={dateControls}
+          dateLabel={dateLabel}
+        />
       ) : (
         <>
           <h2
