@@ -11,7 +11,7 @@ bash deploy/images/build.sh
 
 # Build selected images with a fixed version tag
 bash build.sh \
-  --images main,web,mcp,data-process,terminal \
+  --images management,runtime,web,mcp,terminal \
   --version v2.5.0 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
@@ -19,7 +19,7 @@ bash build.sh \
 
 # Build the same image set as latest
 bash build.sh \
-  --images main,web,mcp,data-process \
+  --images management,runtime,web,mcp \
   --version latest \
   --registry general \
   --platform linux/amd64 \
@@ -37,7 +37,7 @@ The root `build.sh` forwards image builds to `deploy/images/build.sh`. Use `bash
 `--platform` and `--no-cache` are command-line only. Omit `--platform` to build for the local architecture. The `mainland` web build also uses `--no-cache` automatically to avoid stale frontend dependency caches.
 
 Variant options:
-- `--dependency-variant cpu|gpu` controls data-process dependencies and defaults to `cpu`. `gpu` builds GPU/CUDA dependencies and uses the `-gpu` image-name suffix.
+- `--dependency-variant cpu|gpu` controls Management and Runtime model dependencies and defaults to `cpu`. `gpu` builds GPU/CUDA dependencies.
 - `--terminal-variant slim|conda` controls the terminal image and defaults to `slim`. `conda` keeps Miniconda, `vim`, and the compiler toolchain and uses the `-conda` image-name suffix.
 
 Two independent sandbox images are available:
@@ -56,12 +56,13 @@ Manual runs of `docker-deploy.yml` also build only the lightweight sandbox by de
 
 The runtime mechanism is image-variant agnostic. Keep `NEXENT_SANDBOX_DOCKER_IMAGE=nexent/nexent-sandbox:latest` for the standard deployment, or switch it to `nexent/nexent-sandbox-full:latest` and roll the runtime service when the extended capabilities are required. With sandbox networking enabled, the lightweight image can install pure-Python packages or dependencies with compatible wheels at runtime. It cannot install system programs as the non-root runtime user and cannot execute Node.js workspace scripts.
 
-When building `data-process`, `deploy/images/build.sh` prepares `model-assets` automatically: it first uses an existing root `model-assets` directory, then tries `~/model-assets`, and otherwise clones the Hugging Face repository and runs `git lfs pull`. If you run `docker build` directly, prepare `model-assets` in the repository root first.
+When building Management or Runtime, `deploy/images/build.sh` prepares `model-assets` automatically: it first uses an existing root `model-assets` directory, then tries `~/model-assets`, and otherwise clones the Hugging Face repository and runs `git lfs pull`. If you run `docker build` directly, prepare `model-assets` in the repository root first.
 
 Image options:
 - `--main` builds `nexent`
 - `--web` builds `nexent-web`
-- `--data-process` builds `nexent-data-process`
+- `--management` builds `nexent-management`
+- `--runtime` builds `nexent-runtime`
 - `--mcp` builds `nexent-mcp`
 - `--terminal` builds `nexent-ubuntu-terminal`
 - `--docs` builds `nexent-docs`
@@ -75,10 +76,6 @@ docker buildx create --name nexent_builder --use
 # 🚀 build application for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
-
-# 📊 build data_process for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
 
 # 🌐 build web frontend for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
@@ -100,14 +97,12 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 ### 💻 Local Development Build
 
 ```bash
+bash deploy/images/build.sh --management --runtime --version latest --load
+```
+
+```bash
 # 🚀 Build application image (current architecture only)
 docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
-
-# 📊 Build data process image (current architecture only)
-docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
-
-# 📊 Build GPU data process image (current architecture only)
-docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images/dockerfiles/data-process/Dockerfile --build-arg DATA_PROCESS_DEPENDENCY_VARIANT=gpu .
 
 # 🌐 Build web frontend image (current architecture only)
 docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
@@ -147,11 +142,6 @@ docker builder prune -f && docker system prune -f
 - Contains backend API service
 - Built from `deploy/images/dockerfiles/main/Dockerfile`
 - Provides core agent services
-
-#### Data Processing Image (nexent/nexent-data-process)
-- Contains data processing service
-- Built from `deploy/images/dockerfiles/data-process/Dockerfile`
-- Handles document parsing and vectorization
 
 #### Web Frontend Image (nexent/nexent-web)
 - Contains Next.js frontend application
@@ -197,7 +187,6 @@ Repository selection depends on `--registry` and `--push`:
 
 All images include:
 - `nexent/nexent` - Main application backend service
-- `nexent/nexent-data-process` - Data processing service
 - `nexent/nexent-web` - Next.js frontend application
 - `nexent/nexent-docs` - Vitepress documentation site
 - `nexent/nexent-mcp` - MCP server proxy service
@@ -276,7 +265,7 @@ bash build.sh --package \
   --target all \
   --version v2.5.0 \
   --platform amd64 \
-  --components infrastructure,application,data-process \
+  --components infrastructure,application \
   --image-source general \
   --compress true \
   --output-dir offline-package
@@ -302,7 +291,7 @@ bash build.sh --package \
   --target docker \
   --version latest \
   --platform amd64 \
-  --components infrastructure,application,data-process \
+  --components infrastructure,application \
   --image-source local-latest \
   --compress true \
   --output-dir offline-package/docker-local

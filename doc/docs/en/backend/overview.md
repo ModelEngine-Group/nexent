@@ -208,7 +208,6 @@ sequenceDiagram
 - **nexent-runtime**: Runtime service (port 5014)
 - **nexent-mcp**: MCP service (SSE port 5011, management API port 5015)
 - **nexent-northbound**: Northbound open API service (port 5013)
-- **nexent-data-process**: Data processing service (port 5012)
 - **nexent-postgresql**: Database (port 5434)
 - **nexent-elasticsearch**: Search engine (port 9210)
 - **nexent-minio**: Object storage (port 9010)

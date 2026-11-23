@@ -6,7 +6,7 @@
 # install environments.
 
 DEPLOYMENT_SCHEMA_VERSION="1"
-DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process"
+DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_SANDBOX_MODE_DEFAULT="lightweight"
@@ -34,7 +34,7 @@ DEPLOYMENT_DOCKER_PORTS=""
 DEPLOYMENT_ROOT_ENV=""
 DEPLOYMENT_LANGUAGE="${DEPLOYMENT_LANGUAGE:-}"
 
-deployment_component_list="infrastructure application data-process terminal monitoring"
+deployment_component_list="infrastructure application terminal monitoring"
 deployment_https_mode_list="disabled self-signed custom"
 deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
@@ -145,7 +145,6 @@ deployment_i18n_format() {
       tui.components.help) printf '使用 Up/Down 或 j/k 移动，空格切换，Enter 确认，q 退出。' ;;
       tui.component.infrastructure) printf '必需核心依赖：Elasticsearch、PostgreSQL、Redis、MinIO' ;;
       tui.component.application) printf 'Nexent 应用服务：config、runtime、MCP、Gateway、web UI' ;;
-      tui.component.data_process) printf '后台文件解析、索引和知识处理 Worker' ;;
       tui.component.terminal) printf '终端工具使用的 OpenSSH 容器' ;;
       tui.component.monitoring) printf 'OpenTelemetry Collector 和可选链路追踪看板' ;;
       tui.monitoring.title) printf '选择监控 provider' ;;
@@ -177,7 +176,6 @@ deployment_i18n_format() {
       tui.sandbox.full) printf '启用包含 Anthropic 技能依赖的完整 Docker 沙箱' ;;
       image_build.detail.main) printf '后端 API 服务' ;;
       image_build.detail.web) printf 'Next.js 前端' ;;
-      image_build.detail.data_process) printf '文档解析和向量化 Worker' ;;
       image_build.detail.mcp) printf 'MCP 代理镜像' ;;
       image_build.detail.terminal) printf 'OpenSSH 终端工具镜像' ;;
       image_build.detail.docs) printf 'VitePress 文档站点' ;;
@@ -239,7 +237,6 @@ deployment_i18n_format() {
       tui.components.help) printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.' ;;
       tui.component.infrastructure) printf 'required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO' ;;
       tui.component.application) printf 'Nexent app services: config, runtime, MCP, Gateway, web UI' ;;
-      tui.component.data_process) printf 'background file parsing, indexing, and knowledge processing workers' ;;
       tui.component.terminal) printf 'OpenSSH container used by the terminal tool' ;;
       tui.component.monitoring) printf 'OpenTelemetry collector and optional tracing dashboard' ;;
       tui.monitoring.title) printf 'Select monitoring provider' ;;
@@ -271,7 +268,6 @@ deployment_i18n_format() {
       tui.sandbox.full) printf 'enable the full Docker sandbox with Anthropic skill dependencies' ;;
       image_build.detail.main) printf 'backend API service' ;;
       image_build.detail.web) printf 'Next.js frontend' ;;
-      image_build.detail.data_process) printf 'document parsing and vectorization worker' ;;
       image_build.detail.mcp) printf 'MCP proxy image' ;;
       image_build.detail.terminal) printf 'OpenSSH terminal tool image' ;;
       image_build.detail.docs) printf 'VitePress documentation site' ;;
@@ -1133,8 +1129,8 @@ deployment_apply_legacy_inputs() {
         DEPLOYMENT_COMPONENTS="infrastructure,application"
         ;;
       full)
-        deployment_warn "DEPLOYMENT_VERSION=full is deprecated; use --components infrastructure,application,data-process."
-        DEPLOYMENT_COMPONENTS="infrastructure,application,data-process"
+        deployment_warn "DEPLOYMENT_VERSION=full is deprecated; use --components infrastructure,application."
+        DEPLOYMENT_COMPONENTS="infrastructure,application"
         ;;
     esac
   fi
@@ -1432,11 +1428,10 @@ deployment_tui_multiselect_components() {
   [ -n "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && return 0
   [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
 
-  local components=(infrastructure application data-process terminal monitoring)
+  local components=(infrastructure application terminal monitoring)
   local details=(
     "$(deployment_i18n tui.component.infrastructure)"
     "$(deployment_i18n tui.component.application)"
-    "$(deployment_i18n tui.component.data_process)"
     "$(deployment_i18n tui.component.terminal)"
     "$(deployment_i18n tui.component.monitoring)"
   )
@@ -2098,10 +2093,6 @@ deployment_compute_selection() {
     docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-gateway nexent-web nexent-ops)
     helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-gateway nexent-web nexent-ops)
   fi
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
-    docker_services+=(nexent-data-process)
-    helm_charts+=(nexent-data-process)
-  fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
     docker_services+=(nexent-openssh-server)
     helm_charts+=(nexent-openssh)
@@ -2131,9 +2122,6 @@ deployment_compute_docker_ports() {
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
     ports+=(5010 5014 5011 5015 5013 3000 "${OPS_PORT:-5016}")
-  fi
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
-    ports+=(5012 5555)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
     ports+=(2222)
@@ -2184,7 +2172,6 @@ deployment_render_image_rollout_checksums() {
   printf '    managementImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_MANAGEMENT_IMAGE")"
   printf '    runtimeImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_RUNTIME_IMAGE")"
   printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
-  printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
   printf '    sshImage: "%s"\n' "$(deployment_image_rollout_checksum "$OPENSSH_SERVER_IMAGE")"
 }
 
@@ -2198,7 +2185,6 @@ deployment_apply_image_source() {
     export NEXENT_MANAGEMENT_IMAGE="nexent/nexent-management:latest"
     export NEXENT_RUNTIME_IMAGE="nexent/nexent-runtime:latest"
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
-    export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
     export NEXENT_MCP_DOCKER_IMAGE="nexent/nexent-mcp:latest"
     export NEXENT_SANDBOX_IMAGE="nexent/nexent-sandbox:latest"
     export OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest"
@@ -2209,7 +2195,6 @@ deployment_apply_image_source() {
   export NEXENT_MANAGEMENT_IMAGE="${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:$version}"
   export NEXENT_RUNTIME_IMAGE="${NEXENT_RUNTIME_IMAGE:-nexent/nexent-runtime:$version}"
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
-  export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
   export NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:$version}"
   case "$DEPLOYMENT_SANDBOX_MODE" in
@@ -2259,7 +2244,6 @@ deployment_apply_image_source() {
       NEXENT_MANAGEMENT_IMAGE \
       NEXENT_RUNTIME_IMAGE \
       NEXENT_WEB_IMAGE \
-      NEXENT_DATA_PROCESS_IMAGE \
       NEXENT_MCP_DOCKER_IMAGE \
       NEXENT_SANDBOX_IMAGE \
       ELASTICSEARCH_IMAGE \
@@ -2332,7 +2316,6 @@ deployment_render_docker_env() {
     printf 'NEXENT_MANAGEMENT_IMAGE="%s"\n' "$NEXENT_MANAGEMENT_IMAGE"
     printf 'NEXENT_RUNTIME_IMAGE="%s"\n' "$NEXENT_RUNTIME_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
-    printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
     printf 'NEXENT_SANDBOX_IMAGE="%s"\n' "$NEXENT_SANDBOX_IMAGE"
     printf 'NEXENT_SANDBOX_DEFAULT_LEVEL="%s"\n' "$NEXENT_SANDBOX_DEFAULT_LEVEL"
@@ -2382,8 +2365,6 @@ deployment_render_image_values() {
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
-  printf 'nexent-data-process:\n'
-  printf '  images:\n    dataProcess:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_DATA_PROCESS_IMAGE")" "$(deployment_image_tag "$NEXENT_DATA_PROCESS_IMAGE")" "$local_pull_policy"
   printf 'nexent-elasticsearch:\n'
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$ELASTICSEARCH_IMAGE")" "$(deployment_image_tag "$ELASTICSEARCH_IMAGE")"
   printf 'nexent-postgresql:\n'
@@ -2432,8 +2413,6 @@ deployment_render_k8s_port_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30014\n' "$internal_type"
   printf 'nexent-mcp:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
-  printf 'nexent-data-process:\n'
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n' "$internal_type"
   printf 'nexent-elasticsearch:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30920\n      transport: 30930\n' "$internal_type"
   printf 'nexent-postgresql:\n'
@@ -2488,10 +2467,6 @@ deployment_render_helm_chart_values() {
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf '  services:\n    web:\n      type: "%s"\n      nodePort: %s\n' "$web_type" "${NEXENT_WEB_PORT:-30000}"
-  printf 'nexent-data-process:\n'
-  printf '  enabled: %s\n' "$(deployment_chart_enabled data-process)"
-  printf '  images:\n    dataProcess:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_DATA_PROCESS_IMAGE")" "$(deployment_image_tag "$NEXENT_DATA_PROCESS_IMAGE")" "$local_pull_policy"
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n' "$internal_type"
   printf 'nexent-elasticsearch:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled infrastructure)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$ELASTICSEARCH_IMAGE")" "$(deployment_image_tag "$ELASTICSEARCH_IMAGE")"

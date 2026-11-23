@@ -26,7 +26,7 @@ def test_existing_release_stops_writers_and_activates_only_after_bootstrap(isola
         assert not upgrades
         assert not any("nexent-bootstrap-start" in line for line in commands)
         return
-    assert len(scales) == 6
+    assert len(scales) == 5
     assert max(scales) < upgrades[0]
     assert "global.businessPaused=true" in commands[upgrades[0]]
     if failure == "bootstrap":
@@ -39,5 +39,5 @@ def test_existing_release_stops_writers_and_activates_only_after_bootstrap(isola
     assert upgrades[0] < start < upgrades[1]
     assert "global.businessPaused=false" in commands[upgrades[1]]
     assert {commands[i].split()[2] for i in scales} == {
-        f"deployment/nexent-{name}" for name in ("config", "runtime", "mcp", "northbound", "web", "data-process")
+        f"deployment/nexent-{name}" for name in ("config", "runtime", "mcp", "northbound", "web")
     }

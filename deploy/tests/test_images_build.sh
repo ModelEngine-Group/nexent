@@ -58,14 +58,15 @@ grep -q 'libreoffice-impress' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandb
 ! grep -q 'playwright install' "$FULL_SANDBOX_DOCKERFILE" || fail "the focused full sandbox should exclude Playwright Chromium"
 grep -q 'io.nexent.sandbox.skills="docx,pdf,pptx,xlsx,canvas-design,frontend-design,slack-gif-creator,mcp-builder,web-artifacts-builder,skill-creator"' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandbox should declare its supported skills"
 grep -q 'io.nexent.sandbox.variant="full"' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandbox should identify its variant"
-grep -q 'image: \[main, gateway, web, data-process, mcp, terminal, sandbox, sandbox-full\]' "$MAINLAND_WORKFLOW" || fail "mainland publishing should include sandbox-full"
-grep -q 'image: \[main, gateway, web, data-process, mcp, terminal, sandbox, sandbox-full\]' "$OVERSEAS_WORKFLOW" || fail "overseas publishing should include sandbox-full"
+grep -q 'image: \[main, management, runtime, gateway, web, mcp, terminal, sandbox, sandbox-full\]' "$MAINLAND_WORKFLOW" || fail "mainland publishing should include sandbox-full"
+grep -q 'image: \[main, management, runtime, gateway, web, mcp, terminal, sandbox, sandbox-full\]' "$OVERSEAS_WORKFLOW" || fail "overseas publishing should include sandbox-full"
 
-output="$(bash "$BUILD_SCRIPT" --images main,web,mcp,data-process --version latest --registry general --dry-run)"
+output="$(bash "$BUILD_SCRIPT" --images main,management,runtime,web,mcp --version latest --registry general --dry-run)"
 assert_contains "$output" "nexent/nexent:latest" "image list should build main image with latest tag"
 assert_contains "$output" "nexent/nexent-web:latest" "image list should build web image with latest tag"
 assert_contains "$output" "nexent/nexent-mcp:latest" "image list should build mcp image with latest tag"
-assert_contains "$output" "nexent/nexent-data-process:latest" "image list should build data-process image with latest tag"
+assert_contains "$output" "nexent/nexent-management:latest" "image list should build the Management image with latest tag"
+assert_contains "$output" "nexent/nexent-runtime:latest" "image list should build the Runtime image with latest tag"
 assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "terminal image should not be built when terminal image is absent"
 assert_not_contains "$output" "--platform" "default build should use local architecture"
 
@@ -133,20 +134,20 @@ if bash "$BUILD_SCRIPT" --images main,unknown --dry-run >/tmp/nexent-image-build
 fi
 assert_contains "$(cat /tmp/nexent-image-build-invalid.log)" "Unsupported image: unknown" "unknown image should explain the error"
 
-if bash "$BUILD_SCRIPT" --data-process --variant slim --dry-run >/tmp/nexent-image-build-variant.log 2>&1; then
-  fail "deprecated data-process variant option should fail"
+if bash "$BUILD_SCRIPT" --data-process --dry-run >/tmp/nexent-image-build-variant.log 2>&1; then
+  fail "retired data-process option should fail"
 fi
-assert_contains "$(cat /tmp/nexent-image-build-variant.log)" "Unknown option: --variant" "deprecated data-process variant option should be rejected"
+assert_contains "$(cat /tmp/nexent-image-build-variant.log)" "Unknown option: --data-process" "retired data-process option should be rejected"
 
 output="$(
-  printf 'main,web,mcp,data-process\n1\n1\n' | \
+  printf 'main,management,runtime,web,mcp\n1\n1\n' | \
     bash "$BUILD_SCRIPT" --interactive --dry-run
 )"
 assert_contains "$output" "Nexent image build configuration" "interactive mode should show configuration prompt"
 assert_contains "$output" "nexent/nexent:latest" "interactive mode should accept latest version selection"
 assert_contains "$output" "nexent/nexent-web:latest" "interactive image selection should include web image"
 assert_contains "$output" "nexent/nexent-mcp:latest" "interactive image selection should include mcp image"
-assert_contains "$output" "nexent/nexent-data-process:latest" "interactive image selection should include data-process image"
+assert_contains "$output" "nexent/nexent-management:latest" "interactive image selection should include the Management image"
 assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactive image selection should exclude unselected terminal image"
 assert_not_contains "$output" "--platform" "interactive mode should use local architecture by default"
 

@@ -12,7 +12,6 @@ monitoringProvider: "otlp"
 # components:
 #   - infrastructure
 #   - application
-#   - data-process
 #   - terminal
 #   - monitoring
 # monitoringProvider: "phoenix"

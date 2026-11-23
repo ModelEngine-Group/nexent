@@ -290,46 +290,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  nexent-data-process:
-    image: ${NEXENT_DATA_PROCESS_IMAGE}
-    container_name: nexent-data-process
-    restart: always
-    privileged: true
-    ports:
-      - "5012:5012"
-      - "5555:5555" # Celery Flower port
-    volumes:
-      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
-      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
-    environment:
-      TZ: "${TZ:-Asia/Shanghai}"
-      <<: [*proxy-vars, *es-vars, *minio-vars]
-      NEXENT_SQL_STARTUP_MODE: "off"
-      DOCKER_ENVIRONMENT: "true"
-      PYTHONPATH: "/opt:/opt/backend"
-      skip_proxy: "true"
-    env_file:
-      - ../../env/.env
-    depends_on:
-      nexent-config:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nexent-elasticsearch:
-        condition: service_healthy
-    networks:
-      - nexent
-    entrypoint: >
-      /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python -m backend.http.data_process_service'
-      "
-
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   redis:
     image: ${REDIS_IMAGE}
     container_name: nexent-redis

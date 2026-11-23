@@ -120,7 +120,7 @@ jobs:
       - name: Set deployment components
         id: set-components
         run: |
-          COMPONENTS="infrastructure,application,data-process,terminal"
+          COMPONENTS="infrastructure,application,terminal"
 
           echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
           echo "Selected deployment components: $COMPONENTS"

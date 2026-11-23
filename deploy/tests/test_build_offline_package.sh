@@ -159,7 +159,7 @@ echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'nexent/\${{ steps.set-vars.o
 echo "$WORKFLOW_CONTENT" | grep -q 'uses: actions/upload-artifact@v7' || fail "offline package workflow should use upload-artifact v7 for unarchived uploads"
 echo "$WORKFLOW_CONTENT" | grep -q "^[[:space:]]*path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip artifact"
 echo "$WORKFLOW_CONTENT" | grep -q '^[[:space:]]*archive: false' || fail "offline package workflow should upload the zip without adding another archive layer"
-echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,terminal"' || fail "offline package workflow should select all packageable components"
+echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,terminal"' || fail "offline package workflow should select all packageable components"
 echo "$WORKFLOW_CONTENT" | grep -A4 '^      include_full_sandbox:$' | grep -q 'default: false' || fail "offline packages should keep the full sandbox opt-in"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--include-sandbox-full "${{ steps.set-vars.outputs.include-full-sandbox }}"' || fail "offline package workflow should forward the full sandbox switch"
 
@@ -408,7 +408,7 @@ push_log="$TMP_DIR/push-images.log"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --image-registry-prefix https://registry.local/nexent/ \
@@ -418,13 +418,16 @@ grep -q '^login registry.local --username user --password-stdin password=secret$
 grep -q '^IMAGE_REGISTRY_PREFIX=registry.local/nexent$' "$TMP_DIR/push-images.env" || fail "push-images.sh should write selected registry prefix to output env file"
 grep -q '^tag nexent/nexent:latest registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should tag Nexent image with registry prefix"
 grep -q '^push registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should push prefixed Nexent image"
+for role in management runtime; do
+  grep -q "^push registry.local/nexent/nexent/nexent-${role}:latest$" "$push_log" || fail "push-images.sh should push the $role image"
+done
 grep -q '^tag docker.elastic.co/elasticsearch/elasticsearch:8.17.4 registry.local/nexent/docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$push_log" || fail "push-images.sh should tag third-party image with registry prefix"
 grep -q '^tag nexent/minio:RELEASE.2023-12-20T01-00-02Z registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should tag the configured MinIO image with registry prefix"
 grep -q '^push registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should push the configured MinIO image"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --load-images \

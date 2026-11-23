@@ -440,11 +440,9 @@ render_k8s_runtime_config_values() {
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
     echo "    services:"
     printf '      northboundServer: %s\n' "$(yaml_quote "$(effective_northbound_api_server)")"
-    # These inputs also supply defaults for runtime state and worker concurrency.
+    # Redis also supplies the default Runtime state store.
     echo "    redis:"
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
-    echo "    dataProcess:"
-    printf '      partProcessorCount: %s\n' "$(yaml_quote "$(env_or_default DP_PART_PROCESSOR_COUNT "3")")"
     echo "nexent-web:"
     echo "  config:"
     printf '    fileUploadSizeLimit: %s\n' "$(yaml_quote "$(env_or_default FILE_UPLOAD_SIZE_LIMIT "10")")"
@@ -676,7 +674,7 @@ validate_application_release() {
 stop_old_business_workloads() {
     local deployment found pods elapsed
     local existing=()
-    for deployment in nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; do
+    for deployment in nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web; do
         found=$(kubectl get deployment "$deployment" -n "$NAMESPACE" --ignore-not-found -o name) || return 1
         [ -z "$found" ] || existing+=("$deployment")
     done
@@ -989,9 +987,6 @@ wait_for_nexent_ready() {
 
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
         deployments="nexent-config nexent-runtime nexent-mcp nexent-gateway nexent-web nexent-ops"
-    fi
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
-        deployments="$deployments nexent-data-process"
     fi
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         deployments="$deployments nexent-openssh"

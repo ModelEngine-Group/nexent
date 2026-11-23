@@ -52,15 +52,6 @@ runtime-images = [
     "torch>=2.6.0,<3",
     "transformers>=4.25.1,<5",
 ]
-data-process = [
-    "celery>=5.3.6",
-    "flower>=2.0.1",
-    "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
-    "openpyxl>=3.1.5",
-    "xlrd>=2.0.1",
-    "huggingface_hub>=0.30.0,<1.0",
-    "nexent[data_process,performance]",
-]
 runtime-knowledge = [
     "unstructured==0.18.14",
 ]

@@ -23,9 +23,8 @@ OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
 ES_API_KEY = os.getenv('ELASTICSEARCH_API_KEY')
 ES_PASSWORD = os.getenv('ELASTIC_PASSWORD')
-ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 
-# Data Processing Service Configuration
+# Runtime and Management AgentOS
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
 MANAGEMENT_AGENTOS_URL = os.getenv('MANAGEMENT_AGENTOS_URL', 'http://nexent-config:5010').rstrip('/')
 _FILE_CLEANSE_FLAG = os.getenv('MANAGEMENT_FILE_CLEANSE_ENABLED', 'false').lower()
@@ -230,7 +229,7 @@ NEXENT_POSTGRES_PASSWORD = os.getenv('NEXENT_POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
-# Data Processing Service Configuration
+# Redis configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_BACKEND_URL = os.getenv('REDIS_BACKEND_URL')
 REDIS_PORT = int(os.getenv('REDIS_PORT', '6379'))
@@ -261,24 +260,12 @@ RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = float(os.getenv('RUNTIME_THREAD_SHUTDOWN
 NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv('NORTHBOUND_IDEMPOTENCY_TTL_SECONDS', '600'))
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv('NORTHBOUND_RATE_LIMIT_ENABLED', 'true').lower() == 'true'
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv('NORTHBOUND_RATE_LIMIT_PER_MINUTE', '120'))
-FLOWER_PORT = int(os.getenv('FLOWER_PORT', '5555'))
-DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(os.getenv('DP_REDIS_CHUNKS_WAIT_TIMEOUT_S', '300'))
-DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(os.getenv('DP_REDIS_CHUNKS_POLL_INTERVAL_MS', '200'))
 REDIS_ERROR_INFO_TTL_SECONDS = int(os.getenv('REDIS_ERROR_INFO_TTL_SECONDS', str(1 * 24 * 60 * 60)))
 REDIS_ERROR_INFO_SCAN_COUNT = int(os.getenv('REDIS_ERROR_INFO_SCAN_COUNT', '500'))
-FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv('FORWARD_REDIS_RETRY_DELAY_S', '5'))
-FORWARD_REDIS_RETRY_MAX = int(os.getenv('FORWARD_REDIS_RETRY_MAX', '12'))
 
-# Data processing parser configuration
-DP_PART_PROCESSOR_COUNT = int(os.getenv('DP_PART_PROCESSOR_COUNT', '3'))
-DP_FILE_SPLIT_SIZE_MB = int(os.getenv('DP_FILE_SPLIT_SIZE_MB', '5'))
-DP_PARSE_MAX_PROCESSES = int(os.getenv('DP_PARSE_MAX_PROCESSES', '3'))
-DP_PARSE_MIN_PROCESSES = int(os.getenv('DP_PARSE_MIN_PROCESSES', '1'))
+# Management file cleansing
 DP_PARSE_THREADS_PER_PROCESS = int(os.getenv('DP_PARSE_THREADS_PER_PROCESS', '2'))
-DP_PARSE_MAX_TASKS_PER_CHILD = int(os.getenv('DP_PARSE_MAX_TASKS_PER_CHILD', '1000'))
 DP_PRELOAD_MODELS = os.getenv('DP_PRELOAD_MODELS', 'unstructured_default').strip()
-DP_PARSER_STARTUP_TIMEOUT_S = int(os.getenv('DP_PARSER_STARTUP_TIMEOUT_S', '300'))
-DP_PARSER_WORKER_GENERATION = os.getenv('DP_PARSER_WORKER_GENERATION', '').strip()
 
 # Logging Configuration
 LOG_DIR = os.getenv('LOG_DIR', 'logs')
@@ -293,26 +280,9 @@ LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', str(50 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', '30'))
 
 # Service Control Flags
-DISABLE_CELERY_FLOWER = os.getenv('DISABLE_CELERY_FLOWER', 'false').lower() == 'true'
-DOCKER_ENVIRONMENT = os.getenv('DOCKER_ENVIRONMENT', 'false').lower() == 'true'
 NEXENT_MCP_DOCKER_IMAGE = os.getenv('NEXENT_MCP_DOCKER_IMAGE', 'nexent/nexent-mcp:latest')
 ENABLE_UPLOAD_IMAGE = os.getenv('ENABLE_UPLOAD_IMAGE', 'false').lower() == 'true'
 ENABLE_JIUWEN_SDK = os.getenv('NEXENT_ENABLE_JIUWEN_SDK', 'true').lower() == 'true'
-
-# Celery Configuration
-CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.getenv('CELERY_WORKER_PREFETCH_MULTIPLIER', '1'))
-CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '3600'))
-ELASTICSEARCH_REQUEST_TIMEOUT = int(os.getenv('ELASTICSEARCH_REQUEST_TIMEOUT', '30'))
-
-# Worker Configuration
-QUEUES = os.getenv('QUEUES', 'process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q')
-
-# Will be dynamically set based on PID if not provided
-WORKER_NAME = os.getenv('WORKER_NAME')
-
-# The data-process service sets a queue-specific value for each child worker.
-# Keep the historical default when the variable is not provided.
-WORKER_CONCURRENCY = int(os.getenv('WORKER_CONCURRENCY', str(DP_PART_PROCESSOR_COUNT + 1)))
 
 # ===== Memory System =====
 # MMR (Maximal Marginal Relevance) configuration
@@ -451,7 +421,7 @@ KUBERNETES_NAMESPACE = os.getenv('KUBERNETES_NAMESPACE', 'nexent')
 NORTHBOUND_EXTERNAL_URL = os.getenv('NORTHBOUND_EXTERNAL_URL', 'http://localhost:5013/api').rstrip('/')
 APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 KNOWLEDGE_CLEANSE_PARSER_VERSION = APP_VERSION + "-cleanse-v2"
-KNOWLEDGE_RUNTIME_HYBRID_ENABLED = os.getenv("KNOWLEDGE_RUNTIME_HYBRID_ENABLED", "false").lower() in ("true", "1")
+KNOWLEDGE_RUNTIME_HYBRID_ENABLED = os.getenv("KNOWLEDGE_RUNTIME_HYBRID_ENABLED", "true").lower() in ("true", "1")
 
 # =============================================================================
 # Agent Sandbox Configuration

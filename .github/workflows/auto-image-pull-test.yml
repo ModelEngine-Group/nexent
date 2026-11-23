@@ -15,7 +15,6 @@ env:
   NEXENT_IMAGE: nexent/nexent:latest
   NEXENT_GATEWAY_IMAGE: nexent/nexent-gateway:latest
   NEXENT_WEB_IMAGE: nexent/nexent-web:latest
-  NEXENT_DATA_PROCESS_IMAGE: nexent/nexent-data-process:latest
   OPENSSH_SERVER_IMAGE: nexent/nexent-ubuntu-terminal:latest
 
 jobs:
@@ -40,7 +39,6 @@ jobs:
           docker rmi -f ${{ env.NEXENT_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_IMAGE }} not found locally"
           docker rmi -f ${{ env.NEXENT_GATEWAY_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_GATEWAY_IMAGE }} not found locally"
           docker rmi -f ${{ env.NEXENT_WEB_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_WEB_IMAGE }} not found locally"
-          docker rmi -f ${{ env.NEXENT_DATA_PROCESS_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_DATA_PROCESS_IMAGE }} not found locally"
           docker rmi -f ${{ env.OPENSSH_SERVER_IMAGE }} 2>/dev/null || echo "Image ${{ env.OPENSSH_SERVER_IMAGE }} not found locally"
           
           # Clean up dangling images
@@ -92,6 +90,21 @@ jobs:
             fi
           done
 
+      - name: Test pull the Management and Runtime images
+        env:
+          PULL_COUNT: ${{ steps.random-count.outputs.pull-count }}
+        run: |
+          for image in nexent/nexent-management:latest nexent/nexent-runtime:latest; do
+            docker rmi -f "$image" 2>/dev/null || true
+            for attempt in $(seq 1 "$PULL_COUNT"); do
+              docker pull "$image"
+              docker rmi -f "$image"
+              if [ "$attempt" -lt "$PULL_COUNT" ]; then
+                sleep 5
+              fi
+            done
+          done
+
       - name: Test pull nexent/nexent-web:latest  
         run: |
           echo "Testing nexent/nexent-web:latest image pull..."
@@ -105,28 +118,6 @@ jobs:
               docker rmi -f ${{ env.NEXENT_WEB_IMAGE }} 2>/dev/null || true
             else
               echo "❌ Failed to pull nexent/nexent-web:latest (attempt $i)"
-              exit 1
-            fi
-            
-            # Wait 5 seconds if not the last pull attempt
-            if [ $i -lt $PULL_COUNT ]; then
-              sleep 5
-            fi
-          done
-          
-      - name: Test pull nexent/nexent-data-process:latest
-        run: |
-          echo "Testing nexent/nexent-data-process:latest image pull..."
-          PULL_COUNT=${{ steps.random-count.outputs.pull-count }}
-          
-          for i in $(seq 1 $PULL_COUNT); do
-            echo "Pull attempt $i/$PULL_COUNT for nexent/nexent-data-process:latest"
-            if docker pull ${{ env.NEXENT_DATA_PROCESS_IMAGE }}; then
-              echo "✅ Successfully pulled nexent/nexent-data-process:latest (attempt $i)"
-              # Remove image after successful pull to prepare for next pull
-              docker rmi -f ${{ env.NEXENT_DATA_PROCESS_IMAGE }} 2>/dev/null || true
-            else
-              echo "❌ Failed to pull nexent/nexent-data-process:latest (attempt $i)"
               exit 1
             fi
             
@@ -165,7 +156,6 @@ jobs:
           docker rmi -f ${{ env.NEXENT_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_IMAGE }} already removed"
           docker rmi -f ${{ env.NEXENT_GATEWAY_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_GATEWAY_IMAGE }} already removed"
           docker rmi -f ${{ env.NEXENT_WEB_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_WEB_IMAGE }} already removed"
-          docker rmi -f ${{ env.NEXENT_DATA_PROCESS_IMAGE }} 2>/dev/null || echo "Image ${{ env.NEXENT_DATA_PROCESS_IMAGE }} already removed"
           docker rmi -f ${{ env.OPENSSH_SERVER_IMAGE }} 2>/dev/null || echo "Image ${{ env.OPENSSH_SERVER_IMAGE }} already removed"
           
           # Clean up dangling and unused images
@@ -182,7 +172,8 @@ jobs:
           echo "Images tested:"
           echo "  - nexent/nexent:latest"
           echo "  - nexent/nexent-gateway:latest"
+          echo "  - nexent/nexent-management:latest"
+          echo "  - nexent/nexent-runtime:latest"
           echo "  - nexent/nexent-web:latest" 
-          echo "  - nexent/nexent-data-process:latest"
           echo "  - nexent/nexent-ubuntu-terminal:latest"
           echo "Next scheduled run: in 30 minutes"

@@ -113,7 +113,7 @@ def test_k8s_runtime_renderer_passes_existing_postgres_values(tmp_path):
     assert result.returncode == 0, result.stderr
     config = yaml.safe_load(output.read_text(encoding="utf-8"))["nexent-common"]["config"]
     assert config["postgres"] == dict(host="existing-db", port="5544", db="existing", user="existing-user")
-    assert set(config) == {"timezone", "postgres", "services", "redis", "dataProcess"}
+    assert set(config) == {"timezone", "postgres", "services", "redis"}
 
 
 @pytest.mark.parametrize(("file_key", "chart_key", "expected"), [

@@ -521,21 +521,6 @@ maybe_delete_local_volume_data() {
   fi
 }
 
-cleanup_leftover_data_process_resources() {
-  if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    echo "正在清理残留的 nexent-data-process 资源..."
-  else
-    echo "Cleaning up leftover nexent-data-process resources..."
-  fi
-  kubectl delete deployment nexent-data-process -n "$NAMESPACE" --ignore-not-found=true 2>/dev/null || true
-  kubectl delete service nexent-data-process -n "$NAMESPACE" --ignore-not-found=true 2>/dev/null || true
-  kubectl delete rs,pod -n "$NAMESPACE" -l app=nexent-data-process --ignore-not-found=true 2>/dev/null || true
-}
-
 cleanup_leftover_monitoring_resources() {
   if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
     return 0
@@ -566,7 +551,6 @@ cleanup_leftover_monitoring_resources() {
 
 cleanup_leftover_nexent_resources() {
   if [ "$RELEASE_SCOPE" = "all" ] || [ "$RELEASE_SCOPE" = "nexent" ]; then
-    cleanup_leftover_data_process_resources
     cleanup_leftover_monitoring_resources
   fi
 }

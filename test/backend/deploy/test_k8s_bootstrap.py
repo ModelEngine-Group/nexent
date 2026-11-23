@@ -36,7 +36,7 @@ deploy_application_release
 
 def test_non_application_selection_does_not_stop_application_or_run_bootstrap():
     result = run(shell_function("k8s", "deploy_application_release") + r'''
-DEPLOYMENT_COMPONENTS=data-process
+DEPLOYMENT_COMPONENTS=infrastructure
 deployment_csv_contains() { return 1; }
 validate_application_release() { return 0; }
 stop_old_business_workloads() { echo UNEXPECTED; return 1; }
@@ -73,9 +73,9 @@ stop_old_business_workloads
     if fresh:
         assert not scales
     elif not failure:
-        assert len(scales) == 6
+        assert len(scales) == 5
         assert all("--replicas=0" in line for line in scales)
-        assert len([line for line in result.stderr.splitlines() if line.startswith("KUBE:get pods")]) == 6
+        assert len([line for line in result.stderr.splitlines() if line.startswith("KUBE:get pods")]) == 5
     assert not any(resource in line for line in scales for resource in ("postgres", "redis", "minio", "elasticsearch", "supabase"))
 
 

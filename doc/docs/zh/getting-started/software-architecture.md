@@ -22,7 +22,6 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 | **nexent-runtime** | 5014 | 运行时 API：智能体执行、沙箱协调和流式响应 |
 | **nexent-mcp** | 5011/5015 | MCP API 与 FastMCP 服务：MCP 配置、工具发现和容器管理 |
 | **nexent-northbound** | 5013 | 北向 API：外部调用、会话管理和 A2A 接口 |
-| **nexent-data-process** | 5012 | 数据处理 API：文档解析、分块、向量化和索引 |
 
 ### 🧠 业务逻辑层（Business Logic Layer）
 后端采用清晰的分层架构：
@@ -206,8 +205,6 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 │   └── MCP 工具协议、容器管理
 ├── nexent-northbound (5013)
 │   └── 外部 API、A2A 协议、合作伙伴集成
-├── nexent-data-process (5012)
-│   └── 文档处理、向量化、Celery 工作者
 ├── nexent-web (3000)
 │   └── 前端 Next.js 应用
 ├── nexent-sandbox（按运行策略创建）
@@ -271,7 +268,7 @@ Docker Compose 编排：
 
 ### 📚 知识库处理流
 ```
-文件上传 → nexent-config → nexent-data-process
+文件上传 → Management 清洗 → AgentOS → Runtime
     → 文档解析 → 分块 → 向量化
     → Elasticsearch 索引 → 搜索就绪
 ```

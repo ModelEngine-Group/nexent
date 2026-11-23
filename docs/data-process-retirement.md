@@ -1,6 +1,20 @@
 # Data Process 退役开发入口
 
-本分支 `feat-data-process-retirement` 从 `045a69912` 创建，承接 AgentOS stacked PR #4280。当前已迁移清洗及 Runtime 文本 KB 的基础执行链，旧消费者和部署尚未全部切换，data-process 仍在。
+本分支 `feat-data-process-retirement` 从 `045a69912` 创建，承接 AgentOS stacked PR #4280。本分支的默认部署由 Management 清洗文件，Runtime 通过 AgentOS 接管检索及索引执行。仓库已移除旧 worker 源码、镜像构建目标、Compose 服务及 Helm 子 chart。
+
+## 存量环境升级
+
+升级使用已有 Elasticsearch 索引、映射和文档字段。新文件继续写入原知识库索引，历史分块沿用现有读路径。升级前先只读核对专用 Redis 队列、未确认消息和在途文件状态，确认旧 worker 排空后再部署。共享队列无需清理。旧 Redis 结果可由 Management 运维工具只读盘点。
+
+使用 Runtime 后，单次混合检索按 AgentOS 契约最多选择 100 个不同的知识库。普通和北向 API 延用原请求和响应字段。
+
+旧 `.env` 或 Helm override 如果显式关闭了 `KNOWLEDGE_RUNTIME_HYBRID_ENABLED` 或 `nexent-config.config.runtimeHybridEnabled`，升级时将对应配置改为 `true`。Docker Compose 升级完成后，按现场授权仅移除旧 `nexent-data-process` 容器。Helm 升级会移除旧子 chart 的工作负载，应在排空确认后执行。SDK 的解析算法仍由 Management 使用。
+
+```bash
+bash deploy/images/build.sh --management --runtime --version latest --load
+```
+
+## 迁移记录
 
 完整 SPEC 保存在独立同步的 nexent-doc 文档目录，不复制进代码仓库。
 

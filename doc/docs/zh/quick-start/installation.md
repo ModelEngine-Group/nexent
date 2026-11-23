@@ -63,10 +63,10 @@ bash deploy.sh docker
 bash deploy.sh docker --defaults
 
 # 默认组件组合，development 端口策略，标准镜像源
-bash deploy.sh docker --components infrastructure,application,data-process --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-bash deploy.sh docker --components infrastructure,application,data-process,terminal
+bash deploy.sh docker --components infrastructure,application,terminal
 
 # 使用中国大陆镜像源
 bash deploy.sh docker --image-source mainland
@@ -177,7 +177,6 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-runtime | 智能体运行时 API | 5014 |
 | nexent-mcp | MCP 管理与工具服务 | 5011/5015 |
 | nexent-web | Web 前端 | 3000 |
-| nexent-data-process | 数据处理服务 | 5012 |
 | nexent-northbound | 北向 API 服务 | 5013 |
 
 **基础设施服务:**
@@ -243,7 +242,6 @@ Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compo
 | 后端 API | 5010 | 5010 | 后端服务 |
 | Runtime API | 5014 | 5014 | 智能体运行时服务 |
 | MCP API | 5011/5015 | 5011/5015 | MCP 管理与工具服务 |
-| 数据处理 | 5012 | 5012 | 数据处理 API |
 | 北向 API | 5013 | 5013 | 北向接口服务 (A2A/MCP 集成) |
 | PostgreSQL | 5432 | 5434 | 数据库连接 |
 | Elasticsearch | 9200 | 9210 | 搜索引擎 API |

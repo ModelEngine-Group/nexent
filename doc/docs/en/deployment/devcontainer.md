@@ -4,14 +4,14 @@
 
 This development container configuration sets up a complete Nexent development environment, including the following components:
 
-- Main development container (`nexent-data-process`): Based on the nexent/nexent-data-process image, with the repository code mounted into the container's `/opt` directory and a Python development environment pre-installed
+- Main development container (`nexent-config-dev`): Based on the nexent/nexent-management image, with the repository code mounted into the container's `/opt` directory and a Python development environment pre-installed
 - Service containers (infrastructure and application services deployed via `bash deploy.sh docker`):
   - Elasticsearch (`nexent-elasticsearch`)
   - PostgreSQL (`nexent-postgresql`)
   - MinIO (`nexent-minio`)
   - Backend Config service (`nexent-config`)
   - Web frontend (`nexent-web`)
-  - Data processing service (`nexent-data-process`)
+  - Management service (`nexent-config`)
 
 ## 2. Usage Steps
 
@@ -25,7 +25,7 @@ This development container configuration sets up a complete Nexent development e
 
 1. Clone the project locally
 2. Open project folder in Cursor/VS Code
-3. Run `bash deploy.sh docker --components infrastructure,application,data-process --port-policy development` from the repository root to start base containers
+3. Run `bash deploy.sh docker --components infrastructure,application --port-policy development` from the repository root to start base containers
 4. The deploy script writes generated variables such as `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `ELASTICSEARCH_API_KEY` back to `deploy/env/.env`. Services in `deploy/docker/compose/docker-compose.dev.yml` load these settings automatically via `env_file`, so no manual copying is needed
 5. Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Reopen in Container ...`
 6. Cursor will start the development container based on configuration in `.devcontainer` directory
@@ -42,7 +42,6 @@ This development container configuration sets up a complete Nexent development e
 The following ports are forwarded via `forwardPorts` in `.devcontainer/devcontainer.json`:
 
 - 3000: Nexent Web interface
-- 5012: Data processing service
 
 Other service ports (Backend Config service 5010, PostgreSQL 5434, MinIO API 9010, MinIO console 9011, Elasticsearch API 9210, etc.) are published directly on the host by Docker Compose under the development port policy and can be accessed directly from the host machine.
 
@@ -64,5 +63,5 @@ sudo chown -R $(id -u):$(id -g) /opt
 If container startup fails, try:
 
 1. Rebuild container: Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Rebuild Container`
-2. Check Docker logs: `docker logs nexent-data-process`
+2. Check Docker logs: `docker logs nexent-config-dev`
 3. Check if configuration in `.env` file is correct

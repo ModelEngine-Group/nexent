@@ -35,33 +35,6 @@ jobs:
       - name: Build main application image
         run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent:${{ github.event.inputs.app_version }} -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
-  build-data-process:
-    runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Check if model is cached locally
-        id: check-model
-        run: |
-          if [ -f ~/model-assets/clip-vit-base-patch32/config.json ] && \
-             [ -d ~/model-assets/nltk_data ] && \
-             [ -d ~/model-assets/table-transformer-structure-recognition ] && \
-             [ -d ~/model-assets/yolox ]; then
-            echo "cache-hit=true" >> "$GITHUB_OUTPUT"
-            cp -r ~/model-assets ./
-          else
-            echo "cache-hit=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Clone model if not cached
-        if: steps.check-model.outputs.cache-hit == 'false'
-        run: |
-          GIT_LFS_SKIP_SMUDGE=1 git clone https://hf-mirror.com/Nexent-AI/model-assets
-          cd ./model-assets
-          GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
-          rm -rf .git .gitattributes
-      - name: Build data process image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-data-process:${{ github.event.inputs.app_version }} -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
-
   build-web:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
     steps:
@@ -99,7 +72,7 @@ jobs:
 
   deploy:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    needs: [ build-main, build-data-process, build-web, build-docs, build-sandbox, build-mcp ]
+    needs: [ build-main, build-web, build-docs, build-sandbox, build-mcp ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -110,6 +83,16 @@ jobs:
           docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple \
             -t "nexent/nexent-gateway:$APP_VERSION" -t nexent/nexent-gateway:latest \
             -f deploy/images/dockerfiles/gateway/Dockerfile .
+      - name: Build Management and Runtime images on the deployment runner
+        env:
+          APP_VERSION: ${{ inputs.app_version }}
+        run: |
+          bash deploy/images/build.sh --management --runtime --version "$APP_VERSION" --registry general --load
+          if [ "$APP_VERSION" != latest ]; then
+            for role in management runtime; do
+              docker tag "nexent/nexent-$role:$APP_VERSION" "nexent/nexent-$role:latest"
+            done
+          fi
       - name: Copy project to $HOME/nexent
         run: |
           rm -rf $HOME/nexent

@@ -12,7 +12,7 @@ bash build.sh
 
 # 按镜像构建指定版本
 bash build.sh \
-  --images main,web,mcp,data-process,terminal \
+  --images management,runtime,web,mcp,terminal \
   --version v2.5.0 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
@@ -20,7 +20,7 @@ bash build.sh \
 
 # 按同一镜像集合构建 latest 镜像
 bash build.sh \
-  --images main,web,mcp,data-process \
+  --images management,runtime,web,mcp \
   --version latest \
   --registry general \
   --platform linux/amd64 \
@@ -57,12 +57,13 @@ bash build.sh --sandbox-full --version latest --load
 
 部署机制不区分镜像变体。标准配置保持 `NEXENT_SANDBOX_DOCKER_IMAGE=nexent/nexent-sandbox:latest`；需要完整能力时，将它改为 `nexent/nexent-sandbox-full:latest` 后滚动重启运行服务。轻量镜像支持普通 Python 代码以及在启用沙箱网络时通过 pip 安装纯 Python/有可用 wheel 的依赖，但不能在运行期以非 root 用户补装系统程序，也不能执行需要 Node.js 的 workspace 脚本。
 
-构建 `data-process` 时，`deploy/images/build.sh` 会自动准备 `model-assets`：优先使用仓库根目录已有的 `model-assets`，其次复用 `~/model-assets`，否则从 Hugging Face 仓库拉取并执行 `git lfs pull`。如果直接执行 `docker build`，需要先在仓库根目录准备好 `model-assets`。
+构建 Management 或 Runtime 时，`deploy/images/build.sh` 会自动准备 `model-assets`：优先使用仓库根目录已有的 `model-assets`，其次复用 `~/model-assets`，否则从 Hugging Face 仓库拉取并执行 `git lfs pull`。如果直接执行 `docker build`，需要先在仓库根目录准备好 `model-assets`。
 
 镜像选项：
 - `--main` 构建 `nexent`
 - `--web` 构建 `nexent-web`
-- `--data-process` 构建 `nexent-data-process`
+- `--management` 构建 `nexent-management`
+- `--runtime` 构建 `nexent-runtime`
 - `--mcp` 构建 `nexent-mcp`
 - `--terminal` 构建 `nexent-ubuntu-terminal`
 - `--docs` 构建 `nexent-docs`
@@ -76,10 +77,6 @@ docker buildx create --name nexent_builder --use
 # 🚀 为多个架构构建应用程序
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
-
-# 📊 为多个架构构建数据处理服务
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
 
 # 🌐 为多个架构构建前端
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
@@ -103,12 +100,6 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 ```bash
 # 🚀 构建应用程序镜像（仅当前架构）
 docker build --no-cache --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
-
-# 📊 构建数据处理镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
-
-# 📊 构建 GPU 数据处理镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images/dockerfiles/data-process/Dockerfile --build-arg DATA_PROCESS_DEPENDENCY_VARIANT=gpu .
 
 # 🌐 构建前端镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
@@ -141,11 +132,6 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/i
 - 包含后端 API 服务
 - 基于 `deploy/images/dockerfiles/main/Dockerfile` 构建
 - 提供核心的智能体服务
-
-### 数据处理镜像 (nexent/nexent-data-process)
-- 包含数据处理服务
-- 基于 `deploy/images/dockerfiles/data-process/Dockerfile` 构建
-- 处理文档解析和向量化
 
 ### 前端镜像 (nexent/nexent-web)
 - 包含 Next.js 前端应用
@@ -191,7 +177,6 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/i
 
 所有镜像包括：
 - `nexent/nexent` - 主应用后端服务
-- `nexent/nexent-data-process` - 数据处理服务
 - `nexent/nexent-web` - Next.js 前端应用
 - `nexent/nexent-docs` - Vitepress 文档站点
 - `nexent/nexent-mcp` - MCP 服务器代理服务
@@ -255,7 +240,7 @@ bash build.sh --package \
   --target all \
   --version v2.5.0 \
   --platform amd64 \
-  --components infrastructure,application,data-process \
+  --components infrastructure,application \
   --image-source general \
   --compress true \
   --output-dir offline-package
@@ -281,7 +266,7 @@ bash build.sh --package \
   --target docker \
   --version latest \
   --platform amd64 \
-  --components infrastructure,application,data-process \
+  --components infrastructure,application \
   --image-source local-latest \
   --compress true \
   --output-dir offline-package/docker-local

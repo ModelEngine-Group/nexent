@@ -23,10 +23,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [main, gateway, web, data-process, mcp, terminal, sandbox, sandbox-full]
+        image: [main, management, runtime, gateway, web, mcp, terminal, sandbox, sandbox-full]
     steps:
       - name: Free disk space for large images
-        if: matrix.image == 'data-process' || matrix.image == 'sandbox-full'
+        if: matrix.image == 'management' || matrix.image == 'runtime' || matrix.image == 'sandbox-full'
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
       - name: Checkout code
@@ -38,8 +38,8 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Clone model assets for data-process
-        if: matrix.image == 'data-process'
+      - name: Clone model assets for service images
+        if: matrix.image == 'management' || matrix.image == 'runtime'
         run: |
           GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/Nexent-AI/model-assets
           cd model-assets

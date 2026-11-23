@@ -1997,7 +1997,7 @@ async def test_hybrid_search_success(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search_hybrid:
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid") as mock_search_hybrid:
 
         expected_response = {
             "results": [
@@ -2036,7 +2036,6 @@ async def test_hybrid_search_success(vdb_core_mock, auth_data):
             ANY,
             top_k=10,
             weight_accurate=0.5,
-            vdb_core=ANY
         )
 
 
@@ -2067,7 +2066,7 @@ async def test_hybrid_search_value_error(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search_hybrid:
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid") as mock_search_hybrid:
 
         mock_search_hybrid.side_effect = ValueError("Query text is required")
 
@@ -2154,7 +2153,7 @@ async def test_hybrid_search_exception(vdb_core_mock, auth_data):
     with patch("management.api.knowledge_base.vectordatabase.resolve_search_index_names", side_effect=lambda names, _actor: names), \
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search_hybrid:
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid") as mock_search_hybrid:
 
         mock_search_hybrid.side_effect = Exception("Search execution failed")
 
@@ -2535,7 +2534,7 @@ async def test_hybrid_search_forbidden_without_read_permission(vdb_core_mock, au
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=403, detail="No permission to access this knowledge base")) as mock_perm, \
-            patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search:
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid") as mock_search:
 
         payload = {
             "index_names": ["private_kb"],
@@ -2568,7 +2567,7 @@ async def test_hybrid_search_not_found_when_kb_missing(vdb_core_mock, auth_data)
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=404, detail="Knowledge base 'missing_kb' not found")) as mock_perm, \
-            patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search:
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid") as mock_search:
 
         payload = {
             "index_names": ["missing_kb"],
@@ -2605,7 +2604,7 @@ async def test_hybrid_search_checks_all_indices(vdb_core_mock, auth_data):
             patch("management.api.knowledge_base.vectordatabase.get_vector_db_core", return_value=vdb_core_mock), \
             patch("management.api.knowledge_base.vectordatabase.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("management.api.knowledge_base.vectordatabase.require_knowledge_base_read_permission", side_effect=mock_permission_check), \
-            patch("management.services.knowledge_base.hybrid.search_public_hybrid") as mock_search:
+            patch("management.services.knowledge_base.hybrid.search_runtime_hybrid") as mock_search:
 
         payload = {
             "index_names": ["allowed_kb", "forbidden_kb", "another_kb"],

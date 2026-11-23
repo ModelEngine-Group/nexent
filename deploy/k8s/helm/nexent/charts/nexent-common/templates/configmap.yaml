@@ -22,7 +22,6 @@ data:
 
   # Service URLs (internal)
   CONFIG_SERVICE_URL: {{ .Values.config.services.configUrl | quote }}
-  ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
   RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
   MANAGEMENT_AGENTOS_URL: {{ .Values.config.services.managementAgentosUrl | quote }}
   MANAGEMENT_FILE_CLEANSE_ENABLED: {{ .Values.config.fileCleanse.enabled | quote }}
@@ -78,26 +77,11 @@ data:
   DEBUG_JWT_EXPIRE_SECONDS: {{ .Values.config.auth.debugJwtExpireSeconds | quote }}
   INVITE_CODE: {{ .Values.config.auth.inviteCode | quote }}
 
-  # Data Processing Service Configuration
+  # Management file cleansing
   REDIS_PORT: {{ .Values.config.redis.port | quote }}
-  FLOWER_PORT: {{ .Values.config.dataProcess.flowerPort | quote }}
-  DP_PART_PROCESSOR_COUNT: {{ .Values.config.dataProcess.partProcessorCount | quote }}
-  DP_FILE_SPLIT_SIZE_MB: {{ .Values.config.dataProcess.fileSplitSizeMb | quote }}
-  DP_PARSE_MAX_PROCESSES: {{ .Values.config.dataProcess.parseMaxProcesses | quote }}
-  DP_PARSE_MIN_PROCESSES: {{ .Values.config.dataProcess.parseMinProcesses | quote }}
-  DP_PARSE_THREADS_PER_PROCESS: {{ .Values.config.dataProcess.parseThreadsPerProcess | quote }}
-  DP_PARSE_MAX_TASKS_PER_CHILD: {{ .Values.config.dataProcess.parseMaxTasksPerChild | quote }}
-  DP_PRELOAD_MODELS: {{ .Values.config.dataProcess.preloadModels | quote }}
-  DP_PARSER_STARTUP_TIMEOUT_S: {{ .Values.config.dataProcess.parserStartupTimeout | quote }}
-  DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
-  DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
-  ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}
-  CELERY_WORKER_PREFETCH_MULTIPLIER: {{ .Values.config.dataProcess.celeryWorkerPrefetchMultiplier | quote }}
-  CELERY_TASK_TIME_LIMIT: {{ .Values.config.dataProcess.celeryTaskTimeLimit | quote }}
-  ELASTICSEARCH_REQUEST_TIMEOUT: {{ .Values.config.dataProcess.elasticsearchRequestTimeout | quote }}
-  QUEUES: {{ .Values.config.dataProcess.queues | quote }}
-  WORKER_NAME: {{ .Values.config.dataProcess.workerName | quote }}
-  WORKER_CONCURRENCY: {{ default (add (int .Values.config.dataProcess.partProcessorCount) 1) .Values.config.dataProcess.workerConcurrency | quote }}
+  DP_PARSE_THREADS_PER_PROCESS: {{ .Values.config.fileCleanse.parseThreadsPerProcess | quote }}
+  DP_PRELOAD_MODELS: {{ .Values.config.fileCleanse.preloadModels | quote }}
+  ENABLE_UPLOAD_IMAGE: {{ .Values.config.enableUploadImage | quote }}
 
   # Telemetry and Monitoring Configuration
   ENABLE_TELEMETRY: {{ ternary (get $monitoring "enabled") .Values.config.telemetry.enabled (hasKey $monitoring "enabled") | quote }}

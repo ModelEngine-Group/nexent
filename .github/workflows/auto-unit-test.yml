@@ -151,7 +151,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          uv sync --managed-python --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
+          uv sync --managed-python --extra management-cleanse --extra runtime-images --extra runtime-knowledge --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
           cd ..
 
       - name: Run all tests and collect coverage

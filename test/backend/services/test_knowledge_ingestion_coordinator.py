@@ -459,7 +459,7 @@ async def test_accept_freezes_authorized_file_and_model_then_replays_exact_inten
 ):
     s = setup
     first = await s.coordinator.accept(s.value.file_id, s.actor, context=context())
-    assert first["ingestion_request"] == s.value.model_dump(mode="json")
+    assert first["ingestion_request"] == s.value.model_copy(update={"native_documents": True}).model_dump(mode="json")
     s.client.get_model.assert_awaited_once_with(
         2, user_id="user-a", tenant_id="tenant-a"
     )
@@ -479,7 +479,7 @@ async def test_accept_cannot_replace_already_pinned_model_revision(setup):
     s.client.get_model.return_value.revision = "changed"
     with pytest.raises(Conflict):
         await s.coordinator.accept(s.value.file_id, s.actor, context=context())
-    assert s.row()["ingestion_request"] == s.value.model_dump(mode="json")
+    assert s.row()["ingestion_request"] == s.value.model_copy(update={"native_documents": True}).model_dump(mode="json")
 
 
 @pytest.mark.asyncio

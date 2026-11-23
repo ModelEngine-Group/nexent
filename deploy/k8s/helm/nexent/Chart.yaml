@@ -34,10 +34,6 @@ dependencies:
     version: 0.1.0
     repository: "file://./charts/nexent-runtime"
     condition: nexent-runtime.enabled
-  - name: nexent-data-process
-    version: 0.1.0
-    repository: "file://./charts/nexent-data-process"
-    condition: nexent-data-process.enabled
   - name: nexent-gateway
     version: 0.1.0
     repository: "file://./charts/nexent-gateway"

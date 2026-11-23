@@ -1,9 +1,9 @@
 {
-  "name": "nexent-data-process",
+  "name": "nexent-config-dev",
   "dockerComposeFile": "../deploy/docker/compose/docker-compose.dev.yml",
-  "service": "nexent-data-process",
+  "service": "nexent-config-dev",
   "workspaceFolder": "/opt",
-  "forwardPorts": [3000, 5012],
+  "forwardPorts": [3000, 5010],
   "customizations": {
     "vscode": {
       "settings": {

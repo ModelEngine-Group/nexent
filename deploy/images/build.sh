@@ -42,7 +42,7 @@ usage() {
 用法：deploy/images/build.sh [选项]
 
 选项：
-  --images LIST              逗号分隔的镜像列表：all,main,management,runtime,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
+  --images LIST              逗号分隔的镜像列表：all,main,management,runtime,gateway,web,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              兼容参数，等同于只传一个 --images
   --all                      构建全部镜像
   --main                     构建 nexent/nexent
@@ -50,7 +50,6 @@ usage() {
   --runtime                  构建 nexent/nexent-runtime
   --gateway                  构建 nexent/nexent-gateway
   --web                      构建 nexent/nexent-web
-  --data-process             构建 nexent/nexent-data-process
   --mcp                      构建 nexent/nexent-mcp
   --terminal                 构建 nexent/nexent-ubuntu-terminal
   --docs                     构建 nexent/nexent-docs
@@ -61,7 +60,7 @@ usage() {
   --version VERSION          镜像 tag，例如 v2.2.1 或 latest。默认读取根目录 VERSION
   --registry general|mainland
   --dependency-variant cpu|gpu
-                             Management、Runtime 与 data-process 模型依赖变体，默认 cpu
+                             Management 与 Runtime 模型依赖变体，默认 cpu
   --terminal-variant slim|conda
                              terminal 镜像变体，默认 slim
   --push
@@ -77,7 +76,7 @@ USAGE
 Usage: deploy/images/build.sh [options]
 
 Options:
-  --images LIST              Comma-separated image list: all,main,management,runtime,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
+  --images LIST              Comma-separated image list: all,main,management,runtime,gateway,web,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              Compatibility alias for --images with one image
   --all                      Build all images
   --main                     Build nexent/nexent
@@ -85,7 +84,6 @@ Options:
   --runtime                  Build nexent/nexent-runtime
   --gateway                  Build nexent/nexent-gateway
   --web                      Build nexent/nexent-web
-  --data-process             Build nexent/nexent-data-process
   --mcp                      Build nexent/nexent-mcp
   --terminal                 Build nexent/nexent-ubuntu-terminal
   --docs                     Build nexent/nexent-docs
@@ -96,7 +94,7 @@ Options:
   --version VERSION          Image tag, for example v2.2.1 or latest. Defaults to root VERSION.
   --registry general|mainland
   --dependency-variant cpu|gpu
-                             Management, Runtime and data-process model dependencies. Defaults to cpu.
+                             Management and Runtime model dependencies. Defaults to cpu.
   --terminal-variant slim|conda
                              terminal image variant. Defaults to slim.
   --push
@@ -117,7 +115,6 @@ while [ $# -gt 0 ]; do
     --management) REQUESTED_IMAGES+=("management"); shift ;;
     --runtime) REQUESTED_IMAGES+=("runtime"); shift ;;
     --web) REQUESTED_IMAGES+=("web"); shift ;;
-    --data-process) REQUESTED_IMAGES+=("data-process"); shift ;;
     --mcp) REQUESTED_IMAGES+=("mcp"); shift ;;
     --terminal) REQUESTED_IMAGES+=("terminal"); shift ;;
     --docs) REQUESTED_IMAGES+=("docs"); shift ;;
@@ -127,7 +124,7 @@ while [ $# -gt 0 ]; do
     --platform) PLATFORM="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --registry) REGISTRY="$2"; shift 2 ;;
-    --dependency-variant|--data-process-dependency-variant) DEPENDENCY_VARIANT="$2"; shift 2 ;;
+    --dependency-variant) DEPENDENCY_VARIANT="$2"; shift 2 ;;
     --terminal-variant) TERMINAL_VARIANT="$2"; shift 2 ;;
     --push) PUSH=true; shift ;;
     --load) LOAD=true; shift ;;
@@ -165,7 +162,7 @@ add_image_if_missing() {
 }
 
 select_all_images() {
-  SELECTED_IMAGES=(main management runtime gateway web data-process mcp terminal docs sandbox)
+  SELECTED_IMAGES=(main management runtime gateway web mcp terminal docs sandbox)
 }
 
 select_images_from_csv() {
@@ -183,7 +180,7 @@ select_images_from_csv() {
       all)
         select_all_images
         ;;
-      main|management|runtime|gateway|web|data-process|mcp|terminal|docs|sandbox|sandbox-full)
+      main|management|runtime|gateway|web|mcp|terminal|docs|sandbox|sandbox-full)
         add_image_if_missing "$normalized"
         ;;
       *)
@@ -202,14 +199,13 @@ select_images_from_csv() {
 image_tui_multiselect() {
   [ -t 0 ] || return 1
 
-  local images=(main management runtime gateway web data-process mcp terminal docs sandbox sandbox-full)
+  local images=(main management runtime gateway web mcp terminal docs sandbox sandbox-full)
   local details=(
     "$(deployment_i18n image_build.detail.main)"
     "Independent Management API and configuration"
     "Independent AgentOS model and Agent execution Runtime"
     "Independent authentication and streaming Gateway"
     "$(deployment_i18n image_build.detail.web)"
-    "$(deployment_i18n image_build.detail.data_process)"
     "$(deployment_i18n image_build.detail.mcp)"
     "$(deployment_i18n image_build.detail.terminal)"
     "$(deployment_i18n image_build.detail.docs)"
@@ -314,7 +310,7 @@ run_interactive_configuration() {
       else
         echo "Images:"
       fi
-      echo "  main, web, data-process, mcp, terminal, docs, sandbox, sandbox-full"
+      echo "  main, web, mcp, terminal, docs, sandbox, sandbox-full"
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         IMAGES="$(prompt_choice "请输入镜像（默认：main,web）：" "main,web")"
       else
@@ -441,7 +437,7 @@ model_asset_file() {
 
 model_assets_complete() {
   local model_assets_dir="$1"
-  local role="${2:-data-process}"
+  local role="$2"
   model_asset_file "$model_assets_dir/nltk_data/tokenizers/punkt_tab/english/collocations.tab" || return 1
   case "$role" in
     management)
@@ -457,7 +453,6 @@ model_assets_complete() {
       model_asset_file "$model_assets_dir/clip-vit-base-patch32/config.json" && \
       model_asset_file "$model_assets_dir/clip-vit-base-patch32/pytorch_model.bin"
       ;;
-    data-process) model_assets_complete "$model_assets_dir" management && model_assets_complete "$model_assets_dir" runtime ;;
     *) return 1 ;;
   esac
 }
@@ -465,7 +460,7 @@ model_assets_complete() {
 prepare_model_assets() {
   [ "$DRY_RUN" = true ] && return 0
 
-  local role="${1:-data-process}"
+  local role="$1"
   local project_model_assets="$PROJECT_ROOT/model-assets"
   local home_model_assets="${HOME:-}/model-assets"
   local model_assets_repo="${MODEL_ASSETS_REPO:-}"
@@ -556,14 +551,6 @@ build_selected_image() {
       --build-arg MAX_KNOWLEDGE_FILE_SIZE_MB="${MAX_KNOWLEDGE_FILE_SIZE_MB:-100}" \
       "${WEB_MIRROR_ARGS[@]}" ;;
     docs) build_one nexent-docs "$DOCKERFILE_DIR/docs/Dockerfile" "${WEB_MIRROR_ARGS[@]}" ;;
-    data-process)
-      local image_name="nexent-data-process"
-      [ "$DEPENDENCY_VARIANT" = "gpu" ] && image_name="${image_name}-gpu"
-      prepare_model_assets
-      build_one "$image_name" "$DOCKERFILE_DIR/data-process/Dockerfile" \
-        --build-arg DATA_PROCESS_DEPENDENCY_VARIANT="$DEPENDENCY_VARIANT" \
-        "${PY_MIRROR_ARGS[@]}"
-      ;;
     mcp) build_one nexent-mcp "$DOCKERFILE_DIR/mcp/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
     terminal)
       local image_name="nexent-ubuntu-terminal"
@@ -602,9 +589,6 @@ select_images_from_components() {
         add_image_if_missing runtime
         add_image_if_missing web
         add_image_if_missing mcp
-        ;;
-      data-process)
-        add_image_if_missing data-process
         ;;
       terminal)
         add_image_if_missing terminal

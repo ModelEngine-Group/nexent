@@ -17,7 +17,7 @@ BYTES_PER_MB = 1024 * 1024
 KNOWLEDGE_SPAN_DESCRIPTIONS = {
     "knowledge.upload.batch": "`读取一批上传文件并组织 MinIO 上传。",
     "knowledge.minio.upload": "`执行实际的 MinIO 对象写入。",
-    "knowledge.process.submit": "`从 backend 调用 data-process HTTP 接口，提交单文件或批量处理请求。",
+    "knowledge.process.submit": "Management 接纳单文件或批量处理请求并登记摄取任务。",
     "knowledge.chain.submit": "`创建并投递 Celery process → forward → cleanup 任务链。它只表示任务成功进入队列，不代表文件已经处理完成。",
     "knowledge.process": "单个文件的顶层解析任务，负责获取文件、拆分、调度处理并统计 chunk。",
     "knowledge.minio.fetch": "从 MinIO 下载待处理文件字节。",

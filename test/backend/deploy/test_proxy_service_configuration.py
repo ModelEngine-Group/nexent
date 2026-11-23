@@ -11,7 +11,6 @@ import yaml
 from .test_workbench_publication import BASH, REPO, shell_function
 
 GATEWAY_URL = "http://nexent-gateway:5013/api"
-LEGACY_INDEX_URL = "http://nexent-config:5010/api"
 REMOTE_URL = "https://remote.example.test/prefix/api"
 
 
@@ -55,31 +54,10 @@ render_k8s_runtime_config_values "$FIXTURE_VALUES"
 
 
 @pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
-def test_compose_worker_reads_index_endpoint_from_the_env_file(filename):
+def test_compose_uses_independent_images_without_data_process(filename):
     compose_file = REPO / "deploy" / "docker" / "compose" / filename
-    worker = yaml.safe_load(compose_file.read_text(encoding="utf-8"))["services"]["nexent-data-process"]
-    assert "ELASTICSEARCH_SERVICE" not in worker["environment"]
-    assert "../../env/.env" in worker["env_file"]
-    assert "nexent-gateway" not in worker["depends_on"]
-
-
-@pytest.mark.parametrize(
-    "components,configured,expected",
-    [
-        ("infrastructure,application,data-process", LEGACY_INDEX_URL, GATEWAY_URL),
-        ("application,data-process", REMOTE_URL, REMOTE_URL),
-        ("data-process", REMOTE_URL, REMOTE_URL),
-        ("data-process", LEGACY_INDEX_URL, LEGACY_INDEX_URL),
-    ],
-)
-def test_docker_upgrade_only_migrates_the_old_full_stack_default(tmp_path, components, configured, expected):
-    env_file = tmp_path / ".env"
-    env_file.write_text(f'ELASTICSEARCH_SERVICE="{configured}"\nUNCHANGED=1\n', encoding="utf-8")
-    script = 'source deploy/common/common.sh\n' + shell_function("docker", "migrate_legacy_index_gateway")
-    script += '''
-ROOT_ENV_FILE="$FIXTURE_ENV_FILE"
-DEPLOYMENT_COMPONENTS="$FIXTURE_COMPONENTS"
-migrate_legacy_index_gateway && migrate_legacy_index_gateway
-'''
-    run_bash(script, {"FIXTURE_ENV_FILE": env_file.as_posix(), "FIXTURE_COMPONENTS": components})
-    assert env_file.read_text(encoding="utf-8") == f'ELASTICSEARCH_SERVICE="{expected}"\nUNCHANGED=1\n'
+    services = yaml.safe_load(compose_file.read_text(encoding="utf-8"))["services"]
+    assert "nexent-data-process" not in services
+    assert "nexent/nexent-management:" in services["nexent-config"]["image"]
+    assert "nexent/nexent-runtime:" in services["nexent-runtime"]["image"]
+    assert all("nexent-data-process" not in service.get("depends_on", {}) for service in services.values())

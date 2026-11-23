@@ -158,7 +158,6 @@ Nexent uses a microservices architecture deployed via Helm charts:
 | nexent-mcp | MCP management and tool service | 5011 |
 | nexent-northbound | Northbound API service | 5013 |
 | nexent-web | Web frontend | 3000 |
-| nexent-data-process | Data processing service | 5012 |
 
 **Infrastructure Services:**
 | Service | Description |
@@ -243,10 +242,10 @@ bash deploy.sh k8s --release-scope infrastructure
 bash deploy.sh k8s --release-scope nexent
 
 # Non-interactive deployment with the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application --port-policy development --image-source general
 
 # Add the terminal tool to the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,terminal
+bash deploy.sh k8s --components infrastructure,application,terminal
 
 # Deploy with mainland China image sources
 bash deploy.sh k8s --image-source mainland

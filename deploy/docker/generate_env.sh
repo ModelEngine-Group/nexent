@@ -92,7 +92,6 @@ update_env_file() {
   update_env_var "ELASTICSEARCH_HOST" "http://localhost:9210"
   update_env_var "CONFIG_SERVICE_URL" "http://localhost:5010"
   update_env_var "RUNTIME_SERVICE_URL" "http://localhost:5014"
-  update_env_var "ELASTICSEARCH_SERVICE" "http://localhost:5010/api"
   update_env_var "NEXENT_MCP_SERVER" "http://localhost:5011"
   update_env_var "NORTHBOUND_API_SERVER" "http://localhost:5013/api"
   update_env_var "MCP_MANAGEMENT_API" "http://localhost:5015"

@@ -267,43 +267,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  nexent-data-process:
-    image: ${NEXENT_DATA_PROCESS_IMAGE}
-    container_name: nexent-data-process
-    restart: always
-    privileged: true
-    volumes:
-      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
-      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
-    environment:
-      TZ: "${TZ:-Asia/Shanghai}"
-      <<: [*proxy-vars, *es-vars, *minio-vars]
-      NEXENT_SQL_STARTUP_MODE: "off"
-      DOCKER_ENVIRONMENT: "true"
-      DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}
-      PYTHONPATH: "/opt:/opt/backend"
-      skip_proxy: "true"
-    env_file:
-      - ../../env/.env
-    depends_on:
-      nexent-config:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nexent-elasticsearch:
-        condition: service_healthy
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"  # Maximum size of a single log file
-        max-file: "3"    # Maximum number of log files to keep
-    networks:
-      - nexent
-    entrypoint: >
-      /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python -m backend.http.data_process_service'
-      "
-
   redis:
     image: ${REDIS_IMAGE}
     container_name: nexent-redis

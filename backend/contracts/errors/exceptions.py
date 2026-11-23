@@ -217,7 +217,7 @@ class IncorrectInviteCodeException(Exception):
 
 
 class OfficeConversionException(Exception):
-    """Raised when Office-to-PDF conversion via data-process service fails."""
+    """Raised when Management Office-to-PDF conversion fails."""
 
     pass
 

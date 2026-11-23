@@ -35,13 +35,10 @@ services:
 #        tail -f /dev/null
 
 
-  nexent-data-process:
-    image: nexent/nexent-data-process:latest
-    container_name: nexent-data-process
+  nexent-config-dev:
+    image: ${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:latest}
+    container_name: nexent-config-dev
     restart: always
-    privileged: true
-    ports:
-      - "5012:5012"
     volumes:
       - ../../../:/opt/:cached
       - /opt/backend/.venv/
@@ -49,7 +46,7 @@ services:
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
       skip_proxy: "true"
-      PATH: "/usr/local/bin:/usr/bin/:/opt/backend/.venv/bin:${PATH}"
+      PATH: "/opt/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
       VIRTUAL_ENV: "/opt/backend/.venv"
     env_file:
       - ../../env/.env

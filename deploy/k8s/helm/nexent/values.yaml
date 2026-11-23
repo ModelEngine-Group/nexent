@@ -38,7 +38,6 @@ global:
   deploymentComponents:
     infrastructure: false
     application: true
-    data-process: true
     terminal: false
     monitoring: false
   portPolicy: "development"
@@ -124,8 +123,6 @@ nexent-web:
   replicaCount: 1
   config:
     fileUploadSizeLimit: "10"
-nexent-data-process:
-  enabled: true
 nexent-openssh:
   enabled: false
 nexent-monitoring:

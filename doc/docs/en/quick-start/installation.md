@@ -63,10 +63,10 @@ You can also pass options directly:
 bash deploy.sh docker --defaults
 
 # Default component set, development port policy, standard image source
-bash deploy.sh docker --components infrastructure,application,data-process --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application --port-policy development --image-source general
 
 # Add the terminal tool to the default component set
-bash deploy.sh docker --components infrastructure,application,data-process,terminal
+bash deploy.sh docker --components infrastructure,application,terminal
 
 # Use mainland China image sources
 bash deploy.sh docker --image-source mainland
@@ -177,7 +177,6 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | nexent-runtime | Agent runtime API | 5014 |
 | nexent-mcp | MCP management and tool service | 5011/5015 |
 | nexent-web | Web frontend | 3000 |
-| nexent-data-process | Data processing service | 5012 |
 | nexent-northbound | Northbound API service | 5013 |
 
 **Infrastructure Services:**
@@ -245,7 +244,6 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 | Backend API | 5010 | 5010 | Backend service |
 | Runtime API | 5014 | 5014 | Agent runtime service |
 | MCP API | 5011/5015 | 5011/5015 | MCP management and tool service |
-| Data Processing | 5012 | 5012 | Data processing API |
 | Northbound API | 5013 | 5013 | Northbound interface service (A2A/MCP integration) |
 | PostgreSQL | 5432 | 5434 | Database connection |
 | Elasticsearch | 9200 | 9210 | Search engine API |

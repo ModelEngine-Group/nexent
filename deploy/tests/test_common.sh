@@ -154,9 +154,9 @@ assert_contains "$(cat /tmp/nexent-image-build-zh-invalid.log)" "未知选项：
 
 APP_VERSION="latest"
 deployment_prepare_config --app-version latest
-assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and local authentication"
+assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "default components include infrastructure and application"
 assert_eq "lightweight" "$DEPLOYMENT_SANDBOX_MODE" "the lightweight Sandbox should be enabled by default"
-assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "default docker services should include data-process"
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "data-process" "retired component should be ignored"
 deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components should come from CLI"
 assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
@@ -219,7 +219,7 @@ PRODUCTION_HELM_CONTENT="$(cat "$PRODUCTION_HELM_VALUES")"
 assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    northbound:\n      type: "NodePort"\n      nodePort: 30013' "production k8s should expose northbound as NodePort"
 assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "production k8s should expose web as NodePort"
 
-unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
+unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
 unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
 deployment_prepare_config --components infrastructure,application --port-policy development --image-source local-latest --image-registry-prefix https://registry.local/nexent/ --app-version latest
@@ -235,7 +235,7 @@ PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
 assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
-unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
+unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
 unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
 
@@ -273,7 +273,7 @@ write_full_config "$FULL_CONFIG"
 APP_VERSION="v2.2.2"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG"
 assert_eq "v2.2.2" "$DEPLOYMENT_APP_VERSION" "local config appVersion should not override current VERSION"
-assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "local config should still load saved components while ignoring appVersion"
+assert_not_contains "$DEPLOYMENT_COMPONENTS" "data-process" "retired component should be ignored"
 assert_eq "full" "$DEPLOYMENT_SANDBOX_MODE" "local config should restore the selected Sandbox mode"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --version v2.2.3
 assert_eq "v2.2.3" "$DEPLOYMENT_APP_VERSION" "explicit --version should override current VERSION"
@@ -282,19 +282,19 @@ APP_VERSION="latest"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --app-version latest
 deployment_apply_image_source
 assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be applied"
-assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
+assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "data-process" "retired component should be ignored"
 
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$TMP_DIR/missing.yaml" --app-version latest
-assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
+assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "defaults mode should use built-in image source when local config is absent"
 
 deployment_prepare_config --defaults --local-config "$TMP_DIR/missing.yaml" --app-version latest
-assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
+assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "--defaults should use built-in image source when local config is absent"
 
 deployment_prepare_config --local-config "$FULL_CONFIG" --defaults --image-source general --app-version latest
 assert_eq "true" "$DEPLOYMENT_CONFIG_FILE_LOADED" "--defaults should load saved local config"
-assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "--defaults should include saved components"
+assert_not_contains "$DEPLOYMENT_COMPONENTS" "data-process" "retired component should be ignored"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "--defaults should include saved port policy"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit CLI image source should override --defaults local config"
 
@@ -320,8 +320,8 @@ DEPLOYMENT_VERSION="speed"
 DEPLOYMENT_MODE="production"
 IS_MAINLAND="Y"
 deployment_prepare_config --local-config "$FULL_CONFIG" --use-local-config --app-version latest
-assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "use local config should keep saved data-process when legacy env exists"
-assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "use local config should select data-process docker service"
+assert_not_contains "$DEPLOYMENT_COMPONENTS" "data-process" "retired component should be ignored"
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "data-process" "retired component should be ignored"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "use local config should keep saved port policy over legacy mode"
 assert_eq "full" "$DEPLOYMENT_VERSION" "legacy speed input must retain authentication"
 assert_eq "local-latest" "$DEPLOYMENT_IMAGE_SOURCE" "use local config should keep saved image source over legacy mainland flag"
@@ -375,7 +375,6 @@ chmod +x "$FAKE_DOCKER_DIR/docker"
   first_rollout_checksums="$(
     NEXENT_IMAGE="nexent/nexent:latest" \
     NEXENT_WEB_IMAGE="nexent/nexent-web:latest" \
-    NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest" \
     OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest" \
       deployment_render_image_rollout_checksums
   )"
@@ -386,7 +385,6 @@ chmod +x "$FAKE_DOCKER_DIR/docker"
   second_rollout_checksums="$(
     NEXENT_IMAGE="nexent/nexent:latest" \
     NEXENT_WEB_IMAGE="nexent/nexent-web:latest" \
-    NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest" \
     OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest" \
       deployment_render_image_rollout_checksums
   )"
@@ -395,7 +393,6 @@ chmod +x "$FAKE_DOCKER_DIR/docker"
   assert_not_eq "$first_rollout_checksums" "$second_rollout_checksums" "rendered image rollout checksums should change when local image IDs change"
   assert_contains "$first_rollout_checksums" "backendImage:" "image rollout checksums should include backend image"
   assert_contains "$first_rollout_checksums" "webImage:" "image rollout checksums should include web image"
-  assert_contains "$first_rollout_checksums" "dataProcessImage:" "image rollout checksums should include data-process image"
   assert_contains "$first_rollout_checksums" "sshImage:" "image rollout checksums should include ssh image"
 
   missing_checksum_a="$(deployment_image_rollout_checksum "missing/nexent:latest" 2>/dev/null)"
@@ -427,9 +424,6 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deploymen
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-gateway/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web-image" "web deployment should include web image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-env" "web deployment should include env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-data-process-image" "data-process deployment should include data-process image rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-env" "data-process deployment should include env rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-backend:" "data-process deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_TENANT_ID" "common configmap should expose the CAS default tenant"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultTenantId: \"tenant_id\"" "common values should preserve the CAS default tenant"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_ROLE" "common configmap should expose the CAS default role"
@@ -569,14 +563,13 @@ fi
 assert_contains "$(cat "$TMP_DIR/reconfigure-tui-error.log")" "Interactive deployment configuration requires a TTY." "--reconfigure should require a TTY"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --image-source general --app-version latest
 assert_eq "true" "$DEPLOYMENT_CONFIG_FILE_LOADED" "defaults mode should load local config without entering TUI"
-assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "defaults mode should include saved components"
+assert_not_contains "$DEPLOYMENT_COMPONENTS" "data-process" "retired component should be ignored"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "defaults mode should include saved port policy"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit image source should override defaults mode local config"
 unset DEPLOYMENT_VERSION
 
 HELM_VALUES="$TMP_DIR/generated-values.yaml"
 deployment_render_helm_values "$HELM_VALUES"
-assert_contains "$(sed -n '1,220p' "$HELM_VALUES")" "data-process: true" "component table should include data-process"
 assert_contains "$(sed -n '1,260p' "$HELM_VALUES")" "type: \"NodePort\"" "development policy should render NodePort values"
 assert_contains "$(sed -n '1,260p' "$HELM_VALUES")" "enabled: true" "selected charts should be enabled"
 
@@ -625,14 +618,13 @@ DOCKER_DEV_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.dev.yml"
 for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   CONFIG_COMPOSE_BLOCK="$(awk '/^  nexent-config:/,/^  nexent-runtime:/' "$compose_file")"
   RUNTIME_COMPOSE_BLOCK="$(awk '/^  nexent-runtime:/,/^  nexent-mcp:/' "$compose_file")"
-  WEB_COMPOSE_BLOCK="$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$compose_file")"
+  WEB_COMPOSE_BLOCK="$(awk '/^  nexent-web:/,/^  redis:/' "$compose_file")"
   assert_contains "$CONFIG_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker config service should load monitoring.env after root .env"
   assert_contains "$RUNTIME_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
   assert_contains "$CONFIG_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker config service should mount external memory provider plugins"
   assert_contains "$RUNTIME_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker runtime service should mount external memory provider plugins"
   assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-gateway:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-gateway:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
-  assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
   assert_contains "$WEB_COMPOSE_BLOCK" '${ROOT_DIR}/project-config:/mnt/nexent-data/project-config' "docker web should mount persistent project configuration"
   assert_contains "$WEB_COMPOSE_BLOCK" 'PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config' "docker web should read and write the persistent project configuration path"
   MINIO_COMPOSE_BLOCK="$(awk '/^  nexent-minio:/,/^  nexent-openssh-server:/' "$compose_file")"
@@ -648,8 +640,8 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_not_contains "$MINIO_COMPOSE_BLOCK" "/etc/minio/data" "docker MinIO should not retain the obsolete data mount"
   assert_not_contains "$MINIO_COMPOSE_BLOCK" "command: server /data" "docker MinIO should not keep the old unused image command override"
 done
-assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_COMPOSE_FILE")" '../../env/.env' "docker standard web should refresh the upload size from its env file"
-assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_PROD_COMPOSE_FILE")" 'FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}' "docker production web should refresh the persisted upload size during startup"
+assert_contains "$(awk '/^  nexent-web:/,/^  redis:/' "$DOCKER_COMPOSE_FILE")" '../../env/.env' "docker standard web should refresh the upload size from its env file"
+assert_contains "$(awk '/^  nexent-web:/,/^  redis:/' "$DOCKER_PROD_COMPOSE_FILE")" 'FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}' "docker production web should refresh the persisted upload size during startup"
 assert_contains "$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")" 'create_dir_with_permission "$ROOT_DIR/minio/data" 775' "docker deploy should initialize the exact MinIO bind-mount directory"
 DOCKER_PREPARE_DATA_BLOCK="$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
 (
@@ -790,7 +782,7 @@ printf '{"productName":"Persistent Project"}' > "$DOCKER_PROJECT_CONFIG_LEGACY/l
     exit 1
   fi
 )
-assert_not_contains "$(cat "$DOCKER_DEV_COMPOSE_FILE")" "monitoring.env" "docker dev data-process compose should not receive monitoring.env"
+assert_not_contains "$(cat "$DOCKER_DEV_COMPOSE_FILE")" "monitoring.env" "docker dev Management compose should not receive monitoring.env"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}' "docker monitoring compose should pass Langfuse OTLP auth header to the collector"
 assert_not_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" "LANGFUSE_OLTP_AUTH_HEADER" "docker monitoring compose should not pass the misspelled Langfuse auth header alias"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/templates/otel-collector.yaml")" "LANGFUSE_OTLP_AUTH_HEADER" "k8s collector should pass Langfuse OTLP auth header"

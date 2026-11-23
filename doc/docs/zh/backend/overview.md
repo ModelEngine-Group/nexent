@@ -208,7 +208,6 @@ sequenceDiagram
 - **nexent-runtime**: 运行态服务 (端口 5014)
 - **nexent-mcp**: MCP 服务 (SSE 端口 5011，管理 API 端口 5015)
 - **nexent-northbound**: 北向开放 API 服务 (端口 5013)
-- **nexent-data-process**: 数据处理服务 (端口 5012)
 - **nexent-postgresql**: 数据库 (端口 5434)
 - **nexent-elasticsearch**: 搜索引擎 (端口 9210)
 - **nexent-minio**: 对象存储 (端口 9010)

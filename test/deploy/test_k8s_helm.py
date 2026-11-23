@@ -18,7 +18,6 @@ OFFICIAL_SKILLS_DIR = PROJECT_ROOT / "deploy" / "docker" / "assets" / "official-
 
 APPLICATION_DEPLOYMENTS = {
     "nexent-config",
-    "nexent-data-process",
     "nexent-mcp",
     "nexent-gateway",
     "nexent-runtime",
@@ -39,7 +38,6 @@ THREE_REPLICA_APPLICATIONS = {
 APPLICATION_SINGLE_REPLICA = {
     "nexent-mcp",
     "nexent-config",
-    "nexent-data-process",
     "nexent-gateway",
     "nexent-runtime",
     "nexent-supabase-kong",
@@ -48,7 +46,6 @@ APPLICATION_SINGLE_REPLICA = {
 }
 STARTUP_RECOVERY_DEPLOYMENTS = {
     "nexent-config",
-    "nexent-data-process",
     "nexent-runtime",
 }
 APPLICATION_PVCS = {
@@ -346,7 +343,7 @@ def test_compose_sql_startup_is_owned_by_management(filename: str) -> None:
         assert environment.get("NEXENT_SQL_STARTUP_MODE", "off") == "off", name
         assert not any("/opt/nexent/sql" in str(volume) or "/docker-entrypoint-initdb.d/" in str(volume)
                        for volume in service.get("volumes", [])), name
-    for name in ("nexent-runtime", "nexent-mcp", "nexent-data-process"):
+    for name in ("nexent-runtime", "nexent-mcp"):
         assert services[name]["depends_on"]["nexent-config"]["condition"] == "service_healthy"
 
 
@@ -363,7 +360,7 @@ def test_helm_sql_startup_is_owned_by_management(chart_dirs: dict[str, Path]) ->
         document["metadata"]["name"]: document for document in _documents(rendered.stdout)
         if document.get("kind") == "Deployment"
     }
-    for name in ("nexent-config", "nexent-runtime", "nexent-mcp", "nexent-data-process"):
+    for name in ("nexent-config", "nexent-runtime", "nexent-mcp"):
         pod = deployments[name]["spec"]["template"]["spec"]
         container = pod["containers"][0]
         env = {item["name"]: item.get("value") for item in container["env"]}
@@ -559,7 +556,6 @@ def test_nodeport_service_defaults_render_without_explicit_ports(chart_dirs: dic
     application_args = [*_application_dynamic_args()]
     for component in (
         "nexent-config",
-        "nexent-data-process",
         "nexent-mcp",
         "nexent-runtime",
         "nexent-supabase-auth",
@@ -1024,7 +1020,7 @@ def test_deploy_without_application_component_skips_official_skills_sync(
     project, env, mock_log = isolated_k8s_project
     env["MOCK_INFRA_EXISTS"] = "true"
     command = _deploy_command(project, "nexent")
-    command[command.index("--components") + 1] = "data-process"
+    command[command.index("--components") + 1] = "infrastructure"
 
     result = _run(command, check=False, env=env)
 

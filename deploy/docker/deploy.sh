@@ -1157,7 +1157,6 @@ prepare_core_service_deployment() {
       nexent-runtime) image="${NEXENT_RUNTIME_IMAGE:-nexent/nexent-runtime:latest}" ;;
       nexent-gateway) image="${NEXENT_GATEWAY_IMAGE:-}" ;;
       nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
-      nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
       *) image="${NEXENT_IMAGE:-}" ;;
     esac
     if [ -z "$image" ]; then
@@ -1259,24 +1258,13 @@ publish_shared_workbench() {
   fi
 }
 
-migrate_legacy_index_gateway() {
-  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application ||
-      ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" data-process; then
-    return 0
-  fi
-
-  if [ "$(deployment_get_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE)" = "http://nexent-config:5010/api" ]; then
-    deployment_update_env_var_file "$ROOT_ENV_FILE" ELASTICSEARCH_SERVICE "http://nexent-gateway:5013/api"
-  fi
-}
-
 deploy_core_services() {
   # Function to deploy core services
   local core_services=()
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-gateway|nexent-web|nexent-data-process|nexent-ops)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-gateway|nexent-web|nexent-ops)
         core_services+=("$service")
         ;;
     esac
@@ -1331,17 +1319,6 @@ deploy_https_nginx() {
     return 1
   fi
   echo "   ✅ Nginx HTTPS reverse proxy started"
-}
-
-stop_unselected_data_process_service() {
-  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && return 0
-
-  local compose_file="$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}"
-  [ -f "$compose_file" ] || return 0
-
-  echo "data-process is not selected; stopping existing Docker container if present..."
-  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$compose_file" stop nexent-data-process >/dev/null 2>&1 || true
-  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$compose_file" rm -f nexent-data-process >/dev/null 2>&1 || true
 }
 
 deploy_infrastructure() {
@@ -1951,7 +1928,6 @@ main_deploy() {
     exit 1
   }
 
-  stop_unselected_data_process_service
 
   # Generate Elasticsearch API key
   generate_elasticsearch_api_key || {
@@ -2022,7 +1998,6 @@ main_deploy() {
   }
 
   # Migrate the previous full-stack indexing endpoint before starting the worker.
-  migrate_legacy_index_gateway || exit 1
 
   # Start core services
   deploy_core_services || {

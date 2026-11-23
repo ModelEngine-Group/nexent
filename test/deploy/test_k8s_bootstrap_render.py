@@ -17,7 +17,7 @@ from test_k8s_helm import (
     chart_dirs as _chart_dirs,
 )
 
-BUSINESS = {"nexent-config", "nexent-runtime", "nexent-mcp", "nexent-northbound", "nexent-web", "nexent-data-process"}
+BUSINESS = {"nexent-config", "nexent-runtime", "nexent-mcp", "nexent-northbound", "nexent-web"}
 chart_dirs = _chart_dirs
 
 

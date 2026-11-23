@@ -22,7 +22,6 @@ The backend consists of multiple FastAPI-based API services:
 | **nexent-runtime** | 5014 | Runtime API: agent execution, sandbox coordination, and streaming responses |
 | **nexent-mcp** | 5011/5015 | MCP API and FastMCP service: MCP configuration, tool discovery, and container management |
 | **nexent-northbound** | 5013 | Northbound API: external calls, conversation management, and A2A interfaces |
-| **nexent-data-process** | 5012 | Data processing API: document parsing, chunking, vectorization, and indexing |
 
 ### 🧠 Business Logic Layer
 The backend implements a clean layered architecture:
@@ -206,8 +205,6 @@ Service Decomposition Strategy:
 │   └── MCP tool protocol, container management
 ├── nexent-northbound (5013)
 │   └── External APIs, A2A protocol, partner integration
-├── nexent-data-process (5012)
-│   └── Document processing, vectorization, Celery workers
 ├── nexent-web (3000)
 │   └── Frontend Next.js application
 ├── nexent-sandbox (created according to the runtime strategy)
@@ -271,8 +268,8 @@ User Message → nexent-config / nexent-northbound
 
 ### 📚 Knowledge Base Processing Flow
 ```
-File Upload → nexent-config → nexent-data-process
-    → Document Parsing → Chunking → Vectorization
+File Upload → Management Cleansing → AgentOS
+    → Runtime Chunking and Vectorization
     → Elasticsearch Index → Search Ready
 ```
 

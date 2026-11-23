@@ -3,7 +3,7 @@
 Kubernetes deployment uses two independent releases with disjoint resource ownership:
 
 - `nexent-infrastructure`: Elasticsearch, PostgreSQL, Redis, MinIO, infrastructure credentials, and PostgreSQL bootstrap SQL.
-- `nexent`: Config, Runtime, MCP, Northbound, Web, Data Process, Terminal, Monitoring, and application-owned shared resources.
+- `nexent`: Config, Runtime, MCP, Northbound, Web, Terminal, Monitoring, and application-owned shared resources.
 
 Fresh installations are supported. If the deployment script detects a legacy `nexent` release that still owns infrastructure resources, it stops instead of attempting an in-place migration.
 
@@ -59,7 +59,7 @@ bash deploy.sh k8s --defaults \
   --existing-claim-prefix <claim-prefix>
 
 # Add terminal to the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,terminal
+bash deploy.sh k8s --components infrastructure,application,terminal
 
 # Use mainland China image sources
 bash deploy.sh k8s --image-source mainland
@@ -94,7 +94,7 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Before every deployment, existing values, comments, ordering, and old-only variables are preserved while assignments newly introduced by the current `deploy/env/.env.example` are appended. If `.env` is missing, the deploy script first reuses legacy `docker/.env`, then falls back to the current template. A readable template is required before deployment starts. Do not edit generated Helm values by hand; they are recreated from the merged `deploy/env/.env` and deployment options.
 
-Config, Runtime, MCP, Northbound, and Data Process load every variable declared in `.env` through the backend-only `nexent-env` Secret, including newly added variables without a Helm mapping. Config and Runtime additionally load `deploy/env/monitoring.env` through `nexent-monitoring-env`. These scopes match the production Docker Compose configuration. Web and infrastructure do not reference either complete env Secret; they keep their service-specific environment configuration.
+Config, Runtime, MCP, and Gateway load every variable declared in `.env` through the backend-only `nexent-env` Secret, including newly added variables without a Helm mapping. Config and Runtime additionally load `deploy/env/monitoring.env` through `nexent-monitoring-env`. These scopes match the production Docker Compose configuration. Web and infrastructure do not reference either complete env Secret; they keep their service-specific environment configuration.
 
 Internal MCP authentication uses `NEXENT_MCP_INTERNAL_TOKEN`. The deployment script carries an existing `TOKEN` assignment forward when the new key is missing. For direct Helm upgrades, move any existing `nexent-common.config.voiceService.token` override to `nexent-common.secrets.mcpInternalToken`. When `NEXENT_MCP_INTERNAL_TOKEN` is present in the deployment environment file, it takes precedence over the Helm value.
 
@@ -108,14 +108,14 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
-Config, Runtime, Northbound, and Data Process are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
+Config and Runtime are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
 
 ## Deploy Options
 
 | Option | Description | Values |
 |--------|-------------|--------|
 | `--release-scope` | Helm release scope | `all` (default), `infrastructure`, or `nexent` |
-| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `data-process`, `terminal`, `monitoring` |
+| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `terminal`, `monitoring` |
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
@@ -158,7 +158,7 @@ bash deploy/offline/build_offline_package.sh \
   --target k8s \
   --version v2.2.1 \
   --platform amd64 \
-  --components infrastructure,application,data-process \
+  --components infrastructure,application \
   --image-source general \
   --compress true \
   --output-dir offline-package/k8s
@@ -172,7 +172,7 @@ On a target host with access to the cluster, load images before deployment:
 cd offline-package/k8s
 bash deploy.sh --load-images k8s \
   --version v2.2.1 \
-  --components infrastructure,application,data-process \
+  --components infrastructure,application \
   --image-source general
 ```
 
@@ -180,17 +180,16 @@ For multi-node clusters, run `load-images.sh` on every node that may schedule Ne
 
 ## Deployment Components
 
-The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` and `data-process` are selected by default and can be disabled for smaller deployments.
+The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` is selected by default and can be disabled for smaller deployments.
 
 | Component | Services |
 |-----------|----------|
 | `infrastructure` | Elasticsearch, PostgreSQL, Redis, MinIO |
 | `application` | config, runtime, mcp, northbound, web |
-| `data-process` | nexent-data-process |
 | `terminal` | OpenSSH terminal tool |
 | `monitoring` | Optional monitoring chart; selecting it prompts for provider unless `--monitoring-provider` is passed |
 
-`application` does not include `data-process`; it is a separate component even though it is selected by default. User and tenant features use the existing PostgreSQL service; full mode enables authentication independently of optional components.
+User and tenant features use the existing PostgreSQL service; full mode enables authentication independently of optional components.
 
 ## Port Policy
 
@@ -292,7 +291,6 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-mcp | MCP container service | 1 |
 | nexent-gateway | Northbound API service | 1 |
 | nexent-web | Web frontend | 1 |
-| nexent-data-process | Data processing service | 1 |
 
 ### Infrastructure Services
 
@@ -399,8 +397,6 @@ helm upgrade --install nexent nexent \
 | `images.backend.tag` | Backend image tag |
 | `images.web.repository` | Web image repository |
 | `images.web.tag` | Web image tag |
-| `images.dataProcess.repository` | Data process image repository |
-| `images.dataProcess.tag` | Data process image tag |
 | `images.elasticsearch.repository` | Elasticsearch image |
 | `images.postgresql.repository` | PostgreSQL image |
 | `images.redis.repository` | Redis image |

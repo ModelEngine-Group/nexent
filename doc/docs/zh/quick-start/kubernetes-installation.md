@@ -158,7 +158,6 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 | nexent-mcp | MCP 管理与工具服务 | 5011 |
 | nexent-northbound | 北向 API 服务 | 5013 |
 | nexent-web | Web 前端 | 3000 |
-| nexent-data-process | 数据处理服务 | 5012 |
 
 **基础设施服务:**
 | 服务 | 描述 |
@@ -243,10 +242,10 @@ bash deploy.sh k8s --release-scope infrastructure
 bash deploy.sh k8s --release-scope nexent
 
 # 非交互式部署默认组件
-bash deploy.sh k8s --components infrastructure,application,data-process --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-bash deploy.sh k8s --components infrastructure,application,data-process,terminal
+bash deploy.sh k8s --components infrastructure,application,terminal
 
 # 使用中国大陆镜像源部署
 bash deploy.sh k8s --image-source mainland
