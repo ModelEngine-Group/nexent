@@ -368,7 +368,6 @@ get_third_party_images() {
           "docker.io/langfuse/langfuse-worker:3" \
           "docker.io/langfuse/langfuse:3" \
           "docker.io/clickhouse/clickhouse-server:26.3-alpine" \
-          "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
           "docker.io/redis:alpine" \
           "docker.io/postgres:15-alpine"; do
           echo_image_ref "$image"

@@ -374,7 +374,7 @@ for _legacy_name, _double in list(module_mocks.items()):
         if _canonical_name == "nexent.core.agents.cores.smolagents.core_agent":
             _canonical_name = "nexent.core.agents.cores.smolagents.core_agent"
         module_mocks[_canonical_name] = _double
-for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models"):
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.monitor"):
     _package_double = module_mocks.setdefault(_package, types.ModuleType(_package))
     _package_double.__path__ = [str(Path(__file__).resolve().parents[4] / "sdk" / _package.replace(".", "/"))]
 

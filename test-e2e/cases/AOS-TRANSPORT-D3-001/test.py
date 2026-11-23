@@ -2112,6 +2112,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
         assert (agent_id, agent_version, principal, overrides) == (7, 3, actor, {45: effective})
         assert ids is None or ids == {45}
         return {45: {"skill_id": 45, "name": "mounted", "description": "Example", "config": effective,
+                     "owner_tenant_id": principal.tenant_id,
                      "tool_ids": tool_ids}} if access["visible"] else {}
 
     async def execute(signed, principal):

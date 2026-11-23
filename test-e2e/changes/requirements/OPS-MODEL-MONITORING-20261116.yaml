@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MODEL-MONITORING-20261116
+  change_type: requirement
+  requirement_id: OPS-MODEL-MONITORING-20261116
+  title: Model monitoring and shared operations storage
+  description: Deploy shared monitoring control storage and connect model request attempts to published statistics.
+  affected_features:
+    existing: [OPS-BOOTSTRAP]
+    added: [OPS-MODEL-MONITORING]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-BOOTSTRAP-D5-001]
+    added: [OPS-MODEL-MONITORING-D3-001, OPS-MODEL-MONITORING-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [test/backend/ops/test_monitoring.py]
+    behaviors:
+    - Verify event replay, attempt outcome and missing versus zero usage.
+    - Verify per-type publication keys, day boundaries and exact integer aggregation.
+    reason: Existing monitoring tests exercise the legacy PostgreSQL model record rather than the Ops event and publication contracts.
+  notes: D3 must prove actual model, Ops PostgreSQL and Elasticsearch collaboration. D5 must prove separate database migration and recovery with non-production resources.
