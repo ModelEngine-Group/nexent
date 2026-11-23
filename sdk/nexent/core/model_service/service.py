@@ -94,14 +94,15 @@ class _Call:
         return configured if self.deadline is None else min(configured, self.deadline - time.monotonic())
 
     def wire_request(self):
-        self.monitoring.add_span_event("model_attempt_begin", {
-            "request_id": self.request.request_id, "attempt": self.attempt,
-        })
         prepared = replace(
             self.prepared,
             headers=dict(self.prepared.headers),
             json_body=json.loads(self.prepared.body_bytes),
             timeout_seconds=self.timeout(),
+        )
+        self.monitoring.record_model_http_request(
+            json.loads(prepared.body_bytes), request_id=self.request.request_id,
+            attempt=self.attempt, method=prepared.method, url=prepared.url,
         )
         self.monitoring.set_span_attributes(**{
             "llm.invocation_parameters": json.dumps(
@@ -387,7 +388,6 @@ class ModelService:
             f"{call.profile.identity.display_name or call.profile.identity.request_model_id}.generate",
             call.profile.identity.request_model_id,
             **{
-                "input.value": [message.model_dump(mode="json") for message in call.request.messages],
                 "model.request_id": call.request.request_id,
                 **({"model.outlet_id": call.profile.outlet_id} if call.profile.outlet_id is not None else {}),
                 "model.config_revision": call.profile.config_revision,

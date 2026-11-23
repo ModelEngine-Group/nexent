@@ -1771,6 +1771,29 @@ class MonitoringManager:
         if span:
             span.set_attributes(attributes)
 
+    def record_model_http_request(self, body: Dict[str, Any], *, request_id: str, attempt: int,
+                                  method: str, url: str) -> None:
+        """Observe prepared JSON; keep first-send input and separate retry events."""
+        if not self.is_enabled or not OPENTELEMETRY_AVAILABLE:
+            return
+        from .local_content import safe_local_content
+
+        attributes = self._trace_payload_attributes("input", body)
+        attributes.update({
+            "input.value": attributes.get("input.preview", ""),
+            "input.preview": attributes.get("input.preview", ""),
+            "input.mime_type": "application/json",
+            "http.request.method": method,
+            "url.full": safe_local_content(url),
+            "model.request_id": request_id,
+            "model.request.attempt": attempt,
+        })
+        if attempt == 1:
+            self.set_span_attributes(**attributes)
+        self.add_span_event("model_attempt_begin", {
+            "request_id": request_id, "attempt": attempt, **attributes,
+        })
+
     def create_token_tracker(self, model_name: str, span: Optional[Any] = None) -> 'LLMTokenTracker':
         """Create a token tracker for LLM calls."""
         return LLMTokenTracker(self, model_name, span)
