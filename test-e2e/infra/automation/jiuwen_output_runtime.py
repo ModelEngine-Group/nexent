@@ -24,7 +24,12 @@ async def persist_output(monkeypatch, info, output):
         create_conversation, create_conversation_message, get_conversation_history,
     )
     from management.services.agent import prepared_projection, runtime_client
+    from management.services.agent import agentos_events
     from management.services.agent.agentos_events import present_public_resume
+
+    # Match the fixed Management deployment to the actual root runtime under test.
+    monkeypatch.setattr(runtime_client, "NEXENT_AGENT_CORE", info.agent_config.agent_core)
+    monkeypatch.setattr(agentos_events, "NEXENT_AGENT_CORE", info.agent_config.agent_core)
 
     # The SDK run has already drained. Control only retained-journal delivery and
     # the I/O scheduler; keep the production parser, public projection and DAL.

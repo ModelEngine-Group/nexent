@@ -60,6 +60,32 @@ def test_followup_uses_latest_retry_once_and_preserves_same_text_turn(history_db
     assert [turn["assistant_final_answer"] for turn in turns] == ["Third answer", "Independent repeated question answer"]
 
 
+@pytest.mark.parametrize("use_saved_message", [False, True], ids=["before-index", "saved-message"])
+def test_historical_context_returns_the_exclusive_message_boundary(history_db, use_saved_message):
+    module, message, _ = history_db
+    message(10, "user", "Original request", index=0)
+    message(20, "assistant", "What date should I use?", index=1)
+    if use_saved_message:
+        message(30, "user", "Friday", index=2)
+        history = module.get_historical_context(1, 30, "owner", "tenant")
+    else:
+        history = module.get_historical_context(1, None, "owner", "tenant", before_message_index=2)
+        message(30, "user", "Friday", index=2)
+        assert module.get_historical_context(1, None, "owner", "tenant", before_message_index=2) == history
+
+    assert history["current_user_message_index"] == 2
+    assert [turn["assistant_final_answer"] for turn in history["conversation_turns"]] == ["What date should I use?"]
+
+
+def test_historical_context_before_first_message_and_without_ownership(history_db):
+    module, _, _ = history_db
+
+    assert module.get_historical_context(1, None, "owner", "tenant", before_message_index=0) == {
+        "history_summary": None, "conversation_turns": [], "current_user_message_index": 0,
+    }
+    assert module.get_historical_context(1, None, "different-owner", "tenant", before_message_index=0) is None
+
+
 def test_stop_followup_keeps_original_task_and_saved_results(history_db):
     module, message, _ = history_db
     message(1, "user", "Analyze all sales")

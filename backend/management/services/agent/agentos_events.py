@@ -11,6 +11,7 @@ from starlette.responses import StreamingResponse
 from contracts.agentos import EVENT_ID_PATTERN, REPLAY_COUNT_HEADER, AgentResume
 from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESSAGE, STREAM_STATUS_EVENT
 from contracts.constants.environment import NEXENT_AGENT_CORE
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
 from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
 from management.services.agent.stream import AssistantMessageProjection
 from management.services.conversation.nexent_output import NexentOutputAdapter
@@ -179,6 +180,50 @@ def _public_sse(event: dict) -> bytes:
     return b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n"
 
 
+def _event_cursor(cursor, run_id):
+    value = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
+    if cursor.startswith(b"id: ") and re.fullmatch(EVENT_ID_PATTERN, value) and value.startswith(f"{run_id}:"):
+        return value
+    return None
+
+
+async def _restore_output_prefix(output, request, replay_from_start):
+    """Restore renderer state through the acknowledged event without publishing it again."""
+    try:
+        prefix = await replay_from_start()
+    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
+        return False
+    try:
+        if prefix.status_code != 200:
+            return False
+        async with aclosing(iter_sse_frames(prefix)) as frames:
+            async for frame in frames:
+                if frame.startswith(b":"):
+                    continue
+                cursor, _, body = frame.partition(b"\n")
+                event_id = _event_cursor(cursor, request.run_id)
+                if event_id is None:
+                    return False
+                kind, _, data = body.partition(b"\n")
+                if kind == _OBSERVER_LINE:
+                    try:
+                        payload = json.loads(data.removeprefix(b"data: "))
+                        if not isinstance(payload, dict):
+                            return False
+                        output.push(payload)
+                    except (TypeError, ValueError):
+                        return False
+                if event_id == request.after_event_id:
+                    return True
+                if kind == b"event: agentos_terminal":
+                    return False
+        return False
+    finally:
+        await prefix.body_iterator.aclose()
+        if prefix.background is not None:
+            await prefix.background()
+
+
 def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: int, replay_count: int) -> StreamingResponse:
     """Adapt a scoped AgentOS replay to the cursorless client's public SSE format."""
     cursor_pattern = re.compile(rb"id: " + run_id.encode("ascii") + rb":[1-9][0-9]*")
@@ -304,7 +349,7 @@ def _public_group(data, cursor=None):
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
     on_terminal=None, created=False, include_journal_controls=True, opening_events=(), complete_answer=False,
-    replay_from_start=False,
+    replay_from_start=None,
 ) -> StreamingResponse:
     if response.status_code != 200:
         return response
@@ -315,14 +360,8 @@ def present_public_resume(
         initial_events = iter(opening_events)
         answer = _CompleteAnswer() if complete_answer and NEXENT_AGENT_CORE == "smolagents" else None
         native_output = NexentOutputAdapter()
-        warming = replay_from_start and request.after_event_id is not None
+        restore_prefix = replay_from_start is not None and request.after_event_id is not None
         terminal_seen = False
-        prefix_index = 1
-
-        def prefix_error():
-            if include_journal_controls:
-                return b'event: agentos_error\ndata: {"code":"AGENTOS_CURSOR_UNAVAILABLE"}\n\n'
-            return _PUBLIC_ERROR + b"\n\n"
 
         async def render(projected):
             nonlocal error_presented
@@ -351,34 +390,23 @@ def present_public_resume(
                     yield _public_sse(opening_event)
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
-                if warming and cursor == b"event: agentos_error":
-                    yield frame + b"\n\n" if include_journal_controls else _PUBLIC_ERROR + b"\n\n"
-                    return
-                if warming and cursor.startswith(b"id: "):
-                    if cursor != f"id: {request.run_id}:{prefix_index}".encode():
-                        yield prefix_error()
-                        return
-                    prefix_index += 1
-                suppressed = warming
-                if warming and cursor == f"id: {request.after_event_id}".encode():
-                    warming = False
                 if kind in {b"event: agentos_execution_fact", b"event: agentos_execution_summary"}:
                     continue
+                if restore_prefix and (kind == _OBSERVER_LINE or kind == b"event: agentos_terminal"):
+                    restore_prefix = False
+                    if not await _restore_output_prefix(native_output, request, replay_from_start):
+                        yield _PUBLIC_ERROR + b"\n\n"
+                        return
                 if kind != _OBSERVER_LINE:
                     if kind == b"event: agentos_terminal" and cursor.startswith(f"id: {request.run_id}:".encode()):
                         try:
                             status = json.loads(data.removeprefix(b"data: ")).get("status")
                         except (TypeError, ValueError, AttributeError):
                             status = None
-                        if warming:
-                            yield prefix_error()
-                            return
-                        confirmed = await on_terminal() if on_terminal is not None and not suppressed else None
+                        confirmed = await on_terminal() if on_terminal is not None else None
                         terminal_seen = status in {"completed", "failed", "stopped"}
                         close_status = status if terminal_seen and (on_terminal is None or confirmed is True) else "failed"
                         projected = [(_public_sse(event)[:-2], event) for event in native_output.close(close_status)]
-                        if suppressed:
-                            continue
                         rendered = await render(projected)
                         if rendered:
                             # The terminal control is the last event in this raw group.
@@ -393,8 +421,6 @@ def present_public_resume(
                                     yield final_frame
                         if not include_journal_controls:
                             continue
-                    if suppressed:
-                        continue
                     if not include_journal_controls and cursor == b"event: agentos_error":
                         error_presented = True
                         yield _PUBLIC_ERROR + b"\n\n"
@@ -409,15 +435,9 @@ def present_public_resume(
                     projected = _project_observer(data, native_output)
                 except (TypeError, ValueError):
                     projected = [(_PUBLIC_ERROR, {"type": "error"})]
-                if suppressed:
-                    error_presented |= any(event.get("type") == "error" for _, event in projected)
-                    continue
                 rendered = await render(projected)
                 if rendered:
                     yield _public_group(rendered, cursor if include_journal_controls else None)
-        if warming:
-            yield prefix_error()
-            return
         if not terminal_seen and native_output.root is not None:
             projected = [(_public_sse(event)[:-2], event) for event in native_output.close("failed")]
             if not error_presented:

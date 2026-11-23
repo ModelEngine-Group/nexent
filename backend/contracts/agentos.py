@@ -610,7 +610,7 @@ class PreparedHistoryTurn(RunSpecModel):
     user_message_id: PositiveInt
     assistant_message_id: int
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
-    execution_records: list[PreparedHistoryExecutionRecord] = Field(default_factory=list)
+    execution_records: list[PreparedHistoryExecutionRecord] = Field(default_factory=list, exclude_if=lambda records: not records)
 
 
 class PreparedConversationHistory(RunSpecModel):
