@@ -145,13 +145,13 @@ def create_ontology_binding_impl(
     """Bind one knowledge base to one ontology domain.
 
     Confirmed route lives on the KB side and takes no body:
-    POST ``/KnowledgeBase/KnowledgeBases/{kdsId}/OntologyDomain/{DomainId}/Bind``.
+    POST ``/KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kdsId}/OntologyDomain/{DomainId}/Bind``.
     """
     payload = _ontology_request(
         server_url,
         api_key,
         "POST",
-        f"/KnowledgeBase/KnowledgeBases/{kds_id}"
+        f"{_get_binding_base(tenant_id)}/KnowledgeBases/{kds_id}"
         f"/OntologyDomain/{_domain_id_value(domain_id)}/Bind",
         operation="create-ontology-binding",
         json_body={},
@@ -175,14 +175,15 @@ def delete_ontology_binding_impl(
 ) -> dict[str, Any]:
     """Unbind a knowledge base from an ontology domain.
 
-    Confirmed route: POST ``/KnowledgeBase/KnowledgeBases/{kdsId}/OntologyDomain/
-    {DomainId}/Unbind``. It only acknowledges a background tag-clear task.
+    Confirmed route: POST ``/KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kdsId}/
+    OntologyDomain/{DomainId}/Unbind``. It only acknowledges a background
+    tag-clear task.
     """
     payload = _ontology_request(
         server_url,
         api_key,
         "POST",
-        f"/KnowledgeBase/KnowledgeBases/{kds_id}"
+        f"{_get_binding_base(tenant_id)}/KnowledgeBases/{kds_id}"
         f"/OntologyDomain/{_domain_id_value(domain_id)}/Unbind",
         operation="delete-ontology-binding",
         json_body={},

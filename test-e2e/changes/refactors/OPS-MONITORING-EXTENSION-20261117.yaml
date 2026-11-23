@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-EXTENSION-20261117
+  change_type: refactor
+  title: Separate model metrics from the shared Ops monitoring pipeline
+  description: Compose the fact schemas, reducers and mappings explicitly and record the statistic dates when a batch is enqueued.
+  feature_contract_changed: false
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-MODEL-MONITORING-D5-001]
+    added: []
+    modified: [OPS-MODEL-MONITORING-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [Use the fact contract for batch dates, Reject incompatible shared mappings before writing any templates]
+    reason: The existing unit tests cover model metrics and replay identity. The real PostgreSQL and Elasticsearch case verifies publication of a second kind using its own fields.
+    test_selectors: [test/backend/ops/test_monitoring.py, test/backend/ops/test_monitoring_api.py]

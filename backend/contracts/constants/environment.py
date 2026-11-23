@@ -18,6 +18,9 @@ NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
+OPS_MONITORING_ENABLED = (os.getenv('OPS_MONITORING_ENABLED') or 'true').lower() == 'true'
+OPS_MONITORING_TIMEZONE = os.getenv('OPS_MONITORING_TIMEZONE', 'UTC')
+OPS_MONITORING_REPLICAS = int(os.getenv('OPS_MONITORING_REPLICAS', '0'))
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
@@ -222,6 +225,9 @@ NEXENT_POSTGRES_PASSWORD = os.getenv('NEXENT_POSTGRES_PASSWORD')
 POSTGRES_DB = os.getenv('POSTGRES_DB')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
+# Ops reuses the Nexent PostgreSQL connection and changes only the database name.
+OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_ops"
+
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
 REDIS_BACKEND_URL = os.getenv('REDIS_BACKEND_URL')
@@ -331,6 +337,7 @@ MIN_RECALL_COUNT = int(os.getenv('MIN_RECALL_COUNT', '3'))
 MIN_UNIQUE_QUERIES = int(os.getenv('MIN_UNIQUE_QUERIES', '3'))
 DREAMING_SOURCE_LIMIT = int(os.getenv('DREAMING_SOURCE_LIMIT', '10'))
 DREAMING_LONG_TERM_MAX_CHARS = int(os.getenv('DREAMING_LONG_TERM_MAX_CHARS', '10000'))
+DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT = 5
 DREAMING_SUMMARIZATION_MAX_ATTEMPTS = int(os.getenv('DREAMING_SUMMARIZATION_MAX_ATTEMPTS', '2'))
 DREAMING_SCHEDULER_POLL_SECONDS = float(os.getenv('DREAMING_SCHEDULER_POLL_SECONDS', '5.0'))
 DREAMING_SCHEDULER_LEASE_SECONDS = float(os.getenv('DREAMING_SCHEDULER_LEASE_SECONDS', '120.0'))

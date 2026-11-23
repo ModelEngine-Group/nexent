@@ -1153,6 +1153,10 @@ prepare_core_service_deployment() {
 
   for service in "$@"; do
     case "$service" in
+      nexent-config) image="${NEXENT_MANAGEMENT_IMAGE:-}" ;;
+      nexent-runtime) image="${NEXENT_RUNTIME_IMAGE:-}" ;;
+      nexent-mcp) image="${NEXENT_MCP_SERVICE_IMAGE:-}" ;;
+      nexent-ops) image="${NEXENT_OPS_IMAGE:-}" ;;
       nexent-gateway) image="${NEXENT_GATEWAY_IMAGE:-}" ;;
       nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
       nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;

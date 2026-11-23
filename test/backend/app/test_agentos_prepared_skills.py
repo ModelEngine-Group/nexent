@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from contracts.agentos import AgentRunReference, PreparedEvaluationRun
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
@@ -287,20 +288,25 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
     ("none", None), ("revoked", 404), ("config", 409), ("file", 409),
 ])
 @pytest.mark.parametrize("debug", [False, True])
-def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status, debug):
+@pytest.mark.parametrize("owner", ["tenant-a", ASSET_OWNER_TENANT_ID])
+def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status, debug, owner):
     from infrastructure.skill_execution import capture_skill_files
     from management.services.agent.workbench import ResolvedSkillMount
     from runtime.agentos import prepared_skills
 
     agent, _, directory, row, ordinary = skill_snapshot
+    if owner != "tenant-a":
+        directory = directory.parent.parent / owner / row["name"]
+        directory.mkdir(parents=True)
+        (directory / "SKILL.md").write_text("platform guide", encoding="utf-8")
     agent.origin = "SYSTEM"
     for tool in agent.tools:
         tool.params["authorized_skill_names"] = ["summarize"]
     catalog = {"skill_id": 53, "name": row["name"], "description": row["description"],
-               "config": row["config"], "tool_ids": []}
+               "config": row["config"], "tool_ids": [], "owner_tenant_id": owner}
     skill = ResolvedSkillMount(
         53, row["name"], row["description"], (), row["config"],
-        files=tuple(capture_skill_files("tenant-a", row["name"]).items()),
+        files=tuple(capture_skill_files(owner, row["name"]).items()),
     )
     resource = evaluation_snapshot._export_resource(
         agent, {}, "tenant-a", "en", None, {}, workbench_skills=(skill,),
@@ -331,6 +337,8 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
             )
             assert tools["read_skill_config"].params["config_overrides"] == {"summarize": row["config"]}
             assert tools["read_skill_md"].params["authorized_skill_names"] == ["summarize"]
+            staged = Path(tools["read_skill_md"].params["local_skills_dir"]) / actor.tenant_id / "summarize"
+            assert (staged / "SKILL.md").read_bytes() == (directory / "SKILL.md").read_bytes()
             assert verified == [catalog]
         else:
             with pytest.raises(HTTPException) as error:

@@ -18,7 +18,6 @@ from unittest.mock import MagicMock
 
 import pytest
 import uvicorn
-from backend.http.server.app_factory import register_exception_handlers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -30,11 +29,37 @@ KB_ONE = "aidp-kb-faq"
 KB_TWO = "aidp-kb-04"
 
 
-def _client() -> TestClient:
-    # Imported lazily so collecting this module does not load the AIDP router
-    # (and its real permission/database modules) before the unit-test stubs.
-    from ext_components.aidp.apps import aidp_mgmt_app
+_STALE_MODULE_PREFIXES = (
+    "ext_components.aidp",
+    "backend.ext_components.aidp",
+    "management.db",
+    "backend.management.db",
+    "infrastructure.rdb",
+    "database",
+    "backend.database",
+)
 
+
+def _fresh_aidp_modules():
+    """Import the AIDP app stack with a clean SQLAlchemy metadata instance.
+
+    The unit-test module removes production modules from sys.modules after its
+    stub fixtures, but the SQLAlchemy metadata stays populated. Re-importing
+    the model modules would redefine existing tables, so the integration test
+    drops the database module family as well and builds a coherent fresh stack.
+    """
+    for name in list(sys.modules):
+        if name in _STALE_MODULE_PREFIXES or any(
+            name.startswith(prefix + ".") for prefix in _STALE_MODULE_PREFIXES
+        ):
+            sys.modules.pop(name, None)
+    from backend.http.server.app_factory import register_exception_handlers
+    from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
+
+    return aidp_mgmt_app, aidp_mgmt_common, register_exception_handlers
+
+
+def _client(aidp_mgmt_app, register_exception_handlers) -> TestClient:
     app = FastAPI()
     app.include_router(aidp_mgmt_app.aidp_mgmt_router)
     register_exception_handlers(app)
@@ -82,7 +107,9 @@ def aidp_mock_url(tmp_path, monkeypatch):
 
 @pytest.fixture
 def configured_client(aidp_mock_url, monkeypatch):
-    from ext_components.aidp.apps import aidp_mgmt_app, aidp_mgmt_common
+    aidp_mgmt_app, aidp_mgmt_common, register_exception_handlers = (
+        _fresh_aidp_modules()
+    )
 
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", aidp_mock_url)
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", MOCK_API_KEY)
@@ -93,12 +120,21 @@ def configured_client(aidp_mock_url, monkeypatch):
         "get_current_user_id",
         lambda *_a, **_kw: (USER_ID, TENANT_ID),
     )
+    # Keep the HTTP layer database-free: the integration test only needs the
+    # AIDP mock, so role resolution must not query the permission tables.
     monkeypatch.setattr(
-        aidp_mgmt_app.perms,
+        aidp_mgmt_app, "get_user_role_by_tenant", lambda *_a, **_kw: "DEV"
+    )
+    # The permission routes import this module directly; patching it here
+    # keeps every router database-free.
+    from ext_components.aidp.services import aidp_permission_service
+
+    monkeypatch.setattr(
+        aidp_permission_service,
         "require_permission",
         MagicMock(return_value=MagicMock(permission="EDIT")),
     )
-    return _client()
+    return _client(aidp_mgmt_app, register_exception_handlers)
 
 
 def test_kb_sensitive_toggle_round_trip_over_http(aidp_mock_url):

@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-RANKINGS-20261120
+  change_type: requirement
+  requirement_id: OPS-AGENT-RANKINGS-20261120
+  title: Agent Token and success-rate Top 5 through the existing rankings route
+  description: Reuse list ordering after authorized resource aggregation, exclude
+    nulls, preserve zero and stable ties, and expose merged success samples without
+    changing default counts.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - OPS-AGENT-FACTS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - OPS-AGENT-FACTS-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/ops/test_agent_list_sorting.py
+    - test/backend/ops/test_agent_monitoring_views.py::test_rankings_choose_exact_top_five_with_stable_ties
+    - test/backend/ops/test_agent_token_api.py::test_execution_rankings_keep_their_existing_query_dependency
+    behaviors:
+    - New ranking selectors return stable numeric descending Top 5 with exact Token
+      values and valid success sample counts.
+    - Null values are excluded; zero, empty and fewer-than-five results preserve existing
+      semantics.
+    - Authorized filters reach the published readers before ranking; default count
+      ranking retains its prior shape and no model dependency.
+    - Unknown metric is rejected and Token dependency failure is sanitized.
+    reason: Existing list UT proves numeric/null/tie ordering and count ranking UT
+      proves the default, but no existing assertions exercise new rank selectors or
+      success sample projection. Strengthen UT and the existing real PG/ES publication/query
+      D3; no duplicate D1.
+  notes: Start cceb5e1dc; only Agent ranking projection, tests and docs change. No
+    capture, database, aggregation, other-module, baseline or northbound changes;
+    local commit only.

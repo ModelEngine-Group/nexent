@@ -11,8 +11,10 @@ from starlette.responses import StreamingResponse
 from contracts.agentos import EVENT_ID_PATTERN, REPLAY_COUNT_HEADER, AgentResume
 from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESSAGE, STREAM_STATUS_EVENT
 from contracts.constants.environment import NEXENT_AGENT_CORE
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
 from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
 from management.services.agent.stream import AssistantMessageProjection
+from management.services.conversation.nexent_output import NexentOutputAdapter
 from nexent.core.concurrency import run_blocking
 
 _OBSERVER_LINE = b"event: agentos_observer"
@@ -175,6 +177,42 @@ def _public_sse(event: dict) -> bytes:
     return b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n"
 
 
+def _event_cursor(cursor, run_id):
+    value = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
+    if cursor.startswith(b"id: ") and re.fullmatch(EVENT_ID_PATTERN, value) and value.startswith(f"{run_id}:"):
+        return value
+    return None
+
+
+async def _restore_output_prefix(output, request, replay_from_start):
+    """Restore renderer state through the acknowledged event without publishing it again."""
+    try:
+        prefix = await replay_from_start()
+    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
+        return False
+    if prefix.status_code != 200:
+        return False
+    async with aclosing(iter_sse_frames(prefix)) as frames:
+        async for frame in frames:
+            if frame.startswith(b":"):
+                continue
+            cursor, _, body = frame.partition(b"\n")
+            event_id = _event_cursor(cursor, request.run_id)
+            if event_id is None:
+                return False
+            kind, _, data = body.partition(b"\n")
+            if kind == _OBSERVER_LINE:
+                try:
+                    payload = json.loads(data.removeprefix(b"data: "))
+                    if isinstance(payload, dict):
+                        output.push(payload)
+                except (TypeError, ValueError):
+                    return False
+            if event_id == request.after_event_id:
+                return True
+    return False
+
+
 def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: int, replay_count: int) -> StreamingResponse:
     """Adapt a scoped AgentOS replay to the cursorless client's public SSE format."""
     cursor_pattern = re.compile(rb"id: " + run_id.encode("ascii") + rb":[1-9][0-9]*")
@@ -266,6 +304,7 @@ class _CompleteAnswer:
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
     on_terminal=None, created=False, include_journal_controls=True, opening_events=(), complete_answer=False,
+    replay_from_start=None,
 ) -> StreamingResponse:
     if response.status_code != 200:
         return response
@@ -274,6 +313,8 @@ def present_public_resume(
         error_presented = False
         announce_creation = created
         initial_events = iter(opening_events)
+        output = NexentOutputAdapter()
+        restore_prefix = replay_from_start is not None and request.after_event_id is not None
         answer = _CompleteAnswer() if complete_answer and NEXENT_AGENT_CORE == "smolagents" else None
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
@@ -287,13 +328,25 @@ def present_public_resume(
                     yield b"data: " + encoded + b"\n\n"
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
+                is_terminal = kind == b"event: agentos_terminal" and _event_cursor(cursor, request.run_id) is not None
                 if kind in {b"event: agentos_execution_fact", b"event: agentos_execution_summary"}:
                     continue
+                if restore_prefix and (kind == _OBSERVER_LINE or is_terminal):
+                    restore_prefix = False
+                    if not await _restore_output_prefix(output, request, replay_from_start):
+                        yield _PUBLIC_ERROR + b"\n\n"
+                        return
                 if kind != _OBSERVER_LINE:
-                    if kind == b"event: agentos_terminal" and cursor.startswith(f"id: {request.run_id}:".encode()):
+                    if is_terminal:
+                        status = json.loads(data.removeprefix(b"data: ")).get("status")
+                        confirmed = await on_terminal() if on_terminal is not None else None
+                        for event in output.close("failed" if confirmed is False else status):
+                            if event["type"] == "error":
+                                if error_presented:
+                                    continue
+                                error_presented = True
+                            yield _public_sse(event)
                         if on_terminal is not None:
-                            confirmed = await on_terminal()
-                            status = json.loads(data.removeprefix(b"data: ")).get("status")
                             if not error_presented and (status == "failed" or (answer and confirmed is False)):
                                 yield _PUBLIC_ERROR + b"\n\n"
                             if answer and confirmed is True and status == "completed":
@@ -307,9 +360,7 @@ def present_public_resume(
                     else:
                         yield frame + b"\n\n"
                     continue
-                cursor_id = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
-                if (not cursor.startswith(b"id: ") or not re.fullmatch(EVENT_ID_PATTERN, cursor_id)
-                        or not cursor_id.startswith(f"{request.run_id}:")):
+                if _event_cursor(cursor, request.run_id) is None:
                     # Do not give the client a cursor it cannot safely resume.
                     return
                 try:
@@ -323,7 +374,18 @@ def present_public_resume(
                     data = answer.observer(data)
                     if data is None:
                         continue
-                yield (cursor + b"\n" if include_journal_controls else b"") + data + b"\n\n"
+                payload = json.loads(data.removeprefix(b"data: "))
+                projected = output.push(payload)
+                if not projected:
+                    continue
+                # A derived group advances the journal cursor only after its last public event.
+                for event in projected[:-1]:
+                    yield _public_sse(event)
+                last = data + b"\n\n" if projected[-1] is payload else _public_sse(projected[-1])
+                yield (cursor + b"\n" if include_journal_controls else b"") + last
+
+        if output.root is not None and not output.closed and not error_presented:
+            yield _PUBLIC_ERROR + b"\n\n"
 
     excluded_headers = {"content-length", REPLAY_COUNT_HEADER.lower()}
     if not include_journal_controls:

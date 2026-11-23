@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-JIUWEN-PIPELINE-20261120
+  change_type: test-fix
+  title: Verify actual Jiuwen Agent monitoring through published Ops queries
+  description: Extend the existing Agent pipeline Case with real Jiuwen main and child execution, controlled model HTTP/SSE, ES facts, daily publication and HTTP reconciliation. Keep runtime and telemetry internals real.
+  affected_features:
+    existing: [OPS-AGENT-FACTS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors: [test/sdk/core/agents/test_agent_first_answer.py, test/sdk/core/agents/test_core_child_dispatch.py, test/sdk/core/agents/test_child_run_timing.py]
+    behaviors: [First effective answer events, core-neutral execution identity, shared per-invocation timing]
+    reason: Existing unit assertions cover isolated contracts; the missing proof is real Jiuwen execution through the actual storage and API pipeline. No additional D1 or product change is planned.
+  notes: Test backfill at f51f05cd1. Existing 17 pipeline variants execute smolagents. Jiuwen event/dispatch UT cannot prove actual Runner, context propagation or model usage reconciliation. The existing D3 owns isolated PG/ES, HTTP peer, trajectory files and managed workers. No ranking, northbound, baseline sync or push work.

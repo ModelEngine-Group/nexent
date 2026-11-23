@@ -52,7 +52,7 @@ def test_worker_uses_final_config_instead_of_request_metadata(monkeypatch, versi
     seen = []
 
     @contextmanager
-    def start(metadata):
+    def start(metadata, **kwargs):
         seen.append(metadata)
         yield None
 
@@ -65,7 +65,7 @@ def test_worker_uses_final_config_instead_of_request_metadata(monkeypatch, versi
     run_agent.agent_run_thread(info)
     assert seen[0].agent_version_no == version
     assert seen[0].agent_version_name == "Frozen"
-    worker.assert_called_once_with(info)
+    worker.assert_called_once_with(info, observation=None)
 
 
 @pytest.mark.parametrize("version", [2, 1, 0, None])

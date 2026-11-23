@@ -59,8 +59,8 @@ interface AidpKnowledgeDetailInformationProps {
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
-  /** Opens the metadata edit dialog, which owns the sensitive-word switch. */
-  onEditMetadata: () => void;
+  /** Opens the single-switch security guardrail dialog. */
+  onEditGuardrail: () => void;
   /** Opens the permanent-disable confirmation for the knowledge graph. */
   onDisableGraph: () => void;
 }
@@ -80,7 +80,7 @@ const AidpKnowledgeDetailInformation = ({
   formatDateTime,
   onEditSetting,
   onEditPermissions,
-  onEditMetadata,
+  onEditGuardrail,
   onDisableGraph,
 }: AidpKnowledgeDetailInformationProps) => {
   const { t } = useTranslation();
@@ -188,7 +188,11 @@ const AidpKnowledgeDetailInformation = ({
           <AidpDetailField label={t("aidpKnowledge.detailSimilarity")}>
             {displayValue(detail.similarity)}
           </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailSensitiveIntercept")}>
+          <AidpDetailField label={t("aidpKnowledge.detailVectorTopK")}>
+            <span>{displayValue(detail.topk)}</span>
+            {editButton("topk", t("aidpKnowledge.detailEditTopK"))}
+          </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.sensitiveIntercept")}>
             <Tag
               color={
                 detail.sensitive_intercept_enable === 1 ? "green" : "default"
@@ -199,21 +203,17 @@ const AidpKnowledgeDetailInformation = ({
                 : t("common.disabled")}
             </Tag>
             {canEdit && (
-              <Tooltip title={t("aidpKnowledge.detailEditSensitiveIntercept")}>
+              <Tooltip title={t("aidpSensitiveWords.guardrailEdit")}>
                 <Button
                   className="ml-2"
                   type="text"
                   size="small"
-                  aria-label={t("aidpKnowledge.detailEditSensitiveIntercept")}
+                  aria-label={t("aidpSensitiveWords.guardrailEdit")}
                   icon={<EditOutlined />}
-                  onClick={onEditMetadata}
+                  onClick={onEditGuardrail}
                 />
               </Tooltip>
             )}
-          </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailVectorTopK")}>
-            <span>{displayValue(detail.topk)}</span>
-            {editButton("topk", t("aidpKnowledge.detailEditTopK"))}
           </AidpDetailField>
         </dl>
       </section>

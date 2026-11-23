@@ -4899,10 +4899,11 @@ def delete_ontology_binding(
     return JSONResponse(status_code=204, content=None)
 
 
-# Confirmed real-contract routes: bind/unbind live on the KB side and take no
-# body; the domain-side list answers value/next_link/total_count without any
-# BindingId. The legacy routes above stay for older demo seeds.
-@app.post(f"/KnowledgeBase/KnowledgeBases/{{kds_id}}/OntologyDomain/{{domain_id}}/Bind")
+# Confirmed real-contract routes: bind/unbind live on the tenant-scoped KB
+# side and take no body; the domain-side list answers
+# value/next_link/total_count without any BindingId. The legacy routes above
+# stay for older demo seeds.
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/OntologyDomain/{{domain_id}}/Bind")
 def bind_kb_to_ontology(
     kds_id: str,
     domain_id: str,
@@ -4946,7 +4947,7 @@ def bind_kb_to_ontology(
     }
 
 
-@app.post(f"/KnowledgeBase/KnowledgeBases/{{kds_id}}/OntologyDomain/{{domain_id}}/Unbind")
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/OntologyDomain/{{domain_id}}/Unbind")
 def unbind_kb_from_ontology(
     kds_id: str,
     domain_id: str,

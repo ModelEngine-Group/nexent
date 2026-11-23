@@ -50,6 +50,10 @@ def _normalize_legacy_parameters(entry, profile):
     """Interpret old omission and body aliases using the saved outlet only."""
     values = entry["parameter_values"]
     rules = {rule["key"]: rule for rule in profile.parameter_rules}
+    if values.get("enable_thinking") is False and "enable_thinking" not in rules:
+        # Historical snapshots stored false for outlets that cannot toggle
+        # thinking; the value only meant "inherit the outlet".
+        values.pop("enable_thinking")
     effort = rules.get("reasoning_effort", {})
     controls = profile.capabilities.reasoning.controls or ()
     explicit_auto = "auto" in effort.get("schema", {}).get("enum", ()) or any(

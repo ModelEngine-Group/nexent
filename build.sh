@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -12,26 +13,6 @@ fi
 [ -n "${DEPLOYMENT_LANGUAGE:-}" ] || DEPLOYMENT_LANGUAGE="en"
 
 usage() {
-  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    cat <<'USAGE'
-用法：
-  bash build.sh [镜像构建选项]
-  bash build.sh --package [离线包构建选项]
-
-镜像构建会转发到：deploy/images/build.sh
-离线包构建会转发到：deploy/offline/build_offline_package.sh
-
-常用示例：
-  bash build.sh --main --version latest --dry-run
-  bash build.sh --package --version latest --target docker --dry-run
-
-更多选项：
-  bash deploy/images/build.sh --help
-  bash deploy/offline/build_offline_package.sh --help
-USAGE
-    return
-  fi
-
   cat <<'USAGE'
 Usage:
   bash build.sh [image build options]
@@ -40,8 +21,26 @@ Usage:
 Image builds are forwarded to: deploy/images/build.sh
 Offline package builds are forwarded to: deploy/offline/build_offline_package.sh
 
+Available images (use --images LIST with comma-separated names, or matching flags):
+  main          nexent/nexent
+  management    nexent/nexent-management
+  runtime       nexent/nexent-runtime
+  mcp-service   nexent/nexent-mcp-service
+  ops           nexent/nexent-ops
+  gateway       nexent/nexent-gateway
+  web           nexent/nexent-web
+  data-process  nexent/nexent-data-process
+  mcp           nexent/nexent-mcp (proxy)
+  terminal      nexent/nexent-ubuntu-terminal
+  docs          nexent/nexent-docs
+  sandbox       nexent/nexent-sandbox
+  sandbox-full  nexent/nexent-sandbox-full
+  all           Build the images above, excluding optional sandbox-full
+
 Examples:
   bash build.sh --main --version latest --dry-run
+  bash build.sh --images runtime,management --version latest --load
+  bash build.sh --images mcp-service,ops --version latest --load
   bash build.sh --package --version latest --target docker --dry-run
 
 More options:

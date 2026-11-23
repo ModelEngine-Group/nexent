@@ -170,6 +170,7 @@ def _config_to_context(
         "modality": modality,
         "factory": factory,
         "tenant_id": tenant_id,
+        "catalog_model_id": cfg.get("model_id"),
         "slot": slot,
         "ssl_verify": cfg.get("ssl_verify", True),
         "observer": observer,

@@ -128,6 +128,48 @@ def test_read_and_explicit_save_share_legacy_conversion_without_rewriting_histor
     assert old == before
 
 
+@pytest.fixture
+def budget_only_row(protocol_profile):
+    """Outlet that only exposes a reasoning budget, like the DeepSeek catalog entry."""
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+
+    data = protocol_profile.model_dump(mode="json")
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    for rule in data["parameter_rules"]:
+        if (rule.get("condition") or {}).get("key") == "enable_thinking":
+            rule.pop("condition")
+    data["parameter_values"] = {}
+    reasoning_capability = data["capabilities"]["reasoning"]
+    reasoning_capability["controls"] = [
+        control for control in reasoning_capability["controls"]
+        if control.get("parameter_key") != "enable_thinking"
+    ]
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 43
+    refs = model_service_references()
+    for key in ("auth", "code_converter", "native_converter"):
+        data["bindings"][key] = refs[key][0].model_dump(mode="json")
+    return encode_resolved_model_profile(protocol_profile.__class__.model_validate(data), registered_references=refs)
+
+
+def test_persisted_parameter_missing_from_the_profile_does_not_block_saving(monkeypatch, budget_only_row):
+    from management.services.agent import reasoning
+
+    monkeypatch.setattr(reasoning, "get_model_by_model_id", lambda *args, **kwargs: budget_only_row)
+    saved = {"43": {"extra_params": {"enable_thinking": False}}}
+    assert reasoning.snapshot_agent_reasoning_config([43], None, saved, "tenant") is None
+
+
+def test_explicit_parameter_missing_from_the_profile_is_still_rejected(monkeypatch, budget_only_row):
+    from management.services.agent import reasoning
+
+    monkeypatch.setattr(reasoning, "get_model_by_model_id", lambda *args, **kwargs: budget_only_row)
+    with pytest.raises(ParameterValidationError):
+        reasoning.snapshot_agent_reasoning_config(
+            [43], {"43": {"parameter_values": {"enable_thinking": False}}}, None, "tenant"
+        )
+
+
 def test_legacy_custom_bound_fields_cannot_bypass_fixed_outlet_policy(effort_profile):
     data = effort_profile.model_dump(mode="json")
     rule = next(r for r in data["parameter_rules"] if r["key"] == "enable_thinking")

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-FACTS-20261117
+  change_type: requirement
+  requirement_id: OPS-AGENT-FACTS-20261117
+  title: Persist main Agent monitoring facts
+  description: Accept a main Agent sample through the shared producer and persist its revisions as one Elasticsearch document.
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: [OPS-AGENT-FACTS]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [OPS-AGENT-FACTS-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [test/backend/ops/test_agent_monitoring.py]
+    behaviors:
+    - Validate Agent run identities and reject invalid root and child references.
+    - Keep both revisions on the start partition and treat a terminal replay as a no-op.
+    - Preserve the model reducer and keep fact-only registrations out of publication.
+    reason: The baseline uses model and synthetic kinds to prove the shared writer. Agent identity and a registration with no reducer require their own unit assertions.
+  notes: The D3 case proves actual PostgreSQL and Elasticsearch writes of Agent samples. Live Agent instrumentation, daily aggregation and product queries are separate milestones.

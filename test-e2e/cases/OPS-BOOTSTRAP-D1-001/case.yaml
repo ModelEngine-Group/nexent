@@ -21,7 +21,7 @@ case:
   - Application selection starts ops through the correct development or production Compose file.
   - Infrastructure-only selection issues no core startup and disables the ops Helm dependency.
   - Compose failure is propagated to the caller.
-  - The root chart renders ops with the shared image, consistent ports and probes, only configuration secrets and no business envFrom or mounts, only a logs PVC, and configuration rollout checksums.
+  - The root chart renders the dedicated Ops image, consistent ports and probes, allowlisted configuration and credential references, only a logs PVC, and image and configuration rollout checksums.
   - Kubernetes readiness includes ops and propagates an ops readiness failure.
   steps:
   - order: 1

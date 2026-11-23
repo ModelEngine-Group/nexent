@@ -5,12 +5,11 @@
 import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Modal, Form, Input, Switch, message } from "antd";
+import { Alert, Modal, Form, Input, message } from "antd";
 
 import log from "@/lib/logger";
 
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
-import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { useSaveAidpKnowledgeSettings } from "./hooks/useAidpKnowledgeDetail";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
@@ -63,8 +62,6 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
     form.setFieldsValue({
       name: knowledgeBase.kds_name,
       description: knowledgeBase.description || "",
-      sensitive_intercept_enable:
-        knowledgeBase.sensitive_intercept_enable === 1,
       ingroup_permission: isUser
         ? "PRIVATE"
         : knowledgeBase.ingroup_permission || "READ_ONLY",
@@ -127,53 +124,27 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           .some(
             (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
           );
-      // The switch is a KB field, not a permission: only an explicit change
-      // is sent, so unrelated edits never overwrite the upstream value.
-      const nextSensitive = values.sensitive_intercept_enable === true;
-      const originalSensitive = knowledgeBase.sensitive_intercept_enable === 1;
-      const sensitiveChanged =
-        mode === "metadata" && nextSensitive !== originalSensitive;
       const settingsChanged =
         nameChanged || descriptionChanged || permissionChanged;
 
-      if (!settingsChanged && !sensitiveChanged) {
+      if (!settingsChanged) {
         form.resetFields();
         onSuccess(knowledgeBase);
         return;
       }
 
       // Validate only fields the user actually changed. Historical KB names
-      // may not match today's naming rule; an unrelated switch edit must not
-      // be blocked by re-validating the untouched name.
+      // may not match today's naming rule; an unrelated permission edit must
+      // not be blocked by re-validating the untouched name.
       const fieldsToValidate: string[] = [];
       if (mode === "metadata") {
         if (nameChanged) fieldsToValidate.push("name");
         if (descriptionChanged) fieldsToValidate.push("description");
-        if (sensitiveChanged)
-          fieldsToValidate.push("sensitive_intercept_enable");
       }
       if (permissionChanged)
         fieldsToValidate.push("ingroup_permission", "group_ids");
       if (fieldsToValidate.length) {
         await form.validateFields(fieldsToValidate);
-      }
-
-      if (sensitiveChanged) {
-        // Send only the switch and refresh the detail afterwards; the AIDP
-        // update route treats omitted fields as unchanged.
-        await aidpKnowledgeService.updateKb(knowledgeBase.kds_id, {
-          sensitive_intercept_enable: nextSensitive ? 1 : 0,
-        });
-      }
-
-      if (!settingsChanged) {
-        message.success(t("aidpKnowledge.updateKbSuccess"));
-        form.resetFields();
-        onSuccess({
-          ...knowledgeBase,
-          sensitive_intercept_enable: nextSensitive ? 1 : 0,
-        });
-        return;
       }
 
       // Omitted metadata fields must never trigger an upstream AIDP request.
@@ -207,7 +178,6 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             : knowledgeBase.description,
         ingroup_permission: newPermission,
         group_ids: normalizedNewGroupIds,
-        sensitive_intercept_enable: nextSensitive ? 1 : 0,
         resource_status:
           result.metadata_status === "updated"
             ? "ACTIVE"
@@ -284,22 +254,6 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           style={{ padding: "20px 24px 8px" }}
         >
           {mode === "metadata" && <AidpKnowledgeBaseBasicFields t={t} />}
-          {mode === "metadata" && (
-            <>
-              <Form.Item
-                name="sensitive_intercept_enable"
-                label={t("aidpKnowledge.sensitiveIntercept")}
-                valuePropName="checked"
-                extra={
-                  <span className="text-xs text-gray-500">
-                    {t("aidpKnowledge.sensitiveInterceptHint")}
-                  </span>
-                }
-              >
-                <Switch aria-label={t("aidpKnowledge.sensitiveIntercept")} />
-              </Form.Item>
-            </>
-          )}
           {canConfigureGroupPermissions &&
             (groupsError || (!canReadGroups && !groupsLoading)) && (
               <Alert

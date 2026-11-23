@@ -86,12 +86,13 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
 
   const queryKey = useMemo(
-    () => [...scope.key, "ontology-rules", domainId, { page, pageSize }],
-    [domainId, page, pageSize, scope.key]
+    () => [...scope.key, "ontology-rules", domainId],
+    [domainId, scope.key]
   );
   const query = useQuery({
     queryKey,
-    queryFn: () => aidpOntologyService.listRules(domainId, page, pageSize),
+    // AIDP caps rules at 100 per domain, so one request fetches the full list.
+    queryFn: () => aidpOntologyService.listRules(domainId, 1, RULE_LIMIT),
     enabled: scope.enabled && !!domainId,
     staleTime: 0,
     retry: false,
@@ -105,9 +106,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
   });
 
   const rules = useMemo(() => query.data?.value ?? [], [query.data?.value]);
-  const total = query.data?.total_count ?? rules.length;
-  const totalReliable = query.data?.total_reliable !== false;
-  const hasMore = query.data?.has_more ?? false;
   const count = countQuery.data?.count;
   const atLimit = (count ?? 0) >= RULE_LIMIT;
   const filteredRules = useMemo(() => {
@@ -115,6 +113,16 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
     if (!needle) return rules;
     return rules.filter((rule) => rule.name.toLowerCase().includes(needle));
   }, [rules, search]);
+  const total = filteredRules.length;
+  // Keep the rendered page inside range after filtering or deletion shrinks
+  // the list without storing a derived value back into state.
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, lastPage);
+  const pagedRules = useMemo(
+    () =>
+      filteredRules.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [currentPage, filteredRules, pageSize]
+  );
   const selectedRules = rules.filter((rule) =>
     selectedKeys.includes(rule.rule_id)
   );
@@ -194,7 +202,6 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
         try {
           await aidpOntologyService.deleteRule(domainId, rule.rule_id);
           message.success(t("aidpKnowledge.ontologyRulesDeleted"));
-          if (rules.length === 1 && page > 1) setPage(page - 1);
           refresh();
         } catch (error) {
           message.error(
@@ -501,7 +508,7 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
           size="middle"
           className={styles.table}
           columns={resizableColumns}
-          dataSource={filteredRules}
+          dataSource={pagedRules}
           pagination={false}
           tableLayout="fixed"
           components={{ header: { cell: AidpResizableTitle } }}
@@ -633,15 +640,15 @@ const AidpOntologyRulesTab: React.FC<AidpOntologyRulesTabProps> = ({
       </div>
 
       {renderBody()}
-      {rules.length > 0 && (
+      {filteredRules.length > 0 && (
         <div className={styles.paginationRow}>
           <AidpPagination
-            currentPage={page}
+            currentPage={currentPage}
             pageSize={pageSize}
             pageSizeOptions={[10, 20, 50, 100]}
             total={total}
-            totalReliable={totalReliable}
-            hasMore={hasMore}
+            totalReliable
+            hasMore={false}
             selectionHint={
               selectedKeys.length
                 ? t("aidpKnowledge.selectedCount", {

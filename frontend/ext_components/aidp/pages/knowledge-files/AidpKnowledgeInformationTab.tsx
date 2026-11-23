@@ -22,6 +22,7 @@ import {
 import log from "@/lib/logger";
 import AidpChunkModeChoices from "@/ext_components/aidp/shared/components/AidpChunkModeChoices";
 import AidpSliderNumberField from "@/ext_components/aidp/pages/knowledge-create/AidpSliderNumberField";
+import AidpGuardrailSettingsModal from "@/ext_components/aidp/shared/components/AidpGuardrailSettingsModal";
 import {
   AIDP_CHUNK_TOKEN_MAX,
   AIDP_CHUNK_TOKEN_MIN,
@@ -115,7 +116,6 @@ interface AidpKnowledgeInformationTabProps {
   canConfigureGroupPermissions: boolean;
   detailFetching: boolean;
   onEditPermissions: () => void;
-  onEditMetadata: () => void;
   onRefreshDetail: () => Promise<unknown>;
 }
 
@@ -133,7 +133,6 @@ const AidpKnowledgeInformationTab: React.FC<
   canConfigureGroupPermissions,
   detailFetching,
   onEditPermissions,
-  onEditMetadata,
   onRefreshDetail,
 }) => {
   const { t } = useTranslation();
@@ -149,6 +148,9 @@ const AidpKnowledgeInformationTab: React.FC<
   const [settingModal, setSettingModal] = useState<AidpDetailSetting | null>(
     null
   );
+  const [guardrailOpen, setGuardrailOpen] = useState(false);
+  const [guardrailEnabled, setGuardrailEnabled] = useState(false);
+  const [savingGuardrail, setSavingGuardrail] = useState(false);
   const [settingForm] = Form.useForm<{ value: number }>();
   const [graphForm] = Form.useForm<{ value: string | number | boolean }>();
   const [vlmForm] = Form.useForm<{
@@ -524,6 +526,37 @@ const AidpKnowledgeInformationTab: React.FC<
     );
   };
 
+  const openGuardrail = () => {
+    setGuardrailEnabled(detail.sensitive_intercept_enable === 1);
+    setGuardrailOpen(true);
+  };
+
+  const saveGuardrail = async () => {
+    setSavingGuardrail(true);
+    try {
+      await aidpKnowledgeService.updateKb(detail.kds_id, {
+        sensitive_intercept_enable: guardrailEnabled ? 1 : 0,
+      });
+      message.success(t("aidpSensitiveWords.guardrailSaveSuccess"));
+      setGuardrailOpen(false);
+      await onRefreshDetail();
+    } catch (error) {
+      log.error("Failed to update AIDP security guardrails:", {
+        id: detail.kds_id,
+        error,
+      });
+      message.error(
+        getAidpErrorMessage(
+          error,
+          t,
+          t("aidpSensitiveWords.guardrailSaveFailed")
+        )
+      );
+    } finally {
+      setSavingGuardrail(false);
+    }
+  };
+
   return (
     <>
       {detailFetching ? (
@@ -540,7 +573,7 @@ const AidpKnowledgeInformationTab: React.FC<
           summaryModelLabel={summaryModelLabel}
           formatDateTime={formatDetailDateTime}
           onEditPermissions={onEditPermissions}
-          onEditMetadata={onEditMetadata}
+          onEditGuardrail={openGuardrail}
           onEditSetting={setSettingModal}
           onDisableGraph={disableGraph}
         />
@@ -790,6 +823,18 @@ const AidpKnowledgeInformationTab: React.FC<
           </Form>
         ) : null}
       </Modal>
+
+      <AidpGuardrailSettingsModal
+        open={guardrailOpen}
+        enabled={guardrailEnabled}
+        loading={detailFetching}
+        saving={savingGuardrail}
+        onToggle={setGuardrailEnabled}
+        onSave={() => void saveGuardrail()}
+        onCancel={() => {
+          if (!savingGuardrail) setGuardrailOpen(false);
+        }}
+      />
     </>
   );
 };
