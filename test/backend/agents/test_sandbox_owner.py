@@ -86,7 +86,7 @@ def test_epoch_change_alone_does_not_prove_process_death(facts, mocker, ticks, s
 
 @pytest.mark.parametrize('condition,stopped', [('404', False), ('replacement-uid', False),
                                               ('phase-failed', False), ('wrong-container', False),
-                                              ('terminated', True)])
+                                              ('terminated', True), ('last-terminated', True)])
 def test_only_exact_terminated_container_facts_prove_remote_owner_death(facts, condition, stopped):
     store, owner, process = facts
     api = Mock()
@@ -97,15 +97,77 @@ def test_only_exact_terminated_container_facts_prove_remote_owner_death(facts, c
     else:
         if condition == 'replacement-uid':
             pod['metadata']['uid'] = 'replacement'
-        if condition in ('wrong-container', 'terminated'):
+        if condition in ('wrong-container', 'terminated', 'last-terminated'):
+            state_key = 'lastState' if condition == 'last-terminated' else 'state'
             pod['status']['containerStatuses'] = [{
-                'name': 'nexent-runtime', 'state': {'terminated': {
+                'name': 'nexent-runtime', state_key: {'terminated': {
                     'containerID': 'foreign' if condition == 'wrong-container' else process['container_id'],
                     'finishedAt': 'time',
                 }},
             }]
         api.read_namespaced_pod.return_value = pod
     assert observer.process_stopped(store.read(owner.epoch)) is stopped
+
+
+@pytest.mark.parametrize('condition,stopped', [
+    ('no-history', True), ('new-linux-boot', True), ('equal-ticks', False), ('earlier-ticks', False),
+    ('different-deployment', False), ('different-pod', False), ('different-pod-name', False),
+    ('different-namespace', False),
+    ('deleting-pod', False), ('host-pid', False), ('shared-pid', False), ('old-not-init', False),
+    ('current-not-init', False), ('stale-status', False), ('waiting', False), ('missing-started-at', False),
+    ('other-container', False), ('not-a-regular-container', False), ('duplicate-status', False),
+])
+def test_pid1_replacement_requires_a_verified_current_container(facts, condition, stopped):
+    store, owner, process = facts
+    fact = store.read(owner.epoch)
+    old = fact['process'] = {**process, 'pid': 1}
+    current = {**old, 'container_id': 'container-b', 'start_ticks': '200'}
+    current_owner = replace(owner, epoch='new')
+    status = {'name': old['container_name'], 'containerID': current['container_id'],
+              'state': {'running': {'startedAt': '2026-11-23T01:00:00Z'}}}
+    metadata = {'name': owner.pod_name, 'namespace': owner.namespace, 'uid': owner.pod_uid}
+    spec = {'containers': [{'name': old['container_name']}]}
+    pod = {'metadata': metadata, 'spec': spec, 'status': {'containerStatuses': [status]}}
+
+    if condition == 'new-linux-boot':
+        current.update(boot_id='boot-b', start_ticks='42')
+    elif condition in ('equal-ticks', 'earlier-ticks'):
+        current['start_ticks'] = '100' if condition == 'equal-ticks' else '99'
+    elif condition == 'different-deployment':
+        current_owner = replace(current_owner, deployment_id='foreign')
+    elif condition == 'different-pod':
+        current_owner = replace(current_owner, pod_uid='foreign')
+    elif condition == 'different-pod-name':
+        metadata['name'] = 'foreign'
+    elif condition == 'different-namespace':
+        metadata['namespace'] = 'foreign'
+    elif condition == 'deleting-pod':
+        metadata['deletionTimestamp'] = '2026-11-23T01:00:00Z'
+    elif condition == 'host-pid':
+        spec['hostPID'] = True
+    elif condition == 'shared-pid':
+        spec['shareProcessNamespace'] = True
+    elif condition == 'old-not-init':
+        old['pid'] = 123
+    elif condition == 'current-not-init':
+        current['pid'] = 123
+    elif condition == 'stale-status':
+        status['containerID'] = 'intermediate-container'
+    elif condition == 'waiting':
+        status['state'] = {'waiting': {'reason': 'ContainerCreating'}}
+    elif condition == 'missing-started-at':
+        status['state']['running'] = {}
+    elif condition == 'other-container':
+        current['container_name'] = 'sidecar'
+    elif condition == 'not-a-regular-container':
+        spec['initContainers'] = spec.pop('containers')
+    elif condition == 'duplicate-status':
+        pod['status']['containerStatuses'].append(status.copy())
+
+    api = Mock()
+    api.read_namespaced_pod.return_value = pod
+    observer = SandboxOwnerObserver(lambda: nullcontext(api), current_owner, current)
+    assert observer.process_stopped(fact) is stopped
 
 
 @pytest.mark.parametrize('mutation', [

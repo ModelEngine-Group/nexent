@@ -9,7 +9,7 @@ import pytest
 from nexent.core.agents.sandbox_contracts import SandboxOwner, SystemSandboxProfile
 from nexent.core.agents.sandbox_kubernetes import KubernetesSandboxBackend
 from runtime.sandbox_journal import SandboxCoordinationUnknown, SandboxRunJournal, SandboxRunRecord
-from runtime.sandbox_owner import SandboxOwnerFacts
+from runtime.sandbox_owner import SandboxOwnerFacts, SandboxOwnerObserver
 from runtime.sandbox_recovery import SandboxRuntimeRecovery
 
 
@@ -18,7 +18,7 @@ def recovery(tmp_path):
     owner = SandboxOwner('release', 'namespace', 'runtime-a', 'uid-a', '10.0.0.1', 'old')
     journal = SandboxRunJournal(tmp_path / 'control')
     facts = SandboxOwnerFacts(journal, owner)
-    facts.initialize({'pid': 123, 'start_ticks': '100', 'boot_id': 'boot', 'container_id': 'runtime-cid',
+    facts.initialize({'pid': 1, 'start_ticks': '100', 'boot_id': 'boot', 'container_id': 'runtime-cid',
                       'container_name': 'nexent-runtime'})
     key = journal.business_key('release', 'namespace', 'tenant', 'user', 7)
     record = SandboxRunRecord('a' * 32, key, asdict(owner), 'tenant', 'user', 7, 'b' * 64, phase='ACTIVE')
@@ -87,6 +87,46 @@ def test_new_epoch_same_pod_is_blocked_by_another_live_process(recovery):
     with pytest.raises(SandboxCoordinationUnknown):
         engine.recover(startup=True)
     fail.assert_not_called()
+
+
+@pytest.mark.parametrize('sandbox_created', [False, True])
+def test_startup_recovers_replaced_runtime_older_than_last_state(recovery, sandbox_created):
+    from kubernetes.client.exceptions import ApiException
+
+    engine, record, facts, _, api, fail = recovery
+    owner = facts.owner
+    current_owner = replace(owner, epoch='new')
+    engine.coordinator.owner = current_owner
+    process = facts.read(owner.epoch)['process']
+    current_process = {**process, 'container_id': 'runtime-cid-new', 'start_ticks': '200'}
+    engine.observer = SandboxOwnerObserver(engine.api_factory, current_owner, current_process)
+    pod = {
+        'metadata': {'name': owner.pod_name, 'namespace': owner.namespace, 'uid': owner.pod_uid},
+        'spec': {'containers': [{'name': process['container_name']}]},
+        'status': {'containerStatuses': [{
+            'name': process['container_name'], 'containerID': current_process['container_id'],
+            'state': {'running': {'startedAt': '2026-11-23T01:00:00Z'}},
+            'lastState': {'terminated': {'containerID': 'runtime-cid-intermediate', 'finishedAt': 'time'}},
+        }]},
+    }
+    if sandbox_created:
+        declared_resource(facts)
+        api.read_namespaced_pod.side_effect = [pod, ApiException(status=404)]
+        with pytest.raises(SandboxCoordinationUnknown, match='SYSTEM execution termination is unproved'):
+            engine.recover(startup=True)
+        assert engine.journal.read_run(record.run_id).phase == 'ACTIVE'
+        fail.assert_not_called()
+        engine.coordinator.client.eval.assert_not_called()
+    else:
+        api.read_namespaced_pod.return_value = pod
+        assert engine.recover(startup=True)['recovered_runs'] == 1
+        api.read_namespaced_pod.side_effect = ApiException(status=503)
+        assert engine.recover(startup=True)['recovered_runs'] == 0
+        assert engine.journal.read_run(record.run_id).phase == 'TERMINAL'
+        api.read_namespaced_pod.assert_called_once_with(owner.pod_name, owner.namespace, _request_timeout=5)
+        fail.assert_called_once()
+    assert facts.read(owner.epoch)['process_stopped_at'] is not None
+    api.delete_namespaced_pod.assert_not_called()
 
 
 def test_missing_ready_sandbox_never_proves_execution_stopped(recovery, caplog, mocker):

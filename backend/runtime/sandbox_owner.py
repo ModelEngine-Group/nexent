@@ -178,7 +178,7 @@ class SandboxOwnerFacts:
             return self._current(owner)['resource_state'] == 'NOT_CREATED'
 
     def record_process_stopped(self):
-        """Call only after direct process or exact container termination proof."""
+        """Persist a verified termination so later recovery does not need to prove it again."""
         with self.journal.locked(self.owner.key):
             fact = self._current(self.owner)
             if fact['process_stopped_at'] is None:
@@ -190,8 +190,37 @@ class SandboxOwnerObserver:
     def __init__(self, api_factory, current_owner, current_process):
         self.api_factory, self.current_owner, self.current_process = api_factory, current_owner, current_process
 
+    def _superseded_in_current_pod(self, owner, process, pod, statuses):
+        current_owner, current = self.current_owner, self.current_process
+        container_name = process['container_name']
+        metadata = pod['metadata']
+        spec = pod.get('spec', {})
+        if (owner.key != current_owner.key or owner.pod_name != current_owner.pod_name
+                or metadata.get('name') != owner.pod_name or metadata.get('namespace') != owner.namespace
+                or metadata.get('deletionTimestamp') is not None
+                or spec.get('hostPID', False) is not False or spec.get('shareProcessNamespace', False) is not False
+                or process['pid'] != 1 or current['pid'] != 1
+                or container_name != current['container_name']
+                or process['container_id'] == current['container_id']):
+            return False
+        if sum(container.get('name') == container_name for container in spec.get('containers', ())) != 1:
+            return False
+        matching = [status for status in statuses if status.get('name') == container_name]
+        if len(matching) != 1:
+            return False
+        status = matching[0]
+        running = status.get('state', {}).get('running') or {}
+        if status.get('containerID') != current['container_id'] or not running.get('startedAt'):
+            return False
+        # Kubelet starts a replacement for the same regular container after stopping
+        # its predecessor. With private PID namespaces both identities are the
+        # respective container init processes. The Pod UID pins the node, so a
+        # different Linux boot also rules out survival of the previous process.
+        return (process['boot_id'] != current['boot_id']
+                or int(process['start_ticks']) < int(current['start_ticks']))
+
     def process_stopped(self, fact):
-        """Only direct process identity or exact terminated-container facts prove death."""
+        """Accept exact termination or verified replacement of the local Runtime container."""
         SandboxOwnerFacts.validate(fact)
         if fact['process_stopped_at'] is not None:
             return True
@@ -223,7 +252,7 @@ class SandboxOwnerObserver:
                         identity = identity or status.get('containerID')
                     if identity == process['container_id'] and terminated.get('finishedAt'):
                         return True
-            return False
+            return self._superseded_in_current_pod(owner, process, pod, statuses)
         except Exception:
             # 404, replacement UID and API outages all preserve UNKNOWN.
             return False
