@@ -89,6 +89,7 @@ class TestCreateApp:
 
     def test_create_app_all_parameters(self):
         """Test creating app with all parameters."""
+        internal_request = lambda method, path: method == "POST" and path == "/internal/test"
         app = create_app(
             title="Full Test API",
             description="Full description",
@@ -96,13 +97,19 @@ class TestCreateApp:
             root_path="/v3",
             cors_origins=["https://test.com"],
             cors_methods=["GET", "POST"],
-            enable_monitoring=True
+            enable_monitoring=True,
+            gateway_identity_audience="runtime",
+            internal_runtime_request=internal_request,
         )
 
         assert app.title == "Full Test API"
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+        identity = next(item for item in app.user_middleware
+                        if item.cls.__name__ == "GatewayIdentityMiddleware")
+        assert identity.kwargs["audience"] == "runtime"
+        assert identity.kwargs["internal_runtime_request"] is internal_request
 
     def test_create_app_uses_lifespan_context(self):
         @asynccontextmanager
