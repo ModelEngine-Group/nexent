@@ -227,11 +227,6 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # Ops reuses the Nexent PostgreSQL connection and changes only the database name.
 OPS_POSTGRES_DB = os.getenv('OPS_POSTGRES_DB') or f"{POSTGRES_DB or 'nexent'}_ops"
-if OPS_MONITORING_ENABLED:
-    if OPS_POSTGRES_DB == (POSTGRES_DB or 'nexent'):
-        raise ValueError('OPS_POSTGRES_DB must differ from POSTGRES_DB')
-    if len(OPS_POSTGRES_DB.encode('utf-8')) > 63:
-        raise ValueError('OPS_POSTGRES_DB must not exceed 63 UTF-8 bytes')
 
 # Data Processing Service Configuration
 REDIS_URL = os.getenv('REDIS_URL')
@@ -342,6 +337,7 @@ MIN_RECALL_COUNT = int(os.getenv('MIN_RECALL_COUNT', '3'))
 MIN_UNIQUE_QUERIES = int(os.getenv('MIN_UNIQUE_QUERIES', '3'))
 DREAMING_SOURCE_LIMIT = int(os.getenv('DREAMING_SOURCE_LIMIT', '10'))
 DREAMING_LONG_TERM_MAX_CHARS = int(os.getenv('DREAMING_LONG_TERM_MAX_CHARS', '10000'))
+DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT = 5
 DREAMING_SUMMARIZATION_MAX_ATTEMPTS = int(os.getenv('DREAMING_SUMMARIZATION_MAX_ATTEMPTS', '2'))
 DREAMING_SCHEDULER_POLL_SECONDS = float(os.getenv('DREAMING_SCHEDULER_POLL_SECONDS', '5.0'))
 DREAMING_SCHEDULER_LEASE_SECONDS = float(os.getenv('DREAMING_SCHEDULER_LEASE_SECONDS', '120.0'))

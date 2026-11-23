@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-from contracts.constants.environment import OPS_MONITORING_ENABLED
 from backend.http.server.exception_handlers import register_exception_handlers
 from backend.http.server.health import install_health_contract
 
@@ -67,12 +66,18 @@ def create_app(
     Returns:
         Configured FastAPI application
     """
+    if enable_monitoring:
+        from contracts.constants.environment import OPS_MONITORING_ENABLED
+
+        if OPS_MONITORING_ENABLED:
+            lifespan = _with_ops_monitoring(lifespan)
+
     app = FastAPI(
         title=title,
         description=description,
         version=version,
         root_path=root_path,
-        lifespan=_with_ops_monitoring(lifespan) if OPS_MONITORING_ENABLED else lifespan,
+        lifespan=lifespan,
     )
 
     # Add CORS middleware

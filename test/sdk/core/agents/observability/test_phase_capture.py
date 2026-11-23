@@ -37,6 +37,30 @@ def local_spans(spans, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("traced", [False, True])
+async def test_preparation_keeps_strict_wire_models_serializable(local_spans, monkeypatch, traced):
+    from pydantic import BaseModel, ConfigDict
+
+    manager, exporter = local_spans
+    monkeypatch.setattr(manager._config, "enable_telemetry", traced)
+
+    class PreparedWireRun(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        query: str
+
+    @capture_preparation
+    async def prepare():
+        with trace_phase("prepare.wire"):
+            return PreparedWireRun(query="task")
+
+    result = await prepare()
+    assert result.model_dump() == {"query": "task"}
+    assert result.model_dump_json() == '{"query":"task"}'
+    assert not hasattr(result, "run_timing") and not hasattr(result, "preparation_trace")
+    assert not exporter.get_finished_spans()
+
+
+@pytest.mark.asyncio
 async def test_preparation_is_emitted_once_under_worker_with_original_timing(
     local_spans, monkeypatch
 ):

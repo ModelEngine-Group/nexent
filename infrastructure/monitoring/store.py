@@ -28,7 +28,9 @@ def monitoring_engine():
     if not POSTGRES_HOST or not POSTGRES_USER or not OPS_POSTGRES_DB:
         raise RuntimeError("Ops monitoring requires the Nexent PostgreSQL connection")
     if OPS_POSTGRES_DB == (POSTGRES_DB or "nexent"):
-        raise RuntimeError("Ops monitoring requires an independent PostgreSQL database")
+        raise ValueError("OPS_POSTGRES_DB must differ from POSTGRES_DB")
+    if len(OPS_POSTGRES_DB.encode("utf-8")) > 63:
+        raise ValueError("OPS_POSTGRES_DB must not exceed 63 UTF-8 bytes")
     url = URL.create("postgresql+psycopg2", username=POSTGRES_USER, password=NEXENT_POSTGRES_PASSWORD,
                      host=POSTGRES_HOST, port=POSTGRES_PORT, database=OPS_POSTGRES_DB)
     return create_engine(url, pool_size=4, max_overflow=2, pool_pre_ping=True,

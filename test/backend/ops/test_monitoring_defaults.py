@@ -10,18 +10,22 @@ from pathlib import Path
 import pytest
 
 
-def settings(overrides):
+def settings(overrides, *, validate_startup=False):
     root = Path(__file__).resolve().parents[3]
     env = {key: value for key, value in os.environ.items()
            if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME"}}
     env.update(PYTHON_DOTENV_DISABLED="1", PYTHONPATH=os.pathsep.join((str(root), str(root / "backend"))), **overrides)
     return subprocess.run([sys.executable, "-c", """
 import json
+import sys
 from contracts.constants import environment as e
 print(json.dumps([e.OPS_MONITORING_ENABLED, e.OPS_POSTGRES_DB, e.POSTGRES_HOST, e.POSTGRES_PORT,
                   e.POSTGRES_USER, e.NEXENT_POSTGRES_PASSWORD == 'override-secret',
                   any(hasattr(e, 'OPS_POSTGRES_' + suffix) for suffix in ('HOST','PORT','USER','PASSWORD'))]))
-"""], env=env, cwd=root, capture_output=True, text=True, timeout=20)
+if sys.argv[1] == 'validate':
+    from infrastructure.monitoring.store import monitoring_engine
+    monitoring_engine()
+""", "validate" if validate_startup else "settings"], env=env, cwd=root, capture_output=True, text=True, timeout=20)
 
 
 @pytest.mark.parametrize("overrides,expected", [
@@ -47,7 +51,7 @@ def test_monitoring_configuration_defaults_and_overrides(overrides, expected):
     {"OPS_POSTGRES_DB": "数" * 22},
 ])
 def test_invalid_ops_database_configuration_fails_before_startup(overrides):
-    result = settings(overrides)
+    result = settings({"POSTGRES_HOST": "pg", "POSTGRES_USER": "owner", **overrides}, validate_startup=True)
     assert result.returncode != 0
     assert "ValueError" in result.stderr
 

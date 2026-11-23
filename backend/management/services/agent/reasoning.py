@@ -155,8 +155,13 @@ def snapshot_agent_reasoning_config(
             from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
             profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
             entry = read_agent_parameter_entry(entry, profile=profile)
-            if entry["parameter_values"] or entry.get("context_window_tokens") is not None or entry.get("custom_overrides") is not None:
-                merge_agent_model_parameters(profile, entry)
+            if (not entry["parameter_values"]
+                    and entry.get("context_window_tokens") is None
+                    and entry.get("custom_overrides") is None):
+                # Legacy values that only meant "inherit the outlet" leave nothing to store.
+                override_map.pop(model_key, None)
+                continue
+            merge_agent_model_parameters(profile, entry)
             override_map[model_key] = entry
             continue
         capability = _resolve_model_reasoning_capability(model_info)
