@@ -6,9 +6,11 @@ import logging
 from time import monotonic
 from uuid import uuid4
 
+from contracts.agentos_knowledge import KnowledgeLegacyImageRequest
 from management.services.knowledge_base.content_authorization import (
     authorize_knowledge_content,
 )
+from management.services.knowledge_base.legacy_image import fetch_legacy_image
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import DeadlineExceeded, ScopeDenied
 from nexent.storage.models import OperationContext
@@ -22,6 +24,8 @@ CONTENT_SECONDS = 10
 
 def _fetch(request, actor, *, context):
     context.remaining()
+    if isinstance(request, KnowledgeLegacyImageRequest):
+        return fetch_legacy_image(request, actor, context=context)
     grant = authorize_knowledge_content(request, actor, context=context)
     data = read_knowledge_content(actor, grant, role="management", context=context)
     current = authorize_knowledge_content(request, actor, context=context)

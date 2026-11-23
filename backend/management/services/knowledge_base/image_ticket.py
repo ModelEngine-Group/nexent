@@ -6,15 +6,19 @@ import hmac
 import json
 from urllib.parse import urlencode
 
-from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeLegacyImageRequest,
+)
 from contracts.constants import environment
 from cryptography.fernet import Fernet, InvalidToken
 from nexent.storage.errors import ScopeDenied
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 IMAGE_TICKET_PREFIX = "nxki1."
 _TICKET_TTL = 600
 _MAX_TICKET_LENGTH = 8192
+_CONTENT = TypeAdapter(KnowledgeContentRequest | KnowledgeLegacyImageRequest)
 
 
 def _cipher():
@@ -25,7 +29,7 @@ def _cipher():
 
 
 def issue_image_url(content, actor, *, northbound=False):
-    if not isinstance(content, KnowledgeContentRequest) or content.image_ref is None:
+    if not isinstance(content, (KnowledgeContentRequest, KnowledgeLegacyImageRequest)) or content.image_ref is None:
         raise ScopeDenied()
     body = [actor.user_id, actor.tenant_id, northbound, content.model_dump(mode="json")]
     token = IMAGE_TICKET_PREFIX + _cipher().encrypt(json.dumps(body, separators=(",", ":")).encode()).decode()
@@ -45,7 +49,7 @@ def open_image_ticket(ticket, actor, *, northbound=False):
         user, tenant, audience, payload = claims
         if (user, tenant) != (actor.user_id, actor.tenant_id) or audience is not northbound:
             raise ScopeDenied()
-        request = KnowledgeContentRequest.model_validate(payload)
+        request = _CONTENT.validate_python(payload)
         if request.image_ref is None:
             raise ScopeDenied()
         return request

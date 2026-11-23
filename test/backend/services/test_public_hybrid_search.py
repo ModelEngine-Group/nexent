@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from contracts.agentos import ModelMetadata, ModelResult
 from contracts.agentos_knowledge import (
+    KnowledgeLegacyImageRequest,
     KnowledgeSearchHit,
     KnowledgeSearchResult,
     ObjectReference,
@@ -244,3 +245,29 @@ async def test_northbound_passes_original_actor_and_handles_unresolved_name(monk
     lookup.assert_awaited_once_with(["name", "raw"], ServicePrincipal("key-user", "asset-tenant"))
     search.assert_awaited_once_with(["mapped", "raw"], "query", ServicePrincipal("key-user", "asset-tenant"),
                                     top_k=5, weight_accurate=payload.weight_accurate, vdb_core=vectors)
+
+
+async def test_historical_runtime_image_uses_actor_bound_ticket_with_existing_response(runtime_search, monkeypatch):
+    from contracts.constants import environment
+
+    s = runtime_search
+    monkeypatch.setattr(environment, "JWT_SECRET", "legacy-image-test")
+    loc = dict(knowledge_id=2, chunk_key="real-old-id", index_uuid="index-uuid", sequence=4, primary_term=1)
+    response = s.client.search_knowledge.return_value
+    response.image_hits = [KnowledgeSearchHit(knowledge_id=2, chunk_id="display-id", filename="archive.pptx",
+        content="redacted", score=.5, score_kind="legacy.hybrid", legacy_image=loc, location={"page_number": 2})]
+    pinned = KnowledgeLegacyImageRequest(**loc, image_ref=ObjectReference(space="files",
+        key="images_in_attachments/secret.png", version="etag:revision", sha256="a" * 64))
+    pin = Mock(return_value=pinned)
+    monkeypatch.setattr(hybrid, "pin_legacy_image", pin)
+    for northbound in (False, True):
+        result = await hybrid.search_runtime_hybrid(["kb", "shared"], "query", s.actor, top_k=5,
+            weight_accurate=None, reader=s.reader, client=s.client, northbound=northbound)
+        image = result["results"][1]
+        url = image["metadata"]["image_url"]
+        field = "presigned_url" if northbound else "ticket"
+        ticket, = parse_qs(urlsplit(url).query)[field]
+        assert open_image_ticket(ticket, s.actor, northbound=northbound) == pinned
+        assert "images_in_attachments/secret.png" not in str(image)
+        assert '"page_number": 2' in image["content"]
+    assert pin.call_args.args[1] == s.actor

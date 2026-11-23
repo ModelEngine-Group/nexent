@@ -36,13 +36,14 @@ def _logical_image(url):
     return ObjectRef("files", key)
 
 
-def _read_image(ref, *, user_id, tenant_id, context, role):
+def _read_image(ref, *, user_id, tenant_id, context, role, max_bytes=None):
     context.remaining()
     objects = bind_source_objects(tenant_id, user_id, ref.key, environment.MINIO_DEFAULT_BUCKET,
                                  writable=False, role=role)
     try:
         metadata = objects.stat(ref, context=context)
         if (type(metadata.size) is not int or metadata.size < 0 or metadata.ref.version is None
+            or max_bytes is not None and metadata.size > max_bytes
             or metadata.ref.space != ref.space or metadata.ref.key != ref.key
             or ref.version is not None and metadata.ref != ref):
             raise InvalidInput()
@@ -72,9 +73,9 @@ def read_object_image(url, *, user_id, tenant_id, context, role="management"):
     return _read_image(_logical_image(url), user_id=user_id, tenant_id=tenant_id, context=context, role=role)[1]
 
 
-def pin_object_image(url, *, user_id, tenant_id, context):
+def pin_object_image(url, *, user_id, tenant_id, context, max_bytes=None):
     metadata, raw = _read_image(_logical_image(url), user_id=user_id, tenant_id=tenant_id,
-                                context=context, role="management")
+                                context=context, role="management", max_bytes=max_bytes)
     digest = hashlib.sha256(raw).hexdigest()
     if metadata.sha256 not in {None, digest}:
         raise InvalidInput()

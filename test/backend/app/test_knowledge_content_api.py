@@ -175,3 +175,26 @@ async def test_northbound_fetch_uses_current_api_key_identity_for_image_ticket(i
     assert denied.status_code == 403
     fetch.assert_awaited_once()
     assert fetch.await_args.kwargs == {"user_id": actor.user_id, "tenant_id": actor.tenant_id}
+
+
+@pytest.mark.asyncio
+async def test_legacy_image_ticket_uses_existing_get_endpoint_and_current_actor(image_hit, mocker):
+    from contracts.agentos_knowledge import KnowledgeLegacyImageRequest
+    from management.services.knowledge_base.image_ticket import issue_image_url
+
+    request = KnowledgeLegacyImageRequest(knowledge_id=3, chunk_key="old-physical-key", index_uuid="origin",
+        sequence=5, primary_term=1, image_ref=image_hit.image_ref)
+    actor = ServicePrincipal("user", "tenant")
+    address = issue_image_url(request, actor)
+    app = FastAPI()
+    app.include_router(module.router)
+    current = mocker.patch.object(module, "get_current_user_id", return_value=(actor.user_id, actor.tenant_id))
+    fetch = mocker.patch.object(module, "fetch_knowledge_content", return_value=(b"legacy image", "source.pdf"))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://management") as client:
+        success = await client.get(address.removeprefix("/api"))
+        current.return_value = (actor.user_id, "other")
+        rejected = await client.get(address.removeprefix("/api"))
+    assert success.status_code == 200 and success.content == b"legacy image"
+    assert success.headers["content-type"] == "image/png"
+    assert rejected.status_code == 403
+    fetch.assert_awaited_once_with(request, user_id=actor.user_id, tenant_id=actor.tenant_id)

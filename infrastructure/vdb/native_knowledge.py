@@ -9,7 +9,10 @@ from functools import partial
 from time import monotonic
 from types import SimpleNamespace
 
-from contracts.agentos_knowledge import KnowledgeContentRequest
+from contracts.agentos_knowledge import (
+    KnowledgeContentRequest,
+    KnowledgeLegacyImageLocator,
+)
 from contracts.knowledge_chunk_projection import public_chunk_source
 from contracts.knowledge_maintenance import LEGACY_INDEX_OWNER
 from nexent.storage.errors import (
@@ -47,7 +50,8 @@ INGEST_GENERATION = "nexent_ingest_generation"
 INGEST_IMAGE = "nexent_ingest_image"
 IMAGE_PROCESS_SOURCE = "UniversalImageExtractor"
 _SEARCH_FILE = "nexent_native_file"
-_PRIVATE_FIELDS = frozenset({"embedding", "multi_embedding", INGEST_GENERATION, INGEST_IMAGE, _SEARCH_FILE})
+_SEARCH_LEGACY_IMAGE = "nexent_legacy_image_hit"
+_PRIVATE_FIELDS = frozenset({"embedding", "multi_embedding", INGEST_GENERATION, INGEST_IMAGE, _SEARCH_FILE, _SEARCH_LEGACY_IMAGE})
 
 
 def native_file_document_id(file_id, version, generation, position):
@@ -128,6 +132,7 @@ class _NativeHybrid(ElasticSearchCore):
         self.generations = {}
         self.include_history = True
         self.legacy_file_paths = {}
+        self.image_index_ids = None
 
     def identities(self):
         settings = ElasticsearchVectorStore._call(
@@ -156,6 +161,7 @@ class _NativeHybrid(ElasticSearchCore):
             raise ScopeDenied()
         targets = tuple(self.owners)
         search_query = dict(search_query)
+        search_query["seq_no_primary_term"] = True
         visible = _generation_filter(self.generations, include_history=self.include_history)
         if self.legacy_file_paths:
             legacy, runtime_field = _scoped_legacy_filter(self.legacy_file_paths, self.owners)
@@ -185,6 +191,7 @@ class _NativeHybrid(ElasticSearchCore):
             if not _visible_generation(source, self.generations.get(index, ())):
                 raise Conflict()
             source.pop(_SEARCH_FILE, None)
+            source.pop(_SEARCH_LEGACY_IMAGE, None)
             if INGEST_GENERATION not in source:
                 if not self.include_history:
                     path = source.get("path_or_url")
@@ -193,13 +200,30 @@ class _NativeHybrid(ElasticSearchCore):
                         raise ScopeDenied()
                     source[_SEARCH_FILE] = _legacy_search_file(source, scope)
                 source.pop(INGEST_IMAGE, None)
+                if source.get("process_source") == IMAGE_PROCESS_SOURCE:
+                    attributes = legacy_image_attributes(source)
+                    metadata = source.get("metadata")
+                    if isinstance(metadata, dict):
+                        source["metadata"] = {key: value for key, value in metadata.items() if key != "image_url"}
+                    source.pop("image_url", None)
+                    source["content"] = json.dumps({"source_file": source.get("filename", ""),
+                                                   "position": attributes[1] if attributes else {}})
+                    if attributes:
+                        if self.image_index_ids is None:
+                            self.image_index_ids = self.identities()
+                        source[_SEARCH_LEGACY_IMAGE] = {
+                            "chunk_key": hit["_id"], "index_uuid": self.image_index_ids[index],
+                            "sequence": hit.get("_seq_no"), "primary_term": hit.get("_primary_term"),
+                            "position": attributes[1],
+                        }
             else:
                 source[_SEARCH_FILE] = _search_file(hit["_id"], source[INGEST_GENERATION])
             source.setdefault("id", hit["_id"])
             for field in ("embedding", "multi_embedding", INGEST_GENERATION):
                 source.pop(field, None)
             results.append({"score": hit["_score"], "document": source, "index": index,
-                            "highlight_terms": extract_highlight_terms(hit.get("highlight", {}))})
+                            "highlight_terms": ([] if _SEARCH_LEGACY_IMAGE in source
+                                                else extract_highlight_terms(hit.get("highlight", {})))})
         return results
 
 
@@ -569,6 +593,14 @@ def search_native_knowledge(actor, resources, query, query_vector, top_k, weight
             document = hit["document"]
             file = document.pop(_SEARCH_FILE, None)
             image = document.pop(INGEST_IMAGE, None)
+            legacy = document.pop(_SEARCH_LEGACY_IMAGE, None)
+            if legacy is not None:
+                hit["legacy_position"] = legacy.pop("position")
+                try:
+                    hit["legacy_image"] = KnowledgeLegacyImageLocator(
+                        knowledge_id=knowledge_ids[hit["index"]], **legacy)
+                except ValidationError as error:
+                    raise Conflict() from error
             if file_versions is not None and (
                 file is None or file_versions.get(file["file_id"]) != file["file_version"]
             ):
@@ -580,6 +612,50 @@ def search_native_knowledge(actor, resources, query, query_vector, top_k, weight
                 if file is None or any(hit["image"][field] != file[field] for field in ("file_id", "file_version")):
                     raise Conflict()
         return hits, revisions
+
+
+def legacy_image_attributes(document):
+    if INGEST_GENERATION in document or document.get("process_source") != IMAGE_PROCESS_SOURCE:
+        return None
+    metadata, content = document.get("metadata"), document.get("content")
+    url = metadata.get("image_url") if isinstance(metadata, dict) else None
+    if not isinstance(url, str) or not 0 < len(url) <= 2048 or not isinstance(content, str) or len(content) > 16384:
+        return None
+    try:
+        payload = json.loads(content)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(payload, dict) or payload.get("image_url") != url:
+        return None
+    position = payload.get("position")
+    return url, position if isinstance(position, dict) else {}
+
+
+def read_native_legacy_image(actor, resource, locator, *, context):
+    if locator.knowledge_id != resource.knowledge_id:
+        raise ScopeDenied()
+    engine = record_engine(context)
+    try:
+        require_index_owner(actor, resource, context=context, engine=engine)
+        with closing(_configured_client(context.remaining())) as client:
+            index = resource.collection
+            reader = _NativeHybrid(client, {index: resource.resource_tenant_id}, context)
+            if reader.identities()[index] != locator.index_uuid:
+                raise Conflict()
+            hit = ElasticsearchVectorStore._call(client, "get", context, index=index, id=locator.chunk_key,
+                                                 source_excludes=["embedding", "multi_embedding"])
+            source = hit.get("_source")
+            if (hit.get("_index") != index or hit.get("_id") != locator.chunk_key or not isinstance(source, dict)
+                or not _owns_source(source, resource.resource_tenant_id)):
+                raise ScopeDenied()
+            if (hit.get("_seq_no"), hit.get("_primary_term")) != (locator.sequence, locator.primary_term):
+                raise Conflict()
+            attributes = legacy_image_attributes(source)
+            if attributes is None or reader.identities()[index] != locator.index_uuid:
+                raise ScopeDenied()
+            return attributes[0], source.get("filename")
+    finally:
+        close_owned(context, [engine.dispose])
 
 
 def _native_image(image, knowledge_id, document):

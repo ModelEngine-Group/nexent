@@ -206,7 +206,7 @@ class KnowledgeSearchService:
                 scores["retrieval_highlight_terms"] = hit["highlight_terms"]
             file = hit.get("file", {})
             media = hit.get("image", {})
-            location = dict(media.get("location", {}))
+            location = dict(media.get("location", hit.get("legacy_position", {})))
             if file:
                 location["chunk_index"] = file["chunk_index"]
             projected = KnowledgeSearchHit(
@@ -215,7 +215,7 @@ class KnowledgeSearchService:
                 score=hit["score"], score_kind=f"legacy.{request.search_mode}", score_details=scores,
                 public_document=document if request.include_public_document else None,
                 file_id=file.get("file_id", media.get("file_id")), file_version=file.get("file_version", media.get("file_version")),
-                image_ref=media.get("image_ref"), location=location,
+                image_ref=media.get("image_ref"), location=location, legacy_image=hit.get("legacy_image"),
             )
             target = image_hits if image_hits is not None and document.get("process_source") == "UniversalImageExtractor" else text_hits
             target.append(projected)

@@ -5,7 +5,11 @@ from time import monotonic
 from types import SimpleNamespace
 
 import pytest
-from contracts.agentos_knowledge import KnowledgeContentGrant, ObjectReference
+from contracts.agentos_knowledge import (
+    KnowledgeContentGrant,
+    KnowledgeLegacyImageRequest,
+    ObjectReference,
+)
 from nexent.storage.errors import InvalidInput, ScopeDenied
 from nexent.storage.models import OperationContext
 
@@ -115,3 +119,17 @@ def test_content_port_refuses_untrusted_role_before_factory(mocker):
             context=OperationContext("read", monotonic() + 1),
         )
     factory.assert_not_called()
+
+
+def test_legacy_attachment_uses_existing_physical_path_without_extra_prefix(mocker):
+    ref = ObjectReference(space="files", key="images_in_attachments/a.png", version="etag:v1", sha256="a" * 64)
+    request = KnowledgeLegacyImageRequest(knowledge_id=1, chunk_key="legacy", index_uuid="one",
+                                         sequence=2, primary_term=1, image_ref=ref)
+    context = OperationContext("legacy", monotonic() + 1)
+    actor = ServicePrincipal("user", "tenant")
+    read = mocker.patch.object(module, "_read", return_value=b"content")
+    assert module.read_legacy_attachment(actor, request, context=context) == b"content"
+    read.assert_called_once_with(actor, ref, role="management", prefix="", context=context)
+    with pytest.raises(ScopeDenied):
+        module.read_legacy_attachment(actor, request.model_copy(
+            update={"image_ref": ref.model_copy(update={"key": "other/a.png"})}), context=context)

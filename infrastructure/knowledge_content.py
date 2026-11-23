@@ -4,6 +4,7 @@
 from contracts.agentos_knowledge import (
     CleanseArtifact,
     KnowledgeContentGrant,
+    KnowledgeLegacyImageRequest,
     ObjectReference,
 )
 from contracts.constants import environment
@@ -60,6 +61,13 @@ def read_knowledge_manifest(actor, reference, *, context):
             context=context,
         )
     )
+
+
+def read_legacy_attachment(actor, request, *, context, role="management"):
+    if (not isinstance(request, KnowledgeLegacyImageRequest)
+        or not request.image_ref.key.startswith("images_in_attachments/")):
+        raise ScopeDenied()
+    return _read(actor, request.image_ref, role=role, prefix="", context=context)
 
 
 def read_knowledge_content(actor, grant, *, context, role="runtime"):

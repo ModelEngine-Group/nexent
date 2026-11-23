@@ -19,8 +19,15 @@ from management.clients.model import embed_query
 from management.services.knowledge_base.common import KnowledgeBaseNeedsModelConfigError
 from management.services.knowledge_base.file_reader import KnowledgeFileReader
 from management.services.knowledge_base.image_ticket import issue_image_url
+from management.services.knowledge_base.legacy_image import pin_legacy_image
 from nexent.core.concurrency import run_blocking
-from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied
+from nexent.storage.errors import (
+    Conflict,
+    DeadlineExceeded,
+    InvalidInput,
+    NotFound,
+    ScopeDenied,
+)
 from nexent.storage.models import OperationContext
 
 from backend.http.client import create_httpx_client
@@ -29,17 +36,18 @@ from infrastructure.knowledge_search import knowledge_search_revision
 from infrastructure.vdb.native_knowledge import legacy_document_filter
 
 
-def project_retrieved_image(hit, actor, *, northbound=False):
-    if hit.image_ref is None:
+def project_retrieved_image(hit, actor, *, northbound=False, legacy_reference=None):
+    if hit.image_ref is None and legacy_reference is None:
         if hit.public_document is None:
             raise ScopeDenied()
         return dict(hit.public_document)
-    request = KnowledgeContentRequest(
+    request = legacy_reference or KnowledgeContentRequest(
         knowledge_id=hit.knowledge_id, file_id=hit.file_id, file_version=hit.file_version,
         image_ref=hit.image_ref,
     )
     url = issue_image_url(request, actor, northbound=northbound)
-    position = {key: hit.location[key] for key in ("page_number", "sheet_name", "coordinates") if key in hit.location}
+    location = hit.location
+    position = {key: location[key] for key in ("page_number", "sheet_name", "coordinates") if key in location}
     metadata = {"process_source": "UniversalImageExtractor", "image_url": url}
     if "chunk_index" in hit.location:
         metadata["chunk_index"] = hit.location["chunk_index"]
@@ -168,8 +176,15 @@ async def search_runtime_hybrid(
                 for hit in hits:
                     if hit.knowledge_id not in collections:
                         raise ScopeDenied()
-                    document = (project_retrieved_image(hit, actor, northbound=northbound)
-                                if images or hit.image_ref is not None else hit.public_document)
+                    legacy = None
+                    if hit.legacy_image is not None:
+                        try:
+                            legacy = await run_blocking("runtime-legacy-image-pin", pin_legacy_image,
+                                hit.legacy_image, actor, context=context, lane="control-io", owner=__name__)
+                        except (NotFound, InvalidInput, ScopeDenied):
+                            continue
+                    document = (project_retrieved_image(hit, actor, northbound=northbound, legacy_reference=legacy)
+                                if images or hit.image_ref is not None or legacy is not None else hit.public_document)
                     if document is None:
                         raise ScopeDenied()
                     scores = dict(hit.score_details)

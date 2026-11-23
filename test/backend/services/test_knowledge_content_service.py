@@ -58,3 +58,51 @@ async def test_management_queue_wait_is_included_in_deadline(mocker, caplog):
     records = [record for record in caplog.records if record.name == module.__name__]
     assert len(records) == 1 and records[0].levelname == "WARNING"
     assert "threshold_seconds=0.02" in records[0].message and "private-" not in records[0].message
+
+
+@pytest.mark.parametrize("fault", [None, "bucket", "outside", "changed_chunk", "revoked"])
+def test_legacy_attachment_pins_and_rechecks_exact_image(fault, monkeypatch, mocker):
+    from time import monotonic
+
+    from contracts.agentos_knowledge import KnowledgeLegacyImageLocator, ObjectReference
+    from contracts.constants import environment
+    from management.services.knowledge_base import legacy_image
+    from nexent.storage.errors import Conflict, ScopeDenied
+    from nexent.storage.models import OperationContext
+
+    actor = ServicePrincipal("user", "tenant")
+    context = OperationContext("legacy-image", monotonic() + 10)
+    locator = KnowledgeLegacyImageLocator(knowledge_id=1, chunk_key="physical", index_uuid="index",
+                                          sequence=3, primary_term=1)
+    row = {"tenant_id": "tenant", "knowledge_id": 1, "index_name": "kb", "deletion_request": None,
+           "knowledge_sources": "elasticsearch"}
+    monkeypatch.setattr(environment, "MINIO_DEFAULT_BUCKET", "owned")
+    reader = mocker.patch.object(legacy_image, "KnowledgeFileReader")
+    reader.return_value.knowledge.return_value = row
+    key = "attachments/other/secret.png" if fault == "outside" else "images_in_attachments/photo.png"
+    bucket = "wrong" if fault == "bucket" else "owned"
+    lookup = mocker.patch.object(legacy_image, "read_native_legacy_image", return_value=(f"s3://{bucket}/{key}", "a.pdf"))
+    pin = mocker.patch.object(legacy_image, "pin_object_image", return_value=ObjectReference(
+        space="files", key=key, version="etag:one", sha256="a" * 64))
+    read = mocker.patch.object(legacy_image, "read_legacy_attachment", return_value=b"image")
+    if fault in {"bucket", "outside"}:
+        with pytest.raises(ScopeDenied):
+            legacy_image.pin_legacy_image(locator, actor, context=context)
+        pin.assert_not_called()
+        read.assert_not_called()
+        return
+    request = legacy_image.pin_legacy_image(locator, actor, context=context)
+    assert request.image_ref == pin.return_value
+    if fault == "changed_chunk":
+        lookup.side_effect = Conflict()
+        with pytest.raises(Conflict):
+            legacy_image.fetch_legacy_image(request, actor, context=context)
+        read.assert_not_called()
+    elif fault == "revoked":
+        reader.return_value.knowledge.side_effect = [row, ScopeDenied()]
+        with pytest.raises(ScopeDenied):
+            legacy_image.fetch_legacy_image(request, actor, context=context)
+        read.assert_called_once()
+    else:
+        assert legacy_image.fetch_legacy_image(request, actor, context=context) == (b"image", "a.pdf")
+        read.assert_called_once_with(actor, request, context=context)

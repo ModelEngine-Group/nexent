@@ -107,6 +107,18 @@ def validate_knowledge_source_reference(value):
     return None if value is None else KnowledgeSourceReference.model_validate(value).model_dump(mode="json", exclude_none=True)
 
 
+class KnowledgeLegacyImageLocator(Contract):
+    knowledge_id: int = Field(gt=0)
+    chunk_key: str = Field(min_length=1, max_length=512)
+    index_uuid: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(ge=0)
+    primary_term: int = Field(ge=1)
+
+
+class KnowledgeLegacyImageRequest(KnowledgeLegacyImageLocator):
+    image_ref: ObjectReference
+
+
 class KnowledgeContentRequest(KnowledgeFileReference):
     image_ref: ObjectReference | None = None
 
@@ -409,18 +421,25 @@ class KnowledgeSearchHit(Contract):
     score_details: dict[str, JsonValue] = Field(default_factory=dict)
     image_ref: ObjectReference | None = None
     public_document: dict[str, JsonValue] | None = None
+    legacy_image: KnowledgeLegacyImageLocator | None = None
 
     @model_serializer(mode="wrap")
     def serialize_hit(self, handler):
         result = handler(self)
         if self.public_document is None:
             result.pop("public_document", None)
+        if self.legacy_image is None:
+            result.pop("legacy_image", None)
         return result
 
     @model_validator(mode="after")
     def complete_file_reference(self):
         if (self.file_id is None) != (self.file_version is None):
             raise ValueError("File identity and version must be present or absent together")
+        if self.legacy_image is not None and (
+            self.legacy_image.knowledge_id != self.knowledge_id or self.image_ref is not None
+        ):
+            raise ValueError("Historical images must bind their exact knowledge base and original hit")
         return self
 
 
