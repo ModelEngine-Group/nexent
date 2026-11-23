@@ -32,7 +32,7 @@ def test_independent_target_installs_deployment_plugins_without_peer_sources(ser
 def test_independent_images_do_not_package_other_service_implementations():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
     common_and_services = dockerfile.split(" AS final\n", 1)[0]
-    copies = [line.split() for line in common_and_services.splitlines() if line.startswith("COPY ")]
+    copies = [line.split() for line in common_and_services.replace("\\\n", " ").splitlines() if line.startswith("COPY ")]
     for parts in copies:
         assert all(
             not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
@@ -40,7 +40,27 @@ def test_independent_images_do_not_package_other_service_implementations():
         )
     runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
     common = dockerfile.split("FROM base AS backend-common\n", 1)[1].split("\nFROM ", 1)[0]
-    assert "COPY deploy/sql/" not in runtime + common
+    sql_sources = [source for line in (runtime + common).splitlines() if line.startswith("COPY deploy/sql/")
+                   for source in line.split()[1:-1]]
+    assert set(sql_sources) <= {"deploy/sql/ops-init.sql", "deploy/sql/migrations/ops/"}
+
+
+def test_independent_services_package_the_shared_monitoring_producer_and_ops_migrations():
+    dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
+    common = dockerfile.split("FROM base AS backend-common\n", 1)[1].split("\nFROM ", 1)[0]
+    sources = {source for line in common.replace("\\\n", " ").splitlines() if line.startswith("COPY ")
+               for source in line.split()[1:-1]}
+    assert "infrastructure" in sources
+    assert not any(source.startswith("backend/ops") for source in sources)
+    for target in (common, dockerfile.split(" AS standalone-service\n", 1)[1].split("\nFROM ", 1)[0]):
+        assert "postgresql-client" in target
+        assert "deploy/common/run-ops-sql-migrations.sh" in target
+        assert "deploy/common/run-sql-migrations.sh" in target
+        assert "deploy/sql/ops-init.sql" in target and "deploy/sql/migrations/ops/" in target
+    packaging = run_path(str(ROOT / "deploy/images/dockerfiles/main/copy_service_sources.py"))
+    closure = packaging["collect_sources"](ROOT, ("infrastructure.monitoring.runtime",))
+    assert not any(path.as_posix().startswith(("backend/ops/", "backend/management/", "backend/runtime/"))
+                   for path in closure)
 
 
 def test_runtime_packages_aidp_search_without_management_extensions():

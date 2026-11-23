@@ -22,7 +22,8 @@ services:
     entrypoint:
       - /opt/nexent/scripts/start-backend.sh
       - python
-      - backend/http/ops_service.py
+      - -m
+      - backend.http.ops_service
     healthcheck:
       test:
         - CMD

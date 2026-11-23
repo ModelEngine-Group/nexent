@@ -28,9 +28,16 @@ from nexent.core.model_service.profiles.resolved_profile import ResolvedModelPro
 from nexent.core.model_service.registry import AdapterRegistry
 from nexent.monitor import get_monitoring_manager
 from nexent.monitor.model_attempt import ModelAttemptSession
+from nexent.monitor.model_fact import AttemptObservation
 
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _observe_async(call):
+    with call.observe_attempt():
+        yield
 
 
 class ModelServiceError(Exception):
@@ -75,6 +82,19 @@ class _Call:
     empty_response_retries: int = 0
     speculative_empty_retry: bool = False
     capture: object = None
+    observation: AttemptObservation | None = None
+
+    @contextmanager
+    def observe_attempt(self):
+        self.observation = AttemptObservation(self.request, self.profile, self.attempt)
+        try:
+            yield
+        except BaseException as error:
+            self.observation.finish(error)
+            raise
+        finally:
+            self.observation.finish()
+            self.observation = None
 
     def check(self):
         if self.scope.cancelled:
@@ -102,6 +122,7 @@ class _Call:
             headers=dict(self.prepared.headers),
             json_body=json.loads(self.prepared.body_bytes),
             timeout_seconds=self.timeout(),
+            on_dispatch=self._dispatch_attempt,
         )
         tracker = self.capture.begin(
             json.loads(prepared.body_bytes),
@@ -120,6 +141,10 @@ class _Call:
             self.first_token_received = False
         return prepared
 
+    def _dispatch_attempt(self):
+        self.capture.bind_observation(self.observation)
+        self.observation.dispatch()
+
     def event(self, event):
         self.check()
         basis = None
@@ -127,10 +152,15 @@ class _Call:
             basis = "content" if event.type == "text_delta" else "reasoning"
         elif event.type == "tool_call_delta" and event.tool_call_delta.arguments_delta:
             basis = "tool_delta"
-        if basis is not None and not self.first_token_received:
-            self.token_tracker.record_first_token(basis=basis)
-            self.first_token_received = True
+        if basis is not None:
+            if self.observation is not None:
+                self.observation.content()
+            if not self.first_token_received:
+                self.token_tracker.record_first_token(basis=basis)
+                self.first_token_received = True
         elif event.type == "usage":
+            if self.observation is not None:
+                self.observation.observe_usage(event.usage)
             self.monitoring.add_span_event("model_usage", {
                 "attempt": self.attempt, **event.usage.model_dump(exclude_none=True),
             })
@@ -142,6 +172,9 @@ class _Call:
 
     def observe_completion(self, message):
         usage = message.usage
+        if self.observation is not None:
+            self.observation.complete(usage)
+            self.observation.finish()
         if usage.input_tokens is not None and usage.output_tokens is not None:
             self.token_tracker.record_completion(usage.input_tokens, usage.output_tokens, total_tokens=usage.total_tokens)
         self.monitoring.set_span_attributes(**{
@@ -507,7 +540,7 @@ class ModelService:
         with self._trace(call):
             while True:
                 try:
-                    with self._permit(call) as scope:
+                    with self._permit(call) as scope, call.observe_attempt():
                         raw = call.sender.invoke(call.wire_request(), scope=scope)
                         call.capture.raw_response(raw)
                         result = call.adapter.decode_response(raw, call.request, call.profile)
@@ -531,7 +564,7 @@ class ModelService:
         with self._trace(call):
             while True:
                 try:
-                    async with self._apermit(call):
+                    async with self._apermit(call), _observe_async(call):
                         raw = await call.sender.ainvoke(call.wire_request(), scope=call.scope)
                         call.capture.raw_response(raw)
                         result = call.adapter.decode_response(raw, call.request, call.profile)
@@ -595,7 +628,8 @@ class ModelService:
             try:
                 if pending_delay is not None:
                     call.wait(pending_delay)
-                with self._permit(call) as scope, call.sender.stream(call.wire_request(), scope=scope) as frames:
+                with (self._permit(call) as scope, call.observe_attempt(),
+                      call.sender.stream(call.wire_request(), scope=scope) as frames):
                     for event in call.adapter.decode_stream(call.capture.frames(frames), call.request, call.profile):
                         message_id = event.message_id
                         call.capture.event(event)
@@ -621,8 +655,11 @@ class ModelService:
             try:
                 if pending_delay is not None:
                     await call.await_retry(pending_delay)
-                async with self._apermit(call), call.sender.astream(call.wire_request(), scope=call.scope) as frames:
-                    async for event in call.adapter.adecode_stream(call.capture.aframes(frames), call.request, call.profile):
+                async with (self._apermit(call), _observe_async(call),
+                            call.sender.astream(call.wire_request(), scope=call.scope) as frames):
+                    async for event in call.adapter.adecode_stream(
+                        call.capture.aframes(frames), call.request, call.profile,
+                    ):
                         message_id = event.message_id
                         call.capture.event(event)
                         self._check_empty_response(call, event, empty_response_policy)

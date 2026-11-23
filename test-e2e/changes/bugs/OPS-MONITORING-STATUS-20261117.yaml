@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-MONITORING-STATUS-20261117
+  change_type: bugfix
+  bug_id: OPS-MONITORING-STATUS-20261117
+  title: Correct staleness, refresh status and monitoring date gaps
+  description: Keep published data readable and identify failures and uncovered dates at the Ops monitoring API.
+  observed_behavior: Pending Elasticsearch write failures looked fresh, refresh reported completion for missing dates, and trends skipped dates without a publication.
+  expected_behavior: Affected data is stale until failed writes recover, refresh identifies missing dates, and trends preserve dates with null metrics for missing publications.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: The integration case checked retry totals and isolation but omitted refresh, missing dates, and API freshness during an Elasticsearch write block.
+  feature_contract_changed: false
+  affected_features:
+    existing: [OPS-MODEL-MONITORING]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-MODEL-MONITORING-D3-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors: [Verify coverage gap response and trend shape, Verify refresh transitions across coverage and write failure]
+    reason: Existing unit tests cover model metrics and event replay, but do not assert refresh or trend semantics.
+    test_selectors: [test/backend/ops/test_monitoring_api.py]
+  notes: Model monitoring detailed design sections 5 and 7 define coverage and published data behavior. The existing integration case proves the new assertions with a real Ops PostgreSQL and Elasticsearch pair.

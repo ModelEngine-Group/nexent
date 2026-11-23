@@ -22,6 +22,7 @@ from ...monitor.model_attempt import ModelAttemptSession
 from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
     _detect_model_type,
+    _MonitoredChatCompletions,
     _MonitoredClient,
     _monitoring_display_name,
     _monitoring_operation,
@@ -266,6 +267,7 @@ class OpenAIModel(OpenAIServerModel):
 
         capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
+        monitoring_identity = kwargs.pop("monitoring_identity", None)
 
         self.temperature = temperature
         self.top_p = top_p
@@ -345,6 +347,8 @@ class OpenAIModel(OpenAIServerModel):
         base_client = getattr(self, "client", None)
         if base_client is not None and model_id is not None:
             self.client = _MonitoredClient(base_client, model_id, model_type)
+            if monitoring_identity is not None:
+                self.client.chat.completions.catalog_identity = monitoring_identity
         else:
             logger.warning(
                 "OpenAIModel: no `client` attribute after init; "
@@ -1225,7 +1229,11 @@ class OpenAIModel(OpenAIServerModel):
                     "adapter_ref": {"ref": "legacy_openai_chat", "version": 1},
                     "parameters": {key: value for key, value in wire_body.items() if key not in {"messages", "tools"}},
                 })
-            return self.client.chat.completions.create(**parameters)
+            completions = self.client.chat.completions
+            if (_trajectory_capture is not None and _trajectory_capture.enabled
+                    and isinstance(completions, _MonitoredChatCompletions)):
+                return completions.create(_trajectory_capture=_trajectory_capture, **parameters)
+            return completions.create(**parameters)
 
         try:
             return dispatch(completion_kwargs)

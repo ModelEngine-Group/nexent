@@ -38,6 +38,16 @@ Keep TZ identical to Management because CAS expiration uses naive local timestam
 
 Gateway owns a shared HTTP client without a user-cookie jar. SSE/WS responses close on completion, failure and disconnect; streaming execution is never retried implicitly. Northbound protocol/business currently remains in Management behind the fixed Northbound upstream. Moving that adaptation layer is the next batch; durable task recovery remains with the business owner.
 
+When adding or moving a public API, update its explicit exposure and regression
+inputs together. Resolve the target from the application's `include_router`
+mounts, rather than the handler's source directory: conversation handlers under
+`management/api/conversation/` are mounted by Runtime. Register literal paths
+such as `creator_histories` explicitly even when an existing parameter route
+could match them. Verify the target, session policy, exact method and transport
+in unit tests, and add the operation to the existing live forwarding Case when
+the network boundary changes. Private and unmounted handlers must not be
+published automatically.
+
 ## Build, upgrade and rollback
 
 Build with `bash deploy/images/build.sh --gateway --version <release-tag> --load` and rebuild the backend from the same revision. Configure the existing PostgreSQL account/password before startup. Compose/Helm now create `nexent-gateway:5013`; frontend and MCP references use that service. No independent northbound image exists, and no image is deleted by this change.
