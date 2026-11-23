@@ -14,7 +14,6 @@ from contracts.constants.environment import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
-    NORTHBOUND_EXTERNAL_URL,
 )
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
@@ -318,7 +317,6 @@ async def create_tool_config_list(
     *,
     portable_evaluation: bool = False,
     authorized_knowledge_tools: dict | None = None,
-    northbound_run: bool = False,
 ):
     tool_config_list = []
     langchain_tools = [] if portable_evaluation else await discover_langchain_tools()
@@ -464,15 +462,6 @@ async def create_tool_config_list(
             tool_config.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: tool.get("tool_id")}
         elif is_shared_aidp and not portable_evaluation:
             tool_config.metadata = restrict_aidp_access(param_dict["kds_list"], aidp_snapshot)
-            if northbound_run:
-                # Request-scoped, backend-computed values. They are not part
-                # of tool params, so request overrides cannot forge them.
-                tool_config.metadata.update(
-                    {
-                        "northbound_run": True,
-                        "northbound_external_url": NORTHBOUND_EXTERNAL_URL,
-                    }
-                )
             langchain_tool = next((item for item in langchain_tools if item.name == tool_config.class_name), None)
             if langchain_tool is not None:
                 tool_config.metadata["langchain_tool"] = langchain_tool

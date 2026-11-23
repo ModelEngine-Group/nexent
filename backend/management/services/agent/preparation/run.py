@@ -219,7 +219,6 @@ async def create_agent_run_info(
                 captured_records[captured["model_id"]] = captured
     if captured_records:
         create_config_kwargs["runtime_model_records"] = captured_records
-    create_config_kwargs["northbound_run"] = northbound_run
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":

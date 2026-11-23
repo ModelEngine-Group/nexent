@@ -21,6 +21,7 @@ with pytest.MonkeyPatch.context() as import_mocks:
     from management.api.northbound import _role_for_context, router
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
 from contracts.errors.codes import ErrorCode
+from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError, AidpKbPermissionDeniedError
 
 
 app = FastAPI()
@@ -1826,3 +1827,109 @@ def test_retired_control_fields_rejected_before_northbound_execution(field, valu
         })
         assert response.status_code == 400
         run.assert_not_awaited()
+
+
+# =============================================================================
+# AIDP original-file download
+# =============================================================================
+
+class _FakeAidpStream:
+    def __init__(self, content=b"original-bytes"):
+        self.headers = {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": 'attachment; filename="manual.pdf"',
+            "X-File-Size": str(len(content)),
+        }
+        self._content = content
+        self.closed = False
+
+    async def aiter_bytes(self):
+        yield self._content
+
+    async def aclose(self):
+        self.closed = True
+
+
+class TestAidpFileDownload:
+    FILE_UUID = "11111111-2222-4333-8444-555555555555"
+    PATH = f"/nb/v1/knowledge-bases/kb-42/files/{FILE_UUID}/download"
+
+    def _patch(self, *, permission_error=None, upstream=None):
+        permission_mock = MagicMock(side_effect=permission_error)
+        upstream_mock = upstream if upstream is not None else AsyncMock(return_value=_FakeAidpStream())
+        return (
+            patch(
+                "management.api.northbound._get_northbound_context",
+                new_callable=AsyncMock,
+                return_value=MagicMock(user_id="user-1", tenant_id="tenant-1", token_id=1),
+            ),
+            patch("management.api.northbound._require_aidp_permission", new=permission_mock),
+            patch(
+                "management.api.northbound._aidp_file_credentials",
+                return_value=("https://aidp.internal", "aidp-secret"),
+            ),
+            patch("management.api.northbound._stream_aidp_doc", new=upstream_mock),
+        )
+
+    def test_download_streams_original_bytes_and_headers(self):
+        ctx, perm, creds, stream = self._patch()
+        with ctx, perm, creds, stream as upstream:
+            response = client.get(self.PATH, headers=_build_headers())
+
+        assert response.status_code == 200
+        assert response.content == b"original-bytes"
+        assert response.headers["content-type"] == "application/pdf"
+        assert "manual.pdf" in response.headers["content-disposition"]
+        assert response.headers["x-file-size"] == "14"
+        upstream.assert_awaited_once_with("https://aidp.internal", "aidp-secret", "kb-42", self.FILE_UUID)
+
+    @pytest.mark.parametrize("error,expected", [
+        (AidpKbPermissionDeniedError(kb_id="kb-42", user_id="user-1", required="READ"), 403),
+        (AidpKbNotFoundError(kb_id="kb-42", tenant_id="tenant-1"), 404),
+    ])
+    def test_permission_failures_never_reach_aidp(self, error, expected):
+        ctx, perm, creds, stream = self._patch(permission_error=error)
+        with ctx, perm, creds, stream as upstream:
+            response = client.get(self.PATH, headers=_build_headers())
+
+        assert response.status_code == expected
+        upstream.assert_not_awaited()
+
+    def test_aidp_file_not_found_maps_to_404(self):
+        async def missing(*_args, **_kwargs):
+            raise AppException(ErrorCode.AIDP_SERVICE_ERROR, "upstream detail", details={"upstream_status": 404})
+
+        ctx, perm, creds, stream = self._patch(upstream=AsyncMock(side_effect=missing))
+        with ctx, perm, creds, stream:
+            response = client.get(self.PATH, headers=_build_headers())
+
+        assert response.status_code == 404
+        assert "upstream detail" not in response.text
+
+    def test_invalid_uuid_rejected_before_permission(self):
+        ctx, perm, creds, stream = self._patch()
+        with ctx, perm as permission, creds, stream as upstream:
+            response = client.get(
+                "/nb/v1/knowledge-bases/kb-42/files/not-a-uuid/download",
+                headers=_build_headers(),
+            )
+
+        assert response.status_code == 422
+        permission.assert_not_called()
+        upstream.assert_not_awaited()
+
+    def test_invalid_api_key_returns_401_without_permission_or_upstream(self):
+        with patch(
+            "management.api.northbound._get_northbound_context",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=401, detail="Invalid API key"),
+        ), patch(
+            "management.api.northbound._require_aidp_permission"
+        ) as perm, patch(
+            "management.api.northbound._stream_aidp_doc"
+        ) as stream:
+            response = client.get(self.PATH, headers={"Authorization": "Bearer wrong"})
+
+        assert response.status_code == 401
+        perm.assert_not_called()
+        stream.assert_not_awaited()

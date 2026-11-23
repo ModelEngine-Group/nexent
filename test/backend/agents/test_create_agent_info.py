@@ -4557,6 +4557,25 @@ class TestCreateAgentRunInfo:
             compiler.read_version.assert_called_once_with(agent_id=7, tenant_id="tenant-a")
 
     @pytest.mark.asyncio
+    async def test_create_agent_run_info_forwards_northbound_run(self, compiler):
+        """The request-scoped marker reaches the snapshot, not the tool config."""
+        result = await create_agent_run_info(
+            agent_id=7, minio_files=[], query="test query", history=[],
+            user_id="user-a", tenant_id="tenant-a", language="en", is_debug=False,
+            northbound_run=True,
+        )
+
+        assert result is compiler.export.return_value
+        assert compiler.export.call_args.kwargs["northbound_run"] is True
+        assert "northbound_run" not in compiler.compile_agent.await_args.kwargs
+
+        await create_agent_run_info(
+            agent_id=7, minio_files=[], query="test query", history=[],
+            user_id="user-a", tenant_id="tenant-a", language="en", is_debug=False,
+        )
+        assert compiler.export.call_args.kwargs["northbound_run"] is False
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("settings,effort,budget,expected", [
         ({"temperature": 0.4}, "high", None, (0.4, "high", None)),
         ({"temperature": 0}, "low", None, (0, "low", None)),
@@ -7261,78 +7280,6 @@ class TestCreateToolConfigListAidpSearch:
                 "Allowed 2": "kb_allowed_2",
                 "Denied configured": "kb_not_accessible",
             }
-
-    @pytest.mark.asyncio
-    async def test_aidp_search_northbound_flag_is_request_scoped_metadata(self):
-        """Only a northbound run adds the backend-owned download link settings."""
-        access_module = MagicMock()
-        access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
-            accessible_id_set={"kb1"},
-            name_to_id={},
-            tenant_name_to_id={},
-        )
-        with patch('management.services.agent.preparation.tools.discover_langchain_tools',
-                   new_callable=AsyncMock, return_value=[]), \
-             patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
-             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id',
-                   return_value={"name": "test_agent"}), \
-             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
-             patch('management.services.agent.preparation.tools.AIDP_SERVER_URL', "https://aidp.test"), \
-             patch('management.services.agent.preparation.tools.AIDP_API_KEY', "key"), \
-             patch('management.services.agent.preparation.tools.AIDP_TENANT_ID', "tenant"), \
-             patch('management.services.agent.preparation.tools.NORTHBOUND_EXTERNAL_URL',
-                   "https://public.example.com/api"), \
-             patch.dict(sys.modules, {
-                 "ext_components.aidp.services.aidp_access_service": access_module,
-             }):
-            mock_tools.return_value = [{
-                "class_name": "AidpSearchTool",
-                "name": "aidp_search",
-                "description": "AIDP search",
-                "inputs": "{}",
-                "output_type": "string",
-                "params": [{"name": "kds_list", "default": ["kb1"]}],
-                "source": "langchain",
-                "usage": None,
-            }]
-
-            northbound_instance = Mock()
-            northbound_instance.params = {}
-            northbound_instance.metadata = None
-
-            def capture_northbound(**kwargs):
-                for key, value in kwargs.items():
-                    setattr(northbound_instance, key, value)
-                return northbound_instance
-
-            mock_tool_config.side_effect = capture_northbound
-            await tool_preparation.create_tool_config_list(
-                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
-                northbound_run=True,
-            )
-
-            instance = Mock()
-            instance.params = {}
-            instance.metadata = None
-
-            def capture_page(**kwargs):
-                for key, value in kwargs.items():
-                    setattr(instance, key, value)
-                return instance
-
-            mock_tool_config.side_effect = capture_page
-            await tool_preparation.create_tool_config_list(
-                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
-            )
-
-        assert northbound_instance.metadata["northbound_run"] is True
-        assert (
-            northbound_instance.metadata["northbound_external_url"]
-            == "https://public.example.com/api"
-        )
-        assert "northbound_run" not in northbound_instance.params
-        assert "northbound_external_url" not in northbound_instance.params
-        assert "northbound_run" not in instance.metadata
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
