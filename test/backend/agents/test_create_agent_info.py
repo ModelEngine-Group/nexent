@@ -4557,6 +4557,25 @@ class TestCreateAgentRunInfo:
             compiler.read_version.assert_called_once_with(agent_id=7, tenant_id="tenant-a")
 
     @pytest.mark.asyncio
+    async def test_create_agent_run_info_forwards_northbound_run(self, compiler):
+        """The request-scoped marker reaches the snapshot, not the tool config."""
+        result = await create_agent_run_info(
+            agent_id=7, minio_files=[], query="test query", history=[],
+            user_id="user-a", tenant_id="tenant-a", language="en", is_debug=False,
+            northbound_run=True,
+        )
+
+        assert result is compiler.export.return_value
+        assert compiler.export.call_args.kwargs["northbound_run"] is True
+        assert "northbound_run" not in compiler.compile_agent.await_args.kwargs
+
+        await create_agent_run_info(
+            agent_id=7, minio_files=[], query="test query", history=[],
+            user_id="user-a", tenant_id="tenant-a", language="en", is_debug=False,
+        )
+        assert compiler.export.call_args.kwargs["northbound_run"] is False
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("settings,effort,budget,expected", [
         ({"temperature": 0.4}, "high", None, (0.4, "high", None)),
         ({"temperature": 0}, "low", None, (0, "low", None)),

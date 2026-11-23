@@ -6901,6 +6901,28 @@
     },
     {
       "method": "GET",
+      "path": "/nb/v1/knowledge-bases/{kds_id}/files/{file_uuid}/download",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-d52395b842c5b1a2",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/knowledge-bases/{kds_id}/files/{file_uuid}/download",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-386a8336734eb73d",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/chunks",
       "transport": "http",
       "target": "management",
@@ -7076,5 +7098,5 @@
       ]
     }
   ],
-  "revision": "2026-11-21.1"
+  "revision": "2026-11-23.2"
 }

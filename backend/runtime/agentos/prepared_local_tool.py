@@ -46,11 +46,23 @@ def _aidp_access_metadata(tool: ToolConfig, actor: ServicePrincipal) -> dict:
     return restrict_aidp_access(params["kds_list"], snapshot)
 
 
-def _bind_shared_aidp_access(tool: ToolConfig, actor: ServicePrincipal) -> None:
+def _bind_shared_aidp_access(
+    tool: ToolConfig, actor: ServicePrincipal, *, northbound_run: bool = False,
+) -> None:
     tool.params.update(
         server_url=environment.AIDP_SERVER_URL, api_key=environment.AIDP_API_KEY, tenant_id=environment.AIDP_TENANT_ID,
     )
-    tool.metadata = _aidp_access_metadata(tool, actor)
+    metadata = _aidp_access_metadata(tool, actor)
+    if northbound_run:
+        # Request-scoped, backend-authorized download link. The tool itself
+        # still degrades when the hit has no complete locator.
+        metadata.update(
+            {
+                "northbound_run": True,
+                "northbound_external_url": environment.NORTHBOUND_EXTERNAL_URL,
+            }
+        )
+    tool.metadata = metadata
 
 
 def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> ToolConfig:
@@ -65,7 +77,9 @@ def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> Too
     if not compare_digest(revision, reference.revision):
         raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
     tool.params = reference.options.model_dump()
-    _bind_shared_aidp_access(tool, actor)
+    _bind_shared_aidp_access(
+        tool, actor, northbound_run=getattr(resource, "northbound_run", False),
+    )
     return tool
 
 
@@ -181,7 +195,9 @@ def materialize_local_tools(
                 skill_revision=skill_revision, workbench_lookup=workbench_lookup if version == "4" else None,
             )}
         elif tool.class_name == "AidpSearchTool":
-            _bind_shared_aidp_access(tool, actor)
+            _bind_shared_aidp_access(
+                tool, actor, northbound_run=getattr(resource, "northbound_run", False),
+            )
         elif tool.class_name in {"DownloadFromS3Tool", "UploadToS3Tool"}:
             from infrastructure.object_storage.client import minio_client
 

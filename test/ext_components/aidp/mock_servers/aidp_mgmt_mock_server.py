@@ -322,6 +322,27 @@ def _seed_initial_data() -> None:
             "status": 1,
             "file_status": 2,
         },
+        {
+            # Original file for the seeded image chunk. The image itself is
+            # still served by AIDP, while downloads use this file identity.
+            "file_uuid": "00000000-0000-4000-8000-000000000008",
+            "file_ino_no": 1008,
+            "file_name": "肝脏医学影像.jpg",
+            "file_size": 65536,
+            "file_type": "jpg",
+            "create_time": 1718000600,
+        },
+    ]
+    _DOCUMENTS_BY_KB["aidp-kb-product"] = [
+        {
+            # Both seeded product chunks cite this one original file.
+            "file_uuid": "00000000-0000-4000-8000-000000000101",
+            "file_ino_no": 1101,
+            "file_name": "AIDP产品介绍.pdf",
+            "file_size": 4096,
+            "file_type": "pdf",
+            "create_time": 1718000700,
+        },
     ]
     _KNOWLEDGE_BASES["aidp-kb-faq"].update({
         "embedding_model": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
@@ -935,6 +956,58 @@ def _ensure_ontology_chunks() -> None:
 _load_state()
 
 
+def _ensure_source_identity_documents() -> None:
+    """Keep download fixtures for retrieval chunks in already persisted state.
+
+    FusionSearch chunks carry ``metadata.file_uuid`` / ``metadata.kds_id``; the
+    referenced original files must exist in the same mock knowledge base for
+    the download and page-source contracts to be testable after a restart.
+    """
+    fixtures = {
+        "aidp-kb-product": [
+            {
+                "file_uuid": "00000000-0000-4000-8000-000000000101",
+                "file_ino_no": 1101,
+                "file_name": "AIDP产品介绍.pdf",
+                "file_size": 4096,
+                "file_type": "pdf",
+                "create_time": 1718000700,
+            }
+        ],
+        "aidp-kb-faq": [
+            {
+                "file_uuid": "00000000-0000-4000-8000-000000000008",
+                "file_ino_no": 1008,
+                "file_name": "肝脏医学影像.jpg",
+                "file_size": 65536,
+                "file_type": "jpg",
+                "create_time": 1718000600,
+            }
+        ],
+    }
+    changed = False
+    for kds_id, candidates in fixtures.items():
+        if kds_id not in _KNOWLEDGE_BASES:
+            continue
+        documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+        known = {
+            str(document.get("file_uuid"))
+            for document in documents
+            if isinstance(document, dict) and document.get("file_uuid")
+        }
+        additions = [
+            candidate
+            for candidate in candidates
+            if candidate["file_uuid"] not in known
+        ]
+        if additions:
+            documents.extend(additions)
+            changed = True
+    if changed:
+        _save_state()
+        logger.info("SOURCE IDENTITY  ensured original-file download fixtures")
+
+
 def _ensure_detail_demo_tasks() -> None:
     """Retain the legacy opt-in task fixture for existing local test workflows."""
     if os.environ.get("AIDP_MOCK_ENABLE_DETAIL_FIXTURES") != "1":
@@ -1247,6 +1320,7 @@ def _ensure_folder_structure() -> None:
 _ensure_detail_demo_tasks()
 _ensure_chinese_demo_data()
 _ensure_document_uuids()
+_ensure_source_identity_documents()
 _ensure_folder_structure()
 _save_state()
 
@@ -3997,6 +4071,9 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
                 "source": "产品资料", "count": 0, "enabled": False,
                 "tags": ["知识库", "问答"],
                 "standards": {"TEST_STANDARD": {"level_id": "TEST_E", "level_name": "E", "authority": "mock"}},
+                # AIDP's fixed original-file identity contract.
+                "kds_id": "aidp-kb-product",
+                "file_uuid": "00000000-0000-4000-8000-000000000101",
             },
             "chunk_type": "TEXT",
             "file_url": "",
@@ -4006,8 +4083,13 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
         {
             "id": 10002, "score": 0.94, "title": "AIDP产品介绍.pdf",
             "text": "AIDP Search keeps each retrieval chunk independent so citations can identify their own metadata snapshot.",
-            "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "citations", "count": 1, "enabled": True},
-            "chunk_type": "TEXT", "file_url": "", "pages": [2],
+            "metadata": {
+                "knowledge_base_id": "aidp-kb-product", "section": "citations",
+                "count": 1, "enabled": True,
+                "kds_id": "aidp-kb-product",
+                "file_uuid": "00000000-0000-4000-8000-000000000101",
+            },
+            "chunk_type": "text", "file_url": "", "pages": [2],
             "retrieval_sources": ["vector_search"],
         },
     ],
@@ -4017,8 +4099,12 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "score": 0.93,
             "title": "常见问题汇总.txt",
             "text": "If no results are returned, verify the selected knowledge base IDs and API key.",
-            "metadata": {"knowledge_base_id": "aidp-kb-faq", "section": "troubleshooting"},
-            "chunk_type": "TEXT",
+            "metadata": {
+                "knowledge_base_id": "aidp-kb-faq", "section": "troubleshooting",
+                "kds_id": "aidp-kb-faq",
+                "file_uuid": "00000000-0000-4000-8000-000000000001",
+            },
+            "chunk_type": "text",
             "file_url": "",
             "pages": [1],
             "retrieval_sources": ["vector_search", "full_text_search", "graph_search"],
@@ -4028,7 +4114,11 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "score": 0.985,
             "title": "肝脏医学影像.jpg",
             "text": "Liver image for validating AIDP multi-modal retrieval image return pathway.",
-            "metadata": {"knowledge_base_id": "aidp-kb-faq", "section": "liver-image-demo"},
+            "metadata": {
+                "knowledge_base_id": "aidp-kb-faq", "section": "liver-image-demo",
+                "kds_id": "aidp-kb-faq",
+                "file_uuid": "00000000-0000-4000-8000-000000000008",
+            },
             "chunk_type": "image",
             "file_url": _MOCK_IMAGE_URLS[0],
             "pages": [6],
