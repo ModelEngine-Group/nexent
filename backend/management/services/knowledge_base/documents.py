@@ -101,6 +101,7 @@ async def index_documents(index_name, data, actor, *, reader=None, client=None, 
             grant = chunks_resource_grant(row)
             ensured = await client.ensure_knowledge_collection(KnowledgeCollectionEnsure(
                 knowledge_id=grant.knowledge_id, expected_revision=grant.revision, dimensions=dimensions,
+                native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED,
                 model_binding=binding), actor.user_id, actor.tenant_id)
             if (not isinstance(ensured, KnowledgeCollectionEnsured) or ensured.knowledge_id != grant.knowledge_id
                 or ensured.expected_revision != grant.revision or ensured.dimensions != dimensions or ensured.present is not True):

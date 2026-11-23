@@ -180,7 +180,7 @@ class LegacyMigrationService:
             ) if bind_observed_source else None
             plan = KnowledgeIngestionIntent(knowledge_id=knowledge_id, file_id=target_id, file_version=row['source_generation'],
                 user_id=actor.user_id, attempt=row['processing_attempt']+1, filename=row['original_filename'], parser_version=self.parser_version,
-                source=finding.candidate_source,
+                source=finding.candidate_source, native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED,
                 embedding_model={'model_id': metadata.model_id, 'revision': metadata.revision},
                 legacy_snapshot=LegacyIngestionSnapshot.capture(row, resource_revision=resource.revision,
                     legacy_quiesced=True, task_archive_sha256=archive_hash, source_binding=binding,

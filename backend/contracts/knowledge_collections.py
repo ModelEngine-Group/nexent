@@ -17,6 +17,7 @@ class CollectionSetup(Contract):
     resource_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
     dimensions: int | None = Field(default=None, gt=0, le=2**31 - 1)
     operation: Literal['ensure', 'delete_source'] = 'ensure'
+    native_documents: bool = False
     model_binding: ModelVersion | None = None
     phase: Literal['reserved', 'writing', 'unknown']
     writer_ended: bool
@@ -24,7 +25,7 @@ class CollectionSetup(Contract):
     @model_validator(mode='after')
     def consistent_operation(self):
         if self.operation == 'ensure' and self.dimensions is None or (
-            self.operation == 'delete_source' and (self.dimensions is not None or self.model_binding is not None)
+            self.operation == 'delete_source' and (self.dimensions is not None or self.model_binding is not None or self.native_documents)
         ):
             raise ValueError('Unexpected setup fields')
         return self
@@ -34,6 +35,8 @@ class CollectionSetup(Contract):
         payload = handler(self)
         if self.operation == 'ensure':
             payload.pop('operation', None)
+        if not self.native_documents:
+            payload.pop('native_documents', None)
         return payload
 
 
@@ -61,8 +64,19 @@ class KnowledgeCollectionLookup(KnowledgeCollectionAuthorization):
 
 
 class KnowledgeCollectionEnsure(KnowledgeCollectionLookup):
+    native_documents: bool = False
     dimensions: int = Field(gt=0, le=2**31 - 1)
     model_binding: ModelVersion | None = None
+
+
+    @model_serializer(mode='wrap')
+    def serialize_layout(self, handler):
+        payload = handler(self)
+        if self.untracked_source is None:
+            payload.pop('untracked_source', None)
+        if not self.native_documents:
+            payload.pop('native_documents', None)
+        return payload
 
 
 class KnowledgeUntrackedSourceDelete(KnowledgeCollectionLookup):

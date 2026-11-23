@@ -34,6 +34,48 @@ SCROLL_TTL = "2m"
 DEFAULT_SCROLL_SIZE = 1000
 
 
+def legacy_index_definition(actual_embedding_dim):
+    """The field names and settings shared by original Elasticsearch collections."""
+    # Use balanced fixed settings to avoid dynamic adjustment
+    settings = {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+        "refresh_interval": "5s",
+        "index": {
+            "max_result_window": 50000,
+            "translog": {"durability": "async", "sync_interval": "5s"},
+            "write": {"wait_for_active_shards": "1"},
+            # Memory optimization for bulk operations
+            "merge": {"policy": {"max_merge_at_once": 5, "segments_per_tier": 5}},
+        },
+    }
+
+    # Define the mapping with vector field
+    mappings = {
+        "properties": {
+            "id": {"type": "keyword"},
+            "title": {"type": "text"},
+            "filename": {"type": "keyword"},
+            "path_or_url": {"type": "keyword"},
+            "language": {"type": "keyword"},
+            "author": {"type": "keyword"},
+            "date": {"type": "date"},
+            "content": {"type": "text"},
+            "process_source": {"type": "keyword"},
+            "embedding_model_name": {"type": "keyword"},
+            "file_size": {"type": "long"},
+            "create_time": {"type": "date"},
+            "embedding": {
+                "type": "dense_vector",
+                "dims": actual_embedding_dim,
+                "index": "true",
+                "similarity": "cosine",
+            },
+        }
+    }
+    return settings, mappings
+
+
 class ElasticSearchCore(VectorDatabaseCore):
     """
     Core class for Elasticsearch operations including:
@@ -108,19 +150,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             # Use provided embedding_dim or get from model
             actual_embedding_dim = embedding_dim or 1024
 
-            # Use balanced fixed settings to avoid dynamic adjustment
-            settings = {
-                "number_of_shards": 1,
-                "number_of_replicas": 0,
-                "refresh_interval": "5s",
-                "index": {
-                    "max_result_window": 50000,
-                    "translog": {"durability": "async", "sync_interval": "5s"},
-                    "write": {"wait_for_active_shards": "1"},
-                    # Memory optimization for bulk operations
-                    "merge": {"policy": {"max_merge_at_once": 5, "segments_per_tier": 5}},
-                },
-            }
+            settings, mappings = legacy_index_definition(actual_embedding_dim)
 
             # Check if index already exists
             if self.client.indices.exists(index=index_name):
@@ -128,30 +158,6 @@ class ElasticSearchCore(VectorDatabaseCore):
                     f"Index {index_name} already exists, skipping creation")
                 self._ensure_index_ready(index_name)
                 return True
-
-            # Define the mapping with vector field
-            mappings = {
-                "properties": {
-                    "id": {"type": "keyword"},
-                    "title": {"type": "text"},
-                    "filename": {"type": "keyword"},
-                    "path_or_url": {"type": "keyword"},
-                    "language": {"type": "keyword"},
-                    "author": {"type": "keyword"},
-                    "date": {"type": "date"},
-                    "content": {"type": "text"},
-                    "process_source": {"type": "keyword"},
-                    "embedding_model_name": {"type": "keyword"},
-                    "file_size": {"type": "long"},
-                    "create_time": {"type": "date"},
-                    "embedding": {
-                        "type": "dense_vector",
-                        "dims": actual_embedding_dim,
-                        "index": "true",
-                        "similarity": "cosine",
-                    },
-                }
-            }
 
             # Create the index with the defined mappings
             self.client.indices.create(

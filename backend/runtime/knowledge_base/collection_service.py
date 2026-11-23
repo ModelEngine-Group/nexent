@@ -42,16 +42,18 @@ from infrastructure.knowledge_chunk_mutations import (
     knowledge_creation_vector_ports,
 )
 from infrastructure.vdb.native_file_cleanup import delete_untracked_native_source
+from infrastructure.vdb.native_knowledge import ensure_native_collection
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeCollectionService:
     def __init__(self, client, models, *, records=knowledge_chunk_mutation_ports,
-                 ports=knowledge_creation_vector_ports, source_delete=delete_untracked_native_source, operation_seconds=180):
+                 ports=knowledge_creation_vector_ports, source_delete=delete_untracked_native_source,
+                 native_ensure=ensure_native_collection, operation_seconds=180):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
             raise InvalidInput()
-        self.source_delete = source_delete
+        self.source_delete, self.native_ensure = source_delete, native_ensure
         self.client, self.models, self.records, self.ports, self.seconds = client, models, records, ports, operation_seconds
 
     async def _grant(self, request, actor):
@@ -89,6 +91,12 @@ class KnowledgeCollectionService:
                     returned = True
                     result = KnowledgeUntrackedSourceDeleted(knowledge_id=request.knowledge_id,
                         expected_revision=grant.revision, untracked_source=request.untracked_source, deleted_count=count)
+                elif request.native_documents:
+                    journal.begin(setup.operation_id, context=context)
+                    context.remaining()
+                    attempted = True
+                    info = self.native_ensure(actor, grant, request.dimensions, context=context)
+                    returned = True
                 else:
                     with self.ports(actor, grant.collection, request.dimensions, context=context, **namespace) as vectors:
                         if (vectors.scope.actor_id != actor.user_id or vectors.scope.tenant_id != grant.resource_tenant_id
@@ -100,9 +108,9 @@ class KnowledgeCollectionService:
                         attempted = True
                         info = vectors.ensure_collection(grant.collection, context=context)
                         returned = True
-                        if (not isinstance(info, VectorCollectionInfo) or info.collection != grant.collection
-                            or info.dimensions != request.dimensions or info.metric != 'cosine'):
-                            raise Conflict()
+                if not deleting_source and (not isinstance(info, VectorCollectionInfo) or info.collection != grant.collection
+                    or info.dimensions != request.dimensions or info.metric != 'cosine'):
+                    raise Conflict()
                 journal.finish(setup.operation_id, confirmed=True, context=context)
             except Exception as error:
                 rejected = attempted and not returned and isinstance(error, (
@@ -168,7 +176,8 @@ class KnowledgeCollectionService:
                     actor_id=actor.user_id, resource_revision=grant.revision,
                     dimensions=None if delete_source else request.dimensions,
                     model_binding=None if delete_source else request.model_binding,
-                    operation='delete_source' if delete_source else 'ensure', phase='reserved', writer_ended=False)
+                    operation='delete_source' if delete_source else 'ensure',
+                    native_documents=not delete_source and request.native_documents, phase='reserved', writer_ended=False)
                 result = await run_blocking('knowledge-collection-inspect' if inspect else 'knowledge-collection-ensure',
                     self._execute, request, actor, grant, setup, context=context, inspect=inspect,
                     lane='control-io', owner='runtime.knowledge_base')

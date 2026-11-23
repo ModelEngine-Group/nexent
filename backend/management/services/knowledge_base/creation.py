@@ -105,6 +105,7 @@ async def create_knowledge_base(knowledge_name, actor, *, embedding_model_id, em
             grant = chunks_resource_grant(current)
             result = await client.ensure_knowledge_collection(KnowledgeCollectionEnsure(
                 knowledge_id=grant.knowledge_id, expected_revision=grant.revision, dimensions=dimensions,
+                native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED,
                 model_binding=ModelVersion(model_id=model.model_id, revision=model.revision)), actor.user_id, actor.tenant_id)
             context.remaining()
             if (not isinstance(result, KnowledgeCollectionEnsured) or result.knowledge_id != grant.knowledge_id

@@ -154,12 +154,14 @@ class KnowledgeIngestionIntent(KnowledgeFileReference):
     parser_version: str = Field(min_length=1, max_length=128)
     embedding_model: ModelVersion
     chunking_strategy: Literal["basic", "by_title", "none"] = "basic"
+    native_documents: bool = False
     legacy_snapshot: LegacyIngestionSnapshot | None = None
 
     @model_serializer(mode='wrap')
     def serialize_intent(self, handler):
         value = handler(self)
         if self.legacy_snapshot is None: value.pop('legacy_snapshot', None)
+        if not self.native_documents: value.pop('native_documents', None)
         return value
 
     @model_validator(mode="after")
@@ -199,4 +201,5 @@ class KnowledgeIngestionIntent(KnowledgeFileReference):
             idempotency_key=self.idempotency_key,
             embedding_model=self.embedding_model,
             chunking_strategy=self.chunking_strategy,
+            native_documents=self.native_documents,
         )

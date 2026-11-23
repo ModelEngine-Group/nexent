@@ -34,7 +34,10 @@ from nexent.storage.models import (
     VectorGroup,
     WriteReceipt,
 )
-from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from nexent.vector_database.elasticsearch_core import (
+    ElasticSearchCore,
+    legacy_index_definition,
+)
 from nexent.vector_database.utils import extract_highlight_terms
 from pydantic import ValidationError
 
@@ -670,6 +673,51 @@ def _native_image(image, knowledge_id, document):
                 "location": image["location"]}
     except (KeyError, TypeError, ValueError):
         raise Conflict() from None
+
+
+def ensure_native_collection(actor, resource, dimensions, *, context):
+    """Create or verify an authorized original index without changing an existing schema."""
+    index = resource.collection
+    engine = record_engine(context)
+    try:
+        require_index_owner(actor, resource, context=context, engine=engine)
+        with closing(_configured_client(context.remaining())) as client:
+            reader = _NativeHybrid(client, {index: resource.resource_tenant_id}, context)
+            call = ElasticsearchVectorStore._call
+            created = False
+            try:
+                reader.identities()
+            except NotFound:
+                settings, mappings = legacy_index_definition(dimensions)
+                try:
+                    result = call(client, "indices.create", context, write=True, index=index, mappings=mappings,
+                                  settings=settings, wait_for_active_shards="1")
+                except Conflict:
+                    # Verify the exact concurrent creation below without issuing another write.
+                    pass
+                else:
+                    if result.get("acknowledged") is not True or result.get("shards_acknowledged") is not True:
+                        raise OutcomeUnknown(operation_id=context.operation_id)
+                    created = True
+            try:
+                identities = reader.identities()
+                reader.read_mappings()
+                fields = reader.mappings[index]
+                embedding = fields.get("embedding", {})
+                path = fields.get("path_or_url", {})
+                if (not _searchable_vector(embedding, dimensions) or embedding.get("similarity", "cosine") != "cosine"
+                    or path.get("type") != "keyword" or path.get("index", True) is not True):
+                    raise Conflict()
+                if reader.identities() != identities:
+                    raise Conflict()
+                require_index_owner(actor, resource, context=context, engine=engine)
+            except (Conflict, NotFound, ScopeDenied, Unavailable) as error:
+                if created:
+                    raise OutcomeUnknown(operation_id=context.operation_id) from error
+                raise
+            return VectorCollectionInfo(index, dimensions, "cosine")
+    finally:
+        close_owned(context, [engine.dispose])
 
 
 @contextmanager

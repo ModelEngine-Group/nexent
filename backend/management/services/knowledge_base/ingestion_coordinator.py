@@ -14,6 +14,7 @@ from contracts.agentos_knowledge import (
     KnowledgeJobLookup,
     ObjectReference,
 )
+from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
 from contracts.knowledge_cleanse import KnowledgeCleanseLookup
 from contracts.knowledge_ingestion import KnowledgeIngestionIntent
@@ -158,6 +159,7 @@ class IngestionCoordinator:
                 "filename": row["original_filename"],
                 "parser_version": self.cleanse.parser_version,
                 "chunking_strategy": strategy,
+                "native_documents": environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED,
             }
             if prior is not None and prior.legacy_snapshot is not None:
                 values['legacy_snapshot'] = prior.legacy_snapshot.model_dump(mode='json')

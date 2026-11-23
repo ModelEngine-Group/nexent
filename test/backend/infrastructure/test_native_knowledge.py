@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from contracts.knowledge_chunk_projection import PUBLIC_CHUNK_SOURCE_KEY
-from nexent.storage.errors import Conflict, InvalidInput, ScopeDenied
+from nexent.storage.errors import Conflict, InvalidInput, NotFound, ScopeDenied
 from nexent.storage.models import OperationContext, Revision, VectorKey, VectorRecord
 
 from infrastructure.vdb import native_knowledge
@@ -357,3 +357,25 @@ def test_untracked_source_validates_all_pages_before_writing(fixture, claim):
     else:
         assert _delete_legacy_sources(es, grant.collection, actor.tenant_id, [address], context=context) == 2
         assert es.bulk.call_count == 2
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_ensure_native_collection_never_remaps_original_index(fixture, monkeypatch, existing):
+    es, actor, grant, context = fixture
+    es.indices.get_mapping.return_value["kb"]["mappings"]["properties"]["path_or_url"] = {"type": "keyword"}
+    es.indices.create.return_value = {"acknowledged": True, "shards_acknowledged": True}
+    settings = es.indices.get_settings.return_value
+    if not existing:
+        es.indices.get_settings.side_effect = [NotFound(), settings, settings]
+    owner = Mock()
+    monkeypatch.setattr(native_knowledge, "_configured_client", lambda _: es)
+    monkeypatch.setattr(native_knowledge, "record_engine", lambda _: Mock())
+    monkeypatch.setattr(native_knowledge, "require_index_owner", owner)
+    result = native_knowledge.ensure_native_collection(actor, grant, 2, context=context)
+    assert (result.collection, result.dimensions, result.metric) == ("kb", 2, "cosine")
+    assert owner.call_count == 2
+    assert es.indices.create.call_count == (0 if existing else 1)
+    es.indices.put_mapping.assert_not_called()
+    if not existing:
+        fields = es.indices.create.call_args.kwargs["mappings"]["properties"]
+        assert fields["path_or_url"] == {"type": "keyword"} and fields["embedding"]["dims"] == 2

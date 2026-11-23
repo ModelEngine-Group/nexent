@@ -72,7 +72,9 @@ async def invoke(s, **kwargs):
         ports=s.ports, client=s.client, reader=s.reader, **kwargs)
 
 
-async def test_creation_commits_directory_then_ensures_as_actual_actor(boundary):
+@pytest.mark.parametrize("native", [False, True])
+async def test_creation_commits_directory_then_ensures_as_actual_actor(boundary, monkeypatch, native):
+    monkeypatch.setattr(module.environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", native)
     s = boundary
     result = await invoke(s, user_role='ADMIN', ingroup_permission='READ_ONLY', group_ids=[1, 9],
                           preserve_source_file=False, quota_limit_bytes=12)
@@ -89,6 +91,7 @@ async def test_creation_commits_directory_then_ensures_as_actual_actor(boundary)
     s.client.get_model.assert_awaited_once_with(2, 'operator', 'tenant-a')
     request = s.client.ensure_knowledge_collection.await_args.args[0]
     assert request.dimensions == 3 and request.model_binding.model_id == 2 and request.model_binding.revision == 'r1'
+    assert request.native_documents is native
     assert all(ctx is s.contexts[0] for ctx in s.contexts) and s.contexts[0].cancelled.is_set()
     s.records.delete.assert_not_called()
 

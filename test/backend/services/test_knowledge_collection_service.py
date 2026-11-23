@@ -200,3 +200,15 @@ async def test_untracked_source_delete_reserves_collection_without_model_invocat
     assert a.client.authorize_knowledge_collection.call_args.args[0].untracked_source == path
     a.s.models.get.assert_not_awaited()
     a.s.vectors.ensure_collection.assert_not_called()
+
+
+async def test_native_setup_uses_original_collection_under_existing_fence(setup, mocker):
+    a = setup
+    a.service.native_ensure = mocker.Mock(return_value=VectorCollectionInfo("collection", 3, "cosine"))
+    request = a.request.model_copy(update={"native_documents": True})
+    result = await a.service.ensure(request, a.s.s.actor, context=context())
+    assert result.present and result.dimensions == 3
+    assert a.service.native_ensure.call_args.args == (a.s.s.actor, a.grant, 3)
+    a.s.vectors.ensure_collection.assert_not_called()
+    assert await a.s.db(a.journal.inspect, context=context()) is None
+    assert await a.s.db(a.s.s.mutation.revision, context=context()) == 1

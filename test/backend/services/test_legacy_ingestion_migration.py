@@ -13,7 +13,11 @@ from contracts.knowledge_ingestion import (
     KnowledgeIngestionIntent,
     canonical_legacy_file_id,
 )
-from contracts.knowledge_maintenance import LegacyVectorFileLink, SourceFinding, SourceInspectionPage
+from contracts.knowledge_maintenance import (
+    LegacyVectorFileLink,
+    SourceFinding,
+    SourceInspectionPage,
+)
 from management.services.knowledge_base.legacy_migration import LegacyMigrationService
 from nexent.core.concurrency import run_blocking
 from nexent.storage.errors import Conflict, DeadlineExceeded, InvalidInput, ScopeDenied
@@ -59,12 +63,19 @@ async def migration(setup):
     return SimpleNamespace(s=s,service=service,source=sources)
 
 
-async def test_plan_admit_repeat_and_pre_execution_restore_use_existing_lifecycle(migration):
+@pytest.mark.parametrize("native", [False, True])
+async def test_plan_admit_repeat_and_pre_execution_restore_use_existing_lifecycle(migration, monkeypatch, native):
+    from contracts.constants import environment
+
+    monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", native)
     m=migration;s=m.s
     plan=await m.service.plan(1,s.value.file_id,s.actor,legacy_quiesced=True,context=context())
     assert plan.legacy_snapshot.previous.status=='COMPLETED' and plan.source==s.value.source
+    assert plan.native_documents is native
+    monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", not native)
     admitted=await m.service.admit(plan,s.actor,context=context())
     assert admitted['stage']=='INGEST_ACCEPTED' and admitted['ingestion_request']['legacy_snapshot']['previous']['status']=='COMPLETED'
+    assert admitted["ingestion_request"].get("native_documents", False) is native
     before=s.client.get_model.await_count
     repeated=await m.service.admit(plan,s.actor,context=context())
     assert repeated==admitted and s.client.get_model.await_count==before

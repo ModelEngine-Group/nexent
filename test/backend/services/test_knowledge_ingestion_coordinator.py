@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import sqlalchemy as sa
 from contracts.agentos_knowledge import KnowledgeJobState
+from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeUpstreamError
 from contracts.knowledge_cleanse import KnowledgeCleanseState
 from management.services.knowledge_base.ingestion_coordinator import (
@@ -479,3 +480,26 @@ async def test_accept_cannot_replace_already_pinned_model_revision(setup):
     with pytest.raises(Conflict):
         await s.coordinator.accept(s.value.file_id, s.actor, context=context())
     assert s.row()["ingestion_request"] == s.value.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native", [False, True])
+async def test_layout_is_frozen_at_admission_through_restart_and_configuration_change(setup, monkeypatch, native):
+    s = setup
+    monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", native)
+    first = await s.coordinator.accept(s.value.file_id, s.actor, context=context())
+    assert first["ingestion_request"].get("native_documents", False) is native
+    monkeypatch.setattr(environment, "KNOWLEDGE_RUNTIME_HYBRID_ENABLED", not native)
+    restarted = IngestionCoordinator(s.cleanse, s.client, ports=s.ports)
+    replay = await restarted.accept(s.value.file_id, s.actor, context=context())
+    assert replay["ingestion_request"] == first["ingestion_request"]
+    assert replay["version"] == first["version"]
+    s.cleanse.submit.side_effect = lambda *args, **kwargs: s.child("queued")
+    await restarted.advance(s.value.file_id, s.actor, context=context())
+    s.cleanse.inspect.side_effect = lambda *args, **kwargs: s.child("completed", artifact=s.value.source)
+    s.client.upload_knowledge_file.side_effect = lambda *args, **kwargs: s.runtime()
+    await restarted.advance(s.value.file_id, s.actor, context=context())
+    submitted = s.client.upload_knowledge_file.await_args.args[0]
+    assert submitted.native_documents is native
+    assert submitted.idempotency_key == s.value.idempotency_key
+    s.client.upload_knowledge_file.assert_awaited_once()
