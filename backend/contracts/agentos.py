@@ -717,6 +717,21 @@ class PreparedAgentCreatorRun(PreparedCreatorRun):
     bound_resources: str = Field(min_length=1)
 
 
+class ToolSetCheck(RunSpecModel):
+    arm: Literal["base", "result"]
+    removed: list[str] = Field(min_length=1)
+
+
+class ToolCatalogObservation(RunSpecModel):
+    core: Literal["smolagents", "jiuwen"]
+    prompt_tools: list[str]
+    schema_tools: list[str]
+    executable: list[str]
+    model_inputs: int = Field(ge=0)
+    instruction_mentions: list[str]
+    native_definitions: list[str]
+
+
 class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 
@@ -726,6 +741,7 @@ class PreparedEvaluationRun(AgentRunSpec):
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
     watch_tool_arguments: dict[str, list[str]] | None = Field(default=None, min_length=1, max_length=32,
                                                               exclude_if=lambda v: v is None)
+    tool_set_check: ToolSetCheck | None = Field(default=None, exclude_if=lambda v: v is None)
 
     @model_serializer(mode="wrap")
     def omit_ordinary_replay_reference(self, serialize):
@@ -764,6 +780,7 @@ class ReplayReceipt(RunSpecModel):
     skill: SkillTrialObservation | None = Field(default=None, exclude_if=lambda v: v is None)
     root_guide_reads: dict[str, PositiveInt] | None = Field(default=None, exclude_if=lambda v: v is None)
     tool_observation: ReplayToolObservation | None = Field(default=None, exclude_if=lambda v: v is None)
+    tool_catalog: ToolCatalogObservation | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class EvaluationAgentResult(BaseModel):

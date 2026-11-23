@@ -560,6 +560,9 @@ class JiuwenAdapter(AgentCoreAdapter):
 
         def on_step(_request):
             nonlocal step
+            probe = getattr(self, "_tool_set_probe", None)
+            if probe is not None:
+                probe.observe_model_input(_request.messages, _request.tools)
             step += 1
             self.events.begin_step(_request)
 
@@ -770,6 +773,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.cores.jiuwen.resources import JiuwenResourceBridge
 
         self.resource_bridge = JiuwenResourceBridge(self.native_agent, loop, self.scope, self.visible_tool_names)
+        if getattr(info.observer, "replay_tool_recorder", None) is not None:
+            from nexent.core.agents.resources.replay_tools import record_tool_catalog
+            cards = {card.name for card in self.native_agent.ability_manager.list()}
+            self._tool_set_probe = record_tool_catalog(info.observer, info.agent_config, "jiuwen",
+                info.agent_config.context_items or (), cards, cards.union(self.business_tools))
         token = self.scope.register_closer(lambda: loop.call_soon_threadsafe(current.cancel))
 
         async def watch_stop():

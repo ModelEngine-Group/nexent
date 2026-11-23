@@ -26,6 +26,7 @@ change:
     - test/backend/services/test_evolution_skill_package.py
     - test/backend/services/test_evolution_skill_discovery.py
     - test/backend/services/test_evolution_tool_use.py
+    - test/backend/services/test_evolution_tool_sets.py
     - test/backend/services/test_evolution_replay.py
     - test/backend/services/test_evolution_examples.py
     - test/backend/services/test_evolution_feedback_handoff.py

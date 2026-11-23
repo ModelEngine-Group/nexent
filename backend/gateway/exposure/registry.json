@@ -318,6 +318,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/tool-set-candidates",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-tool-set-proposal",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-evolution/feedback/{feedback_id}/candidates",
       "transport": "http",
       "target": "management",

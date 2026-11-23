@@ -9,3 +9,4 @@ acceptance_bindings:
   AC-02: [test_grade_and_compare]
   AC-03: [test_grade_and_compare]
   AC-04: [test_grade_and_compare]
+  AC-05: [test_grade_and_compare]

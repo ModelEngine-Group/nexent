@@ -4,7 +4,7 @@ file_intro: "User uploaded files. The file information is as follows:\n"
 file_query: "\n\nUser wants to answer questions based on the information in the above files: {{ query }}"
 file_with_presigned_url: |-
   File name: {{ name }}
-  - S3 URL: {{ s3_url }}  [for tools WITHOUT [MCP] prefix, like analyze_text_file]
+  - S3 URL: {{ s3_url }}  [for available internal file tools]
   - presigned_url: {{ presigned_url }}  [for tools WITH [MCP] prefix]
 file_without_presigned_url: "File name: {{ name }}, S3 URL: {{ s3_url }}  [permanent]"
 history_file_intro: "\n[Attached files]:\n"

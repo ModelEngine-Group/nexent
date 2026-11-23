@@ -16,6 +16,8 @@ from management.services.evaluation.skill_candidates import generate_skill_step_
 from management.services.evaluation.replay_cases import freeze_development_case, get_development_case
 from management.services.evaluation.experiments import create_experiment, experiment_report, workspace_choices
 from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
+from management.services.evaluation.feedback_handoff import tool_sets_from_experiment
+from contracts.evolution import ToolSetProposal
 from management.services.permission.identity.session import get_current_user_id
 from nexent.core.concurrency import run_blocking
 
@@ -54,6 +56,12 @@ async def select_prompt_examples(experiment_id: int, request: ExampleCandidateRe
     user_id, tenant_id = get_current_user_id(authorization)
     result = await examples_from_experiment(tenant_id, user_id, experiment_id, request)
     return {"data": result}
+
+
+@router.post("/experiments/{experiment_id}/tool-set-candidates")
+async def propose_tool_sets(experiment_id: int, request: ToolSetProposal, authorization: str | None = Header(None)):
+    user_id, tenant_id = get_current_user_id(authorization)
+    return {"data": await tool_sets_from_experiment(tenant_id, user_id, experiment_id, request)}
 
 
 @router.post("/experiments", status_code=202)

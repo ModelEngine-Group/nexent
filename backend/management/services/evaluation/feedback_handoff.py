@@ -15,6 +15,8 @@ from management.db.evaluation.candidates import text_digest
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.experiments import _io, _snapshot, snapshot_digest
+from management.services.evaluation.tool_set_candidates import catalog_source, generate_tool_sets
+from management.db.evaluation.candidates import selectable_tool_names
 from management.services.evaluation.example_candidates import generate_example_candidates
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate
 from management.services.evaluation.replay_cases import get_development_case
@@ -173,6 +175,23 @@ async def examples_from_experiment(tenant, user, eid, request):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The baseline has changed since evaluation")
     return await _io("select-prompt-examples", generate_example_candidates, tenant, user, eid, request,
                      released.get("prompt") or "", agent, version, plan["request"]["language"])
+
+
+async def tool_sets_from_experiment(tenant, user, eid, request):
+    scope = await _io("identify-tool-set-source", jobs.scope, tenant, eid)
+    if not scope:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+    agent, version = scope["agent_id"], scope["version_no"]
+    await _io("authorize-tool-set-source", require_business_agent_edit, agent, tenant, user)
+    plan = await _io("read-tool-set-plan", jobs.read_plan, tenant, eid)
+    if plan["request"]["candidate_type"] != "baseline":
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select an observed released baseline")
+    spec = await _snapshot(DevelopmentExperimentRequest.model_validate(plan["request"]), tenant, user, "base")
+    if snapshot_digest(spec) != plan["snapshots"]["base"]:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Tool-set source changed after evaluation")
+    names = await _io("list-selectable-tools", selectable_tool_names, tenant, agent, version)
+    source = catalog_source(spec, names, snapshot_digest(spec.model_copy(update={"observe_root_skill_choices": None})))
+    return await _io("generate-tool-sets", generate_tool_sets, tenant, user, eid, request, source, agent, version)
 
 
 def generate_from_handoff(tenant, user, feedback_id, model_id):

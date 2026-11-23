@@ -4,10 +4,11 @@
 from nexent.core.agents.resources.replay_tools import argument_digest
 
 
-def judge_tool_use(expectation, observation):
+def judge_tool_use(expectation, observation, *, absent=frozenset()):
     required = {rule["name"] for rule in expectation["rules"]}
-    if (observation is None or not observation.complete or set(observation.registered) != required
-            or any(call.name not in required or call.outcome == "pending" or call.end is None or call.end <= call.start
+    registered = required.difference(absent)
+    if (observation is None or not observation.complete or set(observation.registered) != registered
+            or any(call.name not in registered or call.outcome == "pending" or call.end is None or call.end <= call.start
                    for call in observation.calls)):
         return {"status": "missing_evidence", "reason": "incomplete_tool_observation"}
     issues = []
@@ -18,7 +19,7 @@ def judge_tool_use(expectation, observation):
         if count < rule["min_calls"]:
             issues.append({"tool": name, "reason": "too_few", "count": count})
         if rule["max_calls"] is not None and count > rule["max_calls"]:
-            issues.append({"tool": name, "reason": "too_many", "count": count})
+            issues.append({"tool": name, "reason": "too_many", "count": count, "max_calls": rule["max_calls"]})
         for index, call in enumerate(observation.calls, 1):
             if call.name != name:
                 continue

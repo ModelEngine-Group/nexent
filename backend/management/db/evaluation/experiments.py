@@ -178,7 +178,8 @@ def workspace_choices(tenant, agent_id, version):
             ORDER BY case_id DESC LIMIT 200
         """,
         "candidates": """
-            SELECT c.candidate_id, 'prompt' AS kind, c.resource_field AS name, c.create_time
+            SELECT c.candidate_id, CASE c.resource_field WHEN 'agent.tools' THEN 'tool_set' ELSE 'prompt' END AS kind,
+                c.resource_field AS name, c.create_time
             FROM nexent.evolution_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.base_version_no=:version
             UNION ALL

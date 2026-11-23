@@ -1481,8 +1481,13 @@ Additional Args:
                     if rebuilt.memory_messages is not None else rebuilt.messages
                 )
                 self._emit_history_summary_event()
+                if probe is not None:
+                    probe.observe_model_input(rebuilt.messages)
                 return native_context_rebuild(rebuilt)
 
+            probe = getattr(self, "_tool_set_probe", None)
+            if probe is not None:
+                probe.observe_model_input(input_messages)
             chat_message: ChatMessage = self.model(
                 input_messages,
                 stop_sequences=stop_sequences,
@@ -2622,11 +2627,16 @@ Additional Args:
                     rebuilt.evidence, step_number=self.step_number
                 )
                 self._emit_history_summary_event()
+                if probe is not None:
+                    probe.observe_model_input(rebuilt.messages)
                 return native_context_rebuild(rebuilt)
 
             model_kwargs: dict[str, Any] = {}
             if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
                 model_kwargs["_defer_attempt_commit"] = True
+            probe = getattr(self, "_tool_set_probe", None)
+            if probe is not None:
+                probe.observe_model_input(messages)
             chat_message = self.model(
                 messages,
                 context_rebuild=(

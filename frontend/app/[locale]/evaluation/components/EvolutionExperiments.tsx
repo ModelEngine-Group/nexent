@@ -23,6 +23,7 @@ import ExampleCandidates from "./ExampleCandidates";
 import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedback";
 import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRules";
 import LocalEditFeedback from "./LocalEditFeedback";
+import ToolSetCandidates from "./ToolSetCandidates";
 
 function CaseForm({
   agent,
@@ -379,6 +380,10 @@ function Experiments({
             <DiscoveryFeedback key={report.data.experiment_id} report={report.data} workspace={choices} />}
           {report.data.status === "finished" && choices && <LocalEditFeedback key={report.data.experiment_id}
             report={report.data} workspace={choices} agent={agent} version={version} viewer={viewer} />}
+          {report.data.status === "finished" && baselineReport && <ToolSetCandidates key={report.data.experiment_id}
+            report={report.data} cases={choices?.cases || []} onSelect={id => {
+              setCandidate(`tool_set:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
+            }} />}
           <Table
             pagination={false}
             rowKey="id"
@@ -420,6 +425,17 @@ function Experiments({
                         {issue.tool} {t(`evolution.issue.${issue.reason}`)} {issue.fields?.join(", ")}
                       </div>)}
                     </div>}
+                    {trial.result?.tool_catalog && <details><summary>{t("evolution.actualToolSet")}</summary>
+                      {(["prompt_tools","schema_tools","executable"] as const).map(key => <div key={key}>
+                        {t(`evolution.catalog.${key}`)} · {trial.result!.tool_catalog![key].join(", ") || "∅"}
+                      </div>)}
+                      {trial.result.tool_catalog.model_inputs !== undefined && <>
+                        <div>{t("evolution.catalog.modelInputs", { count: trial.result.tool_catalog.model_inputs })}</div>
+                        {(["instruction_mentions", "native_definitions"] as const).map(key => <div key={key}>
+                          {t(`evolution.catalog.${key}`)} · {trial.result!.tool_catalog![key]?.join(", ") || "∅"}
+                        </div>)}
+                      </>}
+                    </details>}
                     {trial.result?.selection && <div>{t("evolution.skillChoice", {
                       expected: trial.result.selection.expected.join(", ") || "∅",
                       reads: Object.keys(trial.result.selection.reads).join(", ") || "∅",

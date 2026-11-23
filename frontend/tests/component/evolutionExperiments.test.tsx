@@ -5,6 +5,7 @@ import { expect, it, vi } from "vitest";
 import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperiments";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
+import ToolSetCandidates from "@/app/evaluation/components/ToolSetCandidates";
 import { evolutionService } from "@/services/evolutionService";
 
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
@@ -30,6 +31,7 @@ vi.mock("@/services/evolutionService", () => ({
     shareDiscovery: vi.fn(),
     developmentCase: vi.fn(),
     shareLocalEdit: vi.fn(),
+    toolSetCandidates: vi.fn(),
   },
 }));
 
@@ -174,6 +176,32 @@ it("hands off a tool failure when the answer passed, with approved input and arg
     failure: { case_id: 1, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
     protection: { case_id: 2, input_excerpt: "extract rows", expected: "[]", observed: "[]" },
   })));
+});
+
+it("requires both an unwanted call and a protection case before trying a narrower tool set", async () => {
+  const select = vi.fn();
+  vi.mocked(evolutionService.toolSetCandidates).mockResolvedValue({ variants: [
+    { candidate_id: null, removed: [], retained: ["search"] }, { candidate_id: 27, removed: ["search"], retained: [] },
+  ] });
+  const trial = (status: string, max_calls: number) => ({ base: { status, result: { tool_use: {
+    status, issues: status === "fail" ? [{ reason: "too_many", tool: "search", max_calls }] : [],
+  } } }, comparison: "baseline_only" });
+  render(<QueryClientProvider client={new QueryClient()}><ToolSetCandidates onSelect={select}
+    cases={[{ case_id: 1, family: "tools", query: "skip search" }, { case_id: 2, family: "tools", query: "read guide" }]}
+    report={{ experiment_id: 55, status: "finished", total_pairs: 0, valid_pairs: 0,
+      pairs: { "1": trial("fail", 0), "2": trial("pass", 1), "3": trial("fail", 2) } }} /></QueryClientProvider>);
+  fireEvent.click(screen.getByText("evolution.proposeToolSets"));
+  const generate = screen.getByRole("button", { name: "evolution.generateToolSets" });
+  expect(generate).toBeDisabled();
+  await choose("evolution.excessCalls", "skip search");
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.excessCalls" }), { key: "Escape" });
+  expect(generate).toBeDisabled();
+  await choose("evolution.protectTools", "read guide");
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.protectTools" }), { key: "Escape" });
+  fireEvent.click(generate);
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.tryToolSet" }));
+  expect(evolutionService.toolSetCandidates).toHaveBeenCalledWith(55, [1], [2]);
+  expect(select).toHaveBeenCalledWith(27);
 });
 
 it("shares only the three approved request excerpts for a discovery rewrite", async () => {

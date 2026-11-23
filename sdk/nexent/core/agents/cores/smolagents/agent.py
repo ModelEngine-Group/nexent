@@ -638,6 +638,12 @@ class NexentAgent(AgentResources):
                     update_step._get_conversation_id = agent._get_conversation_id
                     update_step._get_user_id = agent._get_user_id
 
+            if getattr(self.observer, "replay_tool_recorder", None) is not None:
+                from nexent.core.agents.resources.replay_tools import record_tool_catalog
+                schemas = (effective_prompt_tools.tools if effective_prompt_tools is not None else
+                           [tool.name for tool in tool_list])
+                agent._tool_set_probe = record_tool_catalog(
+                    self.observer, agent_config, "smolagents", context_items, schemas, agent.tools)
             return agent
         except CancelledError:
             self._cleanup_sandbox()

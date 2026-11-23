@@ -35,7 +35,9 @@ export interface Trial {
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
     selection?: { expected: string[]; reads: Record<string, number>; outcome: string };
     guide_reads?: Record<string, number>;
-    tool_use?: { status: string; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[] }[] };
+    tool_catalog?: { core: string; prompt_tools: string[]; schema_tools: string[]; executable: string[];
+      model_inputs?: number; instruction_mentions?: string[]; native_definitions?: string[] };
+    tool_use?: { status: string; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
     error?: string;
     judgment?: { score?: number; reason?: string; status?: string };
   };
@@ -113,6 +115,9 @@ export const evolutionService = {
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  toolSetCandidates: (id: number, failure_case_ids: number[], protection_case_ids: number[]) =>
+    read<{ variants: { candidate_id: number | null; removed: string[]; retained: string[] }[] }>(
+      `${root}/experiments/${id}/tool-set-candidates`, { failure_case_ids, protection_case_ids }),
   developmentCase: (agent: number, version: number, id: number) =>
     read<{ task: { query: string; expected: string; tool_use?: ToolExpectation } }>(
       `${root}/agents/${agent}/versions/${version}/development-cases/${id}`),

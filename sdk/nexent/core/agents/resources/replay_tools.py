@@ -4,6 +4,7 @@
 import hashlib
 import inspect
 import json
+import re
 from functools import wraps
 from threading import Lock
 
@@ -14,14 +15,41 @@ def argument_digest(value):
 
 
 class ReplayToolRecorder:
-    def __init__(self, root_config, watched):
+    def __init__(self, root_config, watched, probe_names=()):
         self.root_config = root_config
         self.watched = watched
         self.registered = set()
         self.calls = []
         self.event_index = 0
         self.complete = True
+        self.catalog = None
+        self.tool_patterns = {name: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
+                              for name in probe_names}
         self.lock = Lock()
+
+    def observe_model_input(self, messages, tools=()):
+        """Keep only watched names from system instructions and native tool definitions."""
+        if self.catalog is None or not self.tool_patterns:
+            return
+        mentioned = set()
+        for message in messages:
+            if isinstance(message, dict):
+                role, content = message.get("role"), message.get("content")
+            elif hasattr(message, "semantic_role"):
+                role, content = message.semantic_role, message.content_parts
+            else:
+                role, content = getattr(message, "role", None), getattr(message, "content", None)
+            if getattr(role, "value", role) not in {"system", "developer"}:
+                continue
+            pieces = [content] if isinstance(content, str) else [
+                p["text"] for p in content or () if isinstance(p, dict) and isinstance(p.get("text"), str)]
+            for piece in pieces:
+                mentioned.update(name for name, pattern in self.tool_patterns.items() if pattern.search(piece))
+        schema_names = {tool.name for tool in tools if tool.name in self.tool_patterns}
+        with self.lock:
+            self.catalog["model_inputs"] += 1
+            for key, found in (("instruction_mentions", mentioned), ("native_definitions", schema_names)):
+                self.catalog[key] = sorted(found.union(self.catalog[key]))
 
     def bind(self, tool, name, mapping_input=False):
         if name not in self.watched or not callable(getattr(tool, "forward", None)):
@@ -102,3 +130,15 @@ def bind_replay_tool(observer, config, tool, name):
     recorder = getattr(observer, "replay_tool_recorder", None)
     if isinstance(recorder, ReplayToolRecorder) and recorder.root_config is config:
         recorder.bind(tool, name)
+
+
+def record_tool_catalog(observer, config, core, items, schema_names, executable):
+    recorder = getattr(observer, "replay_tool_recorder", None)
+    if not isinstance(recorder, ReplayToolRecorder) or recorder.root_config is not config or not recorder.tool_patterns:
+        return
+    names = {item.content["name"] for item in items
+             if getattr(item.type, "value", item.type) == "tool" and item.content.get("name")}
+    recorder.catalog = {"core": core, "prompt_tools": sorted(names),
+                        "schema_tools": sorted(set(schema_names)), "executable": sorted(set(executable)),
+                        "model_inputs": 0, "instruction_mentions": [], "native_definitions": []}
+    return recorder

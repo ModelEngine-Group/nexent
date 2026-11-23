@@ -4,7 +4,7 @@ file_intro: "用户上传了文件，文件信息如下：\n"
 file_query: "\n\n用户希望基于以上文件信息回答问题：{{ query }}"
 file_with_presigned_url: |-
   文件名：{{ name }}
-  - S3 URL: {{ s3_url }}  [供不带 [MCP] 前缀的工具使用，如 analyze_text_file]
+  - S3 URL: {{ s3_url }}  [供当前可用的内部文件工具使用]
   - presigned_url: {{ presigned_url }}  [供带 [MCP] 前缀的工具使用]
 file_without_presigned_url: "文件名：{{ name }}，S3 URL: {{ s3_url }}  [永久地址]"
 history_file_intro: "\n[附件]：\n"

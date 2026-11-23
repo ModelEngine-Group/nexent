@@ -11,7 +11,7 @@ tools:
     1. **Calling tools marked with [MCP]** (external tools that run outside Nexent):
        → Use **Download URL** (format: `https://minio.example.com/...?token=xxx`)
        Reason: MCP tools run on external services and cannot access internal S3 storage
-    2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
+    2. **Calling an available internal file tool**:
        → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
        Reason: Internal tools run inside Nexent and can directly access MinIO storage
   file_url_guide_worker: |-
@@ -20,7 +20,7 @@ tools:
     1. **Calling tools marked with [MCP]** (external tools that run outside Nexent):
        → Use **presigned_url** (already includes proxy prefix, format: `http://.../api/nb/v1/file/fetch?presigned_url=...`)
        Directly use the **presigned_url** field provided in the user's uploaded file info. No need to construct or append anything.
-    2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
+    2. **Calling an available internal file tool**:
        → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
        Reason: Internal tools run inside Nexent and can directly access MinIO storage
 skills:

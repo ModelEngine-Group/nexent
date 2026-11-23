@@ -9,7 +9,7 @@ from collections import Counter
 from contextlib import ExitStack, asynccontextmanager
 
 from backend.http.client import create_httpx_client
-from contracts.agentos import EvaluationAgentRun
+from contracts.agentos import EvaluationAgentRun, ToolSetCheck
 from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME_URL
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
@@ -27,6 +27,7 @@ from management.services.evaluation.example_candidates import example_source_key
 from management.services.evaluation.replay_cases import get_development_case, remove_trial_inputs, stage_case_input
 from management.services.evaluation.scoring import grade_observed_case
 from management.services.evaluation.tool_use import judge_tool_use
+from management.services.evaluation.tool_set_candidates import resolve_tool_set
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
 
@@ -62,11 +63,19 @@ async def _snapshot(request, tenant, user, variant):
     options = {}
     if request.candidate_type in {"skill_step", "skill_discovery"}:
         options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
-    elif variant == "result":
+    elif request.candidate_type == "prompt" and variant == "result":
         options = {"prompt_candidate_id": request.candidate_id}
     spec = await prepare_evaluation_snapshot(
         EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query=""), user, tenant,
         language=request.language, **options)
+    if request.candidate_type == "tool_set":
+        removed = await _io("resolve-tool-set", resolve_tool_set, tenant, request.agent_id, request.version_no,
+                            request.candidate_id, spec, snapshot_digest(spec))
+        if variant == "result":
+            spec = await prepare_evaluation_snapshot(
+                EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query=""), user, tenant,
+                language=request.language, excluded_root_tools=frozenset(removed))
+        spec = spec.model_copy(update={"tool_set_check": ToolSetCheck(arm=variant, removed=removed)})
     if variant == "no_skill":
         spec = spec.model_copy(update={"omit_root_skill_candidate_id": request.candidate_id})
     if request.candidate_type in {"baseline", "skill_discovery"}:
@@ -287,12 +296,27 @@ async def execute_trial(job):
     await _io("recheck-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
     grade = await run_blocking("grade-development-trial", _grade, request, job, case["task"], observed,
                                lane="evaluation", owner="management")
-    tool_grade = judge_tool_use(watch, receipt.tool_observation) if watch else None
+    absent = set()
+    catalog = receipt.tool_catalog
+    if request.candidate_type == "tool_set":
+        if catalog is None or not catalog.model_inputs:
+            return "invalid", {"error": "missing_tool_catalog"}
+        removed = set(spec.tool_set_check.removed)
+        actual = set(catalog.executable)
+        if job["variant"] == "result":
+            if removed.intersection(actual.union(catalog.schema_tools, catalog.prompt_tools,
+                                                 catalog.instruction_mentions, catalog.native_definitions)):
+                return "invalid", {"error": "excluded_tool_remains_visible_or_callable", "tool_catalog": catalog.model_dump()}
+            absent = removed
+        elif not removed.issubset(actual.intersection(catalog.schema_tools, catalog.prompt_tools)):
+            return "invalid", {"error": "tool_missing_from_baseline", "tool_catalog": catalog.model_dump()}
+    tool_grade = judge_tool_use(watch, receipt.tool_observation, absent=absent) if watch else None
     status = grade["status"]
     if tool_grade and status in {"pass", "fail"} and tool_grade["status"] != "pass":
         status = tool_grade["status"]
     return status, {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
                              **({"tool_use": tool_grade} if tool_grade else {}),
+                             **({"tool_catalog": catalog.model_dump()} if catalog else {}),
                              **({"guide_reads": receipt.root_guide_reads} if request.candidate_type == "baseline"
                                 and receipt.root_guide_reads is not None else {}),
                              **({"skill": skill.model_dump()} if skill else {}),

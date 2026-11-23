@@ -58,3 +58,8 @@ def test_grade_and_compare(monkeypatch):
                                EvaluationAgentResult(answer="y", events=[{"type": "final_answer"}]))
     assert delivered["status"] == "pass" and tool_grade["issues"][0]["reason"] == "too_few"
     assert judge_tool_use(rule, None)["status"] == "missing_evidence"
+    removed = ReplayToolObservation(registered=[], complete=True, calls=[])
+    assert judge_tool_use(rule, removed, absent={"read"})["status"] == "fail"
+    skip = ToolUseExpectation(rules=[{"name": "read", "min_calls": 0, "max_calls": 0}]).model_dump()
+    assert judge_tool_use(skip, removed, absent={"read"})["status"] == "pass"
+    assert judge_tool_use(skip, removed)["status"] == "missing_evidence"

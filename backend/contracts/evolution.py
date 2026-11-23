@@ -162,7 +162,7 @@ class DevelopmentExperimentRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
-    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "baseline"]
+    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "baseline", "tool_set"]
     candidate_id: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
     case_ids: list[int] = Field(min_length=1, max_length=100)
     evaluator_id: int = Field(gt=0)
@@ -226,6 +226,19 @@ class FeedbackHandoffRequest(BaseModel):
 class GenerateFromFeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     model_id: int = Field(gt=0)
+
+
+class ToolSetProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    failure_case_ids: list[int] = Field(min_length=1, max_length=16)
+    protection_case_ids: list[int] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def independent_examples(self):
+        cases = self.failure_case_ids + self.protection_case_ids
+        if min(cases) < 1 or len(set(cases)) != len(cases):
+            raise ValueError("Select distinct failure and protection tasks")
+        return self
 
 
 class DiscoveryExample(BaseModel):

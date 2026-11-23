@@ -109,6 +109,7 @@ def build_evaluation_input(query, minio_files, history, user_id, tenant_id) -> R
 async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str, tenant_id: str, *,
                                       prompt_candidate_id: int | None = None, skill_candidate_id: int | None = None,
                                       skill_variant: Literal["base", "result"] = "result",
+                                      excluded_root_tools: frozenset[str] = frozenset(),
                                       language: Literal["zh", "en"] | None = None):
     from management.services.agent.preparation.run import create_agent_run_info
 
@@ -128,6 +129,7 @@ async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str,
         enable_automation_tool=False,
         **({"language": language} if language is not None else {}),
         **({"prompt_candidate_id": prompt_candidate_id} if prompt_candidate_id is not None else {}),
+        **({"excluded_root_tools": excluded_root_tools} if excluded_root_tools else {}),
     )
     if skill_candidate_id is not None:
         from management.services.evaluation.skill_candidates import pin_skill_candidate

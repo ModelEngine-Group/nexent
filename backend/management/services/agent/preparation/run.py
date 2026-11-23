@@ -126,6 +126,7 @@ async def create_agent_run_info(
     metadata: Optional[Dict[str, Any]] = None,
     user_query: str | None = None,
     prompt_candidate_id: int | None = None,
+    excluded_root_tools: frozenset[str] = frozenset(),
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -185,6 +186,10 @@ async def create_agent_run_info(
         if not is_debug or prepared_conversation is not None or version_no <= 0:
             raise ValueError("Candidate preview requires a released evaluation baseline")
         create_config_kwargs["prompt_candidate_id"] = prompt_candidate_id
+    if excluded_root_tools:
+        if not is_debug or prepared_conversation is not None or version_no <= 0:
+            raise ValueError("Tool-set preview requires a released evaluation baseline")
+        create_config_kwargs["excluded_root_tools"] = excluded_root_tools
     if enable_automation_tool and not is_debug and conversation_id is not None:
         create_config_kwargs.update(
             {

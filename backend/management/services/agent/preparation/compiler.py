@@ -99,6 +99,7 @@ async def create_agent_config(
     authorized_knowledge_tools: dict | None = None,
     runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
     prompt_candidate_id: int | None = None,
+    excluded_root_tools: frozenset[str] = frozenset(),
 ):
     portable_options = {"portable_evaluation": True} if portable_evaluation else {}
     if authorized_knowledge_tools is not None:
@@ -558,6 +559,11 @@ async def create_agent_config(
                 )
         except Exception as e:
             logger.error(f"Failed to load memory tools: {e}", exc_info=True)
+
+    if excluded_root_tools:
+        if not portable_evaluation or not excluded_root_tools.issubset({tool.name for tool in tool_list}):
+            raise ValueError("Tool candidate does not match the compiled evaluation scope")
+        tool_list = [tool for tool in tool_list if tool.name not in excluded_root_tools]
 
     # The final tool params already contain the conversation selection and ACL
     # intersection. Summaries therefore restore semantic routing without
