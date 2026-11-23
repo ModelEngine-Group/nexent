@@ -3,10 +3,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Input, Segmented, Switch, Tooltip } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Input,
+  Segmented,
+  Switch,
+  Tabs,
+  Tooltip,
+} from "antd";
 import { useTranslation } from "react-i18next";
 import { RefreshCw, Save, Search, X } from "lucide-react";
 
+import { PlatformQuotaPanel } from "@/components/quota/PlatformQuotaPanel";
+import ProjectConfigTab from "@/components/system-config/ProjectConfigTab";
 import { useSystemConfigurations } from "@/hooks/system/useSystemConfigurations";
 import type { SystemConfigurationChanges } from "@/types/systemConfiguration";
 import { ConfigTable } from "./components/ConfigTable";
@@ -193,112 +204,140 @@ export function SystemConfigPage() {
           </Tooltip>
         </header>
 
-        <div data-testid="config-content" className="w-full">
-          {error ? (
-            <Alert
-              className="mt-4"
-              type="error"
-              showIcon
-              message={error.message}
-              action={
-                <Button onClick={() => void refetch()}>
-                  {t("systemConfig.retry")}
-                </Button>
-              }
-            />
-          ) : null}
-          {!error || items.length ? (
-            <>
-              <div
-                data-testid="config-filter"
-                className="mt-5 flex flex-wrap items-center gap-3"
-              >
-                <div className="w-full lg:w-[320px] lg:shrink-0">
-                  <Input
-                    id="system-config-search"
-                    allowClear
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    prefix={
-                      <Search className="h-4 w-4 text-[var(--color-icon-tertiary)]" />
-                    }
-                    placeholder={t("systemConfig.searchPlaceholder")}
-                    className="w-full"
-                  />
-                </div>
-                <Segmented
-                  className="max-w-full [&_.ant-segmented-group]:flex-wrap"
-                  value={groupFilter}
-                  onChange={(value) => setGroupFilter(value as GroupFilter)}
-                  options={[
-                    {
-                      label: `${t("systemConfig.filter.all")} ${items.length}`,
-                      value: "all",
-                    },
-                    ...CONFIG_GROUPS.map((group) => ({
-                      label: `${t(group.labelKey)} ${items.filter((item) => item.group === group.id).length}`,
-                      value: group.id,
-                    })),
-                  ]}
-                />
-                <label className="flex cursor-pointer items-center gap-2 text-[12px] text-[var(--color-text-secondary)] md:ml-auto">
-                  <Switch
-                    size="small"
-                    checked={onlyModified}
-                    onChange={setOnlyModified}
-                    aria-label={t("systemConfig.onlyModified")}
-                  />
-                  {t("systemConfig.onlyModified")}
-                </label>
-              </div>
-              <ConfigTable
-                key={`${query}\n${groupFilter}\n${onlyModified}`}
-                items={visibleItems}
-                loading={isLoading}
-                valueOf={valueOf}
-                isModified={isModified}
-                errorByKey={errorByKey}
-                onValueChange={updateDraft}
-                onReset={(item) => updateDraft(item, item.default_value)}
-              />
-            </>
-          ) : null}
-          {changes.length ? (
-            <div
-              data-testid="config-save-bar"
-              className="sticky bottom-0 z-20 mt-4 border-t border-[var(--color-border-separator)] bg-[var(--color-bg-5)] py-3"
-            >
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <span className="text-[13px] text-[var(--color-text-primary)]">
-                    {t("systemConfig.saveBar.count", { count: changes.length })}
-                  </span>
-                  {hasErrors ? (
-                    <span className="ml-3 text-[11px] text-[var(--color-error)]">
-                      {t("systemConfig.saveBar.invalid")}
-                    </span>
+        <Tabs
+          className="mt-4"
+          defaultActiveKey="system"
+          items={[
+            {
+              key: "system",
+              label: t("systemConfig.title"),
+              children: <ProjectConfigTab />,
+            },
+            {
+              key: "platform-quota",
+              label: t("quota.platformOverview"),
+              children: <PlatformQuotaPanel showTenantAllocations={false} />,
+            },
+            {
+              key: "parameters",
+              label: t("systemConfig.tabs.parameters"),
+              children: (
+                <div data-testid="config-content" className="w-full">
+                  {error ? (
+                    <Alert
+                      className="mt-4"
+                      type="error"
+                      showIcon
+                      message={error.message}
+                      action={
+                        <Button onClick={() => void refetch()}>
+                          {t("systemConfig.retry")}
+                        </Button>
+                      }
+                    />
+                  ) : null}
+                  {!error || items.length ? (
+                    <>
+                      <div
+                        data-testid="config-filter"
+                        className="mt-5 flex flex-wrap items-center gap-3"
+                      >
+                        <div className="w-full lg:w-[320px] lg:shrink-0">
+                          <Input
+                            id="system-config-search"
+                            allowClear
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                            prefix={
+                              <Search className="h-4 w-4 text-[var(--color-icon-tertiary)]" />
+                            }
+                            placeholder={t("systemConfig.searchPlaceholder")}
+                            className="w-full"
+                          />
+                        </div>
+                        <Segmented
+                          className="max-w-full [&_.ant-segmented-group]:flex-wrap"
+                          value={groupFilter}
+                          onChange={(value) =>
+                            setGroupFilter(value as GroupFilter)
+                          }
+                          options={[
+                            {
+                              label: `${t("systemConfig.filter.all")} ${items.length}`,
+                              value: "all",
+                            },
+                            ...CONFIG_GROUPS.map((group) => ({
+                              label: `${t(group.labelKey)} ${items.filter((item) => item.group === group.id).length}`,
+                              value: group.id,
+                            })),
+                          ]}
+                        />
+                        <label className="flex cursor-pointer items-center gap-2 text-[12px] text-[var(--color-text-secondary)] md:ml-auto">
+                          <Switch
+                            size="small"
+                            checked={onlyModified}
+                            onChange={setOnlyModified}
+                            aria-label={t("systemConfig.onlyModified")}
+                          />
+                          {t("systemConfig.onlyModified")}
+                        </label>
+                      </div>
+                      <ConfigTable
+                        key={`${query}\n${groupFilter}\n${onlyModified}`}
+                        items={visibleItems}
+                        loading={isLoading}
+                        valueOf={valueOf}
+                        isModified={isModified}
+                        errorByKey={errorByKey}
+                        onValueChange={updateDraft}
+                        onReset={(item) =>
+                          updateDraft(item, item.default_value)
+                        }
+                      />
+                    </>
+                  ) : null}
+                  {changes.length ? (
+                    <div
+                      data-testid="config-save-bar"
+                      className="sticky bottom-0 z-20 mt-4 border-t border-[var(--color-border-separator)] bg-[var(--color-bg-5)] py-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[13px] text-[var(--color-text-primary)]">
+                            {t("systemConfig.saveBar.count", {
+                              count: changes.length,
+                            })}
+                          </span>
+                          {hasErrors ? (
+                            <span className="ml-3 text-[11px] text-[var(--color-error)]">
+                              {t("systemConfig.saveBar.invalid")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            icon={<X className="h-4 w-4" />}
+                            onClick={discardChanges}
+                          >
+                            {t("systemConfig.discard")}
+                          </Button>
+                          <Button
+                            type="primary"
+                            icon={<Save className="h-4 w-4" />}
+                            disabled={hasErrors}
+                            onClick={() => setReviewOpen(true)}
+                          >
+                            {t("systemConfig.saveBar.action")}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    icon={<X className="h-4 w-4" />}
-                    onClick={discardChanges}
-                  >
-                    {t("systemConfig.discard")}
-                  </Button>
-                  <Button
-                    type="primary"
-                    icon={<Save className="h-4 w-4" />}
-                    disabled={hasErrors}
-                    onClick={() => setReviewOpen(true)}
-                  >
-                    {t("systemConfig.saveBar.action")}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
+              ),
+            },
+          ]}
+        />
         <div className="h-4" />
       </div>
 

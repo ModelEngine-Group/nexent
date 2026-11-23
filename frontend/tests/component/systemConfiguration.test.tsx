@@ -44,11 +44,18 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/components/quota/PlatformQuotaPanel", () => ({
+  PlatformQuotaPanel: () => <div>Platform quota panel</div>,
+}));
+
+vi.mock("@/components/system-config/ProjectConfigTab", () => ({
+  default: () => <div>Project config panel</div>,
+}));
+
 const KEYS = [
   "MAX_TENANT_COUNT",
   "MAX_USERS_PER_TENANT",
   "MAX_GROUPS_PER_TENANT",
-  "MAX_SUPER_ADMIN_COUNT",
   "MAX_ADMINS_PER_TENANT",
   "MAX_KNOWLEDGE_BASES_PER_TENANT",
   "MAX_KNOWLEDGE_BASES_PER_USER",
@@ -98,20 +105,26 @@ function item(
 }
 
 function response(): SystemConfigurationListResponse {
-  return { items: KEYS.map((key) => item(key)), total: 19 };
+  return { items: KEYS.map((key) => item(key)), total: 18 };
 }
 
-function renderPage() {
+function renderPage(showParameters = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <App>
         <SystemConfigPage />
       </App>
     </QueryClientProvider>
   );
+  if (showParameters) {
+    fireEvent.click(
+      screen.getByRole("tab", { name: "systemConfig.tabs.parameters" })
+    );
+  }
+  return view;
 }
 
 function deferred() {
@@ -138,13 +151,26 @@ beforeEach(() => {
 });
 
 test("renders the exact catalog as one table without decorative panels", async () => {
-  renderPage();
+  renderPage(false);
 
-  expect(
-    await screen.findByTestId("config-row-MAX_TENANT_COUNT")
-  ).toBeInTheDocument();
+  expect(await screen.findByText("Project config panel")).toBeInTheDocument();
   expect(
     screen.getByRole("heading", { name: "systemConfig.title", level: 1 })
+  ).toBeInTheDocument();
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+    "systemConfig.title",
+    "quota.platformOverview",
+    "systemConfig.tabs.parameters",
+  ]);
+  fireEvent.click(screen.getByRole("tab", { name: "quota.platformOverview" }));
+  expect(screen.getByText("Platform quota panel")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "systemConfig.title" }));
+  expect(screen.getByText("Project config panel")).toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("tab", { name: "systemConfig.tabs.parameters" })
+  );
+  expect(
+    await screen.findByTestId("config-row-MAX_TENANT_COUNT")
   ).toBeInTheDocument();
   expect(screen.getByText("systemConfig.subtitle")).toBeInTheDocument();
   expect(
@@ -204,9 +230,9 @@ test("renders the exact catalog as one table without decorative panels", async (
   fireEvent.click(
     document.querySelector(".ant-pagination-next button") as HTMLButtonElement
   );
-  expect(screen.getAllByTestId(/^config-row-/)).toHaveLength(9);
+  expect(screen.getAllByTestId(/^config-row-/)).toHaveLength(8);
   expect(
-    screen.getByTestId("config-row-MAX_CONVERSATIONS_PER_USER")
+    screen.getByTestId("config-row-MAX_MCP_SERVICES_PER_TENANT")
   ).toBeInTheDocument();
   fireEvent.change(
     screen.getByPlaceholderText("systemConfig.searchPlaceholder"),
@@ -217,7 +243,19 @@ test("renders the exact catalog as one table without decorative panels", async (
   expect(screen.getAllByTestId(/^config-row-/)).toHaveLength(1);
 });
 
-test("shows the parameter key and metadata only in the expanded row", async () => {
+test("resizes system parameter columns with the keyboard", async () => {
+  renderPage();
+  await screen.findByTestId("config-table");
+
+  const parameterResize = screen.getAllByRole("separator")[0];
+  expect(parameterResize).toHaveAttribute("aria-valuenow", "340");
+  fireEvent.keyDown(parameterResize, { key: "ArrowRight" });
+  expect(parameterResize).toHaveAttribute("aria-valuenow", "356");
+  fireEvent.keyDown(parameterResize, { key: "ArrowLeft" });
+  expect(parameterResize).toHaveAttribute("aria-valuenow", "340");
+});
+
+test("shows the parameter key and metadata only in the detail modal", async () => {
   const baseline = item("MAX_TENANT_COUNT", 90);
   baseline.default_value = 100;
   state.list.mockResolvedValue({ items: [baseline], total: 1 });
@@ -228,6 +266,7 @@ test("shows the parameter key and metadata only in the expanded row", async () =
     within(row).getByRole("button", { name: /systemConfig.detail.openFor/ })
   );
 
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
   const detail = await screen.findByTestId("config-detail-MAX_TENANT_COUNT");
   expect(detail).toHaveTextContent("systemConfig.detail.key");
   expect(detail).toHaveTextContent("MAX_TENANT_COUNT");
@@ -292,9 +331,9 @@ test("submits only changed keys and resets a field to its default", async () => 
     )
   );
   fireEvent.click(
-    await within(
-      await screen.findByTestId("config-detail-MAX_TENANT_COUNT")
-    ).findByRole("button", { name: /resetDefaultFor/ })
+    await within(await screen.findByRole("dialog")).findByRole("button", {
+      name: /resetDefaultFor/,
+    })
   );
   fireEvent.click(screen.getByRole("button", { name: /saveBar.action/ }));
   fireEvent.click(

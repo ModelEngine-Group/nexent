@@ -1,14 +1,33 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useMemo, useState } from "react";
-import { Button, InputNumber, Switch, Table, Tooltip } from "antd";
+import { Button, InputNumber, Modal, Switch, Table } from "antd";
 import type { TableColumnsType } from "antd";
-import { AlertTriangle, ChevronDown, RotateCcw } from "lucide-react";
+import { AlertTriangle, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import ResizableTableHeader, {
+  type ResizableTableHeaderProps,
+} from "@/components/table/ResizableTableHeader";
 import { cn } from "@/lib/utils";
 import type { ConfigItem, ConfigValue } from "../systemConfigData";
 import { formatConfigValue } from "../systemConfigFormat";
+
+const DEFAULT_COLUMN_WIDTHS = {
+  parameter: 340,
+  value: 220,
+  range: 200,
+  actions: 96,
+};
+
+const MIN_COLUMN_WIDTHS = {
+  parameter: 240,
+  value: 180,
+  range: 140,
+  actions: 88,
+};
+
+type ConfigColumnKey = keyof typeof DEFAULT_COLUMN_WIDTHS;
 
 interface ConfigTableProps {
   items: ConfigItem[];
@@ -22,11 +41,9 @@ interface ConfigTableProps {
 
 interface ConfigDetailProps {
   item: ConfigItem;
-  value: ConfigValue | null;
-  onReset: () => void;
 }
 
-function ConfigDetail({ item, value, onReset }: ConfigDetailProps) {
+function ConfigDetail({ item }: ConfigDetailProps) {
   const { t } = useTranslation("common");
   const kindLabel =
     item.kind === "boolean"
@@ -38,7 +55,11 @@ function ConfigDetail({ item, value, onReset }: ConfigDetailProps) {
     {
       key: "key",
       term: t("systemConfig.detail.key"),
-      description: <code className="break-all font-mono">{item.key}</code>,
+      description: (
+        <code className="block overflow-x-auto whitespace-nowrap font-mono">
+          {item.key}
+        </code>
+      ),
     },
     {
       key: "group",
@@ -63,35 +84,22 @@ function ConfigDetail({ item, value, onReset }: ConfigDetailProps) {
   ];
 
   return (
-    <div
-      data-testid={`config-detail-${item.key}`}
-      className="bg-[var(--color-fill)] px-4 py-3"
-    >
-      <div className="flex flex-wrap items-end gap-3">
-        <dl className="m-0 grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {details.map(({ key, term, description }) => (
-            <div key={key} className="min-w-0">
-              <dt className="text-[11px] leading-4 text-[var(--color-text-secondary)]">
-                {term}
-              </dt>
-              <dd className="m-0 mt-1 break-words text-[12px] leading-5 text-[var(--color-text-primary)]">
-                {description}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <Button
-          size="small"
-          onClick={onReset}
-          disabled={value === item.default_value}
-          aria-label={t("systemConfig.resetDefaultFor", {
-            name: t(item.label_key),
-          })}
-          icon={<RotateCcw className="h-3.5 w-3.5" />}
-        >
-          {t("systemConfig.resetDefault")}
-        </Button>
-      </div>
+    <div data-testid={`config-detail-${item.key}`} className="py-1">
+      <dl className="m-0 divide-y divide-[var(--color-border-separator-subtle)]">
+        {details.map(({ key, term, description }) => (
+          <div
+            key={key}
+            className="grid grid-cols-[112px_minmax(0,1fr)] gap-x-4 py-3 first:pt-1 last:pb-1"
+          >
+            <dt className="text-[12px] leading-5 text-[var(--color-text-secondary)]">
+              {term}
+            </dt>
+            <dd className="m-0 min-w-0 break-words text-[13px] leading-5 text-[var(--color-text-primary)]">
+              {description}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -108,6 +116,8 @@ export function ConfigTable({
   const { t } = useTranslation("common");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [detailItem, setDetailItem] = useState<ConfigItem | null>(null);
+  const [columnWidths, setColumnWidths] = useState(DEFAULT_COLUMN_WIDTHS);
 
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const visiblePage = Math.min(currentPage, pageCount);
@@ -148,7 +158,6 @@ export function ConfigTable({
     {
       title: t("systemConfig.table.value"),
       key: "value",
-      width: 220,
       align: "center",
       render: (_, item) => {
         const label = t(item.label_key);
@@ -220,7 +229,6 @@ export function ConfigTable({
     {
       title: t("systemConfig.table.range"),
       key: "range",
-      width: 200,
       align: "center",
       render: (_, item) => (
         <span className="text-[12px] text-[var(--color-text-secondary)]">
@@ -232,77 +240,117 @@ export function ConfigTable({
         </span>
       ),
     },
+    {
+      title: "",
+      key: "actions",
+      align: "center",
+      render: (_, item) => (
+        <Button
+          size="small"
+          aria-label={t("systemConfig.detail.openFor", {
+            name: t(item.label_key),
+          })}
+          aria-haspopup="dialog"
+          onClick={() => setDetailItem(item)}
+        >
+          {t("systemConfig.detail.action")}
+        </Button>
+      ),
+    },
   ];
 
+  const resizableColumns = columns.map((column) => {
+    const key = column.key as ConfigColumnKey;
+    const headerLabel =
+      key === "actions"
+        ? t("systemConfig.detail.action")
+        : (column.title as string);
+    return {
+      ...column,
+      width: columnWidths[key],
+      onHeaderCell: () =>
+        ({
+          "aria-label": headerLabel,
+          className: "relative !overflow-visible select-none",
+          resizeWidth: columnWidths[key],
+          minWidth: MIN_COLUMN_WIDTHS[key],
+          resizeLabel: t("systemConfig.resizeColumn", {
+            column: headerLabel,
+          }),
+          resizeFromStart: key === "actions",
+          onResizeWidth: (width: number) =>
+            setColumnWidths((current) => ({ ...current, [key]: width })),
+        }) as ResizableTableHeaderProps,
+    };
+  });
+
   return (
-    <Table<ConfigItem>
-      data-testid="config-table"
-      bordered
-      className="mt-4 [&_.ant-table-cell]:align-middle"
-      rowKey="key"
-      columns={[...columns, Table.EXPAND_COLUMN]}
-      dataSource={pagedItems}
-      loading={loading}
-      pagination={{
-        current: visiblePage,
-        pageSize,
-        total: items.length,
-        showSizeChanger: true,
-        pageSizeOptions: [10, 20, 50],
-        showTotal: (total) => t("common.pagination.total", { total }),
-        onChange: (page, nextPageSize) => {
-          if (nextPageSize !== pageSize) {
-            setPageSize(nextPageSize);
-            setCurrentPage(1);
-          } else {
-            setCurrentPage(page);
-          }
-        },
-      }}
-      scroll={{ x: 760 }}
-      locale={{ emptyText: t("systemConfig.empty") }}
-      expandable={{
-        columnWidth: 48,
-        expandedRowRender: (item) => (
-          <ConfigDetail
-            item={item}
-            value={valueOf(item)}
-            onReset={() => onReset(item)}
-          />
-        ),
-        expandIcon: ({ expanded, onExpand, record: item }) => (
-          <Tooltip
-            title={
-              expanded ? t("systemConfig.collapse") : t("systemConfig.expand")
+    <>
+      <Table<ConfigItem>
+        data-testid="config-table"
+        bordered
+        className="mt-4 [&_.ant-table-cell]:align-middle"
+        rowKey="key"
+        columns={resizableColumns}
+        components={{ header: { cell: ResizableTableHeader } }}
+        tableLayout="fixed"
+        dataSource={pagedItems}
+        loading={loading}
+        pagination={{
+          current: visiblePage,
+          pageSize,
+          total: items.length,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (total) => t("common.pagination.total", { total }),
+          onChange: (page, nextPageSize) => {
+            if (nextPageSize !== pageSize) {
+              setPageSize(nextPageSize);
+              setCurrentPage(1);
+            } else {
+              setCurrentPage(page);
             }
-          >
+          },
+        }}
+        scroll={{
+          x: Object.values(columnWidths).reduce(
+            (total, width) => total + width,
+            0
+          ),
+        }}
+        locale={{ emptyText: t("systemConfig.empty") }}
+        onRow={(item) => ({
+          className: "system-config-row",
+          "data-testid": `config-row-${item.key}`,
+        })}
+      />
+      <Modal
+        open={detailItem !== null}
+        title={
+          detailItem
+            ? `${t(detailItem.label_key)} · ${t("systemConfig.detail.title")}`
+            : t("systemConfig.detail.title")
+        }
+        onCancel={() => setDetailItem(null)}
+        footer={
+          detailItem ? (
             <Button
-              type="text"
-              size="small"
-              className="!h-7 !w-7 !p-0"
-              aria-label={t(
-                expanded
-                  ? "systemConfig.detail.closeFor"
-                  : "systemConfig.detail.openFor",
-                { name: t(item.label_key) }
-              )}
-              aria-expanded={expanded}
-              onClick={(event) => onExpand(item, event)}
-              icon={
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform duration-150 ${
-                    expanded ? "rotate-180" : ""
-                  }`}
-                />
-              }
-            />
-          </Tooltip>
-        ),
-      }}
-      onRow={(item) => ({
-        className: "system-config-row",
-        "data-testid": `config-row-${item.key}`,
-      })}
-    />
+              onClick={() => onReset(detailItem)}
+              disabled={valueOf(detailItem) === detailItem.default_value}
+              aria-label={t("systemConfig.resetDefaultFor", {
+                name: t(detailItem.label_key),
+              })}
+              icon={<RotateCcw className="h-4 w-4" />}
+            >
+              {t("systemConfig.resetDefault")}
+            </Button>
+          ) : null
+        }
+        width={720}
+        destroyOnHidden
+      >
+        {detailItem ? <ConfigDetail item={detailItem} /> : null}
+      </Modal>
+    </>
   );
 }
