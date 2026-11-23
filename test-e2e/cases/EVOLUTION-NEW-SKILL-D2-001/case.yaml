@@ -1,0 +1,36 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-NEW-SKILL-D2-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-03]
+  title: 新 Skill 从独立业务成功题生成隔离候选包
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 在真实身份、数据库和 HTTP 路由上验证 S3 的交接、生成、权限和重试。
+  preconditions: [可创建临时 PostgreSQL 数据库。]
+  test_data:
+    profile: 两个独立成功来源、一条反例和同源改写题。模型、Runtime 和对象存储使用受控测试替身。
+  steps:
+  - order: 1
+    action: 编辑者选择两个同源成功例，再选择两个独立来源，另指定不适用的业务题和创建人。
+    expected: 拒绝同源材料，独立来源返回共用步骤和交接编号。
+  - order: 2
+    action: 未获指定的编辑者试生成，指定创建人再生成两次，读取候选内容。
+    expected: 只有获指定的创建人可生成，重试取得原编号。模型只收到抽象步骤，没有样本私值。
+  - order: 3
+    action: 原编辑者查看候选。创建人被撤销 Skill 创建权限后重试。
+    expected: 编辑者可读文件，撤权后拒绝生成。数据库未创建共享 Skill 或智能体绑定。
+  expected_results: [来源应独立且有真实已判分回执。, 按指定身份生成并隔离存储。, 候选不会自动上线且撤权有效。]
+  forbidden_side_effects: [不改动共享技能目录或发布版本。]
+  acceptance:
+  - {id: AC-01, description: 来源分离, steps: [1], expected_results: [1]}
+  - {id: AC-02, description: 授权生成和重试, steps: [2], expected_results: [2]}
+  - {id: AC-03, description: 独立维护权限和资源隔离, steps: [3], expected_results: [3], forbidden_side_effects: [1]}
+  contract:
+    protocol: HTTP API
+    request_expectations: [使用原生会话凭据。]
+    response_expectations: [返回交接编号、候选编号与生成文件。]

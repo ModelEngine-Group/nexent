@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperiments";
+import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
 import ToolSetCandidates from "@/app/evaluation/components/ToolSetCandidates";
@@ -394,4 +395,37 @@ it("shares only the three approved request excerpts for a discovery rewrite", as
     overused: { case_id: 2, query_excerpt: "overused meeting" },
     correct: { case_id: 3, query_excerpt: "correct meeting" },
   }));
+});
+
+it("offers independent passing development tasks as evidence for a new Skill", async () => {
+  const cases = ["Customer A", "Customer B", "Failed task", "Fixed regression"].map(
+    (query, i) => ({ case_id: i + 1, query }),
+  );
+  const report = {
+    experiment_id: 7,
+    pairs: Object.fromEntries(cases.map(({case_id}) => [
+      case_id, { base: { status: case_id === 3 ? "fail" : "pass" } },
+    ])),
+    fixed_regression: { case_ids: [4] },
+  };
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NewSkillBriefForm report={report as Parameters<typeof NewSkillBriefForm>[0]["report"]}
+        workspace={{cases, skills: []} as unknown as Parameters<typeof NewSkillBriefForm>[0]["workspace"]}/>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByText("evolution.newSkill.title"));
+  const selects = screen.getAllByRole("combobox", {name: "evolution.newSkill.success"});
+  const open = (field: HTMLElement) => fireEvent.mouseDown(field.closest(".ant-select-selector") || field);
+  const visibleOptions = () => [...document.querySelectorAll(
+    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content",
+  )];
+  open(selects[0]);
+  await waitFor(() => expect(visibleOptions().map(el => el.textContent)).toEqual(["#1 Customer A", "#2 Customer B"]));
+  fireEvent.click(visibleOptions()[0]);
+  open(selects[1]);
+  await waitFor(() => expect(visibleOptions().map(el => el.textContent)).toEqual(["#2 Customer B"]));
+  fireEvent.click(visibleOptions()[0]);
+  open(screen.getByRole("combobox", {name: "evolution.newSkill.counter"}));
+  await waitFor(() => expect(visibleOptions().map(el => el.textContent)).toEqual(["#3 Failed task"]));
 });

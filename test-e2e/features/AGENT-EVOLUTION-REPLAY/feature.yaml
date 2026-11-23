@@ -12,4 +12,6 @@ feature:
     description: 基线和候选均取得有效判分才计算改进或退步；未完成、故障及缺证保留在总题数中。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-02
     description: 用于提示词示例的材料及相同来源组不能再次作为该候选的验证任务。
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-03
+    description: 新 Skill 只使用不同来源的成功开发题生成候选，样本值隔离，资源维护权限与智能体编辑权限分别核对。
   required_test_stages: [D1, D2, D3]

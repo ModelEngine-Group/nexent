@@ -78,6 +78,8 @@ export function ResourceCandidateGenerator() {
     </Form>
     {generate.error && <Alert type="error" message={generate.error.message} />}
     {generate.data && <div><strong>#{generate.data.candidate_id} · {generate.data.method}</strong>
-      <p><del>{generate.data.edit.old}</del></p><p><ins>{generate.data.edit.new}</ins></p></div>}
+      {generate.data.edit && <><p><del>{generate.data.edit.old}</del></p><p><ins>{generate.data.edit.new}</ins></p></>}
+      {Object.entries(generate.data.files || {}).map(([path,content]) =>
+        <details key={path} open={path==="SKILL.md"}><summary>{path}</summary><pre className="whitespace-pre-wrap">{content}</pre></details>)}</div>}
   </details>;
 }

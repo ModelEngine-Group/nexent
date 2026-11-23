@@ -25,6 +25,7 @@ import DiscoveryFeedback, { ResourceCandidateGenerator } from "./DiscoveryFeedba
 import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRules";
 import FileStateRules, { fileStateRule, type FileRule } from "./FileStateRules";
 import LocalEditFeedback from "./LocalEditFeedback";
+import NewSkillBriefForm from "./NewSkillBriefForm";
 import ToolSetCandidates from "./ToolSetCandidates";
 import FixedRegressionCases from "./FixedRegressionCases";
 
@@ -551,6 +552,7 @@ function Experiments({
             <DiscoveryFeedback key={report.data.experiment_id} report={development} workspace={choices} />}
           {development && report.data.status === "finished" && choices && <LocalEditFeedback key={report.data.experiment_id}
             report={development} workspace={choices} agent={agent} version={version} viewer={viewer} />}
+          {development && report.data.status === "finished" && baselineReport && choices && <NewSkillBriefForm key={report.data.experiment_id} report={development} workspace={choices}/>}
           {development && report.data.status === "finished" && baselineReport && <ToolSetCandidates key={report.data.experiment_id}
             report={development} cases={choices?.cases || []} onSelect={id => {
               setCandidate(`tool_set:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();

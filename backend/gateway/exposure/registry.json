@@ -318,6 +318,24 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/new-skill-brief",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-new-skill-brief",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evolution/new-skill-candidates/{candidate_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-new-skill-read",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-evolution/experiments/{experiment_id}/tool-set-candidates",
       "transport": "http",
       "target": "management",

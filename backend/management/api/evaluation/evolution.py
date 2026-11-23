@@ -10,7 +10,11 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
+from contracts.new_skill_candidates import NewSkillBriefRequest
 from contracts.releases import PromotionRequest, RollbackRequest
+from management.db.evaluation.experiments import read_handoff
+from management.services.evaluation.new_skill_candidates import generate_new_skill, preview_new_skill
+from management.services.evaluation.new_skill_evidence import share_new_skill_brief
 from management.db.evaluation.releases import release_view, set_publisher
 from management.services.evaluation.releases import promote, rollback
 from management.db.evaluation.candidates import text_digest
@@ -148,10 +152,30 @@ async def share_feedback(experiment_id: int, request: FeedbackHandoffRequest | D
     return {"data": {"feedback_id": fid}}
 
 
+@router.post("/experiments/{experiment_id}/new-skill-brief")
+async def propose_new_skill(experiment_id: int, request: NewSkillBriefRequest, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await share_new_skill_brief(tenant, user, experiment_id, request)}
+
+
+@router.get("/new-skill-candidates/{candidate_id}")
+async def read_new_skill(candidate_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking(
+        "preview-new-skill", preview_new_skill, tenant, user, candidate_id, lane="control-io", owner="management"
+    )
+    return {"data": result}
+
+
 @router.post("/feedback/{feedback_id}/candidates")
 async def create_from_feedback(feedback_id: int, request: GenerateFromFeedbackRequest,
                                authorization: str | None = Header(None)):
     user_id, tenant_id = get_current_user_id(authorization)
+    feedback = await run_blocking(
+        "identify-feedback-method", read_handoff, tenant_id, feedback_id, lane="control-io", owner="management"
+    )
+    if feedback and feedback.get("method") == "S3":
+        return {"data": await generate_new_skill(tenant_id, user_id, feedback_id, request.model_id)}
     result = await run_blocking("generate-from-development-feedback", generate_from_handoff, tenant_id, user_id,
                                 feedback_id, request.model_id, lane="evaluation", owner="management")
     return {"data": result}

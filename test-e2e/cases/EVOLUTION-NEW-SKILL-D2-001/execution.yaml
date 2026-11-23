@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: EVOLUTION-NEW-SKILL-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_new_skill_http
+acceptance_bindings:
+  AC-01: [test_new_skill_http]
+  AC-02: [test_new_skill_http]
+  AC-03: [test_new_skill_http]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: The native identity fixture creates and drops its disposable database. Test-owned in-memory storage and a stub Runtime stream cover external dependencies.

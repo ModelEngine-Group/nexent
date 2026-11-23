@@ -85,6 +85,17 @@ export interface ExperimentReport {
     skill_vs_absent?: { base: string; result: string } }>;
 }
 
+export interface NewSkillBrief {
+  name: string;
+  creator_id: string;
+  purpose: string;
+  skip_when: string;
+  parameters: string[];
+  successes: {case_id: number; private_values: string[]; outcomes: { step: string; excerpt: string }[]}[];
+  counterexample_id: number;
+  covered: {step: string; skill: string; passage: string}[];
+}
+
 export interface ApprovedExample {
   case_id: number;
   variant: "base" | "result";
@@ -190,8 +201,10 @@ export const evolutionService = {
   shareDiscovery: (id: number, body: { method: "S1"; skill_id: number; goal: string } &
     Record<"missed" | "overused" | "correct", { case_id: number; query_excerpt: string }>) =>
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
+  newSkillBrief: (id: number, body: NewSkillBrief) =>
+    read<{feedback_id: number; steps: string[]; covered: string[]}>(`${root}/experiments/${id}/new-skill-brief`, body),
   fromFeedback: (id: number, model_id: number) =>
-    read<{ candidate_id: number; method: string; edit: { old: string; new: string } }>(
+    read<{ candidate_id: number; method: string; edit?: { old: string; new: string }; files?: Record<string, string> }>(
       `${root}/feedback/${id}/candidates`, { model_id }),
   exampleCandidates: (id: number, body: {
     target_case_id: number;

@@ -10,13 +10,17 @@ from infrastructure.rdb.client import db_client, get_db_session
 from management.db.evaluation.confirmation_locks import locked_protocol
 
 
-@contextmanager
 def execution_slot(lock_id):
+    return exclusive_job_slot(f"nexent.confirmation.run/{lock_id}", "Independent comparison is already running")
+
+
+@contextmanager
+def exclusive_job_slot(key, busy_message):
     # A backend session lock releases on process death without holding a long-running SQL transaction.
-    key = {"key": f"nexent.confirmation.run/{lock_id}"}
+    key = {"key": key}
     with db_client.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         if not conn.scalar(text("SELECT pg_try_advisory_lock(hashtextextended(:key,0))"), key):
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Independent comparison is already running")
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, busy_message)
         try:
             yield
         finally:

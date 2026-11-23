@@ -61,17 +61,37 @@ def _object_key(tenant_id, skill_id, digest):
     return f"evolution/skill-packages/{owner}/{skill_id}/{digest}.zip"
 
 
-def store_skill_package(tenant_id, skill_id, files):
+def _store_package(files, key_for_digest):
     payload = encode_skill_package(files)
     digest = sha256(payload).hexdigest()
-    ok, _ = minio_client.upload_fileobj(io.BytesIO(payload), _object_key(tenant_id, skill_id, digest))
+    ok, _ = minio_client.upload_fileobj(io.BytesIO(payload), key_for_digest(digest))
     if not ok:
         raise OSError("Could not store Skill package")
     return digest
 
 
+def store_skill_package(tenant_id, skill_id, files):
+    return _store_package(files, lambda digest: _object_key(tenant_id, skill_id, digest))
+
+
+def _new_skill_key(tenant, agent, digest):
+    return _object_key(tenant, agent, digest).replace("evolution/skill-packages/", "evolution/new-skills/", 1)
+
+
+def store_new_skill_package(tenant, agent, files):
+    return _store_package(files, lambda digest: _new_skill_key(tenant, agent, digest))
+
+
+def load_new_skill_package(tenant, agent, digest):
+    return _load_package(_new_skill_key(tenant, agent, digest), digest)
+
+
 def load_skill_package(tenant_id, skill_id, digest):
-    ok, stream = minio_client.get_file_stream(_object_key(tenant_id, skill_id, digest))
+    return _load_package(_object_key(tenant_id, skill_id, digest), digest)
+
+
+def _load_package(key, digest):
+    ok, stream = minio_client.get_file_stream(key)
     if not ok:
         raise OSError("Could not read Skill package")
     with closing(stream):
