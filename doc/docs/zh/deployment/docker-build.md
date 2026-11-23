@@ -12,7 +12,7 @@ bash build.sh
 
 # 按镜像构建指定版本
 bash build.sh \
-  --images main,web,mcp,data-process,terminal \
+  --images management,runtime,ops,gateway,web,mcp,data-process,terminal \
   --version v2.5.0 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
@@ -20,7 +20,7 @@ bash build.sh \
 
 # 按同一镜像集合构建 latest 镜像
 bash build.sh \
-  --images main,web,mcp,data-process \
+  --images management,runtime,ops,gateway,web,mcp,data-process \
   --version latest \
   --registry general \
   --platform linux/amd64 \
@@ -33,7 +33,7 @@ bash build.sh --web --docs --version v2.5.0 --dry-run
 bash build.sh --web --version v2.5.0 --no-cache
 ```
 
-根目录 `build.sh` 会把镜像构建转发到 `deploy/images/build.sh`。使用 `bash build.sh --package ...` 可以转发到离线包构建脚本。在终端无参数运行 `build.sh` 时，会依次选择镜像、镜像版本（`latest` 或根 `VERSION`）和镜像源。交互式默认选择 `main,web` 和 `latest`。也可以用 `--interactive` 强制进入同样的选择流程。
+根目录 `build.sh` 会把镜像构建转发到 `deploy/images/build.sh`。使用 `bash build.sh --package ...` 可以转发到离线包构建脚本。在终端无参数运行 `build.sh` 时，会依次选择镜像、镜像版本（`latest` 或根 `VERSION`）和镜像源。交互式默认选择 `management,runtime,ops,gateway,web` 和 `latest`。也可以用 `--interactive` 强制进入同样的选择流程。
 
 `--platform` 和 `--no-cache` 仅支持命令行传入。不传 `--platform` 时不会添加该参数，默认按本地架构构建。`mainland` 的 web 镜像构建也会自动使用 `--no-cache`，避免前端依赖缓存过期。
 
@@ -60,7 +60,7 @@ bash build.sh --sandbox-full --version latest --load
 构建 `data-process` 时，`deploy/images/build.sh` 会自动准备 `model-assets`：优先使用仓库根目录已有的 `model-assets`，其次复用 `~/model-assets`，否则从 Hugging Face 仓库拉取并执行 `git lfs pull`。如果直接执行 `docker build`，需要先在仓库根目录准备好 `model-assets`。
 
 镜像选项：
-- `--main` 构建 `nexent`
+- `--main` 可显式构建旧版合并镜像 `nexent`
 - `--web` 构建 `nexent-web`
 - `--data-process` 构建 `nexent-data-process`
 - `--mcp` 同时构建共享的 `nexent-management` 后端镜像和 `nexent-mcp` 代理镜像。用 `--images mcp` 可以单独构建代理。MCP 后端使用 Management 镜像启动独立容器。

@@ -322,7 +322,6 @@ show_dry_run_plan() {
 }
 
 get_nexent_images() {
-  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MANAGEMENT_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_RUNTIME_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_OPS_IMAGE"

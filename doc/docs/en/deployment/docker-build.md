@@ -11,7 +11,7 @@ bash deploy/images/build.sh
 
 # Build selected images with a fixed version tag
 bash build.sh \
-  --images main,web,mcp,data-process,terminal \
+  --images management,runtime,ops,gateway,web,mcp,data-process,terminal \
   --version v2.5.0 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
@@ -19,7 +19,7 @@ bash build.sh \
 
 # Build the same image set as latest
 bash build.sh \
-  --images main,web,mcp,data-process \
+  --images management,runtime,ops,gateway,web,mcp,data-process \
   --version latest \
   --registry general \
   --platform linux/amd64 \
@@ -32,7 +32,7 @@ bash build.sh --web --docs --version v2.5.0 --dry-run
 bash build.sh --web --version v2.5.0 --no-cache
 ```
 
-The root `build.sh` forwards image builds to `deploy/images/build.sh`. Use `bash build.sh --package ...` to forward to the offline package builder. When run in a terminal without arguments, `build.sh` prompts for images, image version (`latest` or root `VERSION`), and image source. The interactive defaults are images `main,web` and version `latest`. Use `--interactive` to force the same prompts.
+The root `build.sh` forwards image builds to `deploy/images/build.sh`. Use `bash build.sh --package ...` to forward to the offline package builder. When run in a terminal without arguments, `build.sh` prompts for images, image version (`latest` or root `VERSION`), and image source. The interactive defaults are images `management,runtime,ops,gateway,web` and version `latest`. Use `--interactive` to force the same prompts.
 
 `--platform` and `--no-cache` are command-line only. Omit `--platform` to build for the local architecture. The `mainland` web build also uses `--no-cache` automatically to avoid stale frontend dependency caches.
 
@@ -59,7 +59,7 @@ The runtime mechanism is image-variant agnostic. Keep `NEXENT_SANDBOX_DOCKER_IMA
 When building `data-process`, `deploy/images/build.sh` prepares `model-assets` automatically: it first uses an existing root `model-assets` directory, then tries `~/model-assets`, and otherwise clones the Hugging Face repository and runs `git lfs pull`. If you run `docker build` directly, prepare `model-assets` in the repository root first.
 
 Image options:
-- `--main` builds `nexent`
+- `--main` explicitly builds the legacy combined `nexent` image
 - `--web` builds `nexent-web`
 - `--data-process` builds `nexent-data-process`
 - `--mcp` builds the shared `nexent-management` backend and the `nexent-mcp` proxy image. Use `--images mcp` to build just the proxy. The deployed MCP backend runs in a separate container using the Management image.

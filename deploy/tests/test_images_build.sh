@@ -60,7 +60,8 @@ grep -q 'io.nexent.sandbox.skills="docx,pdf,pptx,xlsx,canvas-design,frontend-des
 grep -q 'io.nexent.sandbox.variant="full"' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandbox should identify its variant"
 for workflow in "$MAINLAND_WORKFLOW" "$OVERSEAS_WORKFLOW"; do
   matrix="$(sed -n 's/^[[:space:]]*image: \[\(.*\)\]$/\1/p' "$workflow" | tr -d ' ')"
-  for image in management mcp ops sandbox-full; do
+  assert_not_contains ",$matrix," ",main," "$workflow should skip the combined backend image"
+  for image in management runtime mcp ops sandbox-full; do
     case ",$matrix," in
       *",$image,"*) ;;
       *) fail "$workflow should publish $image" ;;
@@ -95,6 +96,7 @@ assert_contains "$output" "NPM_MIRROR=https://repo.huaweicloud.com/repository/np
 assert_contains "$output" "MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple" "mainland full Sandbox builds should use the Python mirror"
 
 output="$(bash "$BUILD_SCRIPT" --all --version v1.2.3 --dry-run)"
+assert_not_contains "$output" "nexent/nexent:v1.2.3" "all should skip the combined backend image"
 assert_contains "$output" "nexent/nexent-sandbox:v1.2.3" "all should include the default lightweight sandbox"
 assert_not_contains "$output" "nexent/nexent-sandbox-full:v1.2.3" "all should leave the optional full sandbox opt-in"
 
@@ -156,6 +158,12 @@ output="$(bash "$BUILD_SCRIPT" --image web --version v1.2.3 --registry general -
 assert_contains "$output" "nexent/nexent-web:v1.2.3" "explicit image build should keep supporting selected versions"
 assert_not_contains "$output" "nexent/nexent:v1.2.3" "single image build should not build main image"
 
+output="$(bash "$BUILD_SCRIPT" --components application --version latest --dry-run)"
+assert_not_contains "$output" "nexent/nexent:latest" "application should skip the combined backend image"
+for image in management runtime ops; do
+  assert_contains "$output" "nexent/nexent-$image:latest" "application should build $image"
+done
+
 output="$(bash "$BUILD_SCRIPT" --components infrastructure,monitoring --version latest --dry-run)"
 assert_contains "$output" "No Nexent images selected for build." "legacy non-application components should produce no Nexent image builds"
 
@@ -185,7 +193,8 @@ output="$(
   printf '\n\n1\n' | \
     bash "$BUILD_SCRIPT" --interactive --dry-run
 )"
-assert_contains "$output" "nexent/nexent:latest" "interactive default image selection should include main image"
+assert_not_contains "$output" "nexent/nexent:latest" "interactive defaults should skip the combined backend image"
+assert_contains "$output" "nexent/nexent-management:latest" "interactive defaults should include Management"
 assert_contains "$output" "nexent/nexent-web:latest" "interactive default image selection should include web image"
 assert_not_contains "$output" "nexent/nexent-mcp:latest" "interactive default image selection should not include mcp image"
 assert_not_contains "$output" "nexent/nexent-data-process:latest" "interactive default image selection should not include data-process image"
@@ -193,7 +202,7 @@ assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactiv
 
 assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile")" \
   "COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres" \
-  "main image must package the standalone account migration tools"
+  "the backend Dockerfile must package the account migration tools"
 [ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate_docker.py" ] || fail "Docker migration entry point is missing"
 [ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate.sh" ] || fail "Host Shell migration entry point is missing"
 [ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate_kubernetes.sh" ] || fail "Kubernetes Shell transport is missing"
