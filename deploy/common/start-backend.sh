@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -10,6 +11,7 @@ fi
 umask "$requested_umask"
 
 SQL_STARTUP_MODE="${NEXENT_SQL_STARTUP_MODE:-off}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -z "${NEXENT_SQL_STARTUP_MODE+x}" ] && [ -n "${NEXENT_RUN_SQL_MIGRATIONS:-}" ]; then
   if [ "$NEXENT_RUN_SQL_MIGRATIONS" = "true" ]; then
@@ -21,10 +23,10 @@ fi
 
 case "$SQL_STARTUP_MODE" in
   migrate)
-    /opt/nexent/scripts/run-sql-migrations.sh --migrate
+    bash "$script_dir/run-sql-migrations.sh" --migrate
     ;;
   wait)
-    /opt/nexent/scripts/run-sql-migrations.sh --wait
+    bash "$script_dir/run-sql-migrations.sh" --wait
     ;;
   off|"")
     ;;
@@ -33,5 +35,15 @@ case "$SQL_STARTUP_MODE" in
     exit 1
     ;;
 esac
+
+monitoring_enabled="${OPS_MONITORING_ENABLED:-true}"
+if [[ "${monitoring_enabled,,}" == true ]]; then
+  # Independent Ops startup must not run business SQL for the Ops process.
+  if [[ "$SQL_STARTUP_MODE" == wait ]]; then
+    bash "$script_dir/run-ops-sql-migrations.sh" --wait
+  else
+    bash "$script_dir/run-ops-sql-migrations.sh" --migrate
+  fi
+fi
 
 exec "$@"

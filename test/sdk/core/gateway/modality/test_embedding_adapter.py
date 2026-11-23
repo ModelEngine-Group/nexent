@@ -634,3 +634,41 @@ async def test_bounded_embedding_http_response_is_decoded_once(monkeypatch, repl
     else:
         assert await adapter.get_embeddings_with_deadline("sample", timeout=1) == [[0.2, 0.8]]
     assert [request["input"] for request in calls] == [["sample"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["healthy", "null", "unavailable", "slow"])
+async def test_bounded_memory_embedding_preserves_model_monitoring_facts(monkeypatch, mode):
+    import asyncio
+    import httpx
+    from nexent.core.gateway.modality.embedding import openai
+    from nexent.monitor.facts import get_fact_sink, set_fact_sink
+
+    facts = []
+    original = httpx.AsyncClient
+
+    async def response(request):
+        if mode == "slow":
+            await asyncio.sleep(60)
+        return httpx.Response(503 if mode == "unavailable" else 200, json={
+            "data": None if mode == "null" else [{"embedding": [0.2, 0.8]}],
+            "usage": {"prompt_tokens": 3, "total_tokens": 3},
+        })
+
+    monkeypatch.setattr(openai.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(response), **kw))
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx(tenant_id="tenant", catalog_model_id=7))
+    previous = get_fact_sink()
+    set_fact_sink(facts.append)
+    try:
+        if mode == "healthy":
+            assert await adapter.get_embeddings_with_deadline("sample", timeout=0.1) == [[0.2, 0.8]]
+        else:
+            with pytest.raises((openai.InvalidEmbeddingResponse, httpx.HTTPStatusError, TimeoutError)):
+                await adapter.get_embeddings_with_deadline("sample", timeout=0.1)
+    finally:
+        set_fact_sink(previous)
+    assert [fact["outcome"] for fact in facts] == ["started", "succeeded" if mode == "healthy" else "failed"]
+    assert facts[-1]["model_id"] == 7 and facts[-1]["tenant_id"] == "tenant"
+    assert facts[-1]["duration_ms"] >= 0
+    if mode == "healthy":
+        assert facts[-1]["input_tokens"] == facts[-1]["total_tokens"] == 3

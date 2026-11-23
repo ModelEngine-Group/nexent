@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-CHILD-TIMING-20261120
+  change_type: requirement
+  requirement_id: OPS-AGENT-CHILD-TIMING-20261120
+  title: Share complete child invocation timing between monitoring and trajectory
+  description: Give each child invocation an independent common clock across allocation, execution, release and output callbacks. Preserve actual execution eligibility, date ownership, outcomes, Tokens and first answer semantics.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/sdk/core/agents/test_child_run_facts.py, test/sdk/core/agents/test_child_run_timing.py, test/sdk/core/agents/test_core_child_dispatch.py, test/sdk/core/agents/test_agent_first_answer.py, test/sdk/core/agents/test_main_run_timing.py, test/backend/ops/test_agent_main_dates.py, test/sdk/core/agents/observability/test_phase_capture.py]
+    behaviors:
+    - Share the complete child boundary across raw spans and facts, including normal, failure, cancellation and capture disabled.
+    - Keep new clocks per repeated, nested and concurrent invocation, without inheriting parent clocks or contexts.
+    - Retain actual-run eligibility, execution-start date, first-answer timing and typed outcomes, with terminal reporting after release.
+    - Isolate reporting failures and remove the replaced child-only duration calculation.
+    reason: Existing child UT proves identity and adapter-only timing, while existing D3 proves parent/child source publication and metrics. Strengthen these same surfaces with complete-boundary and raw trajectory agreement; no duplicate D1 is needed.
+  notes: Starts at 85f3b1477. No integration-branch synchronization, other metric changes or push.

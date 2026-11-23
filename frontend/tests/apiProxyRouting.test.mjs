@@ -106,10 +106,7 @@ function dispatch(method, pathname) {
     }),
     proxy: { web: (_req, _res, config) => calls.push(config) },
   });
-  vm.runInContext(
-    source.slice(start, end),
-    context
-  );
+  vm.runInContext(source.slice(start, end), context);
   const req = { method, url: pathname };
   const handled = context.handleAllApiProxy(pathname, req, {});
   return { handled, calls, req };
@@ -135,9 +132,16 @@ for (const [method, path, target] of [
   ["GET", "/api/trajectory/records", "config"],
   ["GET", "/api/trajectory/conversations/42", "config"],
   ["GET", "/api/trajectory/conversations/42/snapshot", "config"],
-  ["GET", "/api/trajectory/conversations/42/contents/signed-reference", "config"],
+  [
+    "GET",
+    "/api/trajectory/conversations/42/contents/signed-reference",
+    "config",
+  ],
   ["POST", "/api/trajectory/cleanup", "config"],
   ["GET", "/api/trajectory_config", "config"],
+  ["GET", "/api/ops/v1/monitoring/models/summary", "config"],
+  ["POST", "/api/ops/v1/monitoring/models/refresh", "config"],
+  ["GET", "/api/ops/v1/monitoring/models/refreshes/signed-reference", "config"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
     const result = dispatch(method, path);
@@ -145,9 +149,7 @@ for (const [method, path, target] of [
     assert.equal(result.calls.length, 1);
     assert.equal(
       result.calls[0].target,
-      `http://${target}:${
-        target === "config" ? 5010 : 5014
-      }`
+      `http://${target}:${target === "config" ? 5010 : 5014}`
     );
   });
 }

@@ -14,6 +14,8 @@ import requests
 from nexent.core.concurrency import run_blocking
 
 from nexent.monitor import record_model_call
+from nexent.monitor.model_fact import AttemptObservation, suppress_model_attempts
+from nexent.monitor.monitoring import read_openai_token_counts
 
 from ...multimodal_adapter import ModelInfo
 from ...registry import register_adapter
@@ -87,15 +89,30 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
         data = self._prepare_input(inputs)
         body = {**(self._context.extra_body or {}), **data}
         with record_model_call("embedding", self._model_name, display_name=self._model_name):
-            async with asyncio.timeout(timeout):
-                async with httpx.AsyncClient(verify=self._ssl_verify, trust_env=False, timeout=timeout) as client:
-                    response = await client.post(self._base_url, headers=self._headers, json=body)
-                    response.raise_for_status()
-                    try:
-                        payload = response.json()
-                    except ValueError as exc:
-                        raise InvalidEmbeddingResponse("Invalid embedding JSON") from exc
-                    return _embedding_vectors(payload, len(data["input"]))
+            observation = AttemptObservation.for_client(
+                self._context.tenant_id, self._context.catalog_model_id, self._context.modality,
+            )
+            if observation is not None:
+                observation.dispatch()
+            try:
+                async with asyncio.timeout(timeout):
+                    async with httpx.AsyncClient(verify=self._ssl_verify, trust_env=False, timeout=timeout) as client:
+                        response = await client.post(self._base_url, headers=self._headers, json=body)
+                        response.raise_for_status()
+                        try:
+                            payload = response.json()
+                        except ValueError as exc:
+                            raise InvalidEmbeddingResponse("Invalid embedding JSON") from exc
+                        vectors = _embedding_vectors(payload, len(data["input"]))
+            except BaseException as error:
+                if observation is not None:
+                    observation.finish(error)
+                raise
+            if observation is not None:
+                observation.record_provider_counts(read_openai_token_counts(payload.get("usage")))
+                observation.complete(None)
+                observation.finish()
+            return vectors
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         """Runs a connectivity check with a sample text input.
@@ -108,12 +125,13 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
             the check fails.
         """
         try:
-            return await run_blocking(
-                "gateway-embedding-connectivity",
-                self.get_embeddings,
-                "Hello, nexent!",
-                timeout=timeout,
-            )
+            with suppress_model_attempts():
+                return await run_blocking(
+                    "gateway-embedding-connectivity",
+                    self.get_embeddings,
+                    "Hello, nexent!",
+                    timeout=timeout,
+                )
         except requests.exceptions.Timeout:
             logging.error(f"OpenAI embedding connection timed out ({timeout}s)")
             return []

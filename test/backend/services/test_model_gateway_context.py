@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regression tests for ``_config_to_context``: falsy-but-valid sampling values.
 
 The bridge coalesces per-call ``construct_extras`` with ``cfg``-level values
@@ -81,3 +82,9 @@ def test_per_call_override_wins_over_cfg():
     ctx = _config_to_context(_cfg(temperature=0.5), "llm", "llm", None,
                             model_name="m", temperature=0.2)
     assert ctx.temperature == 0.2
+
+
+def test_shared_adapter_preserves_catalog_identity_for_monitoring():
+    ctx = _config_to_context(_cfg(model_id=17), "embedding", "embedding", "tenant", model_name="embed")
+    assert ctx.catalog_model_id == 17
+    assert ctx.tenant_id == "tenant"

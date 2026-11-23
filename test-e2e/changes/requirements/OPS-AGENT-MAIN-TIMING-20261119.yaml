@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-AGENT-MAIN-TIMING-20261119
+  change_type: requirement
+  requirement_id: OPS-AGENT-MAIN-TIMING-20261119
+  title: Share complete main Agent execution timing between monitoring and trajectory
+  description: Wire the verified common clock into main preparation and complete worker cleanup, preserve actual-execution counting and date ownership, and replace the old main duration calculation while retaining child and TTFT behavior.
+  affected_features:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [OPS-AGENT-FACTS-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors: [test/sdk/core/agents/test_main_run_timing.py, test/sdk/core/agents/test_agent_run_facts.py, test/sdk/core/agents/test_agent_first_answer.py, test/sdk/core/agents/observability/test_phase_capture.py, test/sdk/core/agents/observability/test_local_capture.py, test/sdk/core/agents/test_child_run_facts.py, test/sdk/core/agents/test_core_child_dispatch.py, test/sdk/monitor/test_run_timing.py, test/sdk/monitor/test_agent_version.py, test/backend/ops/test_agent_main_dates.py, test/backend/ops/test_agent_monitoring.py, test/backend/ops/test_agent_monitoring_views.py, test/backend/ops/test_agent_ttft.py, test/backend/ops/test_agent_tokens.py]
+    behaviors:
+    - Carry main preparation timing independently of telemetry and finish after full worker cleanup.
+    - Emit matching start/end identities and timestamps, retain actual execution eligibility and TTFT, and isolate each consumer's reporting failures.
+    - Supply one frozen start/end/duration to the main span and monitoring fact without recomputing the main duration.
+    - Preserve actual execution statistic dates and partitions across midnight while accepting legacy facts and leaving child timing unchanged.
+    reason: Existing timing primitive, main/child facts, phase and span tests prove separate pieces. Strengthen them and the existing real pipeline D3 to prove complete main boundary equality through raw trajectory and ES, including failure, cancellation, midnight and disabled capture. No new D1 is needed.
+  notes: Work starts at 848dc4fd4 and does not synchronize the integration branch. Child timing migration and other metrics remain outside this change.
