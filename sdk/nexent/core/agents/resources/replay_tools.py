@@ -5,6 +5,8 @@ import hashlib
 import inspect
 import json
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from threading import Lock
 
@@ -18,6 +20,7 @@ class ReplayToolRecorder:
     def __init__(self, root_config, watched, probe_names=()):
         self.root_config = root_config
         self.watched = watched
+        self.requested = ContextVar("replay_requested_arguments", default=None)
         self.registered = set()
         self.calls = []
         self.event_index = 0
@@ -57,6 +60,56 @@ class ReplayToolRecorder:
         input_names = list(getattr(tool, "inputs", {}) or {})
         tool.forward = self.wrap_forward(name, tool.forward, input_names, mapping_input)
 
+    @contextmanager
+    def observe_requested(self, name, values, public_fields):
+        """Pair the approved public inputs with the physical call in this task's context."""
+        fields = set(self.watched.get(name, ())).intersection(public_fields)
+        if not fields:
+            yield
+            return
+        try:
+            digests = {key: argument_digest(values[key]) for key in fields if key in values}
+        except (TypeError, ValueError, RecursionError, UnicodeError):
+            with self.lock:
+                self.complete = False
+            digests = {}
+        token = self.requested.set((name, digests))
+        try:
+            yield
+        finally:
+            self.requested.reset(token)
+
+    def bind_requested(self, tool, name):
+        if not self.watched.get(name):
+            return
+        forward = tool.forward
+        fields = list(tool.inputs)
+
+        def observe(args, kwargs):
+            values = args[0] if len(args) == 1 and isinstance(args[0], dict) and not kwargs else {
+                **dict(zip(fields, args)), **kwargs
+            }
+            return self.observe_requested(name, values, fields)
+
+        @wraps(forward)
+        async def async_forward(*args, **kwargs):
+            with observe(args, kwargs):
+                return await forward(*args, **kwargs)
+
+        @wraps(forward)
+        def sync_forward(*args, **kwargs):
+            with observe(args, kwargs):
+                result = forward(*args, **kwargs)
+            if not inspect.isawaitable(result):
+                return result
+
+            async def finish():
+                with observe(args, kwargs):
+                    return await result
+            return finish()
+
+        tool.forward = async_forward if inspect.iscoroutinefunction(forward) else sync_forward
+
     def wrap_forward(self, name, forward, input_names, mapping_input=False):
         if name not in self.watched:
             return forward
@@ -64,6 +117,9 @@ class ReplayToolRecorder:
 
         def begin(args, kwargs):
             call = {"name": name, "arguments": {}, "outcome": "pending", "end": None}
+            requested = self.requested.get()
+            if requested is not None and requested[0] == name:
+                call["requested_arguments"] = requested[1]
             with self.lock:
                 self.event_index += 1
                 call["start"] = self.event_index

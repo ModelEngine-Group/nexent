@@ -188,6 +188,7 @@ class ToolConfig(BaseModel):
     params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
     source: str = Field(description="Tool source, can be local or mcp", default="local")
     usage: Optional[str] = Field(description="MCP server name", default=None)
+    argument_formats: Optional[Dict[str, Any]] = Field(default=None, exclude_if=lambda value: value is None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
     labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
 

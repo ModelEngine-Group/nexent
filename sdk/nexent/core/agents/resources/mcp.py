@@ -166,6 +166,12 @@ class ManagedMCPToolCollection:
                         return self._call_tool(__session, __name, arguments)
 
                     tool = adapter.adapt(call_tool, mcp_tool)
+                    raw_schema = getattr(mcp_tool, "inputSchema", None)
+                    if isinstance(raw_schema, dict):
+                        from nexent.core.agents.resources.argument_formats import supported_public_formats
+                        formats = supported_public_formats(raw_schema.get("properties", {}))
+                        if formats:
+                            tool._nexent_mcp_formats = formats
                     if allowed_tools is not None:
                         if mcp_tool.name in matched or tool.name != allowed_tools[mcp_tool.name]:
                             raise ValueError("MCP tool discovery does not match the authorized binding")

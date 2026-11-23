@@ -206,6 +206,19 @@ async def examples_from_experiment(tenant, user, eid, request):
                      released.get("prompt") or "", agent, version, plan["request"]["language"])
 
 
+async def tool_mapping_from_experiment(tenant, user, eid, request):
+    from management.services.evaluation.tool_mapping_candidates import generate_mapping
+    scope = await _io("identify-mapping-source", jobs.scope, tenant, eid)
+    if not scope:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+    await _io("authorize-mapping-source", require_business_agent_edit, scope["agent_id"], tenant, user)
+    plan = await _io("read-mapping-source", jobs.read_plan, tenant, eid, True)
+    if not plan or plan["request"]["candidate_type"] != "baseline":
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select a completed released baseline")
+    spec = await _snapshot(DevelopmentExperimentRequest.model_validate(plan["request"]), tenant, user, "base")
+    return await _io("generate-tool-mapping", generate_mapping, tenant, user, eid, request, plan, spec)
+
+
 async def tool_sets_from_experiment(tenant, user, eid, request):
     scope = await _io("identify-tool-set-source", jobs.scope, tenant, eid)
     if not scope:

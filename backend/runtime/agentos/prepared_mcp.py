@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from contracts.agentos import MCPExecutionBinding, SkillDerivedMCPBinding
 from contracts.errors.exceptions import ValidationError
 from infrastructure.mcp_execution import (
-    apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server,
+    apply_mcp_argument_overrides, build_mcp_tool, registered_argument_format, mcp_binding_identity, mcp_execution_revision, select_mcp_server,
 )
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
@@ -16,8 +16,9 @@ from infrastructure.rdb.mcp_execution_records import (
 
 
 class PreparedMCP:
-    def __init__(self, actor):
+    def __init__(self, actor, *, mapping_trial=False):
         self.actor = actor
+        self.mapping_trial = mapping_trial
         self.hosts = {}
         self._servers = None
         self._tool_servers = {}
@@ -86,7 +87,18 @@ class PreparedMCP:
             allowed = self.hosts[server_id]["allowed_tools"]
             if allowed.setdefault(origin_name, tool.class_name) != tool.class_name:
                 raise ValueError("Ambiguous MCP tool name")
-            tools.append(apply_mcp_argument_overrides(tool, binding.argument_overrides))
+            effective = apply_mcp_argument_overrides(tool, binding.argument_overrides)
+            if version == "1":
+                formats = binding.argument_formats or {}
+                persisted = row.get("released_argument_formats") or {}
+                if formats != persisted and not self.mapping_trial:
+                    raise ValueError("The MCP mapping is not published for this agent version")
+                if formats:
+                    if any(field in effective.params or registered_argument_format(row, field) != rule
+                           for field, rule in formats.items()):
+                        raise ValueError("MCP mapping no longer matches the configured tool schema")
+                    effective = effective.model_copy(update={"argument_formats": formats})
+            tools.append(effective)
         return tools
 
     @staticmethod

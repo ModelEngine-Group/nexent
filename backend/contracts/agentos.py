@@ -504,6 +504,7 @@ class MCPBindingReference(RunSpecModel):
 
 class MCPExecutionBinding(MCPBindingReference):
     instance_id: PositiveInt
+    argument_formats: dict[str, dict[str, JsonValue]] | None = Field(default=None, max_length=32, exclude_if=lambda value: value is None)
 
 
 class SkillDerivedMCPBinding(MCPBindingReference):
@@ -783,6 +784,8 @@ class ToolForwardCall(RunSpecModel):
     start: PositiveInt
     end: PositiveInt | None
     arguments: dict[str, Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]]
+    requested_arguments: dict[str, Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]] | None = Field(
+        default=None, exclude_if=lambda value: value is None)
     outcome: Literal["returned", "raised", "pending"]
 
 

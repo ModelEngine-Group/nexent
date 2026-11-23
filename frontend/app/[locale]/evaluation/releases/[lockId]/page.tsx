@@ -77,6 +77,9 @@ export default function ReleasePage() {
                   current: data.current_version,
                 })}
               </Typography.Text>
+              {data.tool_mapping && <Typography.Text>
+                {data.tool_mapping.tool}.{data.tool_mapping.field} · {t(`evolution.mapping.${data.tool_mapping.proposed[data.tool_mapping.field].kind}`)}
+              </Typography.Text>}
               {!!data.components?.length && (
                 <ul aria-label={t("evolution.chooseComponents")}>
                   {data.components.map(part => (

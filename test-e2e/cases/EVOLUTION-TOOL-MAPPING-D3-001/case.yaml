@@ -1,0 +1,42 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-TOOL-MAPPING-D3-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-04]
+  title: MCP 日期映射按智能体版本装载并核验调用实参
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 对照试验绑定、实际发布的绑定和旧版本，验证执行端的格式及权限。
+  preconditions: [可创建临时数据库的 PostgreSQL 测试实例。]
+  test_data:
+    profile: 同一租户、同一工具实例的两个版本，一项公开日期参数和一个由会话注入的租户字段。
+  steps:
+  - order: 1
+    action: 普通 Runtime 读取 V1 和 V2 的实际绑定，另在隔离 Runtime 用 V1 试跑映射，记录模型侧与执行侧实参。
+    expected: V1 原样传递，试验和 V2 转为 ISO 日期。身份字段始终由会话注入。
+  - order: 2
+    action: 在普通 V1 请求中夹带映射，在 V2 请求中省略已发布映射，再在另一个租户读取。
+    expected: 三次均拒绝装载。
+  expected_results: [日期及其两处摘要与受测版本一致。, 旧版、新版和租户边界不能被请求改写。]
+  forbidden_side_effects: [模型不能写入受保护的身份字段或替换其他租户的绑定。]
+  acceptance:
+  - id: AC-01
+    description: 核对模型输入与执行器实参。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 拒绝越过发布绑定。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary: [使用真实 PostgreSQL、Runtime 绑定解析和 SDK MCP 包装器；远端调用使用记录实参的替身。]
+  observations: [已装载的版本、传输实参、两处摘要和拒绝结果。]
+  cleanup: [销毁临时数据库。]

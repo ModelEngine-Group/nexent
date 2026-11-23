@@ -77,6 +77,9 @@ async def _snapshot(request, tenant, user, variant):
     spec = await prepare_evaluation_snapshot(
         EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query=""), user, tenant,
         language=request.language, **options)
+    if request.candidate_type == "tool_mapping":
+        from management.services.evaluation.tool_mapping_candidates import pin_mapping
+        return await _io("pin-tool-mapping", pin_mapping, spec, tenant, request.candidate_id, snapshot_digest(spec), variant)
     if request.candidate_type == "tool_set":
         removed = await _io("resolve-tool-set", resolve_tool_set, tenant, request.agent_id, request.version_no,
                             request.candidate_id, spec, snapshot_digest(spec))
@@ -171,6 +174,9 @@ async def _new_skill_proposal(request, tenant):
 
 
 async def _excluded_sources(request, tenant):
+    if request.candidate_type == "tool_mapping":
+        return await _io("mapping-example-sources", prompt_example_sources, tenant, request.agent_id,
+                         request.version_no, request.candidate_id, "agent.tool_format", "T2_MAPPING")
     if request.candidate_type == "skill_new":
         return set((await _new_skill_proposal(request, tenant))["source_keys"])
     if request.components:
@@ -254,10 +260,16 @@ async def create_experiment(request, tenant, user):
     arms = {"baseline": ("base",), "skill_step": ("base", "result", "no_skill"),
             "combination": ("base", "only_a", "only_b", "result")}.get(
         request.candidate_type, ("base", "result"))
+    mapping_arms = {}
     for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
+        if request.candidate_type == "tool_mapping":
+            mapping_arms[variant] = spec.resource
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
+    if mapping_arms:
+        from management.services.evaluation.tool_mapping_candidates import mapping_difference
+        plan["tool_mapping"] = mapping_difference(mapping_arms["base"], mapping_arms["result"])
     if request.screening:
         plan["judges"] = await _io("freeze-development-judges", judges_for_plan, tenant, rule, request, fixed)
     if request.candidate_type != "baseline":

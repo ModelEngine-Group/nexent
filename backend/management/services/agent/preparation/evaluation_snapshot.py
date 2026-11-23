@@ -594,6 +594,8 @@ def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_server
         reference = SkillDerivedMCPBinding(tool_id=row["tool_id"], **common)
         version = "3" if "workbench_skill_ids" in row else "2"
     else:
+        if row.get("released_argument_formats"):
+            common["argument_formats"] = row["released_argument_formats"]
         reference = MCPExecutionBinding(instance_id=row["tool_instance_id"], **common)
         version = "1"
     return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json", exclude_unset=True))

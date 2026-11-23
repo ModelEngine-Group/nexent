@@ -187,7 +187,7 @@ def workspace_choices(tenant, agent_id, version):
             ORDER BY case_id DESC LIMIT 200
         """,
         "candidates": """
-            SELECT c.candidate_id, CASE c.resource_field WHEN 'agent.tools' THEN 'tool_set' ELSE 'prompt' END AS kind,
+            SELECT c.candidate_id, CASE c.resource_field WHEN 'agent.tools' THEN 'tool_set' WHEN 'agent.tool_format' THEN 'tool_mapping' ELSE 'prompt' END AS kind,
                 c.resource_field AS name, c.create_time
             FROM nexent.evolution_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.base_version_no=:version
@@ -205,7 +205,7 @@ def workspace_choices(tenant, agent_id, version):
         "experiments": """
             SELECT e.experiment_id, e.create_time, plan->'request'->>'candidate_type' AS candidate_type,
                    (plan->'request'->>'candidate_id')::bigint AS candidate_id,
-                   (plan->'request'->>'candidate_id' IS NOT NULL AND plan->'request'->>'candidate_type' <> 'skill_new' AND NOT e.cancelled AND
+                   (plan->'request'->>'candidate_id' IS NOT NULL AND plan->'request'->>'candidate_type' IN ('prompt','skill_discovery','skill_step','tool_set') AND NOT e.cancelled AND
                     NOT EXISTS (SELECT 1 FROM nexent.evolution_trial_t t WHERE t.experiment_id=e.experiment_id
                                 AND t.status IN ('running','pending','cancelled')) AND
                     EXISTS (SELECT 1 FROM nexent.evolution_trial_t t JOIN nexent.evolution_trial_t b

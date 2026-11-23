@@ -14,4 +14,6 @@ feature:
     description: 用于提示词示例的材料及相同来源组不能再次作为该候选的验证任务。
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-03
     description: 新 Skill 只使用不同来源的成功开发题生成候选，样本值隔离。按维护权限生成候选，用未见的适用题和不适用题对照，分别核对交付和实际读取。
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-04
+    description: 工具参数格式改动须用同一模型入参验证传输实参已纠正，正常值继续通过，正式版本只装载已确认的映射。
   required_test_stages: [D1, D2, D3]

@@ -391,7 +391,10 @@ def prepare_run_snapshot(
     query, history, files = materialize_evaluation_input(
         payload.input, actor, payload.language, include_history_in_query=NEXENT_AGENT_CORE != "jiuwen",
     )
-    mcp = PreparedMCP(actor)
+    from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
+    mcp = (PreparedMCP(actor, mapping_trial=True)
+           if EVOLUTION_REPLAY_RUNTIME and isinstance(payload, PreparedEvaluationRun) and payload.replay_trial_id
+           else PreparedMCP(actor))
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
     workspace_run_id = payload.run_id if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)) else uuid4().hex

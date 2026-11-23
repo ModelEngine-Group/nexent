@@ -262,7 +262,7 @@ def _confirmed_new_guide(session, tenant, agent, base, ctx, expected):
 
 
 def publish(
-    tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed, expected_guide=None
+    tenant, actor, lock, reason, expected, digest, stamp, pins, prompt, baseline, removed, expected_guide=None, mapping=None
 ):
     try:
         with get_db_session() as session:
@@ -296,10 +296,16 @@ def publish(
                 )
                 + 1
             )
+            if mapping:
+                bindings = [r for r in rows[ToolInstance] if r["tool_instance_id"] == mapping["instance_id"] and r["enabled"]]
+                if len(bindings) != 1 or (bindings[0]["released_argument_formats"] or {}) != mapping["previous"]:
+                    reject("The source MCP tool mapping changed during publication")
             for model, records in rows.items():
                 for row in records:
                     data = {k: v for k, v in row.items() if k not in {"create_time", "update_time"}}
                     data.update(version_no=version, updated_by=actor)
+                    if model is ToolInstance and mapping and row["tool_instance_id"] == mapping["instance_id"]:
+                        data["released_argument_formats"] = mapping["proposed"]
                     if model is AgentInfo:
                         data["current_version_no"] = None
                         if prompt is not None:
@@ -382,6 +388,7 @@ def release_view(tenant, actor, lock):
                 text("""
             SELECT e.agent_id,e.version_no AS base_version,e.experiment_id,c.digest AS candidate_digest,
                    c.recipe->'components' AS components,
+                   e.plan->'tool_mapping' AS tool_mapping,
                    c.recipe->>'candidate_type' AS candidate_type,(c.recipe->>'candidate_id')::bigint AS resource_candidate_id,
                    a.current_version_no AS current_version,
                    r.summary,COALESCE(s.paused,false) AS paused,

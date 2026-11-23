@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Rebuild pinned MCP tool and connection configuration from authorized records."""
 
+import ast
 import hmac
 import json
 from urllib.parse import quote, urljoin
@@ -86,3 +87,20 @@ def mcp_execution_revision(tenant_id: str, agent_id: int, version_no: int, bindi
     values = [tenant_id, agent_id, version_no, binding_identity, tool.model_dump(mode="json"), origin_name, server_id, host]
     payload = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hmac.digest(key, payload, "sha256").hex()
+
+def registered_argument_format(row, field):
+    """Reconstruct the only supported mapping from the registered public property."""
+    from nexent.core.agents.resources.argument_formats import format_rule
+    from nexent.core.agents.resources.tool_user_context import USER_CONTEXT_FIELDS
+
+    if field in USER_CONTEXT_FIELDS or field in build_mcp_tool(row).params:
+        raise ValueError("Identity and configured arguments cannot be mapped")
+    schema = row["inputs"]
+    if isinstance(schema, str):
+        try:
+            schema = json.loads(schema)
+        except json.JSONDecodeError:
+            schema = ast.literal_eval(schema)
+    if not isinstance(schema, dict) or field not in schema:
+        raise ValueError("Unknown public MCP argument")
+    return format_rule(schema[field])

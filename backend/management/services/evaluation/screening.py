@@ -2,6 +2,7 @@
 """Decide whether a development candidate can be submitted for independent confirmation."""
 
 from management.services.evaluation.confirmation_results import new_skill_use
+from management.services.evaluation.tool_use import mapping_effect, observed_mapping
 
 
 def _verified(row, case_digest, arm_digest, rubric):
@@ -66,6 +67,7 @@ def screen_development(plan, pairs, *, cancelled):
     regression = plan["regression_cases"]
     gaps, failures = {}, {}
     skill_uses = set()
+    mapping_effects = set()
     choices_fixed = 0
     fixed = base_tokens = candidate_tokens = 0
 
@@ -89,6 +91,17 @@ def screen_development(plan, pairs, *, cancelled):
                 issue.get("reason") == "too_many" and issue.get("max_calls") == 0
                 for issue in (evidence.get("tool_use") or {}).get("issues", [])):
             failures.setdefault("forbidden_action", []).append(cid)
+        if request["candidate_type"] == "tool_mapping" and "base" in verified and result["status"] == "pass":
+            base = pair["base"]
+            effect = mapping_effect(observed_mapping(base["result"], plan["tool_mapping"]),
+                                    observed_mapping(evidence, plan["tool_mapping"]))
+            if cid in targets and base["status"] == "fail":
+                if effect != "corrected":
+                    gaps.setdefault("mapping_unproven_gain", []).append(cid)
+                else:
+                    mapping_effects.add(effect)
+            if effect == "protected" and base["status"] == "pass":
+                mapping_effects.add(effect)
         if cid not in targets:
             if result["status"] != "pass":
                 failures.setdefault("protection_failed", []).append(cid)
@@ -126,6 +139,8 @@ def screen_development(plan, pairs, *, cancelled):
                 base_tokens += counts[0]
                 candidate_tokens += counts[1]
 
+    if request["candidate_type"] == "tool_mapping" and mapping_effects != {"corrected", "protected"}:
+        gaps["mapping_scope_coverage"] = []
     if request["candidate_type"] == "combination" and not gaps:
         _measure_combination(criteria, request["components"], targets, pairs, gaps, failures)
     if request["candidate_type"] == "skill_new" and not {"used", "skipped"} <= skill_uses:

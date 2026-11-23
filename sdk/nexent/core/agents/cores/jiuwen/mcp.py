@@ -96,7 +96,14 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
                     proxy.send = self.replay_recorder.wrap_forward(card.name, proxy.send, [], mapping_input=True)
                 if tool_config.description:
                     card.description = tool_config.description
-                tools.append(_ObservedMCPTool(proxy, card, self.observe, self.emit_result))
+                formats = tool_config.argument_formats
+                if formats and (not set(formats).issubset(card.input_params["properties"])
+                                or set(formats).intersection(tool_config.params or {})):
+                    raise ValueError("Mapping requires an unconfigured public MCP argument")
+                if formats:
+                    from nexent.core.agents.resources.argument_formats import supported_public_formats, validate_live_formats
+                    validate_live_formats(formats, supported_public_formats(card.input_params["properties"]))
+                tools.append(_ObservedMCPTool(proxy, card, self.observe, self.emit_result, self.replay_recorder, formats))
 
             close_event = asyncio.Event()
             with self._lock:
@@ -146,17 +153,26 @@ class _ManagedNativeClient:
 
 
 class _ObservedMCPTool(MCPTool):
-    def __init__(self, client, card, observe, emit_result):
+    def __init__(self, client, card, observe, emit_result, replay_recorder=None, formats=None):
         super().__init__(client, card)
         self._observe = observe
         self._emit_result = emit_result
+        self._replay_recorder = replay_recorder
+        self._formats = formats
 
     async def invoke(self, inputs, **kwargs):
         with self._observe(self.card.name, inputs) or nullcontext():
             # Empty collections and explicit null are valid MCP argument values.
             # Keep native schema validation and formatting, but never erase them.
             kwargs["skip_none_value"] = False
-            result = await super().invoke(inputs, **kwargs)
+            capture = self._replay_recorder.observe_requested(
+                self.card.name, inputs, self.card.input_params.get("properties", {})
+            ) if self._replay_recorder is not None and isinstance(inputs, dict) else nullcontext()
+            with capture:
+                if self._formats:
+                    from nexent.core.agents.resources.argument_formats import format_arguments
+                    inputs = format_arguments(inputs, self._formats)
+                result = await super().invoke(inputs, **kwargs)
             if self._emit_result:
                 self._emit_result(result)
             return result

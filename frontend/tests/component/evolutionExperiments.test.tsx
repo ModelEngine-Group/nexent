@@ -6,6 +6,7 @@ import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperimen
 import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
+import ToolMappingCandidate from "@/app/evaluation/components/ToolMappingCandidate";
 import ToolSetCandidates from "@/app/evaluation/components/ToolSetCandidates";
 import FixedRegressionCases from "@/app/evaluation/components/FixedRegressionCases";
 import { evolutionService } from "@/services/evolutionService";
@@ -42,6 +43,7 @@ vi.mock("@/services/evolutionService", () => ({
     developmentCase: vi.fn(),
     shareLocalEdit: vi.fn(),
     toolSetCandidates: vi.fn(),
+    toolMappingCandidate: vi.fn(),
     setFixedRegression: vi.fn(),
   },
 }));
@@ -455,4 +457,34 @@ it("requires both an applicable task and a skip task before comparing a new Skil
   fireEvent.keyDown(screen.getByRole("combobox", {name:"evolution.cases"}), {key:"Escape"});
   await choose("evolution.cases", "Time · Look up time");
   expect(compare).toBeEnabled();
+});
+
+it("uses the selected argument evidence and a passing case to request a mapping", async () => {
+  const onSelect = vi.fn();
+  vi.mocked(evolutionService.toolMappingCandidate).mockResolvedValue({
+    candidate_id: 37, tool: "lookup", field: "day", rule: { kind: "iso_date" },
+  });
+  const pair = (status: string, effective: string) => ({
+    base: { status, result: { tool_use: { status, argument_evidence: [{
+      tool: "lookup", field: "day", call: 1, effective, requested: effective, expected: "canonical",
+    }] } } }, comparison: "baseline",
+  });
+  render(<QueryClientProvider client={new QueryClient()}>
+    <ToolMappingCandidate onSelect={onSelect}
+      cases={[{case_id: 9, family: "dates", query: "Original"}, {case_id: 10, family: "dates", query: "Protected"}]}
+      report={{experiment_id: 42, status: "finished", valid_pairs: 0, total_pairs: 0,
+        pairs: {"9": pair("fail", "raw"), "10": pair("pass", "canonical")}}}/>
+  </QueryClientProvider>);
+  fireEvent.click(screen.getByText("evolution.mapping.title"));
+  await choose("evolution.mapping.target", "Original · lookup.day");
+  await choose("evolution.protectTools", "Protected");
+  const generate = screen.getByRole("button", {name: "evolution.mapping.generate"});
+  expect(generate).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("evolution.mapping.raw"), {target: {value: "2026/09/01"}});
+  fireEvent.click(generate);
+  fireEvent.click(await screen.findByRole("button", {name: "evolution.mapping.try"}));
+  expect(evolutionService.toolMappingCandidate).toHaveBeenCalledWith(42, {
+    failure_case_id: 9, protection_case_id: 10, tool_name: "lookup", field: "day", supplied_value: "2026/09/01",
+  });
+  expect(onSelect).toHaveBeenCalledWith(37);
 });

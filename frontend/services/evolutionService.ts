@@ -57,7 +57,9 @@ export interface Trial {
     tool_catalog?: { core: string; prompt_tools: string[]; schema_tools: string[]; executable: string[];
       model_inputs?: number; instruction_mentions?: string[]; native_definitions?: string[] };
     new_skill_trial?: {candidate_id: number; name: string; digest: string; arm: "base" | "result"};
-    tool_use?: { status: string; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
+    tool_use?: { status: string; argument_evidence?: {
+      tool: string; field: string; call: number; requested: string | null; effective: string | null; expected: string;
+    }[]; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
     error?: string;
     judgment?: { score?: number; reason?: string; status?: string };
   };
@@ -134,6 +136,7 @@ export const evolutionService = {
   release: (id: number) => read<{
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
     candidate_digest: string; candidate_type: string; paused: boolean; excluded_tools?: string[];
+    tool_mapping?: {tool: string; field: string; proposed: Record<string, {kind: string; values?: string[]}>} | null;
     components?: {experiment_id: number; candidate_type: string; candidate_id: number}[] | null;
     skill_description?: {name: string; previous: string; proposed: string} | null;
     added_guide?: {candidate_id: number; name: string; digest: string} | null;
@@ -195,6 +198,10 @@ export const evolutionService = {
     scoring?: { evaluator_id: number; judge_model_id?: number; language: string }) =>
     read<{ case_id: number; enabled: boolean }>(
       `${root}/agents/${agent}/versions/${version}/development-cases/${id}/regression`, { enabled, ...scoring }),
+  toolMappingCandidate: (id: number, body: {
+    failure_case_id: number; protection_case_id: number; tool_name: string; field: string; supplied_value: string;
+  }) => read<{candidate_id: number; tool: string; field: string; rule: {kind: string; values?: string[]}}>(
+    `${root}/experiments/${id}/tool-mapping-candidates`, body),
   toolSetCandidates: (id: number, failure_case_ids: number[], protection_case_ids: number[]) =>
     read<{ variants: { candidate_id: number | null; removed: string[]; retained: string[] }[] }>(
       `${root}/experiments/${id}/tool-set-candidates`, { failure_case_ids, protection_case_ids }),

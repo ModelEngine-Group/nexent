@@ -4,6 +4,8 @@
 from collections import Counter
 from math import ceil
 
+from management.services.evaluation.tool_use import mapping_effect, observed_mapping
+
 
 def new_skill_use(evidence):
     trial = evidence.get("new_skill_trial")
@@ -20,7 +22,7 @@ def new_skill_use(evidence):
     return "skipped" if not selection["reads"].get(name) else "incorrect"
 
 
-def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=()):
+def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=(), mapping=None):
     task = task or {}
     file_grade = result.get("file_state") or {}
     tool_grade = result.get("tool_use") or {}
@@ -47,6 +49,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False, step_
     }:
         status = "fail"
     return {
+        **({"mapping_observation": observed_mapping(result, mapping)} if mapping else {}),
         **({"read_step_ids": sorted({
             skill["candidate_id"] for skill in (result.get("skills") or [result.get("skill") or {}])
             if skill.get("candidate_id") in step_ids and skill.get("guide_reads", 0) > 0
@@ -67,7 +70,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False, step_
     }
 
 
-def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=()):
+def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=(), require_mapping=False):
     # Private family names and individual task outcomes never appear in the returned object.
     valid, families, timings, token_pairs = [], Counter(), [], []
     failed, missing = [], []
@@ -92,6 +95,19 @@ def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=
             timings.append(candidate["ms"])
         if base["status"] == candidate["status"] == "pass":
             token_pairs.append((base["tokens"], candidate["tokens"]))
+    if require_mapping:
+        effects = set()
+        for _, old, new in pairs:
+            if old["status"] not in {"pass", "fail"} or new["status"] != "pass":
+                continue
+            effect = mapping_effect(old.get("mapping_observation"), new.get("mapping_observation"))
+            if old["status"] == "fail" and effect != "corrected":
+                missing.append("mapping_unproven_gain")
+                break
+            if (old["status"], effect) in {("fail", "corrected"), ("pass", "protected")}:
+                effects.add(effect)
+        if effects != {"corrected", "protected"}:
+            missing.append("mapping_scope_coverage")
     if required_step_ids:
         exercised = set()
         for _, old, new in pairs:

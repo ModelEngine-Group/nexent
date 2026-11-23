@@ -71,6 +71,10 @@ def _materials(tenant, ctx, prepared):
             prompt = resolve_prompt_candidate(
                 tenant, ctx["submitted_by"], agent, version, candidate_id
             )["result_text"]
+        elif part_kind == "tool_mapping" and kind == "tool_mapping":
+            from management.services.evaluation.tool_mapping_candidates import mapping_difference
+            if mapping_difference(base, new) != ctx["plan"].get("tool_mapping"):
+                releases.reject("The independently tested mapping changed")
         elif part_kind == "tool_set":
             if removed:
                 releases.reject("Two candidates cannot replace the same tool catalog")
@@ -189,6 +193,7 @@ async def promote(tenant, actor, lock, request):
         baseline,
         removed,
         guide,
+        ctx["plan"].get("tool_mapping") if recipe["candidate_type"] == "tool_mapping" else None,
     )
 
 

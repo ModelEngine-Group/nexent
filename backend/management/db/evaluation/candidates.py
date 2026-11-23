@@ -64,14 +64,14 @@ def selectable_tool_names(tenant, agent, version):
         """), dict(tenant=tenant, agent=agent, version=version)))
 
 
-def prompt_example_sources(tenant, agent_id, version, candidate_id):
+def prompt_example_sources(tenant, agent_id, version, candidate_id, field="agent.prompt", method="P2"):
     with get_db_session() as session:
         rows = session.scalars(text("""
             SELECT DISTINCT jsonb_array_elements_text(f.feedback->'source_keys')
             FROM nexent.evolution_candidate_t c JOIN nexent.evolution_candidate_feedback_t f USING (candidate_id)
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.base_version_no=:version
-                AND c.candidate_id=:candidate AND f.feedback->>'method'='P2'
-        """), dict(tenant=tenant, agent=agent_id, version=version, candidate=candidate_id))
+                AND c.candidate_id=:candidate AND c.resource_field=:field AND f.feedback->>'method'=:method
+        """), dict(tenant=tenant, agent=agent_id, version=version, candidate=candidate_id, field=field, method=method))
         return set(rows)
 
 

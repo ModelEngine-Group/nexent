@@ -356,11 +356,19 @@ class ToolResources:
         elif source == "mcp":
             from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
             recorder = getattr(getattr(self, "observer", None), "replay_tool_recorder", None)
-            if isinstance(recorder, ReplayToolRecorder) and any(tool_config is c for c in recorder.root_config.tools):
+            observed = isinstance(recorder, ReplayToolRecorder) and any(tool_config is c for c in recorder.root_config.tools)
+            if observed:
                 tool_obj = self.create_mcp_tool(class_name, replay_recorder=recorder, replay_name=tool_config.name or class_name)
             else:
                 tool_obj = self.create_mcp_tool(class_name)
             tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
+            if tool_config.argument_formats:
+                from nexent.core.agents.resources.argument_formats import bind_argument_formats
+                if set(tool_config.argument_formats).intersection(tool_config.params or {}):
+                    raise ValueError("A configured MCP argument cannot also use a format mapping")
+                bind_argument_formats(tool_obj, tool_config.argument_formats)
+            if observed:
+                recorder.bind_requested(tool_obj, tool_config.name or class_name)
         elif source == "langchain":
             tool_obj = self.create_langchain_tool(tool_config)
         elif source == "builtin":

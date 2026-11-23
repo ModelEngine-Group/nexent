@@ -228,7 +228,7 @@ class DevelopmentExperimentRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
-    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "skill_new", "baseline", "tool_set", "combination"]
+    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "skill_new", "baseline", "tool_set", "tool_mapping", "combination"]
     candidate_id: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
     components: list[EvaluatedCandidate] | None = Field(default=None, min_length=2, max_length=2, exclude_if=lambda v: v is None)
     case_ids: list[int] = Field(min_length=1, max_length=100)
@@ -315,6 +315,21 @@ class FeedbackHandoffRequest(BaseModel):
 class GenerateFromFeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     model_id: int = Field(gt=0)
+
+
+class ToolMappingProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    failure_case_id: int = Field(gt=0)
+    protection_case_id: int = Field(gt=0)
+    tool_name: str = Field(min_length=1, max_length=180)
+    field: str = Field(min_length=1, max_length=128)
+    supplied_value: str = Field(min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def separate_examples(self):
+        if self.failure_case_id == self.protection_case_id:
+            raise ValueError("The protection case must differ from the failure")
+        return self
 
 
 class ToolSetProposal(BaseModel):
