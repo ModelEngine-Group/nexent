@@ -116,6 +116,45 @@ def _serialize_unit_content(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+def _compact_native_thinking_units(units):
+    """Coalesce Jiuwen text by step and block, retaining the first unit index."""
+    compacted = []
+    groups = {}
+    for unit in units:
+        kind = unit.get("unit_type")
+        if kind not in {"model_output", "model_output_deep_thinking"}:
+            compacted.append(unit)
+            continue
+        payload = unit.get("unit_content")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                compacted.append(unit)
+                continue
+        if (not isinstance(payload, dict) or payload.get("type") != kind
+                or payload.get("schema_version") != 1 or payload.get("runtime_mode") != "native_agent"
+                or payload.get("agent_core") != "jiuwen" or not isinstance(payload.get("content"), str)):
+            compacted.append(unit)
+            continue
+
+        turn_id, step_id, block_id = (payload.get(field) for field in ("turn_id", "step_id", "block_id"))
+        key = (kind, turn_id, step_id, block_id, unit.get("invocation_id"), payload.get("attempt_id"))
+        if not turn_id or not (step_id or block_id) or any(value is not None and not isinstance(value, str) for value in key):
+            compacted.append(unit)
+            continue
+        if key not in groups:
+            stored_kind = "model_output_thinking" if kind == "model_output" else kind
+            envelope = {**payload, "type": stored_kind}
+            groups[key] = (envelope, [])
+            compacted.append({**unit, "unit_type": stored_kind, "unit_content": envelope})
+        groups[key][1].append(payload["content"])
+
+    for envelope, fragments in groups.values():
+        envelope["content"] = "".join(fragments)
+    return compacted
+
+
 def _optional_conversation_column(name: str, fallback: Any):
     """Keep rolling-schema and unit-test stubs readable during migration."""
     column = getattr(ConversationRecord, name, None)
@@ -1157,8 +1196,10 @@ def persist_assistant_run_batch(
         if parent.status != "streaming":
             raise ValueError(f"Assistant message is already finalized with status {parent.status}")
 
+        # Receipts fingerprint the original projection so pre-upgrade runs can be replayed.
+        stored_units = _compact_native_thinking_units(message_units)
         unit_rows: List[Dict[str, Any]] = []
-        for unit in message_units:
+        for unit in stored_units:
             unit_rows.append(
                 add_creation_tracking(
                     {
@@ -3534,7 +3575,7 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns,
-                "current_user_message_index": current.message_index}
+                "current_user_message_index": before_message_index}
 
 
 def _remove_scope_references(

@@ -33,3 +33,27 @@ async def test_unavailable_history_boundary_rejects_before_prepared_compilation(
     else:
         load.assert_called_once_with(101, None, "owner", "tenant", before_message_index=4)
     compile_run.assert_not_awaited()
+
+
+def test_prepared_history_preserves_read_only_execution_records():
+    from contracts.agentos import PreparedConversationHistory
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.agentos.prepared_evaluation import _restore_conversation_history
+
+    records = [
+        {"record_type": "tool", "content": "Lookup", "tool_call_id": "call-1", "invocation_id": None},
+        {"record_type": "execution_logs", "content": "Found result", "tool_call_id": "call-1", "invocation_id": "child-1"},
+        {"record_type": "error", "content": None, "tool_call_id": None, "invocation_id": None},
+    ]
+    turn = {"user_message": "Continue", "assistant_final_answer": "Done", "user_message_id": 21,
+            "assistant_message_id": 22}
+    history = {"conversation_turns": [turn | {"execution_records": records}, turn | {"user_message_id": 23}]}
+
+    prepared = evaluation_snapshot._prepare_conversation_history(history, "owner", "tenant")
+    wire = prepared.model_dump(mode="json")
+    assert "execution_records" not in wire["conversation_turns"][1]
+    received = PreparedConversationHistory.model_validate(wire)
+    restored = _restore_conversation_history(received, ServicePrincipal("owner", "tenant"))
+
+    assert restored["conversation_turns"][0]["execution_records"] == records
+    assert "execution_records" not in restored["conversation_turns"][1]
