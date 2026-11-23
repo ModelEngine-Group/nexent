@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: WB-CONTROLS-D3-001
+timeout_seconds: 45
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_workbench_skill_snapshot
+  profiles: [mock]
+acceptance_bindings:
+  AC-01: [test_workbench_skill_snapshot]
+  AC-02: [test_workbench_skill_snapshot_rejects_changes]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

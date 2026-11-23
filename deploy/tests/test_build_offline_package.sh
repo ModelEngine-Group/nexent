@@ -239,6 +239,15 @@ for target in docker k8s all; do
   esac
 done
 
+langfuse_package_dir="$OUT_DIR/langfuse-all"
+PATH="$BIN_DIR:$PATH" \
+  bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+    --version v2.2.0 --components infrastructure,monitoring --monitoring-provider langfuse \
+    --image-source general --target all --output-dir "$langfuse_package_dir" >"$TMP_DIR/langfuse-all.log"
+[ "$(grep -Fxc '  - "nexent/minio:RELEASE.2023-12-20T01-00-02Z"' "$langfuse_package_dir/manifest.yaml")" -eq 1 ] || fail "combined package should list the selected MinIO image once"
+[ -f "$langfuse_package_dir/images/minio-2023-12-20T01-00-02Z.tar" ] || fail "combined package should save the selected MinIO tar"
+! grep -Fq 'quay.io/minio/minio:' "$langfuse_package_dir/manifest.yaml" || fail "combined package should only use the selected mirror"
+
 sandbox_package_dir="$OUT_DIR/without-sandbox"
 PATH="$BIN_DIR:$PATH" \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
