@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared ingestion remains independent of Ops and preserves retry/lifetime contracts."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,8 @@ def test_application_factory_has_no_ops_dependency():
 
 
 def test_producer_import_does_not_load_service_implementations():
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        (str(ROOT), str(ROOT / "backend"), str(ROOT / "sdk"), os.environ.get("PYTHONPATH", "")))}
     result = subprocess.run([sys.executable, "-c", """
 import importlib.abc
 import sys
@@ -31,7 +34,7 @@ class RejectServices(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RejectServices())
 from infrastructure.monitoring.runtime import Producer
 assert Producer.__module__ == 'infrastructure.monitoring.runtime'
-"""], cwd=ROOT, capture_output=True, text=True, timeout=20)
+"""], cwd=ROOT, env=environment, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

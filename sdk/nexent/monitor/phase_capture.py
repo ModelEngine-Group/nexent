@@ -161,6 +161,11 @@ def capture_preparation(function):
         try:
             with trace_phase("agent.prepare"):
                 result = await function(*args, **kwargs)
+            fields = getattr(type(result), "model_fields", None)
+            if fields is not None and "run_timing" not in fields:
+                # Transport models cross service boundaries and cannot own a process-local clock.
+                timing.finish()
+                return result
             result.run_timing = timing
             try:
                 if capture:
