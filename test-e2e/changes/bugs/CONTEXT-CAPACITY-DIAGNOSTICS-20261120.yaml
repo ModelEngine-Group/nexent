@@ -29,7 +29,7 @@ change:
     decision: strengthen
     behaviors:
     - Keep hard rejection and preparation without maintenance unchanged.
-    - Log local/calibrated estimate, C and usage provenance without prompt content or credentials.
+    - Log local/calibrated estimate, context_window_tokens and usage provenance without prompt content or credentials.
     - Preserve missing provider usage as unknown rather than zero.
     reason: This is failure-boundary observability, not a new compaction policy or a solution for cross-run
       continuation. Existing functional contracts remain selected but execution is paused.
