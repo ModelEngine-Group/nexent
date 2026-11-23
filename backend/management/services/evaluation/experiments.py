@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections import Counter
 from contextlib import ExitStack, asynccontextmanager
 
@@ -434,10 +435,18 @@ async def execute_trial(job):
     if case["digest"] != job["plan"]["cases"][str(job["case_id"])] or snapshot_digest(spec) != digest:
         return "invalid", {"error": "frozen_input_changed"}
     client = AgentOSClient(EVOLUTION_REPLAY_RUNTIME_URL, create_httpx_client)
+    return await run_verified_arm(request, job, case, spec, client, lambda index: stage_case_input(
+        *args, job["receipt_id"], index))
+
+
+async def run_verified_arm(request, job, case, spec, client, stage_input):
+    """Execute and grade one verified arm; the caller owns the evidence and storage scope."""
+    tenant, user = job["tenant_id"], job["created_by"]
+    digest = job["plan"]["snapshots"][job["variant"]]
     stack = ExitStack()
     async def load_input(index):
         stage = asyncio.create_task(_io("stage-development-input", stack.enter_context,
-                                        stage_case_input(*args, job["receipt_id"], index)))
+                                        stage_input(index)))
         try:
             return await asyncio.shield(stage)
         except asyncio.CancelledError:
@@ -445,7 +454,9 @@ async def execute_trial(job):
             raise
     try:
         task = case["task"]
+        started = time.monotonic_ns()
         observations, turns, error = await run_turns(client, spec, task, load_input, job, user, tenant)
+        execution_ms = (time.monotonic_ns() - started + 999999) // 1000000
     finally:
         await _io("release-development-input", stack.close)
     dialogue = {"turns": turns} if turns else {}
@@ -491,7 +502,7 @@ async def execute_trial(job):
             ("protect", "pass"): "protection_passed", ("protect", "fail"): "protection_failed",
         }
         trace_review["trace_baseline_outcome"] = outcomes.get((source["purpose"], status), "inconclusive")
-    return status, {"judgment": grade, "answer": final.answer, "event_count": len(events), **dialogue,
+    return status, {"judgment": grade, "answer": final.answer, "event_count": len(events), "execution_ms":execution_ms, **dialogue,
                              **trace_review,
                              **({"tool_use": tool_grade} if tool_grade else {}),
                              **({"file_state": file_grade} if file_grade else {}),

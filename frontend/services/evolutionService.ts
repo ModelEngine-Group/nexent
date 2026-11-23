@@ -158,6 +158,11 @@ export const evolutionService = {
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  confirmationResults: (id: number) => read<Array<{
+    lock_id: number;
+    summary: null | { decision: "passed" | "failed" | "insufficient"; valid_pairs: number;
+      total_pairs: number; regressed: number; quality_gain_pp: number | null };
+  }>>(`${root}/experiments/${id}/confirmation-results`),
   nominate: (id: number) => read<{ experiment_id: number; candidate_digest: string }>(
     `${root}/experiments/${id}/confirmation-candidate`, {}),
   setFixedRegression: (agent: number, version: number, id: number, enabled: boolean,

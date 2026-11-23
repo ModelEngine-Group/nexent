@@ -34,6 +34,7 @@ vi.mock("@/services/evolutionService", () => ({
     createCase: vi.fn(),
     report: vi.fn(),
     nominate: vi.fn(),
+    confirmationResults: vi.fn().mockResolvedValue([]),
     submit: vi.fn(),
     exampleCandidates: vi.fn(),
     shareDiscovery: vi.fn(),
@@ -169,6 +170,8 @@ it("submits an eligible candidate only when its editor requests independent conf
     screening:{status:"eligible",gain:1,criteria:{target_case_ids:[2],metric:"tasks_fixed",minimum:1},failures:{},missing:{}}});
   const digest = "b".repeat(64);
   vi.mocked(evolutionService.nominate).mockResolvedValue({experiment_id:41,candidate_digest:digest});
+  vi.mocked(evolutionService.confirmationResults).mockResolvedValue([{lock_id:1,summary:{
+    decision:"passed",valid_pairs:3,total_pairs:3,regressed:0,quality_gain_pp:100/3}}]);
   render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
   await choose("agentEvaluation.agentLabel", "Meeting agent");
   await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
@@ -178,6 +181,7 @@ it("submits an eligible candidate only when its editor requests independent conf
   fireEvent.click(submit);
   expect(await screen.findByText(digest)).toBeInTheDocument();
   expect(evolutionService.nominate).toHaveBeenCalledWith(41);
+  expect(await screen.findByText(/evolution.confirmation.passed/)).toBeInTheDocument();
 });
 
 it("requires a business expectation before freezing a trace draft, then selects its baseline", async () => {

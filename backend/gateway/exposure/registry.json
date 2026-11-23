@@ -336,6 +336,15 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/confirmation-results",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-confirmation-results",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET",
       "path": "/api/agent-evolution/confirmation-locks/{lock_id}",
       "transport": "http",
       "target": "management",

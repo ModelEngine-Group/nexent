@@ -744,6 +744,7 @@ class PreparedEvaluationRun(AgentRunSpec):
                                                               exclude_if=lambda v: v is None)
     tool_set_check: ToolSetCheck | None = Field(default=None, exclude_if=lambda v: v is None)
     replay_files: TextFiles | None = Field(default=None, exclude_if=lambda v: v is None)
+    confirmation_bucket: str | None = Field(default=None, min_length=1, max_length=63, exclude_if=lambda v: v is None)
 
     @model_serializer(mode="wrap")
     def omit_ordinary_replay_reference(self, serialize):
@@ -779,6 +780,7 @@ class ReplayToolObservation(RunSpecModel):
 class ReplayReceipt(RunSpecModel):
     trial_id: str = Field(pattern=RUN_ID_PATTERN)
     outcome: str = Field(min_length=1)
+    confirmation_bucket: str | None = Field(default=None, min_length=1, max_length=63, exclude_if=lambda v: v is None)
     skill: SkillTrialObservation | None = Field(default=None, exclude_if=lambda v: v is None)
     skills: list[SkillTrialObservation] | None = Field(default=None, min_length=2, max_length=2, exclude_if=lambda v: v is None)
     root_guide_reads: dict[str, PositiveInt] | None = Field(default=None, exclude_if=lambda v: v is None)

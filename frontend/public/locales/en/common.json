@@ -1,4 +1,10 @@
 {
+  "evolution.confirmation.refresh": "Check independent evaluation",
+  "evolution.confirmation.passed": "Independent evaluation passed",
+  "evolution.confirmation.failed": "Independent evaluation failed",
+  "evolution.confirmation.insufficient": "Insufficient independent evidence",
+  "evolution.confirmation.pending": "Locked, awaiting evaluation",
+  "evolution.confirmation.pairs": "{{valid}}/{{total}} valid pairs, {{regressed}} regressions",
   "evolution.confirmation.submit": "Submit candidate for independent evaluation",
   "evolution.confirmation.receipt": "Candidate submitted. Share experiment {{id}} and this digest with the independent evaluator.",
   "evolution.screen.skill_selection": "Candidate missed or selected an incorrect Skill",

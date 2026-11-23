@@ -14,6 +14,8 @@ from nexent.core.agents.resources.replay_files import files_digest
 def validate_turn(spec, receipt, attempt, expected_names):
     if not receipt or receipt.trial_id != attempt:
         return {"error": "missing_or_unsuccessful_runtime_receipt"}
+    if getattr(spec,"confirmation_bucket",None) != getattr(receipt,"confirmation_bucket",None):
+        return {"error":"confirmation_runtime_mismatch"}
     if receipt.outcome != "completed":
         return {"error": "unsuccessful_runtime", "runtime_outcome": receipt.outcome}
     skills = [receipt.skill] if receipt.skill else (receipt.skills or [])

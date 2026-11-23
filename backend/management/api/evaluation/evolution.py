@@ -13,6 +13,7 @@ from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest
 from management.db.evaluation.candidates import text_digest
 from management.db.evaluation.confirmation import register_suite, set_curator
 from management.db.evaluation.confirmation_locks import locked_protocol
+from management.db.evaluation.confirmation_runs import result_for_experiment
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.confirmation import approve_comparison, nominate_candidate
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
@@ -29,6 +30,21 @@ from nexent.core.concurrency import run_blocking
 
 
 router = APIRouter(prefix="/agent-evolution")
+
+
+@router.get("/experiments/{experiment_id}/confirmation-results")
+async def read_independent_results(experiment_id: int, authorization: str | None = Header(None)):
+    from management.db.evaluation.experiments import scope
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
+    user, tenant = get_current_user_id(authorization)
+    def read():
+        experiment = scope(tenant,experiment_id)
+        if not experiment:
+            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+        require_business_agent_edit(experiment["agent_id"],tenant,user)
+        return result_for_experiment(tenant,experiment_id)
+    return {"data":await run_blocking("read-independent-results",read,lane="control-io",owner="management")}
 
 
 @router.post("/experiments/{experiment_id}/confirmation-candidate")

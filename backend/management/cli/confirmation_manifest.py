@@ -15,14 +15,14 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 from contracts.evolution_sources import example_source_keys, task_digest
 
 
-def inspect_private_suite(path):
+def read_private_suite(path):
     path = Path(path).resolve(strict=True)
     if path.stat().st_size > 64 * 1024 * 1024:
         raise ValueError("Private suite exceeds the manifest size limit")
     raw = json.loads(path.read_bytes())
     if not isinstance(raw, list) or not 1 <= len(raw) <= 500:
         raise ValueError("Supply between one and 500 private tasks")
-    cases, families, scope = [], Counter(), None
+    cases, families, tasks, scope = [], Counter(), {}, None
     for entry in raw:
         task = PrivateTask.model_validate(entry)
         if scope and scope != (task.agent_id, task.version_no):
@@ -30,6 +30,7 @@ def inspect_private_suite(path):
         scope = task.agent_id, task.version_no
         families[task.family] += 1
         files = []
+        paths = {}
         remaining = 64 * 1024 * 1024
         for attachment in task.attachments:
             relative = PureWindowsPath(attachment.object_name)
@@ -47,13 +48,22 @@ def inspect_private_suite(path):
                         raise ValueError("Private task attachments exceed the 64 MiB limit")
                     digest.update(chunk)
             remaining -= size
+            paths[attachment.name] = file
             files.append({"name":attachment.name, "size":size, "sha256":digest.hexdigest()})
         frozen = task.model_dump(mode="json", exclude_none=True, exclude={"attachments", "conversation_digest"})
         frozen["attachments"] = files
         if task.conversation_digest:
             frozen["trace_source"] = {"source_group":task.conversation_digest}
-        cases.append({"digest":task_digest(frozen), "sources":sorted(example_source_keys(frozen))})
-    return ConfirmationManifest(format="nexent-confirmation-v1", agent_id=scope[0], version_no=scope[1], cases=cases), families
+        digest = task_digest(frozen)
+        tasks[digest] = (frozen, paths)
+        cases.append({"digest":digest, "sources":sorted(example_source_keys(frozen))})
+    manifest = ConfirmationManifest(format="nexent-confirmation-v1", agent_id=scope[0], version_no=scope[1], cases=cases)
+    return manifest, families, tasks
+
+
+def inspect_private_suite(path):
+    manifest, families, _ = read_private_suite(path)
+    return manifest, families
 
 
 def compile_private_suite(path):

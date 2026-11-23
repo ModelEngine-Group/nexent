@@ -16,6 +16,67 @@ def _case(**changes):
             "family":"Meeting","source_group":"Private source", **changes}
 
 
+def test_private_results_distinguish_regression_missing_evidence_and_a_verified_gain():
+    from management.services.evaluation.confirmation_results import arm_measurement, comparison_summary
+
+    policy = ConfirmationPolicy(minimum_valid_pairs=2, minimum_valid_percent=100,
+                                family_minimums={"private family": 2}, minimum_quality_gain_pp=1)
+    def measure(status, reads=1):
+        return arm_measurement(status, {"judgment":{"status":status}, "skill":{"guide_reads":reads},
+                                        "execution_ms":20, "answer":"private answer"})
+    base, better = measure("fail"), measure("pass")
+    def compare(first, second):
+        return comparison_summary(policy, [("private family", *first), ("private family", *second)], require_guide=True)
+    passed = compare((base,better), (better,better))
+    assert passed["decision"] == "passed" and passed["quality_gain_pp"] == 50
+    assert "private" not in json.dumps(passed)
+    missing = compare((base,measure("pass",0)), (better,better))
+    assert missing["decision"] == "insufficient" and missing["valid_pairs"] == 1
+    regressed = compare((better,base), (base,better))
+    assert "regression_limit" in regressed["failures"]
+    violation = arm_measurement("invalid", {"file_state":{"protected_writes":["private.txt"]}})
+    failed = compare((measure("invalid"),violation), (better,better))
+    assert failed["decision"] == "failed" and failed["forbidden_tasks"] == 1
+    unknown = arm_measurement("invalid", {}, task={"tool_use":{"rules":[{"max_calls":0}]}})
+    assert "unverified_protection" in compare((base,unknown),(better,better))["missing"]
+    assert arm_measurement("pass",{"judgment":{"status":"pass"}},require_selection=True)["status"] == "invalid"
+
+
+def test_usage_and_latency_need_complete_comparable_measurements():
+    from management.services.evaluation.confirmation_results import comparison_summary
+
+    policy = ConfirmationPolicy(minimum_valid_pairs=2, minimum_valid_percent=100, family_minimums={"x": 1},
+                                minimum_quality_gain_pp=0, minimum_input_saving_percent=25, max_candidate_p95_ms=10)
+    base = {"status":"pass", "forbidden":False, "tokens":100, "ms":5}
+    pair = ("x",base,{**base,"tokens":75, "ms":10})
+    def result(**changes):
+        return comparison_summary(policy, [pair, ("x",base,{**pair[2],**changes})])
+    assert result()["decision"] == "passed" and result()["input_saving_percent"] == 25
+    assert result(tokens=76)["failures"] == ["usage_target"]
+    assert result(ms=11)["failures"] == ["latency_limit"]
+    assert result(ms=None,tokens=None)["decision"] == "insufficient"
+
+
+def test_private_worker_requires_separate_state_and_reuses_only_first_measurement(tmp_path, monkeypatch):
+    from contracts.constants import environment
+    from management.services.evaluation.confirmation_runner import checkpoint, private_settings
+
+    suite = tmp_path / "suite" / "tasks.json"
+    for key, value in {"EVOLUTION_CONFIRMATION_BUCKET":"private","MINIO_DEFAULT_BUCKET":"private",
+                       "EVOLUTION_CONFIRMATION_STATE_DIR":str(tmp_path/"state"),"ENABLE_TELEMETRY":False,
+                       "EVOLUTION_CONFIRMATION_RUNTIME_URL":"http://private"}.items():
+        monkeypatch.setattr(environment,key,value)
+    _, ledger = private_settings(suite)
+    assert checkpoint(ledger,"arm") is None
+    assert checkpoint(ledger,"arm",{"status":"fail"}) == checkpoint(ledger,"arm",{"status":"pass"}) == {"status":"fail"}
+    monkeypatch.setattr(environment,"EVOLUTION_CONFIRMATION_STATE_DIR",str(suite.parent/"state"))
+    with pytest.raises(ValueError,match="state"):
+        private_settings(suite)
+    monkeypatch.setattr(environment,"ENABLE_TELEMETRY",True)
+    with pytest.raises(ValueError,match="telemetry"):
+        private_settings(suite)
+
+
 def compile_at(path, *cases):
     path.write_text(json.dumps(list(cases)), encoding="utf-8")
     return compile_private_suite(path)

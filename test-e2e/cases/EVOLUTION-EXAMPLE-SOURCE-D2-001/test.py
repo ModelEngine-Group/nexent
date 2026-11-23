@@ -40,7 +40,7 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                      "015_conversation_evolution", "016_evolution_candidates", "017_evolution_skill_candidates",
                      "018_evolution_replay_cases", "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
                      "025_evolution_regression_cases", "026_evolution_combination", "028_evolution_confirmation_suites",
-                     "029_evolution_confirmation_locks"):
+                     "029_evolution_confirmation_locks", "030_evolution_confirmation_results"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for version in (0, 1, 2):
@@ -202,6 +202,9 @@ def check_confirmation_space(client, identity, editor, editor_id, tenant, privat
     from local_auth_http import seed_membership_roles
     from management.cli.confirmation_manifest import compile_private_suite
     from management.db.evaluation.confirmation import register_suite
+    from management.db.evaluation.confirmation_runs import finalize
+    from management.services.evaluation.confirmation_results import comparison_summary
+    from contracts.confirmation import ConfirmationPolicy
     from management.db.evaluation.replay_cases import save_replay_case
 
     login = identity.post("/api/user/signup",json={"email":"curator@example.com","password":"Password123",
@@ -288,9 +291,21 @@ def check_confirmation_space(client, identity, editor, editor_id, tenant, privat
     second = client.post(seal_url,headers=curator,json=other.canonical()).json()["data"]
     reuse = client.post(seal_url + f"/{second['suite_id']}/locks",headers=curator,json={**body,"suite_digest":second["digest"]})
     assert reuse.status_code == 400 and "already assigned" in reuse.text
+    results_url = root + f"/experiments/{experiment}/confirmation-results"
+    assert client.get(results_url,headers=editor).json()["data"] == [{"lock_id":protocol["lock_id"],"summary":None}]
+    assert client.get(results_url).status_code in (401,403)
+    arm = {"status":"fail","ms":1,"tokens":None,"forbidden":False}
+    summary = comparison_summary(ConfirmationPolicy(**policy), [("meeting",arm,{**arm,"status":"pass"})])
+    assert finalize(tenant,curator_id,protocol,summary) == summary
+    assert finalize(tenant,curator_id,protocol,{**summary,"decision":"failed"}) == summary
+    public = client.get(results_url,headers=editor)
+    assert public.json()["data"] == [{"lock_id":protocol["lock_id"],"summary":summary}]
+    assert not any(secret in public.text for secret in ("PRIVATE ANSWER","new-private-series","meeting"))
     with get_db_session() as session:
         assert session.scalar(text("SELECT count(*) FROM nexent.evolution_confirmation_lock_t")) == 1
     assert client.put(grant_url,headers=editor,json={**grant,"enabled":False}).is_success
+    with pytest.raises(AppException):
+        finalize(tenant,curator_id,protocol,summary)
     assert client.post(url,headers=curator,json=body).status_code == 403
     assert client.get(read_url,headers=curator).status_code == 403
     assert client.post(seal_url,headers=curator,json=manifest.canonical()).status_code == 403

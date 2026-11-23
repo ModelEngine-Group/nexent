@@ -216,6 +216,14 @@ def remove_trial_inputs(user_id, attempt, files):
 def stage_case_input(tenant_id, user_id, agent_id, version_no, case_id, attempt=None, turn_index=0):
     row = get_development_case(tenant_id, user_id, agent_id, version_no, case_id)
     task = row["task"]
+    def archive(file):
+        return _read_bounded(_archive_key(tenant_id, agent_id, file["sha256"]), file["size"])
+    with stage_verified_input(tenant_id, user_id, task, attempt, turn_index, archive) as current:
+        yield current
+
+
+@contextmanager
+def stage_verified_input(tenant_id, user_id, task, attempt, turn_index, read_material):
     followups = task.get("followups", [])
     if turn_index:
         turn = followups[turn_index - 1]
@@ -231,8 +239,7 @@ def stage_case_input(tenant_id, user_id, agent_id, version_no, case_id, attempt=
         for file in task["attachments"]:
             if file["name"] not in names:
                 continue
-            source = _archive_key(tenant_id, agent_id, file["sha256"])
-            data = _read_bounded(source, file["size"])
+            data = read_material(file)
             if len(data) != file["size"] or sha256(data).hexdigest() != file["sha256"]:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Archived replay attachment changed")
             key = f"{prefix}/{file['name']}"

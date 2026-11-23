@@ -2,7 +2,7 @@
 """Atomic transition from an eligible development candidate to an independent comparison."""
 
 import json
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 from sqlalchemy import text
 
@@ -111,8 +111,8 @@ def lock_comparison(tenant, curator, suite_id, request, recipe):
         return {"lock_id":lock_id,"digest":digest}
 
 
-def locked_protocol(tenant, curator, lock_id):
-    with get_db_session() as session:
+def locked_protocol(tenant, curator, lock_id, *, transaction=None):
+    with (get_db_session() if transaction is None else nullcontext(transaction)) as session:
         row = session.execute(text("""
             SELECT l.lock_id,l.digest,l.policy,l.experiment_id,l.suite_id,s.manifest,s.digest AS suite_digest,
                    e.agent_id,e.version_no,e.cancelled,c.digest AS candidate_digest,c.recipe

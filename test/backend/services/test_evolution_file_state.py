@@ -60,7 +60,7 @@ async def test_cancelled_file_trial_releases_its_directory_after_the_worker_exit
     release = Mock()
     monkeypatch.setattr(runtime, "release_prepared_run", release)
     monkeypatch.setattr(runtime, "collect_observer_output", AsyncMock(side_effect=asyncio.CancelledError()))
-    payload = SimpleNamespace(replay_trial_id="a"*32, replay_files={"a.txt":"draft"}, conversation_id=-1,
+    payload = SimpleNamespace(confirmation_bucket=None, replay_trial_id="a"*32, replay_files={"a.txt":"draft"}, conversation_id=-1,
                               watch_tool_arguments=None, tool_set_check=None, resource=SimpleNamespace(skill_refs=[]),
                               observe_root_skill_choices=False)
     with pytest.raises(asyncio.CancelledError):
@@ -86,7 +86,7 @@ def test_reject_invalid_or_unjudgeable_file_fixture(initial, expected, protected
 async def test_only_verified_final_files_carry_to_next_turn(evidence):
     initial, expected = {"keep.txt":"private"}, {"keep.txt":"private", "out.txt":"hidden grading label"}
     rule = FileStateCheck(initial=initial, expected=expected, protected=["keep.txt"]).model_dump()
-    spec = Mock(resource=SimpleNamespace(skill_refs=[]), observe_root_skill_choices=False, tool_set_check=None)
+    spec = Mock(confirmation_bucket=None, resource=SimpleNamespace(skill_refs=[]), observe_root_skill_choices=False, tool_set_check=None)
     spec.model_copy.side_effect = lambda update: SimpleNamespace(**update)
     payloads = []
     async def respond(payload, *_):

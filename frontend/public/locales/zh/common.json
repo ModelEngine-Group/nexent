@@ -1,4 +1,10 @@
 {
+  "evolution.confirmation.refresh": "查看独立评测进度",
+  "evolution.confirmation.passed": "独立评测通过",
+  "evolution.confirmation.failed": "独立评测未通过",
+  "evolution.confirmation.insufficient": "独立评测证据不足",
+  "evolution.confirmation.pending": "已锁定，等待评测结果",
+  "evolution.confirmation.pairs": "有效对照 {{valid}}/{{total}} 题，退步 {{regressed}} 题",
   "evolution.confirmation.submit": "提交候选给独立评测人",
   "evolution.confirmation.receipt": "已提交实验 {{id}} 的候选。请将实验编号和候选摘要交给独立评测人。",
   "evolution.screen.skill_selection": "候选漏选或错选 Skill",

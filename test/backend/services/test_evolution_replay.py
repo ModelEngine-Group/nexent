@@ -154,6 +154,25 @@ def test_normal_runtime_declines_replay_before_materialization(monkeypatch):
     prepare = AsyncMock()
     monkeypatch.setattr(runtime, "load_prepared_run", prepare)
     with pytest.raises(HTTPException) as error:
-        asyncio.run(runtime.execute_prepared_evaluation(SimpleNamespace(replay_trial_id="a"*32), None))
+        asyncio.run(runtime.execute_prepared_evaluation(SimpleNamespace(replay_trial_id="a"*32, confirmation_bucket=None), None))
     assert error.value.status_code == 503
+    prepare.assert_not_awaited()
+
+
+@pytest.mark.parametrize("pool,requested,telemetry", [("", "private", False), ("private", None, False),
+                                                       ("private", "other", False), ("private", "private", True)])
+def test_private_trials_reject_an_unmatched_runtime_before_loading(pool, requested, telemetry, monkeypatch):
+    from contracts.constants import environment
+    from fastapi import HTTPException
+    from runtime.agentos import prepared_evaluation as runtime
+
+    monkeypatch.setattr(environment, "EVOLUTION_REPLAY_RUNTIME", True)
+    monkeypatch.setattr(environment, "EVOLUTION_CONFIRMATION_BUCKET", pool)
+    monkeypatch.setattr(environment, "MINIO_DEFAULT_BUCKET", "private")
+    monkeypatch.setattr(environment, "ENABLE_TELEMETRY", telemetry)
+    prepare = AsyncMock()
+    monkeypatch.setattr(runtime, "load_prepared_run", prepare)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(runtime.execute_prepared_evaluation(SimpleNamespace(replay_trial_id="a"*32, confirmation_bucket=requested), None))
+    assert error.value.status_code == 403
     prepare.assert_not_awaited()

@@ -286,6 +286,13 @@ function Experiments({
     },
   });
   const nomination = useMutation({ mutationFn: (id: number) => api.nominate(id) });
+  const confirmations = useQuery({
+    queryKey: ["confirmation-results", viewer, agent, version, selected],
+    queryFn: () => api.confirmationResults(selected!),
+    enabled: !!selected && report.data?.screening?.status === "eligible",
+    retry: false,
+    refetchInterval: query => query.state.data?.some(row => !row.summary) ? 10000 : false,
+  });
   const choices = workspace.data;
   const eligible = choices?.experiments.filter(e => e.eligible_component && e.candidate_type && e.candidate_id) || [];
   const fixedIds = new Set(report.data?.fixed_regression?.case_ids ?? []);
@@ -301,7 +308,7 @@ function Experiments({
     rules.error ||
     start.error ||
     report.error ||
-    cancel.error;
+    cancel.error || confirmations.error;
   return (
     <Flex vertical gap={14}>
       {error instanceof Error && (
@@ -507,6 +514,16 @@ function Experiments({
               })} <Typography.Text copyable>{nomination.data.candidate_digest}</Typography.Text></p>}
               {nomination.variables === report.data.experiment_id && nomination.error instanceof Error &&
                 <Alert type="error" message={nomination.error.message} />}
+              {report.data.screening.status === "eligible" && <div>
+                <Button type="link" loading={confirmations.isFetching} onClick={() => void confirmations.refetch()}>
+                  {t("evolution.confirmation.refresh")}
+                </Button>
+                {confirmations.data?.map(({lock_id, summary}) => <p key={lock_id}>
+                  #{lock_id} · {t(`evolution.confirmation.${summary?.decision ?? "pending"}`)}
+                  {summary && <> · {t("evolution.confirmation.pairs", {valid: summary.valid_pairs,
+                    total: summary.total_pairs, regressed: summary.regressed})}</>}
+                </p>)}
+              </div>}
             </div>}
             {active && (
               <Button

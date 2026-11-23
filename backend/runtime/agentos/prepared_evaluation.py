@@ -513,6 +513,14 @@ def release_prepared_run(info: AgentRunInfo, conversation_id: int, user_id: str,
 async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> EvaluationAgentResult:
     from contracts.agentos import ReplayReceipt
     from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
+    from contracts.constants import environment
+
+    private_bucket = environment.EVOLUTION_CONFIRMATION_BUCKET
+    if private_bucket or payload.confirmation_bucket:
+        if (not private_bucket or payload.confirmation_bucket != private_bucket
+                or environment.MINIO_DEFAULT_BUCKET != private_bucket or environment.ENABLE_TELEMETRY
+                or not EVOLUTION_REPLAY_RUNTIME or not payload.replay_trial_id):
+            raise HTTPException(status_code=403, detail={"code": "AGENTOS_CONFIRMATION_RUNTIME_REQUIRED"})
 
     if payload.replay_trial_id is not None and not EVOLUTION_REPLAY_RUNTIME:
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_REPLAY_RUNTIME_REQUIRED"})
@@ -553,6 +561,7 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
                 skill.guide_reads = reads[path].count if path is not None else 0
             file_state = await fixture.receipt() if fixture else None
             result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id, file_state=file_state,
+                confirmation_bucket=payload.confirmation_bucket,
                 outcome=info.attempt_outcome or "unconfirmed",
                 skill=observations[0][0] if len(observations) == 1 else None,
                 skills=[s for s, _ in observations] if len(observations) > 1 else None,
