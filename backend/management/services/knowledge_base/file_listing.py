@@ -81,7 +81,9 @@ class KnowledgeFileListing:
             owner="management.knowledge_base",
         )
 
-    async def list(self, index_name, actor, *, native_documents=False):
+    async def list(self, index_name, actor, *, native_documents=None):
+        if native_documents is None:
+            native_documents = environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED
         cancelled = Event()
         context = OperationContext(
             "knowledge-file-list-" + uuid4().hex,

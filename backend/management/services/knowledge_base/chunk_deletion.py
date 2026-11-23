@@ -50,7 +50,8 @@ async def delete_manual_chunk(index_name, chunk_id, actor, *, reader=None, clien
                 index_name, actor, edit=True, context=context, lane="control-io", owner="management.knowledge_base")
             grant = chunks_resource_grant(row)
             request = ChunkMutationLookup(knowledge_id=grant.knowledge_id, chunk_id=chunk_id,
-                operation="delete", resource_revision=grant.revision, resolve_public_id=True)
+                operation="delete", resource_revision=grant.revision, resolve_public_id=True,
+                native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED)
             target = await client.inspect_knowledge_chunk(request, actor.user_id, actor.tenant_id)
             context.remaining()
             if not isinstance(target, ChunkMutationTarget) or any(
@@ -67,6 +68,7 @@ async def delete_manual_chunk(index_name, chunk_id, actor, *, reader=None, clien
             intent = ChunkMutationIntent(knowledge_id=grant.knowledge_id, chunk_id=chunk.chunk_id,
                 request_key=uuid4().hex, operation="delete", resource_revision=grant.revision,
                 expected_change_epoch=target.change_epoch, file_ref=ref,
+                native_documents=target.native_documents, storage_revision=target.storage_revision,
                 generation=target.generation if ref else None, chunk_index=chunk.chunk_index if ref else None)
             state = await client.mutate_knowledge_chunk(intent, actor.user_id, actor.tenant_id)
             context.remaining()

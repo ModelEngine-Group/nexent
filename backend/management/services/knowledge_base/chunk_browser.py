@@ -66,7 +66,9 @@ class KnowledgeChunkBrowser:
             result['create_time'] = file['create_time']
         return result
 
-    async def browse(self, index_name, actor, *, page=None, page_size=None, path_or_url=None, native_documents=False):
+    async def browse(self, index_name, actor, *, page=None, page_size=None, path_or_url=None, native_documents=None):
+        if native_documents is None:
+            native_documents = environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED
         cancelled = Event()
         context = OperationContext('knowledge-chunk-browse-' + uuid4().hex, monotonic() + self.operation_seconds, cancelled=cancelled)
         threshold = context.remaining()

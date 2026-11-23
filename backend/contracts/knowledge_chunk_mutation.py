@@ -13,7 +13,7 @@ from contracts.agentos_knowledge import (
     ModelVersion,
 )
 from contracts.knowledge_chunk_projection import public_id_matches
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue, model_serializer, model_validator
 
 CHANGES = "runtime_knowledge_chunk_changes"
 STATES = "runtime_knowledge_chunk_states"
@@ -60,16 +60,32 @@ class ChunkMutationGrant(ChunkMutationAuthorization):
 class ChunkMutationLookup(ChunkMutationAuthorization):
     resource_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     resolve_public_id: bool = False
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_lookup(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        if result.get("storage_revision") is None:
+            result.pop("storage_revision", None)
+        return result
 
 
 class ChunkMutationTarget(ChunkMutationLookup):
     change_epoch: int = Field(ge=0)
     chunk: KnowledgeChunk | None = None
     generation: str | None = Field(default=None, min_length=1, max_length=256)
+    storage_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def exact_target(self):
-        if (self.chunk is None) != (self.generation is None):
+        if self.native_documents:
+            if (self.chunk is None) != (self.storage_revision is None) or self.chunk is None and self.generation is not None or (
+                self.chunk is not None and (self.chunk.file_id is None) != (self.generation is None)
+            ):
+                raise ValueError("Native target requires its exact storage revision and any file generation")
+        elif self.storage_revision is not None or (self.chunk is None) != (self.generation is None):
             raise ValueError("A stored chunk and its generation must be present together")
         if self.chunk is not None and (self.chunk.knowledge_id != self.knowledge_id
             or self.chunk.chunk_id != self.chunk_id and not (
@@ -98,9 +114,14 @@ class ChunkMutationIntent(Contract):
     generation: str | None = Field(default=None, min_length=1, max_length=256)
     chunk_index: int | None = Field(default=None, ge=0, le=2**63 - 1)
     expected_change_epoch: int | None = Field(default=None, ge=0)
+    native_documents: bool = False
+    storage_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def valid_binding(self):
+        if (self.storage_revision is not None and not self.native_documents
+            or self.native_documents and self.storage_revision is None and (self.operation != "create" or self.file_ref is not None)):
+            raise ValueError("Native update or delete requires the inspected storage revision")
         if self.file_ref is None:
             if self.generation is not None or self.chunk_index is not None:
                 raise ValueError("Standalone chunks must not invent file metadata")
@@ -114,6 +135,15 @@ class ChunkMutationIntent(Contract):
             raise ValueError("Delete has no field changes")
         json.dumps(self.changes, allow_nan=False)
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_intent(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        if self.storage_revision is None:
+            result.pop("storage_revision", None)
+        return result
 
     def fingerprint(self):
         payload = self.model_dump(mode="json")

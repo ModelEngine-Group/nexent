@@ -192,6 +192,7 @@ class ChunkMutationJournal:
                 "chunk_key": logical_key,
                 "operation": intent.operation,
                 "request_sha256": digest,
+                "native_documents": intent.native_documents,
                 "resource_revision": intent.resource_revision,
                 "file_id": ref.file_id if ref else None,
                 "file_version": ref.file_version if ref else None,

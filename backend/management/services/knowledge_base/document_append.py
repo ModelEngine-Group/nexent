@@ -79,6 +79,7 @@ async def append_documents(index_name, documents, actor, *, reader=None, client=
                 selected = list(documents[offset:offset + 64])
                 request = KnowledgeDocumentsAppend(knowledge_id=grant.knowledge_id, resource_revision=grant.revision,
                     embedding_model=model_binding or {"model_id": model_id}, documents=selected,
+                    native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED,
                     embedding_batch_size=min(embedding_batch_size, 64) if embedding_batch_size is not None else None)
                 result = await client.append_knowledge_documents(request, actor.user_id, actor.tenant_id)
                 context.remaining()

@@ -149,6 +149,7 @@ class KnowledgeDocumentAppender:
                     for index, ((document, _, is_image), source, vector) in enumerate(zip(inputs, prepared, vectors, strict=True)):
                         key = "document-" + uuid4().hex
                         intent = ChunkMutationIntent(knowledge_id=request.knowledge_id, chunk_id=key, operation="create",
+                            native_documents=request.native_documents,
                             request_key=f"{batch}:{index}", resource_revision=grant.revision,
                             changes={"content": document.content, "filename": source.get("filename") if isinstance(source.get("filename"), str) else None,
                                      "location": {PUBLIC_CHUNK_SOURCE_KEY: source}, "supplied_embedding": list(vector),

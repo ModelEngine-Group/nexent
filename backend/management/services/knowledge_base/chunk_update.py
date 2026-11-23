@@ -78,7 +78,8 @@ async def update_manual_chunk(index_name, chunk_id, payload, actor, *, reader=No
             try:
                 grant = chunks_resource_grant(row)
                 request = ChunkMutationLookup(knowledge_id=grant.knowledge_id, chunk_id=chunk_id, operation="update",
-                    resource_revision=grant.revision, resolve_public_id=True)
+                    resource_revision=grant.revision, resolve_public_id=True,
+                    native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED)
                 target = await client.inspect_knowledge_chunk(request, actor.user_id, actor.tenant_id)
                 context.remaining()
                 if not isinstance(target, ChunkMutationTarget) or any(
@@ -106,6 +107,7 @@ async def update_manual_chunk(index_name, chunk_id, payload, actor, *, reader=No
                     knowledge_id=chunk.knowledge_id, file_id=chunk.file_id, file_version=chunk.file_version)
                 intent = ChunkMutationIntent(knowledge_id=grant.knowledge_id, chunk_id=chunk.chunk_id, operation="update",
                     resource_revision=grant.revision, request_key=uuid4().hex, expected_change_epoch=target.change_epoch,
+                    native_documents=target.native_documents, storage_revision=target.storage_revision,
                     file_ref=ref, generation=target.generation if ref else None, chunk_index=chunk.chunk_index if ref else None,
                     changes=changes)
                 state = await client.mutate_knowledge_chunk(intent, actor.user_id, actor.tenant_id)

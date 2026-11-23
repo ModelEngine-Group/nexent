@@ -107,6 +107,8 @@ changes = sa.Table(
         nullable=False,
         comment="Canonical intent digest for idempotency; no raw chunk content is stored.",
     ),
+    sa.Column("native_documents", sa.Boolean, nullable=False, server_default=sa.false(),
+              comment="Physical mutation target uses the original knowledge index."),
     sa.Column(
         "resource_revision",
         sa.String(64),

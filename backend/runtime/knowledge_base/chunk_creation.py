@@ -111,7 +111,7 @@ class ChunkCreationExecutor:
             )
             if row is not None:
                 require_chunk_identity(row, intent, self.collection)
-                if row.generation is None:
+                if row.generation is None and not intent.native_documents:
                     raise Conflict()
             return row
 

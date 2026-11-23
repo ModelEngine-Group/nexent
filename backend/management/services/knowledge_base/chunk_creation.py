@@ -63,7 +63,8 @@ async def create_manual_chunk(index_name, payload, actor, *, reader=None, client
                     "created_by": actor.user_id}, payload.metadata)
                 key = public_chunk_key(source["id"])
                 request = ChunkMutationLookup(knowledge_id=grant.knowledge_id, chunk_id=key, operation="create",
-                                              resource_revision=grant.revision)
+                                              resource_revision=grant.revision,
+                                              native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED)
                 target = await client.inspect_knowledge_chunk(request, actor.user_id, actor.tenant_id)
                 context.remaining()
                 if not isinstance(target, ChunkMutationTarget) or any(
@@ -83,6 +84,7 @@ async def create_manual_chunk(index_name, payload, actor, *, reader=None, client
                     changes["require_embedding"] = True
                 intent = ChunkMutationIntent(knowledge_id=grant.knowledge_id, chunk_id=key, operation="create",
                     request_key=uuid4().hex, resource_revision=grant.revision, expected_change_epoch=target.change_epoch,
+                    native_documents=target.native_documents, storage_revision=target.storage_revision,
                     file_ref=ref, generation=target.generation if ref else None, chunk_index=chunk.chunk_index if ref else None,
                     changes=changes)
                 state = await client.mutate_knowledge_chunk(intent, actor.user_id, actor.tenant_id)

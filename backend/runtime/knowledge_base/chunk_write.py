@@ -38,6 +38,7 @@ from infrastructure.knowledge_chunk_mutations import (
     knowledge_creation_vector_ports,
 )
 from infrastructure.knowledge_runtime import knowledge_chunks_ports
+from infrastructure.vdb.native_chunk_mutation import native_mutation_port
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class ChunkMutationService:
         creation_ports=knowledge_creation_vector_ports,
         maintenance_ports=knowledge_chunk_vector_ports,
         lookup_ports=knowledge_chunks_ports,
+        native_port=native_mutation_port,
         operation_seconds=180,
     ):
         if (
@@ -66,6 +68,7 @@ class ChunkMutationService:
             operation_seconds,
         )
         self.lookup_ports = lookup_ports
+        self.native_port = native_port
 
     async def _grant(self, intent, actor):
         request = ChunkMutationAuthorization(
@@ -162,6 +165,21 @@ class ChunkMutationService:
         cls._visible_target(view, target, context=context)
         return view, target
 
+    def _native_target(self, records, payload, grant, actor, *, context):
+        if records.scope.tenant_id != grant.resource_tenant_id or records.scope.actor_id != actor.user_id:
+            raise ScopeDenied()
+        view = ChunkReadView(records, payload.knowledge_id, context=context)
+        with self.native_port(actor, grant, context=context) as native:
+            key = VectorKey(grant.collection, payload.chunk_id)
+            row, revision = native.find(key, resolve_public_id=payload.resolve_public_id, context=context)
+        chunk = None if row is None else view._dto(row, grant)
+        target = ChunkMutationTarget(
+            **payload.model_dump(), change_epoch=view.version, chunk=chunk, storage_revision=revision,
+            generation=row.generation.value if row is not None and row.generation is not None else None,
+        )
+        self._visible_target(view, target, context=context)
+        return view, target
+
     async def lookup(self, payload, actor, *, context=None):
         if not isinstance(payload, ChunkMutationLookup):
             raise InvalidInput()
@@ -184,17 +202,11 @@ class ChunkMutationService:
                     records,
                     vectors,
                 ):
+                    target_fn = self._native_target if payload.native_documents else self._target
+                    args = (records,) if payload.native_documents else (records, vectors)
                     view, target = await run_blocking(
-                        "knowledge-chunk-target",
-                        self._target,
-                        records,
-                        vectors,
-                        payload,
-                        grant,
-                        actor,
-                        context=context,
-                        lane="control-io",
-                        owner="runtime.knowledge_base",
+                        "knowledge-chunk-target", target_fn, *args, payload, grant, actor,
+                        context=context, lane="control-io", owner="runtime.knowledge_base",
                     )
                     if await self._grant(payload, actor) != grant:
                         raise Conflict()
@@ -254,23 +266,28 @@ class ChunkMutationService:
                             if await self._grant(payload, actor) != grant:
                                 raise Conflict()
 
+                        def native_creation(actor, collection, dimensions, *, context, resource_tenant_id=None):
+                            return self.native_port(actor, grant, context=context, storage_revision=payload.storage_revision)
+
                         row = await ChunkCreationExecutor(
                             journal,
                             self.models,
                             actor,
                             grant.collection,
-                            ports=self.creation_ports,
+                            ports=native_creation if payload.native_documents else self.creation_ports,
                         ).execute(payload, context=context, authorize=authorize)
                     else:
 
                         def execute():
                             context.remaining()
-                            dimensions = {} if "embedding" not in payload.changes else {
-                                "dimensions": len(payload.changes["embedding"])
-                            }
-                            with self.maintenance_ports(
-                                actor, grant.collection, context=context, **namespace, **dimensions
-                            ) as vectors:
+                            if payload.native_documents:
+                                ports = self.native_port(actor, grant, context=context, storage_revision=payload.storage_revision)
+                            else:
+                                dimensions = {} if "embedding" not in payload.changes else {
+                                    "dimensions": len(payload.changes["embedding"])
+                                }
+                                ports = self.maintenance_ports(actor, grant.collection, context=context, **namespace, **dimensions)
+                            with ports as vectors:
                                 result = ChunkMutationExecutor(
                                     journal, vectors, grant.collection
                                 ).execute(payload, context=context)

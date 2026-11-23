@@ -112,6 +112,7 @@ class ChunkReadView:
             terms = [
                 Comparison("knowledge_id", "eq", self.knowledge_id),
                 Comparison("status", "eq", "completed"),
+                Comparison("native_documents", "eq", False),
             ]
             terms += (
                 [Comparison("file_id", "is_null", True)]
