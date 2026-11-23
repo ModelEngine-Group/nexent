@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 from contracts.automation import ScheduleTrigger
 from contracts.constants.constants import USER_DREAMING_SCOPE
 from contracts.constants.environment import (
+    DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT,
     DREAMING_LONG_TERM_MAX_CHARS,
     DREAMING_SOURCE_LIMIT,
     DREAMING_SUMMARIZATION_MAX_ATTEMPTS,
@@ -70,17 +71,21 @@ def get_dreaming_parameters(
     thresholds = memory_dreaming_db.get_thresholds(tenant_id, user_id, USER_DREAMING_SCOPE)
     source_limit = DREAMING_SOURCE_LIMIT
     long_term_max_chars = DREAMING_LONG_TERM_MAX_CHARS
+    long_term_length_tolerance_percent = DREAMING_LONG_TERM_LENGTH_TOLERANCE_PERCENT
     summarization_max_attempts = DREAMING_SUMMARIZATION_MAX_ATTEMPTS
     if thresholds:
         if thresholds.get("source_limit") is not None:
             source_limit = thresholds["source_limit"]
         if thresholds.get("long_term_max_chars") is not None:
             long_term_max_chars = thresholds["long_term_max_chars"]
+        if thresholds.get("long_term_length_tolerance_percent") is not None:
+            long_term_length_tolerance_percent = thresholds["long_term_length_tolerance_percent"]
         if thresholds.get("summarization_max_attempts") is not None:
             summarization_max_attempts = thresholds["summarization_max_attempts"]
     return {
         "source_limit": source_limit,
         "long_term_max_chars": long_term_max_chars,
+        "long_term_length_tolerance_percent": long_term_length_tolerance_percent,
         "summarization_max_attempts": summarization_max_attempts,
     }
 
@@ -109,7 +114,9 @@ def get_dreaming_schedule(
         "min_unique_queries": None,
         "source_limit": None,
         "long_term_max_chars": None,
+        "long_term_length_tolerance_percent": None,
         "summarization_max_attempts": None,
+        **(memory_dreaming_db.get_thresholds(tenant_id, user_id, USER_DREAMING_SCOPE) or {}),
     }
 
 
@@ -153,6 +160,7 @@ def put_dreaming_schedule(
         source_limit=payload.source_limit,
         long_term_max_chars=payload.long_term_max_chars,
         summarization_max_attempts=payload.summarization_max_attempts,
+        **payload.model_dump(include={"long_term_length_tolerance_percent"}, exclude_unset=True),
     )
 
 

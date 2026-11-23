@@ -261,12 +261,6 @@ class MemoryDreamingSchedule(TableBase):
     next_fire_at = Column(TIMESTAMP(timezone=False))
     last_fire_at = Column(TIMESTAMP(timezone=False))
     fire_count = Column(Integer, nullable=False, default=0)
-    min_score = Column(Float, nullable=True)
-    min_recall_count = Column(Integer, nullable=True)
-    min_unique_queries = Column(Integer, nullable=True)
-    source_limit = Column(Integer, nullable=True)
-    long_term_max_chars = Column(Integer, nullable=True)
-    summarization_max_attempts = Column(Integer, nullable=True)
 
 
 class MemoryProviderConfig(TableBase):

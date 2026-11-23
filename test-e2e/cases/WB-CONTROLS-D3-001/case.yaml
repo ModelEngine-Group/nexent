@@ -1,0 +1,47 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CONTROLS-D3-001
+  feature_id: WB-CONTROLS
+  requirement_ids: [WB-SKILL-PRECEDENCE-20261113]
+  business_rule_ids: [WB-CONTROLS-RULE-008]
+  title: Workbench Skill ownership across snapshot export and Runtime
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove that a business-tenant run verifies and reads the same effective skills in Management and Runtime.
+  preconditions:
+  - A published platform Workbench and a business-tenant user exist in the isolated fixture catalog.
+  test_data:
+    profile: mock
+    catalog: Isolated relational rows and separate same-name platform and tenant files.
+  steps:
+  - order: 1
+    action: Compile and materialize snapshots with no mounts and with an authorized same-name tenant mount.
+    expected: Runtime checks each snapshot revision and the SDK guide and configuration tools read the selected skill.
+  - order: 2
+    action: Change a selected file, revoke mount access, remove the published Workbench identity or request an unbound platform skill.
+    expected: Runtime rejects the changed revision or missing authorization before it returns usable tools.
+  expected_results:
+  - A normal tenant uses the platform default or the whole authorized tenant replacement, including the correct bytes and configuration.
+  - Runtime refuses stale files, revoked or foreign-tenant mounts, and defaults without an active published Workbench identity.
+  forbidden_side_effects:
+  - Run tools cannot read the shadowed skill, and source files remain unchanged by successful staging and cleanup.
+  integration_boundary:
+  - Management snapshot export, Runtime catalog and file reconstruction, and SDK skill tools over an isolated relational catalog.
+  observations:
+  - Selected skill IDs, revision errors, SDK guide bytes and effective configuration.
+  cleanup:
+  - Close the in-memory catalog and remove temporary source and staged files.
+  acceptance:
+  - id: AC-01
+    description: Effective ownership, precedence, revision and SDK scope agree.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: File drift and loss of authorization stop preparation.
+    steps: [2]
+    expected_results: [2]
