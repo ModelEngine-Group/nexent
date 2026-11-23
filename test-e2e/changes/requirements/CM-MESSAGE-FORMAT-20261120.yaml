@@ -3,29 +3,37 @@ change:
   change_id: CM-MESSAGE-FORMAT-20261120
   change_type: requirement
   requirement_id: CM-MESSAGE-FORMAT-20261120
-  title: Fix the ContextManager message format at Runtime construction
-  description: Reuse shared context assembly for CodeAgent and complete Chat Completions messages, with faithful tool history and final request accounting.
+  title: Preserve fixed runtime message formats and real native call identities
+  description: Share context assembly and final wire accounting across CodeAgent and Chat Completions, preserving authorized
+    call/result groups.
   feature_contract_changed: false
   affected_features:
-    existing: [JIUWEN-CONTEXT, F-171]
-    modified: []
+    existing: [F-171, JIUWEN-CONTEXT]
     added: []
+    modified: []
     retired: []
   affected_cases:
-    existing: [JIUWEN-CONTEXT-D3-001, CONTEXT-POST-RESPONSE-D3-001]
-    modified: []
+    existing: [CONTEXT-POST-RESPONSE-D3-001, JIUWEN-CONTEXT-D3-001]
     added: []
+    modified: []
     retired: []
   traditional_ut:
     decision: strengthen
     behaviors:
-    - Fixed constructor formats, explicit Runtime wiring and unsupported Responses rejection.
-    - Faithful ordered native history from authorized facts, real error results and incomplete or ambiguous read-only fallback.
-    - Same-name parallel, duplicate, cross-step and child scope isolation without replay.
-    - Final wire messages, tool definitions and request prompts agree with context accounting before and after maintenance.
-    reason: Extend existing unit and protocol proof without duplicating D1. Existing D3 boundaries remain required; their legacy fixtures and native history assertions need review before execution.
+      - Fix formats at Runtime construction, reject unsupported Responses, and keep final messages, tools and request
+        prompts aligned with accounting before/after maintenance.
+      - Render authorized native calls in model order and results in completion order, retaining real errors; incomplete
+        or ambiguous groups remain read-only data without replay.
+      - Preserve same-name parallel, duplicate, cross-step, child and nested isolation; match converted text/native results
+        by provider ID rather than guessed name/order.
+      - Maintain unique legacy completion and duplicate/cancel isolation with post-response-only scheduling; add no execution
+        authority or reasoning-as-answer fallback.
+    reason: Reuse unit and protocol assertions for pairing and formats; existing D3 history/protocol boundaries remain
+      independent acceptance.
     test_selectors:
-    - test/sdk/core/agents/test_context_message_format.py
-    - test/sdk/core/agents/test_jiuwen_context.py
-    - test/sdk/core/agents/test_jiuwen_output.py
-  notes: 'SPEC: model-access-native-agent/followups/20261112-remove-output-budget/08 History Reconstruction Field Audit 20261120.md sections8-9; CMF-001 through CMF-004. User approved implementation. No new format selection field above Runtime, no Responses adapter, output cap, vendor fallback, new DB table or historical replay. Formal runs, real models and Phoenix remain paused by coordinator. Existing D3 mapping is not evidence of native wire acceptance or complete existing assertions.'
+      - test/sdk/core/agents/test_context_message_format.py
+      - test/sdk/core/agents/test_jiuwen_context.py
+      - test/sdk/core/agents/test_jiuwen_errors.py
+      - test/sdk/core/agents/test_jiuwen_output.py
+  notes: 'SPEC: remove-output-budget history reconstruction audit, CMF-001..004 and AC-006/008/009/011. No new format
+    selection above Runtime, Responses adapter, DB table, output cap, retry or vendor fallback.'

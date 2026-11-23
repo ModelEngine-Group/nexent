@@ -70,10 +70,7 @@ def test_fix01_uncovered_records_remain_and_output_can_be_read_by_owning_run():
         source, assistant_message_id=42, history=store, owner="new-run"
     )
     assert "uncovered fact" in text
-    assert (
-        json.loads(store.read("new-run", "message:42/unit-index:5"))["text"]
-        == "<STDOUT>actual stdout</STDOUT>"
-    )
+    assert json.loads(store.read('new-run', 'message:42/unit-index:5'))['text'] == '<STDOUT>actual stdout</STDOUT>'
     with pytest.raises(PermissionError):
         store.read("other-run", "message:42/unit-index:5")
 
@@ -90,16 +87,8 @@ def test_fix01_committed_view_is_restored_with_full_original_readable(kind):
     )
     assert "accepted compact representation" in text
     assert "actual stdout" not in text
-    assert (
-        "actual stdout"
-        in json.loads(store.read("new-run", "message:42/unit-index:5"))["text"]
-    )
-    assert (
-        render_persisted_actions(
-            source, assistant_message_id=42, history=store, owner="new-run"
-        )
-        == text
-    )
+    assert 'actual stdout' in json.loads(store.read('new-run', 'message:42/unit-index:5'))['text']
+    assert render_persisted_actions(source, assistant_message_id=42, history=store, owner='new-run') == text
 
 
 @pytest.mark.parametrize(
@@ -130,24 +119,11 @@ def test_fix01_unproven_projection_never_hides_raw_evidence(mutation):
 
 def test_fix01_real_renderer_and_hard_guard_use_restored_representation():
     from nexent.core.agents.context.manager import ContextManager
-    from nexent.core.agents.context.models import (
-        ContextItemType,
-        ConversationTurnContextItem,
-    )
+    from nexent.core.agents.context.models import ConversationTurnContextItem
     from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 
     manager = ContextManager(message_format="codeagent")
-    turn = ConversationTurnContextItem(
-        id="turn",
-        type=ContextItemType.CONVERSATION_TURN,
-        content={
-            "user_message": "prior question",
-            "assistant_final_answer": "actual answer",
-            "user_message_id": 41,
-            "assistant_message_id": 42,
-            "execution_records": records(),
-        },
-    )
+    turn = ConversationTurnContextItem(id="turn", type="conversation_turn", content=history_turn().content)
     messages = manager.build_context_messages([turn])
     assert [message["role"] for message in messages] == ["user", "user", "assistant"]
     assert "actual stdout" in str(messages[1]["content"])
@@ -191,14 +167,9 @@ def test_fix01_parsed_candidate_is_not_promoted_to_executed_source(mocker, dispa
     step.execution_dispatched = dispatched
     agent._finalize_step(step)
     action = agent._execution_history.get(step.execution_key).payload()["model_action"]
-    assert action["dispatch_state"] == (
-        "dispatched" if dispatched else "not_dispatched"
-    )
+    assert action['dispatch_state'] == ('dispatched' if dispatched else 'not_dispatched')
     assert bool(action["tool_calls"]) is dispatched
-    assert (
-        agent._execution_history.get(step.execution_key).fields["ERROR"]
-        == "actual failure"
-    )
+    assert agent._execution_history.get(step.execution_key).fields['ERROR'] == 'actual failure'
 
 
 def test_fix01_shared_store_keeps_historical_references_owner_scoped():
@@ -320,10 +291,7 @@ def test_fix01_real_core_records_only_the_dispatched_interpreter_action():
     assert len(completed) == 1 and model.count == 2
     payload = observer.execution_history.get(completed[0].execution_key).payload()
     assert payload["model_action"]["dispatch_state"] == "dispatched"
-    assert (
-        payload["model_action"]["tool_calls"][0]["arguments"]
-        == 'print("ACTUAL_RESULT")'
-    )
+    assert payload['model_action']['tool_calls'][0]['arguments'] == 'print("ACTUAL_RESULT")'
     assert "ACTUAL_RESULT" in payload["content"]
 
 
