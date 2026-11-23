@@ -90,7 +90,9 @@ async def test_native_tool_uses_pinned_file_versions_and_rechecks_native_snapsho
     request = service.search.await_args.args[0]
     assert request.native_documents and request.include_public_document
     assert request.file_versions == {"f" * 32: 0}
+    assert request.selected_files == list(tool.files)
     assert service.verify_data_revisions.await_args.kwargs["native_documents"] is True
+    assert service.verify_data_revisions.await_args.kwargs["selected_files"] == list(tool.files)
 
 
 @pytest.mark.asyncio

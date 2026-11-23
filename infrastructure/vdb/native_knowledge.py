@@ -127,6 +127,7 @@ class _NativeHybrid(ElasticSearchCore):
         self.mappings = {}
         self.generations = {}
         self.include_history = True
+        self.legacy_file_paths = {}
 
     def identities(self):
         settings = ElasticsearchVectorStore._call(
@@ -156,6 +157,10 @@ class _NativeHybrid(ElasticSearchCore):
         targets = tuple(self.owners)
         search_query = dict(search_query)
         visible = _generation_filter(self.generations, include_history=self.include_history)
+        if self.legacy_file_paths:
+            legacy, runtime_field = _scoped_legacy_filter(self.legacy_file_paths, self.owners)
+            visible = {"bool": {"should": [visible, legacy], "minimum_should_match": 1}}
+            search_query["runtime_mappings"] = {**search_query.get("runtime_mappings", {}), **runtime_field}
         if knn := search_query.get("knn"):
             targets = tuple(name for name in targets if _searchable_vector(
                 self.mappings[name].get(knn["field"], {}), len(knn["query_vector"]),
@@ -182,7 +187,11 @@ class _NativeHybrid(ElasticSearchCore):
             source.pop(_SEARCH_FILE, None)
             if INGEST_GENERATION not in source:
                 if not self.include_history:
-                    raise Conflict()
+                    path = source.get("path_or_url")
+                    scope = self.legacy_file_paths.get(index, {}).get(path) if isinstance(path, str) else None
+                    if scope is None:
+                        raise ScopeDenied()
+                    source[_SEARCH_FILE] = _legacy_search_file(source, scope)
                 source.pop(INGEST_IMAGE, None)
             else:
                 source[_SEARCH_FILE] = _search_file(hit["_id"], source[INGEST_GENERATION])
@@ -192,6 +201,87 @@ class _NativeHybrid(ElasticSearchCore):
             results.append({"score": hit["_score"], "document": source, "index": index,
                             "highlight_terms": extract_highlight_terms(hit.get("highlight", {}))})
         return results
+
+
+def _legacy_search_file(document, scope):
+    metadata = document.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ScopeDenied()
+    metadata = metadata or {}
+    for fields in (document, metadata):
+        claim, version = fields.get("file_id"), fields.get("file_version")
+        if claim is not None and claim not in (scope.file_id, scope.alias):
+            raise ScopeDenied()
+        if version is not None and (type(version) is not int or version != scope.file_version):
+            raise ScopeDenied()
+    if scope.file_version and document.get("file_version", metadata.get("file_version")) != scope.file_version:
+        raise ScopeDenied()
+    position = document.get("index")
+    if position is None:
+        position = metadata.get("chunk_index")
+    process = document.get("process_source")
+    if type(position) is not int or position < 0 or not isinstance(process, str) or not process.strip():
+        raise ScopeDenied()
+    return {"file_id": scope.file_id, "file_version": scope.file_version, "chunk_index": position}
+
+
+def _scoped_legacy_filter(paths, owners):
+    field = "nexent_authorized_legacy_file"
+    scope_filter = {"bool": {"should": [{"bool": {"filter": [
+        {"term": {"_index": index}}, {"terms": {"path_or_url": list(scopes)}},
+    ]}} for index, scopes in paths.items()], "minimum_should_match": 1}}
+    # The source fields do not always have keyword mappings. Filter within ES before ranking.
+    script = """
+        def source = params._source;
+        def path = source['path_or_url'];
+        def index = doc['_index'].value;
+        def scope = params.files[index];
+        if (!(path instanceof String) || scope == null || !scope.containsKey(path)) { emit(false); return; }
+        def expected = scope[path];
+        def metadata = source['metadata'];
+        if (metadata != null && !(metadata instanceof Map)) { emit(false); return; }
+        if (metadata == null) { metadata = [:]; }
+        def tenant = params.tenants[index];
+        for (def owner : [source, metadata]) {
+            def fid = owner['file_id'];
+            def version = owner['file_version'];
+            def taggedTenant = owner['tenant_id'];
+            if (taggedTenant != null && !tenant.equals(taggedTenant)
+                || fid != null && !fid.equals(expected.id) && !fid.equals(expected.alias)
+                || version != null && (!(version instanceof Integer || version instanceof Long)
+                || version != expected.version)) { emit(false); return; }
+        }
+        def version = source.containsKey('file_version') ? source['file_version'] : metadata['file_version'];
+        def position = source['index'] == null ? metadata['chunk_index'] : source['index'];
+        def process = source['process_source'];
+        emit((expected.version == 0 || version != null && version == expected.version)
+            && (position instanceof Integer || position instanceof Long) && position >= 0
+            && process instanceof String && process.trim().length() > 0);
+    """
+    files = {index: {path: {"id": scope.file_id, "alias": scope.alias, "version": scope.file_version}
+                     for path, scope in scopes.items()} for index, scopes in paths.items()}
+    query = {"bool": {"filter": [legacy_document_filter(), scope_filter, {"term": {field: True}}]}}
+    return query, {field: {"type": "boolean", "script": {"source": script, "params": {"files": files, "tenants": owners}}}}
+
+
+def _bind_legacy_search_files(resources, mappings, file_versions, legacy_files):
+    entries = {resource.knowledge_id: resource.collection for resource in resources}
+    paths = {}
+    for scope in legacy_files:
+        if scope.knowledge_id not in entries or file_versions.get(scope.file_id) != scope.file_version:
+            raise ScopeDenied()
+        index = entries[scope.knowledge_id]
+        field = mappings[index].get("path_or_url", {})
+        limit = field.get("ignore_above", 32766)
+        if field.get("type") != "keyword" or field.get("index", True) is not True or type(limit) is not int:
+            continue
+        for address in scope.addresses:
+            if len(address.encode("utf-8")) > limit:
+                continue
+            previous = paths.setdefault(index, {}).setdefault(address, scope)
+            if previous != scope:
+                raise Conflict()
+    return paths
 
 
 def _searchable_vector(mapping, dimensions):
@@ -404,7 +494,7 @@ def _native_chunk(hit, resource, generations):
 
 
 @contextmanager
-def _native_search_reader(actor, resources, *, context, file_versions=None):
+def _native_search_reader(actor, resources, *, context, file_versions=None, legacy_files=()):
     owners = {resource.collection: resource.resource_tenant_id for resource in resources}
     if len(owners) != len(resources) or not owners or any(
         not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", index) for index in owners
@@ -428,8 +518,17 @@ def _native_search_reader(actor, resources, *, context, file_versions=None):
                     _published_generations(actor, resource, engine=engine, context=context, file_versions=file_versions)
                     if file_versions and INGEST_GENERATION in mappings[resource.collection] else frozenset()
                 ) for resource in resources}
+                search.legacy_file_paths = _bind_legacy_search_files(resources, mappings, file_versions, legacy_files)
+
+            def revision_parts(resource):
+                parts = [resource.revision, versions[resource.collection], sorted(generations[resource.collection])]
+                scoped = search.legacy_file_paths.get(resource.collection, {})
+                if scoped:
+                    parts.append([[path, scoped[path].model_dump(mode="json")] for path in sorted(scoped)])
+                return parts
+
             revisions = {resource.knowledge_id: hashlib.sha256(json.dumps(
-                [resource.revision, versions[resource.collection], sorted(generations[resource.collection])],
+                revision_parts(resource),
                 separators=(",", ":")).encode()).hexdigest() for resource in resources}
             yield search, revisions
             if any(_index_revision(client, resource, context) != versions[resource.collection] for resource in resources) or (
@@ -442,14 +541,14 @@ def _native_search_reader(actor, resources, *, context, file_versions=None):
         close_owned(context, [engine.dispose])
 
 
-def native_search_revisions(actor, resources, *, context):
-    with _native_search_reader(actor, resources, context=context) as (_, revisions):
+def native_search_revisions(actor, resources, *, context, file_versions=None, legacy_files=()):
+    with _native_search_reader(actor, resources, context=context, file_versions=file_versions, legacy_files=legacy_files) as (_, revisions):
         return revisions
 
 
 def search_native_knowledge(actor, resources, query, query_vector, top_k, weight_accurate, multimodal, *,
-                            context, mode="hybrid", file_versions=None):
-    with _native_search_reader(actor, resources, context=context, file_versions=file_versions) as (search, revisions):
+                            context, mode="hybrid", file_versions=None, legacy_files=()):
+    with _native_search_reader(actor, resources, context=context, file_versions=file_versions, legacy_files=legacy_files) as (search, revisions):
         if not search.owners:
             return [], revisions
         indices = list(search.owners)

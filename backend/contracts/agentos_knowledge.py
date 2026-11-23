@@ -261,6 +261,21 @@ class KnowledgeJobState(KnowledgeJobLookup):
 
 class KnowledgeSearchAuthorization(Contract):
     knowledge_ids: list[int] = Field(min_length=1, max_length=100)
+    selected_files: list[KnowledgeFileReference] = Field(default_factory=list, max_length=1000)
+
+    @model_validator(mode="after")
+    def selected_file_scope(self):
+        if (len({ref.file_id for ref in self.selected_files}) != len(self.selected_files)
+            or any(ref.knowledge_id not in self.knowledge_ids for ref in self.selected_files)):
+            raise ValueError("Expected distinct selected files in the authorized knowledge bases")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_selected_files(self, handler):
+        result = handler(self)
+        if not self.selected_files:
+            result.pop("selected_files", None)
+        return result
 
     @field_validator("knowledge_ids")
     @classmethod
@@ -278,8 +293,28 @@ class KnowledgeBaseGrant(Contract):
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class KnowledgeLegacySearchFile(KnowledgeFileReference):
+    addresses: list[str] = Field(min_length=1, max_length=8)
+    alias: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def valid_addresses(self):
+        if (len(set(self.addresses)) != len(self.addresses) or any(not 0 < len(path) <= 2048 for path in self.addresses)
+            or self.alias is not None and (not self.alias.isprintable() or not self.alias.strip() or self.alias == self.file_id)):
+            raise ValueError("Invalid historical file scope")
+        return self
+
+
 class KnowledgeSearchGrant(Contract):
     knowledge_bases: list[KnowledgeBaseGrant] = Field(min_length=1, max_length=100)
+    legacy_files: list[KnowledgeLegacySearchFile] = Field(default_factory=list, max_length=1000)
+
+    @model_serializer(mode="wrap")
+    def serialize_legacy_files(self, handler):
+        result = handler(self)
+        if not self.legacy_files:
+            result.pop("legacy_files", None)
+        return result
 
 
 class KnowledgeSearch(KnowledgeSearchAuthorization):
@@ -301,6 +336,9 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
 
     @model_validator(mode="after")
     def pinned_resources(self):
+        if self.selected_files and (not self.native_documents
+            or {ref.file_id: ref.file_version for ref in self.selected_files} != self.file_versions):
+            raise ValueError("Historical file search requires exact selected file versions")
         if self.native_documents and (
             not self.expected_revisions or self.rerank_model is not None or self.file_ids and not self.file_versions
         ):
@@ -331,6 +369,8 @@ class KnowledgeSearch(KnowledgeSearchAuthorization):
     @model_serializer(mode="wrap")
     def serialize_search(self, handler):
         result = handler(self)
+        if not self.selected_files:
+            result.pop("selected_files", None)
         if not self.global_hybrid_candidates:
             result.pop("global_hybrid_candidates", None)
         if not self.split_multimodal_candidates:

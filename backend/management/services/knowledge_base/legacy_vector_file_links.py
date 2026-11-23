@@ -61,36 +61,48 @@ def legacy_source_addresses(row, *, strict=False):
     return result
 
 
-def require_unique_source_addresses(records, knowledge_id, addresses, *, context, file_id=None):
+def conflicting_source_addresses(records, knowledge_id, owners, *, context):
     # Include retired rows. A reused source path can still identify historical vectors.
-    cursor = None
+    cursor, conflicts = None, set()
     query = RecordQuery(where=Comparison("knowledge_id", "eq", knowledge_id),
                         fields=("file_id", "bucket_name", "source_key", "object_name", "local_source_path"))
     while True:
         page = records.query("knowledge_file_history", query, PageRequest(limit=500, cursor=cursor), context=context)
         for row in page.items:
-            raw_addresses = {row[field] for field in ("source_key", "object_name", "local_source_path")}
-            if row["file_id"] != file_id and addresses & (legacy_source_addresses(row) | raw_addresses):
-                raise Conflict()
+            raw = {row[field] for field in ("source_key", "object_name", "local_source_path")}
+            for address in legacy_source_addresses(row) | raw:
+                if address in owners and owners[address] != row["file_id"]:
+                    conflicts.add(address)
         cursor = page.next_cursor
         if cursor is None:
-            return
+            return conflicts
+
+
+def require_unique_source_addresses(records, knowledge_id, addresses, *, context, file_id=None):
+    if conflicting_source_addresses(records, knowledge_id, dict.fromkeys(addresses, file_id), context=context):
+        raise Conflict()
+
+
+def active_file_aliases(records, knowledge_id, file_ids, *, context):
+    if not file_ids:
+        return {}
+    query = RecordQuery(where=Junction("and", (Comparison("knowledge_id", "eq", knowledge_id),
+                                               Comparison("standard_file_id", "in", list(file_ids)))))
+    page = records.query(ACTIVE_LEGACY_FILE_IDS, query, PageRequest(limit=len(file_ids)), context=context)
+    if page.next_cursor:
+        raise Conflict()
+    result = {}
+    for row in page.items:
+        file_id, alias = row["standard_file_id"], row["original_file_id"]
+        if (row["knowledge_id"] != knowledge_id or file_id not in file_ids or file_id in result
+            or row["tenant_id"] != records.scope.tenant_id or alias == file_id or not is_historical_file_id(alias)):
+            raise ScopeDenied()
+        result[file_id] = alias
+    return result
 
 
 def active_file_alias(records, knowledge_id, file_id, *, context):
-    query = RecordQuery(where=Junction("and", (Comparison("knowledge_id", "eq", knowledge_id),
-                                               Comparison("standard_file_id", "eq", file_id))))
-    page = records.query(ACTIVE_LEGACY_FILE_IDS, query, PageRequest(limit=2), context=context)
-    if not page.items:
-        return None
-    if page.next_cursor or len(page.items) != 1:
-        raise Conflict()
-    row = page.items[0]
-    alias = row["original_file_id"]
-    if (row["knowledge_id"] != knowledge_id or row["standard_file_id"] != file_id
-        or row["tenant_id"] != records.scope.tenant_id or alias == file_id or not is_historical_file_id(alias)):
-        raise ScopeDenied()
-    return alias
+    return active_file_aliases(records, knowledge_id, {file_id}, context=context).get(file_id)
 
 
 class LegacyVectorFileLinks:

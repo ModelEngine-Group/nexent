@@ -102,6 +102,7 @@ class KnowledgeToolSearch:
                     response = await self.service.search(KnowledgeSearch(
                         knowledge_ids=[r.knowledge_id for r in scoped], query=query, search_mode=search_mode, top_k=limit,
                         embedding_model=ModelVersion(model_id=model_id, revision=revision),
+                        selected_files=(files or []) if self.native_documents else [],
                         file_ids=[f.file_id for f in files or ()],
                         file_versions={f.file_id: f.file_version for f in files or ()},
                         expected_revisions={r.knowledge_id: r.revision for r in scoped},
@@ -132,9 +133,12 @@ class KnowledgeToolSearch:
                 await self._reauthorize(resources)
                 phase = "content"
                 if revisions:
-                    await self.service.verify_data_revisions([r for r in resources if r.knowledge_id in revisions],
-                                                             revisions, self.actor, context=context,
-                                                             **({"native_documents": True} if self.native_documents else {}))
+                    verified = [r for r in resources if r.knowledge_id in revisions]
+                    native = {}
+                    if self.native_documents:
+                        native = {"native_documents": True,
+                                  "selected_files": [ref for ref in self.files or () if ref.knowledge_id in revisions]}
+                    await self.service.verify_data_revisions(verified, revisions, self.actor, context=context, **native)
                 context.remaining()
                 return candidates[:top_k]
         except TimeoutError as error:

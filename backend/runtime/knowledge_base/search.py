@@ -158,11 +158,13 @@ class KnowledgeSearchService:
 
     async def _grant(self, request, actor):
         grant = await self.client.authorize_knowledge_search(
-            KnowledgeSearchAuthorization(knowledge_ids=request.knowledge_ids), actor.user_id, actor.tenant_id)
+            KnowledgeSearchAuthorization(knowledge_ids=request.knowledge_ids, selected_files=request.selected_files),
+            actor.user_id, actor.tenant_id)
         if ([g.knowledge_id for g in grant.knowledge_bases] != request.knowledge_ids
                 or len({g.collection for g in grant.knowledge_bases}) != len(grant.knowledge_bases)
                 or any(g.resource_tenant_id not in {actor.tenant_id, ASSET_OWNER_TENANT_ID} for g in grant.knowledge_bases)):
             raise ScopeDenied()
+        self._check_legacy_scope(grant, request.selected_files)
         primary = request.embedding_model.model_id
         if (grant.knowledge_bases[0].embedding_model_id != primary or
             not request.first_collection_embedding and any(g.embedding_model_id != primary for g in grant.knowledge_bases)):
@@ -172,6 +174,13 @@ class KnowledgeSearchService:
         ):
             raise Conflict()
         return grant
+
+    @staticmethod
+    def _check_legacy_scope(grant, selected_files):
+        selected = {(ref.knowledge_id, ref.file_id, ref.file_version) for ref in selected_files}
+        returned = {(ref.knowledge_id, ref.file_id, ref.file_version) for ref in grant.legacy_files}
+        if len(returned) != len(grant.legacy_files) or not returned <= selected:
+            raise ScopeDenied()
 
     async def _invoke(self, payload, actor):
         result = await self.models.invoke(payload, actor)
@@ -184,6 +193,7 @@ class KnowledgeSearchService:
             search_native_knowledge, actor, grant.knowledge_bases, request.query, query_vector,
             request.top_k, request.weight_accurate, multimodal, context=context,
             mode=request.search_mode, file_versions=request.file_versions or None,
+            **({"legacy_files": grant.legacy_files} if grant.legacy_files else {}),
         )
         if await self._grant(request, actor) != grant:
             raise Conflict()
@@ -290,14 +300,24 @@ class KnowledgeSearchService:
                                                               context=context)
                 for resource in grant.knowledge_bases}
 
-    async def verify_data_revisions(self, resources, expected, actor, *, context, native_documents=False):
+    async def verify_data_revisions(self, resources, expected, actor, *, context, native_documents=False, selected_files=()):
         grant = KnowledgeSearchGrant(knowledge_bases=resources)
         if set(expected) != {resource.knowledge_id for resource in resources}:
             raise ScopeDenied()
         try:
             async with asyncio.timeout(context.remaining()):
                 if native_documents:
-                    revisions = await self._blocking(native_search_revisions, actor, resources, context=context)
+                    scoped = {}
+                    if selected_files:
+                        current = await self.client.authorize_knowledge_search(KnowledgeSearchAuthorization(
+                            knowledge_ids=[r.knowledge_id for r in resources], selected_files=list(selected_files)),
+                            actor.user_id, actor.tenant_id)
+                        if current.knowledge_bases != resources:
+                            raise Conflict()
+                        self._check_legacy_scope(current, selected_files)
+                        scoped = {"file_versions": {r.file_id: r.file_version for r in selected_files},
+                                  "legacy_files": current.legacy_files}
+                    revisions = await self._blocking(native_search_revisions, actor, resources, context=context, **scoped)
                     if revisions != expected:
                         raise Conflict()
                     return

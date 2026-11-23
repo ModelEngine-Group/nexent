@@ -8,11 +8,12 @@ from time import monotonic
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from pydantic import ValidationError
 from contracts.agentos import ModelResult
 from contracts.agentos_knowledge import (
     KnowledgeFileDelete,
+    KnowledgeFileReference,
     KnowledgeJobLookup,
+    KnowledgeLegacySearchFile,
     KnowledgeSearch,
     KnowledgeSearchGrant,
 )
@@ -24,6 +25,7 @@ from nexent.storage.models import (
     VectorCollectionInfo,
     VectorKey,
 )
+from pydantic import ValidationError
 from runtime.knowledge_base.search import KnowledgeSearchService
 
 from infrastructure.rdb.knowledge_jobs import JOBS
@@ -319,3 +321,18 @@ def test_protected_image_search_preserves_published_chunk_index(chunk_index):
     assert result.location["page_number"] == 2
     assert result.public_document is None and result.image_ref.key == "image.png"
     assert "chunk_index" not in location
+
+
+async def test_history_scope_revision_is_reconfirmed_before_tool_returns(search, mocker):
+    s, _, grant, _, service = search
+    ref = {"knowledge_id": 1, "file_id": s.request.file_id, "file_version": 0}
+    authorized = grant.model_copy(update={"legacy_files": [
+        KnowledgeLegacySearchFile(**ref, addresses=["history/source.txt"])]})
+    s.client.authorize_knowledge_search.return_value = authorized
+    native = mocker.patch("runtime.knowledge_base.search.native_search_revisions", return_value={1: "c" * 64})
+    selected = [KnowledgeFileReference(**ref)]
+    with pytest.raises(Conflict):
+        await service.verify_data_revisions(grant.knowledge_bases, {1: "b" * 64}, s.actor,
+            context=s.context, native_documents=True, selected_files=selected)
+    assert s.client.authorize_knowledge_search.await_args.args[0].selected_files == selected
+    assert native.call_args.kwargs["legacy_files"] == authorized.legacy_files
