@@ -100,7 +100,6 @@ async def forward_northbound_run(
 ):
     payload = CompatibilityConversationRun(
         request=agent_request.model_dump(mode="json"),
-        invocation="northbound",
     )
     try:
         response = await forward_conversation_run(

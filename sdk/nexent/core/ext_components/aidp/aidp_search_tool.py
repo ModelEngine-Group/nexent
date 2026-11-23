@@ -68,9 +68,9 @@ def _parse_kds_list(kds_list: str) -> List[str]:
 
 def _normalize_identity_value(value: Any) -> str:
     """Return a non-empty string identifier, or ``""`` for a missing value."""
-    if value is None or isinstance(value, bool):
+    if not isinstance(value, str):
         return ""
-    return str(value).strip()
+    return value.strip()
 
 
 def extract_aidp_file_identity(metadata: Any) -> tuple[str, str]:

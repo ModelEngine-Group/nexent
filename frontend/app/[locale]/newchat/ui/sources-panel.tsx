@@ -101,11 +101,7 @@ export function getAidpFileIdentity(
   const reference = item.sourceReference;
   if (!reference) return undefined;
   const normalize = (value: unknown) =>
-    typeof value === "string"
-      ? value.trim()
-      : typeof value === "number"
-        ? String(value)
-        : "";
+    typeof value === "string" ? value.trim() : "";
   const kdsId = normalize(reference.kds_id);
   const fileUuid = normalize(reference.file_uuid);
   return kdsId && fileUuid ? { kdsId, fileUuid } : undefined;

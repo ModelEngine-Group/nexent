@@ -106,16 +106,9 @@ router = APIRouter(prefix="/nb/v1", tags=["northbound"])
 
 __all__ = ["router", "_get_northbound_context"]
 
-# Resolved lazily so legacy Northbound unit tests can stub the environment
-# module without the AIDP credentials it does not exercise. The runtime values
-# come from the shared backend constants; tests may override these attributes.
-_AIDP_FILE_SERVER_URL: Optional[str] = None
-_AIDP_FILE_API_KEY: Optional[str] = None
-
-
+# The legacy Northbound contract tests stub the environment module without AIDP
+# constants; resolve them only when the download handler actually runs.
 def _aidp_file_credentials() -> tuple[str, str]:
-    if _AIDP_FILE_SERVER_URL is not None and _AIDP_FILE_API_KEY is not None:
-        return _AIDP_FILE_SERVER_URL, _AIDP_FILE_API_KEY
     from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
 
     return AIDP_SERVER_URL, AIDP_API_KEY
