@@ -30,6 +30,8 @@ change:
       rebuild; local rejection dispatches no new recovery.
     - Ignore withdrawn checkpoint extras without modifying stored rows or granting user-message/covered-history
       sources.
+    - Measure summary gains using rendered request cost in both formats; skip noncompactable actions without
+      changing recent-action boundaries or discarding an otherwise valid history summary.
     reason: User-approved removal follows 2c18 behavior boundaries; keep old Cases and only withdraw capability-specific
       extensions. No duplicate D1 or new framework.
     test_selectors:

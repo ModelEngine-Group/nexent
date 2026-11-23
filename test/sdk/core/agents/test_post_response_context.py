@@ -296,3 +296,84 @@ def test_ac008_core_passes_fresh_framing_after_clearing_protocol_repairs(monkeyp
     assert 'obsolete repair fixture' in str(frames[0][1])
     assert complete.call_args.kwargs['request_system_messages']
     assert 'obsolete repair fixture' not in str(complete.call_args.kwargs['request_tail_messages'])
+
+
+def _maintain_history(manager, turns, current, model, *, provider_delta=0):
+    from nexent.core.agents.context.maintenance import complete_context
+
+    context = manager.prepare_items_context("", items=turns)
+
+    def assemble(maintenance):
+        return manager.assemble_context_items(model=model, run_context=context, current_items=current,
+            maintenance=maintenance, force_compaction=maintenance)
+
+    before = assemble(False)
+    baseline = ContextUsageBaseline()
+    baseline.capture(before.evidence.final_token_estimate, "model")
+    result = complete_context(manager=manager, baseline=baseline, model_key="model",
+        input_tokens=before.evidence.final_token_estimate + provider_delta, assemble=assemble,
+        cancelled=lambda: False, estimate=manager.estimate_request_tokens)
+    return before, result
+
+
+@pytest.mark.parametrize("message_format", ["codeagent", "openai_chat_completions"])
+@pytest.mark.parametrize("provider_delta", [0, 800], ids=["fits-window", "usage-requires-reduction"])
+def test_ac008_stored_arguments_cannot_make_a_larger_rendered_summary_acceptable(message_format, provider_delta):
+    from nexent.core.agents.context import ContextItem, ContextItemInput
+    from test_persisted_codeagent_actions import history_turn
+
+    manager = runtime(3000, message_format=message_format).context_manager
+    sink = manager.config.history_summary_sink = Mock()
+    source = history_turn() if message_format == "codeagent" else history_turn(
+        execution_records=[], answer="history fact " * 40)
+    turn = ContextItem.from_input(source)
+    summary = "# Compact Result of History\n" + "\n".join(
+        "## " + key.replace("_", " ").title() + "\n" + "retained fact " * 12
+        for key in manager.config.summary_json_schema)
+    model = Mock(spec=[], return_value=SimpleNamespace(content=summary))
+    task = ContextItem.from_input(ContextItemInput(id="task", type="current_task", content={"text": "x" * 1900}))
+    before, result = _maintain_history(manager, [turn], [task], model, provider_delta=provider_delta)
+
+    if message_format == "codeagent":
+        assert turn.token_estimate > 60000
+    assert manager._message_tokens(manager.build_context_messages([turn])) < 1000
+    assert result.final_token_estimate <= before.evidence.final_token_estimate
+    assert manager._history_candidate is None and manager._pending_history_summary_event is None
+    sink.assert_not_called()
+    assert model.call_count <= 1
+
+
+@pytest.mark.parametrize("with_history", [False, True], ids=["no-history", "valid-history-summary"])
+def test_ac008_native_actions_remain_intact_when_the_target_is_unreachable(with_history):
+    from copy import deepcopy
+    from nexent.core.agents.context import ContextItem, ContextItemInput
+    from nexent.core.agents.context.history_compression import HistoryCompressionResult, HistorySummaryCandidate
+    from nexent.core.agents.cores.jiuwen.context import NativeActionItem
+
+    manager = runtime(10000, message_format="openai_chat_completions").context_manager
+    turn = ContextItem.from_input(ContextItemInput(id="turn", type="conversation_turn", content={
+        "user_message": "old question", "assistant_final_answer": "old " * 1100,
+        "user_message_id": 1, "assistant_message_id": 2}))
+    task = ContextItem.from_input(ContextItemInput(id="task", type="current_task", content={"text": "x" * 3000}))
+    action = NativeActionItem(id="response", type="current_action", content={"messages": [
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "original", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "original", "content": "answer"}]})
+    original = deepcopy(action.model_dump())
+    candidate = HistorySummaryCandidate(summary={"markdown": "summary " * 420}, covered_through_message_id=2)
+    manager._history_compressor.compress = Mock(return_value=HistoryCompressionResult(candidate=candidate))
+    sink = manager.config.history_summary_sink = Mock()
+    before, result = _maintain_history(manager, [turn] if with_history else [], [task, action],
+                                     SimpleNamespace(), provider_delta=1000 if with_history else 5000)
+
+    assert result.maintenance_phase == "post_response"
+    assert action.model_dump() == original
+    if with_history:
+        assert manager._history_candidate is not None
+        assert before.evidence.final_token_estimate > result.final_token_estimate > manager.config.compaction_target_tokens
+        assert result.final_token_estimate < manager.config.context_window_tokens
+        sink.assert_called_once()
+    else:
+        assert manager._history_candidate is None
+        manager._history_compressor.compress.assert_not_called()
+        sink.assert_not_called()
