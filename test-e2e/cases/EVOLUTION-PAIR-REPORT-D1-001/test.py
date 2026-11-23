@@ -31,3 +31,12 @@ def test_grade_and_compare(monkeypatch):
     assert report["counts"] == dict(improved=1, regressed=1, both_pass=1, both_fail=1, inconclusive=2)
     assert report["pairs"][2]["result"]["result"]["score"] == 0
     assert report["pairs"][5]["base"]["status"] == "missing_evidence"
+    assert "valid_triplets" not in report
+    for row in rows:
+        row["result"]["skill"] = {"guide_reads": 0 if row["case_id"] == 2 else 1}
+    rows.extend({"case_id": i, "variant": "no_skill", "status": status, "result": {}}
+                for i, status in enumerate(["fail", "pass", "invalid", "fail", "pass", "pass"], 1))
+    report = service.experiment_report("tenant", "editor", 8)
+    assert report["valid_pairs"] == 4 and report["valid_triplets"] == 3 and report["verified_guide_pairs"] == 2
+    assert report["pairs"][1]["skill_vs_absent"] == {"base":"both_fail", "result":"improved"}
+    assert report["pairs"][3]["skill_vs_absent"] == {"base":"inconclusive", "result":"inconclusive"}

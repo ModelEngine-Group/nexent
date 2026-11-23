@@ -1,4 +1,9 @@
 {
+  "evolution.no_skill": "不挂载目标 Skill",
+  "evolution.skillCoverage": "三组均有效 {{valid}} / {{total}} 题，其中新旧版均读取正文 {{read}} 题",
+  "evolution.guideEvidence": "挂载版本 {{revision}} · 正文读取 {{reads}} 次",
+  "evolution.unmounted": "未挂载",
+  "evolution.skillVsAbsent": "相对不挂载组：旧版{{old}}，新版{{next}}",
   "evolution.stepTokens": "已上报步骤的输入 token：{{tokens}}",
   "evolution.sourceGroup": "材料来源组（同源改写题填写相同名称）",
   "evolution.selectExamples": "从评测结果挑选提示词示例",

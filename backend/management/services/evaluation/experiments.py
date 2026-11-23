@@ -59,12 +59,15 @@ async def _io(name, fn, *args):
 async def _snapshot(request, tenant, user, variant):
     options = {}
     if request.candidate_type == "skill_step":
-        options = {"skill_candidate_id": request.candidate_id, "skill_variant": variant}
+        options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
     elif variant == "result":
         options = {"prompt_candidate_id": request.candidate_id}
-    return await prepare_evaluation_snapshot(
+    spec = await prepare_evaluation_snapshot(
         EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query=""), user, tenant,
         language=request.language, **options)
+    if variant == "no_skill":
+        spec = spec.model_copy(update={"omit_root_skill_candidate_id": request.candidate_id})
+    return spec
 
 
 async def _excluded_sources(request, tenant):
@@ -97,7 +100,8 @@ async def create_experiment(request, tenant, user):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
         cases[str(case_id)] = case["digest"]
     snapshots = {}
-    for variant in ("base", "result"):
+    arms = ("base", "result", "no_skill") if request.candidate_type == "skill_step" else ("base", "result")
+    for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
         snapshots[variant] = snapshot_digest(spec)
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
@@ -118,10 +122,21 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     counts = Counter(improved=0, regressed=0, both_pass=0, both_fail=0, inconclusive=0)
     labels = {("fail", "pass"): "improved", ("pass", "fail"): "regressed",
               ("pass", "pass"): "both_pass", ("fail", "fail"): "both_fail"}
+    valid_triplets = verified_guide_pairs = 0
     for pair in pairs.values():
         outcome = labels.get((pair["base"]["status"], pair["result"]["status"]), "inconclusive")
         counts[outcome] += 1
         pair["comparison"] = outcome
+        if "no_skill" in pair:
+            control = pair["no_skill"]["status"]
+            complete = outcome != "inconclusive" and control in {"pass", "fail"}
+            valid_triplets += int(complete)
+            if complete and all(((pair[arm]["result"] or {}).get("skill") or {}).get("guide_reads", 0) > 0
+                                for arm in ("base", "result")):
+                verified_guide_pairs += 1
+            pair["skill_vs_absent"] = {
+                arm: labels[(control, pair[arm]["status"])] if complete else "inconclusive" for arm in ("base", "result")
+            }
     states = {row["status"] for row in rows}
     if states <= {"pending"}:
         status = "pending"
@@ -130,6 +145,8 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     else:
         status = "cancelled" if "cancelled" in states else "finished"
     return {"experiment_id": eid, **scope, "status": status, "total_pairs": len(pairs),
+            **({"valid_triplets": valid_triplets, "verified_guide_pairs": verified_guide_pairs}
+               if any("no_skill" in p for p in pairs.values()) else {}),
             "valid_pairs": len(pairs) - counts["inconclusive"], "counts": dict(counts), "pairs": pairs}
 
 
@@ -207,12 +224,23 @@ async def execute_trial(job):
     finally:
         await _io("release-development-input", stack.close)
     receipt = observed.replay_receipt
-    if not receipt or receipt.trial_id != job["receipt_id"] or receipt.outcome != "completed":
+    if not receipt or receipt.trial_id != job["receipt_id"]:
         return "invalid", {"error": "missing_or_unsuccessful_runtime_receipt"}
+    if receipt.outcome != "completed":
+        return "invalid", {"error": "unsuccessful_runtime", "runtime_outcome": receipt.outcome}
+    skill = receipt.skill
+    if "no_skill" in job["plan"]["snapshots"]:
+        target = next((ref for ref in spec.resource.skill_refs if ref.package_candidate_id == request.candidate_id), None)
+        omitted = job["variant"] == "no_skill"
+        if (not target or not skill or skill.candidate_id != request.candidate_id or skill.instance_id != target.instance_id
+                or skill.variant != job["variant"] or skill.mounted_revision != (None if omitted else target.revision)
+                or omitted and (skill.listed or skill.guide_reads)):
+            return "invalid", {"error": "skill_observation_mismatch"}
     await _io("recheck-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
     grade = await run_blocking("grade-development-trial", _grade, request, job, case["task"], observed,
                                lane="evaluation", owner="management")
     return grade["status"], {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
+                             **({"skill": skill.model_dump()} if skill else {}),
                              "reported_step_input_tokens": reported_step_input_tokens(observed.events),
                              "events_digest": task_digest(observed.events), "case_digest": case["digest"],
                              "snapshot_digest": digest, "evaluator_version": job["plan"]["evaluator"]["version_no"]}

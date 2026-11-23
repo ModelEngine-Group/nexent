@@ -62,7 +62,7 @@ def submit(tenant, user, request, plan):
                 WHERE suggestion_id=:sid"""), link)
         session.execute(text("""
             INSERT INTO nexent.evolution_trial_t (experiment_id, case_id, variant) VALUES (:eid, :case, :variant)
-        """), [dict(eid=eid, case=case, variant=v) for case in request.case_ids for v in ("base", "result")])
+        """), [dict(eid=eid, case=case, variant=v) for case in request.case_ids for v in plan["snapshots"]])
         return eid
 
 

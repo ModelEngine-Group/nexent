@@ -722,6 +722,7 @@ class PreparedEvaluationRun(AgentRunSpec):
 
     conversation_id: Annotated[int, Field(le=0)] = 0
     replay_trial_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
+    omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
 
     @model_serializer(mode="wrap")
     def omit_ordinary_replay_reference(self, serialize):
@@ -731,9 +732,19 @@ class PreparedEvaluationRun(AgentRunSpec):
         return payload
 
 
+class SkillTrialObservation(RunSpecModel):
+    candidate_id: PositiveInt
+    instance_id: PositiveInt
+    variant: Literal["no_skill", "base", "result"]
+    listed: bool
+    mounted_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    guide_reads: int = Field(ge=0)
+
+
 class ReplayReceipt(RunSpecModel):
     trial_id: str = Field(pattern=RUN_ID_PATTERN)
     outcome: str = Field(min_length=1)
+    skill: SkillTrialObservation | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class EvaluationAgentResult(BaseModel):

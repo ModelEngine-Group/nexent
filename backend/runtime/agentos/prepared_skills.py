@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from contracts.agentos import EvaluationSkillTool, FileToolDescription, WorkbenchDebugSkillLookup, WorkbenchSkillLookup
+from infrastructure.rdb import skill_candidate_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_skill_rows
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
@@ -18,6 +19,61 @@ from runtime.agentos.prepared_workbench import fetch_workbench_skill_mounts
 
 _stage_lock = Lock()
 _stage_directory: TemporaryDirectory | None = None
+
+
+def root_without_target_skill(resource, actor, candidate_id):
+    bound = skill_candidate_records.read_bound_skill_candidate(actor.tenant_id, resource.agent_id, resource.version_no, candidate_id)
+    target = [ref for ref in resource.skill_refs if ref.package_candidate_id == candidate_id]
+    if (not bound or resource.workbench_skill_refs or len(target) != 1 or target[0].package_variant != "base"
+            or target[0].instance_id != bound["instance_id"] or resource.evaluation_options is None):
+        raise ValueError("The control requires a pinned baseline Skill on the root Agent")
+    remaining = [ref for ref in resource.skill_refs if ref.instance_id != bound["instance_id"]]
+    removed_tools = set() if remaining else set(EvaluationSkillTool)
+    tools = [binding for binding in resource.tools if binding.tool_id not in removed_tools]
+    items = []
+    for item in resource.evaluation_options.context_items or ():
+        content = item.get("content")
+        if isinstance(content, dict) and (
+            (item.get("type") == "skill" and content.get("name") == bound["skill_name"])
+            or (item.get("type") == "tool" and content.get("name") in removed_tools)
+        ):
+            continue
+        items.append(item)
+    options = resource.evaluation_options.model_copy(update={"context_items": items})
+    return resource.model_copy(update={"skill_refs": remaining, "tools": tools, "evaluation_options": options})
+
+
+def skill_trial_observation(payload, info, actor):
+    """Inspect the mounted root Agent after Runtime has built its executable tools."""
+    from contracts.agentos import SkillTrialObservation
+
+    refs = [ref for ref in payload.resource.skill_refs if ref.package_candidate_id is not None]
+    if not refs:
+        return None, None
+    if len(refs) != 1:
+        raise ValueError("Expected one target Skill for a single-resource trial")
+    ref = refs[0]
+    bound = skill_candidate_records.read_bound_skill_candidate(actor.tenant_id, payload.resource.agent_id,
+                                                              payload.resource.version_no, ref.package_candidate_id)
+    if not bound or bound["instance_id"] != ref.instance_id:
+        raise ValueError("Skill trial binding is no longer available")
+    name = bound["skill_name"]
+    config = info.agent_config
+    listed = any(item.type == "skill" and item.content.get("name") == name for item in config.context_items or [])
+    reader = next((t for t in config.tools if t.name == EvaluationSkillTool.GUIDE), None)
+    path = None
+    if reader:
+        path = Path(reader.params["local_skills_dir"]) / skill_path_segment(actor.tenant_id) / skill_path_segment(name) / "SKILL.md"
+        if path.is_file() != (name in reader.params["authorized_skill_names"]):
+            raise ValueError("Skill reader permissions do not match the staged guide")
+        if not path.is_file():
+            path = None
+    omitted = payload.omit_root_skill_candidate_id is not None
+    if omitted == (path is not None) or (omitted and listed):
+        raise ValueError("Mounted Skill does not match the trial arm")
+    return SkillTrialObservation(candidate_id=ref.package_candidate_id, instance_id=ref.instance_id,
+                                variant="no_skill" if omitted else ref.package_variant, listed=listed,
+                                mounted_revision=None if omitted else ref.revision, guide_reads=0), path
 
 
 def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | None:
@@ -97,10 +153,9 @@ def materialize_skill_tools(
             if candidate is None:
                 files = capture_skill_files(owner, name)
             else:
-                from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
                 from infrastructure.skill_package import load_skill_package
 
-                bound = read_bound_skill_candidate(tenant, resource.agent_id, resource.version_no, candidate)
+                bound = skill_candidate_records.read_bound_skill_candidate(tenant, resource.agent_id, resource.version_no, candidate)
                 if not bound or bound["instance_id"] != ref.instance_id:
                     raise ValueError("Skill candidate is outside the Agent binding")
                 files = load_skill_package(tenant, bound["skill_id"], bound[ref.package_variant + "_digest"])

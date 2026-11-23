@@ -15,7 +15,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useModelList } from "@/hooks/model/useModelList";
-import { evolutionService as api } from "@/services/evolutionService";
+import { evolutionService as api, type Trial } from "@/services/evolutionService";
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import ExampleCandidates from "./ExampleCandidates";
@@ -329,6 +329,9 @@ function Experiments({
                 total: report.data.total_pairs,
               })}
             </Typography.Text>
+            {report.data.valid_triplets !== undefined && <Typography.Text>{t("evolution.skillCoverage", {
+              valid: report.data.valid_triplets, total: report.data.total_pairs, read: report.data.verified_guide_pairs,
+            })}</Typography.Text>}
             {active && (
               <Button
                 onClick={() => cancel.mutate()}
@@ -363,13 +366,10 @@ function Experiments({
                   choices?.cases.find((c) => String(c.case_id) === id)
                     ?.family || id,
               },
-              ...(["base", "result"] as const).map((key) => ({
+              ...(report.data.valid_triplets === undefined ? ["base", "result"] : ["no_skill", "base", "result"]).map((key) => ({
                 title: t(`evolution.${key}`),
                 dataIndex: key,
-                render: (trial: {
-                  status: string;
-                  result?: { answer?: string; error?: string; reported_step_input_tokens?: number | null };
-                }) => (
+                render: (trial?: Trial) => trial && (
                   <div>
                     <strong>{t(`evolution.state.${trial.status}`)}</strong>
                     <div className="whitespace-pre-wrap">
@@ -378,13 +378,24 @@ function Experiments({
                     {trial.result && <Typography.Text type="secondary">{t("evolution.stepTokens", {
                       tokens: trial.result.reported_step_input_tokens ?? "—",
                     })}</Typography.Text>}
+                    {trial.result?.skill && <div title={trial.result.skill.mounted_revision || undefined}>
+                      {t("evolution.guideEvidence", {
+                        revision: trial.result.skill.mounted_revision?.slice(0, 10) || t("evolution.unmounted"),
+                        reads: trial.result.skill.guide_reads,
+                      })}
+                    </div>}
                   </div>
                 ),
               })),
               {
                 title: t("evolution.change"),
                 dataIndex: "comparison",
-                render: (value) => t(`evolution.state.${value}`),
+                render: (value, row) => <div>{t(`evolution.state.${value}`)}
+                  {row.skill_vs_absent && <div>{t("evolution.skillVsAbsent", {
+                    old: t(`evolution.state.${row.skill_vs_absent.base}`),
+                    next: t(`evolution.state.${row.skill_vs_absent.result}`),
+                  })}</div>}
+                </div>,
               },
             ]}
           />

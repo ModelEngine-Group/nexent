@@ -26,11 +26,12 @@ export interface Workspace {
   cases: { case_id: number; family: string; query: string }[];
   experiments: { experiment_id: number; create_time: string }[];
 }
-interface Trial {
+export interface Trial {
   status: string;
   result?: {
     answer?: string;
     reported_step_input_tokens?: number | null;
+    skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
     error?: string;
     judgment?: { score?: number; reason?: string };
   };
@@ -40,7 +41,10 @@ export interface ExperimentReport {
   status: string;
   valid_pairs: number;
   total_pairs: number;
-  pairs: Record<string, { base: Trial; result: Trial; comparison: string }>;
+  valid_triplets?: number;
+  verified_guide_pairs?: number;
+  pairs: Record<string, { base: Trial; result: Trial; no_skill?: Trial; comparison: string;
+    skill_vs_absent?: { base: string; result: string } }>;
 }
 
 export interface ApprovedExample {

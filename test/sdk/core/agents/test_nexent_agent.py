@@ -6457,6 +6457,8 @@ class TestLogStepMetricsNA:
 
         output = captured.getvalue()
         assert "N/A" in output
+        with patch("builtins.open", side_effect=PermissionError("read-only deployment")):
+            nexent_agent_instance._log_step_metrics()
 
 
 # ----------------------------------------------------------------------------

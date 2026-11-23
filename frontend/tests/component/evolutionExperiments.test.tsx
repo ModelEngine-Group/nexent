@@ -62,8 +62,13 @@ it("selects a published scope and opens its paired results with the original sta
     status: "finished",
     total_pairs: 1,
     valid_pairs: 1,
+    valid_triplets: 1,
+    verified_guide_pairs: 0,
     pairs: {
       "9": {
+        no_skill: { status: "fail", result: { answer: "omitted control", skill: {
+          guide_reads: 0, listed: false, mounted_revision: null,
+        } } },
         base: { status: "fail", result: { answer: "missing owner" } },
         result: { status: "pass", result: { answer: "unassigned" } },
         comparison: "improved",
@@ -88,6 +93,8 @@ it("selects a published scope and opens its paired results with the original sta
     "#42 · " + new Date("2026-11-23T00:00:00Z").toLocaleString()
   );
   expect(await screen.findByText("unassigned")).toBeInTheDocument();
+  expect(screen.getByText("omitted control")).toBeInTheDocument();
+  expect(screen.getByText("evolution.skillCoverage")).toBeInTheDocument();
   expect(screen.getByText("missing owner")).toBeInTheDocument();
   expect(screen.getByText("evolution.state.improved")).toBeInTheDocument();
   expect(evolutionService.workspace).toHaveBeenCalledWith(7, 1);

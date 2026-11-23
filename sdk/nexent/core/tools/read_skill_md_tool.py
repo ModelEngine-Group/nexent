@@ -1,8 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Skill markdown reading tool."""
 import logging
 import os
 import re
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Optional, Tuple
 
 from smolagents.tools import Tool
@@ -10,6 +14,34 @@ from smolagents.tools import Tool
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_ENCODINGS = ("utf-8-sig", "gb18030")
+
+
+@dataclass
+class GuideReads:
+    count: int = 0
+
+
+_observed_guides: dict[Path, GuideReads] = {}
+_guide_lock = Lock()
+
+
+@contextmanager
+def observe_guide_reads(staged_guide: Path | None):
+    """Count successful SDK reads of one trial-private file, including reads on worker threads."""
+    reads = GuideReads()
+    if staged_guide is None:
+        yield reads
+        return
+    path = staged_guide.resolve()
+    with _guide_lock:
+        if path in _observed_guides:
+            raise ValueError("Skill guide is already under observation")
+        _observed_guides[path] = reads
+    try:
+        yield reads
+    finally:
+        with _guide_lock:
+            _observed_guides.pop(path, None)
 
 
 def _read_text_file(file_path: str) -> str:
@@ -129,6 +161,11 @@ class ReadSkillMdTool(Tool):
                     return "File access is not authorized", False
             if os.path.exists(full_path):
                 content = _read_text_file(full_path)
+                if self.isolated_skills_root and _observed_guides:
+                    with _guide_lock:
+                        observed = _observed_guides.get(Path(full_path).resolve())
+                        if observed is not None:
+                            observed.count += 1
                 # Strip frontmatter if it's a markdown file
                 if full_path.endswith('.md'):
                     content = self._strip_frontmatter(content)

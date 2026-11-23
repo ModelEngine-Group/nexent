@@ -4,7 +4,7 @@
 import asyncio
 import logging
 import shutil
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from functools import partial
 from hmac import compare_digest
 from uuid import uuid4
@@ -69,7 +69,7 @@ from runtime.agentos.prepared_mcp import PreparedMCP
 from infrastructure.mcp_header_passthrough import apply_bound_mcp_headers
 from contracts.runtime_metadata import strip_reserved_runtime_metadata_fields
 from runtime.agentos.prepared_memory import materialize_memory
-from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
+from runtime.agentos.prepared_skills import materialize_skill_tools, root_without_target_skill, skill_stage_path, skill_trial_observation
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
@@ -173,7 +173,7 @@ def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
     root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
-    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None,
+    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -197,8 +197,11 @@ def _materialize_agent(
     ):
         raise ValueError("Unsupported prepared planning bindings")
 
+    # Keep the original catalog tool authorizations for every arm. Only the
+    # root Skill listing, staged files and access through the Skill tools vary.
+    visible = root_without_target_skill(resource, actor, omit_skill_candidate) if omit_skill_candidate else resource
     local_tools, mounted_skills = materialize_skill_tools(
-        resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
+        visible, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
         public_reference=public_reference, workbench_version=workbench_version,
         debug_run_id=workbench_debug_run_id,
     )
@@ -244,15 +247,15 @@ def _materialize_agent(
         "langchain": iter(materialize_langchain_tools(resource, actor, workbench_tools=mounted_tools)),
     }
     files = iter(_materialize_file_tools(
-        [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id not in ordered_tools],
+        [binding for binding in visible.tools if binding.tool_id not in local_tools and binding.tool_id not in ordered_tools],
         actor, workspace_path, workspace_run_id,
     ))
     tools = [
         local_tools[binding.tool_id] if binding.tool_id in local_tools
         else next(ordered_tools.get(binding.tool_id, files))
-        for binding in resource.tools
+        for binding in visible.tools
     ]
-    options = _agent_options(resource, language, sandbox_enabled)
+    options = _agent_options(visible, language, sandbox_enabled)
     legacy_root = root_alias is not None and resource.model_alias is None
     return AgentConfig(
         name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
@@ -397,6 +400,8 @@ def prepare_run_snapshot(
             used_aliases = set()
             agent_config = _materialize_agent(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
+                **({"omit_skill_candidate": payload.omit_root_skill_candidate_id}
+                   if isinstance(payload, PreparedEvaluationRun) and payload.omit_root_skill_candidate_id else {}),
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None or turn_generation is not None else None,
@@ -460,6 +465,10 @@ def prepare_run_snapshot(
 
 
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
+    from contracts.constants.environment import EVOLUTION_REPLAY_RUNTIME
+
+    if payload.omit_root_skill_candidate_id is not None and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
     return prepare_run_snapshot(payload, actor)
 
 
@@ -512,11 +521,22 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
 
     status = "failed"
     try:
-        result = await collect_observer_output(info, agent_run, runtime_thread_manager)
+        skill = None
+        observation = nullcontext()
+        if payload.replay_trial_id and any(ref.package_candidate_id for ref in payload.resource.skill_refs):
+            from nexent.core.tools.read_skill_md_tool import observe_guide_reads
+
+            skill, path = await run_blocking("observe-trial-skill", skill_trial_observation, payload, info, actor,
+                                             lane="control-io", owner="runtime")
+            observation = observe_guide_reads(path)
+        with observation as reads:
+            result = await collect_observer_output(info, agent_run, runtime_thread_manager)
         status = info.attempt_outcome or "completed"
         if payload.replay_trial_id is not None:
+            if skill:
+                skill.guide_reads = reads.count
             result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id,
-                                                  outcome=info.attempt_outcome or "unconfirmed")
+                                                  outcome=info.attempt_outcome or "unconfirmed", skill=skill)
         return result
     except asyncio.CancelledError:
         status = "stopped"

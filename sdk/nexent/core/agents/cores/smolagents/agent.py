@@ -1052,8 +1052,11 @@ class NexentAgent(AgentResources):
         logger.debug("\n".join(lines))
 
         # Optional: write to local file
-        with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        try:
+            with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError:
+            logger.debug("Local context metrics file unavailable", exc_info=True)
 
     def _resolve_tool_class(self, name):
         return globals().get(name)

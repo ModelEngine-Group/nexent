@@ -1,4 +1,9 @@
 {
+  "evolution.no_skill": "Without target Skill",
+  "evolution.skillCoverage": "All three arms graded on {{valid}} / {{total}} tasks; both versions read the guide on {{read}}",
+  "evolution.guideEvidence": "Mounted revision {{revision}} · guide reads {{reads}}",
+  "evolution.unmounted": "none",
+  "evolution.skillVsAbsent": "Against omission: baseline {{old}}, candidate {{next}}",
   "evolution.stepTokens": "Reported step input tokens: {{tokens}}",
   "evolution.sourceGroup": "Source group (use the same name for rewrites of the same material)",
   "evolution.selectExamples": "Select prompt examples from results",

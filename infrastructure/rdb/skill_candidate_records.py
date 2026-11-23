@@ -9,7 +9,7 @@ from infrastructure.rdb.client import get_db_session
 def read_bound_skill_candidate(tenant_id, agent_id, version_no, candidate_id):
     with get_db_session() as session:
         row = session.execute(text("""
-            SELECT c.skill_id, c.base_digest, c.result_digest, i.skill_instance_id AS instance_id
+            SELECT c.skill_id, c.skill_name, c.base_digest, c.result_digest, i.skill_instance_id AS instance_id
             FROM nexent.evolution_skill_candidate_t c
             JOIN nexent.ag_skill_instance_t i ON i.tenant_id=c.tenant_id AND i.skill_id=c.skill_id
             JOIN nexent.ag_skill_info_t s ON s.tenant_id=i.tenant_id AND s.skill_id=i.skill_id

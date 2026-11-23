@@ -1,69 +1,20 @@
-"""
-Unit tests for nexent.core.tools.read_skill_md_tool module.
-
-This test module follows the pattern from test_ragflow_search_tool.py with proper mocking.
-"""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for the Skill guide reader."""
 import os
-import sys
-import types
-import tempfile
 import shutil
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import tempfile
+from unittest.mock import MagicMock
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Prepare mocks for external dependencies BEFORE any SDK imports.
-# ---------------------------------------------------------------------------
-
-# -- smolagents ---------------------------------------------------------------
-class _MockTool:
-    """A proper class that Tool can inherit from."""
-    def __init__(self, *args, **kwargs):
-        pass
+from nexent.core.tools.read_skill_md_tool import (
+    ReadSkillMdTool,
+    _read_skill_md_without_context,
+    _uncached_read_skill_md_tool,
+    observe_guide_reads,
+)
 
 
-_mock_smolagents = MagicMock()
-_mock_smolagents_tools = types.ModuleType("smolagents.tools")
-_mock_smolagents_tools.Tool = _MockTool
-_mock_smolagents.tools = _mock_smolagents_tools
-
-# -- namespace package stubs --------------------------------------------------
-SDK_SOURCE_ROOT = Path(__file__).resolve().parents[4] / "sdk"
-
-_mock_sdk = types.ModuleType("sdk")
-_mock_sdk.__path__ = [str(SDK_SOURCE_ROOT)]
-
-_mock_sdk_nexent = types.ModuleType("sdk.nexent")
-_mock_sdk_nexent.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
-
-_mock_sdk_nexent_core = types.ModuleType("sdk.nexent.core")
-_mock_sdk_nexent_core.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
-
-_mock_sdk_nexent_core_tools = types.ModuleType("sdk.nexent.core.tools")
-_mock_sdk_nexent_core_tools.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")]
-
-_mock_nexent = types.ModuleType("nexent")
-_mock_nexent_skills = types.ModuleType("nexent.skills")
-
-
-# -- Register all mocks in sys.modules ----------------------------------------
-_MODULE_MOCKS = {
-    "smolagents": _mock_smolagents,
-    "smolagents.tools": _mock_smolagents_tools,
-    "sdk": _mock_sdk,
-    "sdk.nexent": _mock_sdk_nexent,
-    "sdk.nexent.core": _mock_sdk_nexent_core,
-    "sdk.nexent.core.tools": _mock_sdk_nexent_core_tools,
-    "nexent": _mock_nexent,
-    "nexent.skills": _mock_nexent_skills,
-}
-sys.modules.update(_MODULE_MOCKS)
-
-
-# -- Mock SkillManager for nexent.skills ------------------------------------
 class MockSkillManager:
     """Mock SkillManager for testing."""
     def __init__(self, local_skills_dir=None, agent_id=None, tenant_id=None, version_no=0):
@@ -92,18 +43,27 @@ class MockSkillManager:
         return "Script executed successfully"
 
 
-_mock_nexent_skills.SkillManager = MockSkillManager
+@pytest.fixture(autouse=True)
+def local_skill_manager(monkeypatch):
+    monkeypatch.setattr("nexent.skills.SkillManager", MockSkillManager)
 
 
-# -- Now import the module under test ---------------------------------------
-from sdk.nexent.core.tools.read_skill_md_tool import (
-    ReadSkillMdTool,
-    _uncached_read_skill_md_tool,
-    _read_skill_md_without_context,
-)
+def test_trial_observation_counts_only_successful_reads_of_the_staged_guide(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for stage in (first, second):
+        stage.mkdir()
+        (stage / "SKILL.md").write_text("guide", encoding="utf-8")
+    reader = ReadSkillMdTool(isolated_skills_root=True, authorized_skill_names=["demo"])
+    with observe_guide_reads(first / "SKILL.md") as seen, observe_guide_reads(second / "SKILL.md") as other:
+        assert reader._read_skill_file(str(first), "SKILL") == ("guide", True)
+        assert reader._read_skill_file(str(first), "SKILL.md") == ("guide", True)
+        assert reader._read_skill_file(str(first), "missing")[1] is False
+        assert seen.count == 2 and other.count == 0
+    reader._read_skill_file(str(first), "SKILL.md")
+    assert seen.count == 2
 
 
-# ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
 

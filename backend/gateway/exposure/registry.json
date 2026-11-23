@@ -300,6 +300,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent-evolution/experiments/{experiment_id}/example-candidates",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-example-candidates",
+      "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-evolution/experiments/{experiment_id}/feedback",
       "transport": "http",
       "target": "management",

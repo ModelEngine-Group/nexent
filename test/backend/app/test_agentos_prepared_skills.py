@@ -100,6 +100,57 @@ def skill_snapshot(mocker, tmp_path):
     return agent, binding, directory, row, runtime_read
 
 
+def test_omitting_one_of_two_skills_removes_only_its_files_and_discovery(skill_snapshot, mocker):
+    from contracts.agentos import EvaluationSkillTool, SkillExecutionBinding
+    from contracts.constants import environment
+    from infrastructure import skill_execution
+    from infrastructure.rdb import skill_candidate_records
+    from runtime.agentos.prepared_skills import skill_trial_observation
+
+    agent, model, directory, row, runtime_read = skill_snapshot
+    payload = evaluation_snapshot.export_snapshot(agent, [model], "query", None, tenant_id="tenant-a",
+                                                   conversation_id=-42, language="en")
+    resource = payload.resource
+    ref = resource.skill_refs[0].model_copy(update={"package_candidate_id": 7, "package_variant": "base"})
+    other = dict(row, instance_id=44, name="other", description="Other guide")
+    other_dir = directory.parent / "other"
+    other_dir.mkdir()
+    (other_dir / "SKILL.md").write_text("---\nname: other\ndescription: Other guide\n---\nIndependent", encoding="utf-8")
+    files = skill_execution.capture_skill_files("tenant-a", "other")
+    revision = skill_execution.skill_execution_revision("tenant-a", resource.agent_id, resource.version_no, other, files)
+    resource.skill_refs = [ref, SkillExecutionBinding(instance_id=44, revision=revision)]
+    options = resource.evaluation_options
+    options.context_items = [
+        {"id": "skill:" + r["name"], "type": "skill", "content":{"name":r["name"], "description":r["description"]}}
+        for r in (row, other)]
+    runtime_read.return_value = [row, other]
+    lookup = mocker.patch.object(skill_candidate_records, "read_bound_skill_candidate",
+                                 return_value={"instance_id":23, "skill_name":"summarize"})
+    payload.omit_root_skill_candidate_id = 7
+    actor = ServicePrincipal("editor", "tenant-a")
+    mocker.patch.object(environment, "EVOLUTION_REPLAY_RUNTIME", True)
+    with pytest.raises(HTTPException) as ordinary:
+        prepared_evaluation.prepare_evaluation_run(payload, actor)
+    assert ordinary.value.status_code == 422
+    payload.replay_trial_id = "a" * 32
+    info = prepared_evaluation.prepare_evaluation_run(payload, actor)
+    try:
+        config = next(t for t in info.agent_config.tools if t.name == EvaluationSkillTool.GUIDE)
+        assert config.params["authorized_skill_names"] == ["other"]
+        tool = NexentAgent.create_builtin_tool(None, config)
+        assert "Independent" in tool.forward("other")
+        assert "not authorized" in tool.forward("summarize")
+        assert not (Path(config.params["local_skills_dir"]) / "tenant-a" / "summarize").exists()
+        observed, path = skill_trial_observation(payload, info, actor)
+        assert path is None and observed.variant == "no_skill" and not observed.listed
+    finally:
+        prepared_evaluation._remove_skill_files(info.workspace_path)
+    assert len(resource.skill_refs) == 2
+    lookup.return_value = None
+    with pytest.raises(HTTPException):
+        prepared_evaluation.prepare_evaluation_run(payload, actor)
+
+
 @pytest.mark.parametrize(("change", "status"), [
     ("none", None), ("unbound", 404), ("other_tenant", 404), ("config", 409), ("file", 409),
 ])

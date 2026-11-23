@@ -4,6 +4,21 @@ from unittest.mock import Mock
 import pytest
 
 
+def test_step_feedback_requires_reads_of_same_baseline_in_both_examples():
+    from contracts.errors.exceptions import AppException
+    from management.services.evaluation.feedback_handoff import _require_baseline_guide
+
+    target = {"instance_id":21, "skill_id":5}
+    observation = {"instance_id":21, "candidate_id":9, "variant":"base", "guide_reads":1}
+    success = {"result":{"skill":observation}}
+    _require_baseline_guide(target, 5, 9, [success, success])
+    for changes in ({"guide_reads":0}, {"instance_id":2}, {"candidate_id":1}, {"variant":"result"}):
+        with pytest.raises(AppException, match="reads"):
+            _require_baseline_guide(target, 5, 9, [success, {"result":{"skill":{**observation, **changes}}}])
+    with pytest.raises(AppException, match="match"):
+        _require_baseline_guide(target, 6, 9, [success, success])
+
+
 def test_only_recorded_development_excerpts_reach_resource_editor():
     from contracts.errors.exceptions import AppException
     from contracts.evolution import FeedbackExcerpt

@@ -6,6 +6,7 @@ from hashlib import sha256
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, SkillStepCandidateRequest
+from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
 from infrastructure.skill_execution import capture_skill_files
 from infrastructure.skill_package import encode_skill_package
 from management.db.evaluation import experiments as jobs
@@ -32,6 +33,16 @@ def _approved_excerpt(excerpt, required_status, trial, task):
             "expected": excerpt.expected, "observed": observed or "[Observed empty final answer]"}
 
 
+def _require_baseline_guide(target, skill_id, candidate_id, trials):
+    if target is None or target["skill_id"] != skill_id:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The evaluated Skill does not match this S2 request")
+    for trial in trials:
+        observed = trial["result"].get("skill") or {}
+        if (observed.get("instance_id") != target["instance_id"] or observed.get("candidate_id") != candidate_id
+                or observed.get("variant") != "base" or observed.get("guide_reads", 0) < 1):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "S2 requires observed reads of the selected baseline guide in both trials")
+
+
 def _prepare_handoff(tenant, user, eid, request):
     scope = jobs.scope(tenant, eid)
     if not scope:
@@ -52,6 +63,11 @@ def _prepare_handoff(tenant, user, eid, request):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Case does not match the trial receipt")
         feedback[field] = _approved_excerpt(excerpt, status, trial, case["task"])
     if request.method == "S2":
+        provenance = plan["request"]
+        target = (read_bound_skill_candidate(tenant, agent_id, version, provenance["candidate_id"])
+                  if provenance.get("candidate_type") == "skill_step" else None)
+        _require_baseline_guide(target, request.skill_id, provenance["candidate_id"],
+                                [trials[request.failure.case_id], trials[request.protection.case_id]])
         bindings = query_skill_instances_by_agent_id(agent_id, tenant, version)
         if not any(row["skill_id"] == request.skill_id and row["enabled"] for row in bindings):
             raise AppException(ErrorCode.COMMON_FORBIDDEN)

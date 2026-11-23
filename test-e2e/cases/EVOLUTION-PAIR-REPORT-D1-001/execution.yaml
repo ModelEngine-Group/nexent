@@ -6,3 +6,4 @@ implementations:
   selector: test_grade_and_compare
 acceptance_bindings:
   AC-01: [test_grade_and_compare]
+  AC-02: [test_grade_and_compare]
