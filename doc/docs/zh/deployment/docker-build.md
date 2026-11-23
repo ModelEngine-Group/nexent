@@ -60,7 +60,6 @@ bash build.sh --sandbox-full --version latest --load
 构建 `data-process` 时，`deploy/images/build.sh` 会自动准备 `model-assets`：优先使用仓库根目录已有的 `model-assets`，其次复用 `~/model-assets`，否则从 Hugging Face 仓库拉取并执行 `git lfs pull`。如果直接执行 `docker build`，需要先在仓库根目录准备好 `model-assets`。
 
 镜像选项：
-- `--main` 可显式构建旧版合并镜像 `nexent`
 - `--web` 构建 `nexent-web`
 - `--data-process` 构建 `nexent-data-process`
 - `--mcp` 同时构建共享的 `nexent-management` 后端镜像和 `nexent-mcp` 代理镜像。用 `--images mcp` 可以单独构建代理。MCP 后端使用 Management 镜像启动独立容器。
@@ -75,8 +74,8 @@ bash build.sh --sandbox-full --version latest --load
 docker buildx create --name nexent_builder --use
 
 # 🚀 为多个架构构建应用程序
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
+bash build.sh --images management,runtime,ops --platform linux/amd64,linux/arm64 --registry general --push
+bash build.sh --images management,runtime,ops --platform linux/amd64,linux/arm64 --registry mainland --push
 
 # 📊 为多个架构构建数据处理服务
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
@@ -103,7 +102,7 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 
 ```bash
 # 🚀 构建应用程序镜像（仅当前架构）
-docker build --no-cache --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
+bash build.sh --images management,runtime,ops --load
 
 # 📊 构建数据处理镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
@@ -138,10 +137,10 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/i
 
 ## 🔧 镜像说明
 
-### 主应用镜像 (nexent/nexent)
-- 包含后端 API 服务
-- 基于 `deploy/images/dockerfiles/main/Dockerfile` 构建
-- 提供核心的智能体服务
+### 后端镜像
+- `nexent/nexent-management` 提供 Management API，并运行 MCP 后端。
+- `nexent/nexent-runtime` 运行 AgentOS。
+- `nexent/nexent-ops` 提供运维和监控 API。
 
 ### 数据处理镜像 (nexent/nexent-data-process)
 - 包含数据处理服务
@@ -191,7 +190,7 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/i
 - `--registry mainland` 但不带 `--push` 时，仍构建本地 `nexent/*` tag，同时使用大陆构建镜像源。
 
 所有镜像包括：
-- `nexent/nexent` - 主应用后端服务
+- `nexent/nexent-management`、`nexent/nexent-runtime` 和 `nexent/nexent-ops` 提供后端服务
 - `nexent/nexent-data-process` - 数据处理服务
 - `nexent/nexent-web` - Next.js 前端应用
 - `nexent/nexent-docs` - Vitepress 文档站点

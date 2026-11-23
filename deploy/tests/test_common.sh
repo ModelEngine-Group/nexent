@@ -101,8 +101,6 @@ assert_eq "zh" "$(DEPLOYMENT_LANG="" LC_ALL="zh_CN.UTF-8" LC_MESSAGES="" LANGUAG
 assert_eq "en" "$(DEPLOYMENT_LANG="en" LC_ALL="" LC_MESSAGES="" LANGUAGE="" LANG="zh_CN.UTF-8" deployment_detect_language)" "DEPLOYMENT_LANG should force English"
 assert_eq "zh" "$(DEPLOYMENT_LANG=zh bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache Chinese"
 assert_eq "en" "$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache forced English"
-assert_eq "后端 API 服务" "$(DEPLOYMENT_LANGUAGE=zh deployment_i18n image_build.detail.main)" "image build TUI details should support Chinese"
-assert_eq "backend API service" "$(DEPLOYMENT_LANGUAGE=en deployment_i18n image_build.detail.main)" "image build TUI details should preserve English"
 
 ZH_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$ZH_DEPLOY_HELP" "用法：" "deploy wrapper help should follow Chinese locale"

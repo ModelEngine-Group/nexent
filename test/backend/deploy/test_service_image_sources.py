@@ -31,11 +31,11 @@ def test_independent_target_installs_deployment_plugins_without_peer_sources(ser
 
 def test_independent_images_do_not_package_other_service_implementations():
     dockerfile = (ROOT / "deploy/images/dockerfiles/main/Dockerfile").read_text(encoding="utf-8")
-    common_and_services = dockerfile.split(" AS final\n", 1)[0]
-    copies = [line.split() for line in common_and_services.replace("\\\n", " ").splitlines() if line.startswith("COPY ")]
+    copies = [line.split() for line in dockerfile.replace("\\\n", " ").splitlines() if line.startswith("COPY ")]
     for parts in copies:
         assert all(
-            not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
+            source.rstrip("/") != "backend"
+            and not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
             for source in parts[1:-1]
         )
     runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]

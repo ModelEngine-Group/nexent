@@ -175,7 +175,6 @@ deployment_i18n_format() {
       tui.sandbox.disabled) printf '不启用 Docker 沙箱，使用本地执行模式' ;;
       tui.sandbox.lightweight) printf '启用默认轻量级 Docker 沙箱' ;;
       tui.sandbox.full) printf '启用包含 Anthropic 技能依赖的完整 Docker 沙箱' ;;
-      image_build.detail.main) printf '后端 API 服务' ;;
       image_build.detail.web) printf 'Next.js 前端' ;;
       image_build.detail.data_process) printf '文档解析和向量化 Worker' ;;
       image_build.detail.mcp) printf 'MCP 代理镜像' ;;
@@ -269,7 +268,6 @@ deployment_i18n_format() {
       tui.sandbox.disabled) printf 'disable the Docker sandbox and use local execution mode' ;;
       tui.sandbox.lightweight) printf 'enable the default lightweight Docker sandbox' ;;
       tui.sandbox.full) printf 'enable the full Docker sandbox with Anthropic skill dependencies' ;;
-      image_build.detail.main) printf 'backend API service' ;;
       image_build.detail.web) printf 'Next.js frontend' ;;
       image_build.detail.data_process) printf 'document parsing and vectorization worker' ;;
       image_build.detail.mcp) printf 'MCP proxy image' ;;

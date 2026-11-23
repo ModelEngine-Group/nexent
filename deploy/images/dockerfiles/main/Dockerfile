@@ -162,18 +162,3 @@ RUN ln -s ../runtime/launcher.py /opt/backend/http/runtime_service.py
 COPY backend/http/server /opt/backend/http/server
 COPY backend/gateway/__init__.py /opt/backend/gateway/
 COPY backend/gateway/identity /opt/backend/gateway/identity
-
-# Keep the existing full backend as the default build target.
-FROM management-base AS final
-RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends vim procps wget less
-COPY --from=builder /opt/sdk /opt/sdk
-COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
-COPY deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_and_ops_roles.sql
-COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
-RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
-COPY backend /opt/backend
-COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json

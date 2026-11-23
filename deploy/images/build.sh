@@ -42,10 +42,9 @@ usage() {
 用法：deploy/images/build.sh [选项]
 
 选项：
-  --images LIST              逗号分隔的镜像列表：all,main,management,runtime,ops,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
+  --images LIST              逗号分隔的镜像列表：all,management,runtime,ops,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              兼容参数，等同于只传一个 --images
   --all                      构建默认镜像集合
-  --main                     构建旧版合并镜像 nexent/nexent
   --management               构建 nexent/nexent-management
   --runtime                  构建 nexent/nexent-runtime
   --mcp                      构建 Nexent MCP 后端和代理镜像
@@ -78,10 +77,9 @@ USAGE
 Usage: deploy/images/build.sh [options]
 
 Options:
-  --images LIST              Comma-separated image list: all,main,management,runtime,ops,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
+  --images LIST              Comma-separated image list: all,management,runtime,ops,gateway,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              Compatibility alias for --images with one image
   --all                      Build the default image set
-  --main                     Build the legacy combined nexent/nexent image
   --management               Build nexent/nexent-management
   --runtime                  Build nexent/nexent-runtime
   --mcp                      Build the Nexent MCP backend and proxy images
@@ -115,7 +113,6 @@ while [ $# -gt 0 ]; do
     --images) IMAGES="$2"; shift 2 ;;
     --all) REQUESTED_IMAGES=(all); shift ;;
     --gateway) REQUESTED_IMAGES+=("gateway"); shift ;;
-    --main) REQUESTED_IMAGES+=("main"); shift ;;
     --management) REQUESTED_IMAGES+=("management"); shift ;;
     --runtime) REQUESTED_IMAGES+=("runtime"); shift ;;
     --mcp) REQUESTED_IMAGES+=("management" "mcp"); shift ;;
@@ -186,7 +183,7 @@ select_images_from_csv() {
       all)
         select_all_images
         ;;
-      main|management|runtime|ops|gateway|web|data-process|mcp|terminal|docs|sandbox|sandbox-full)
+      management|runtime|ops|gateway|web|data-process|mcp|terminal|docs|sandbox|sandbox-full)
         add_image_if_missing "$normalized"
         ;;
       *)
@@ -205,9 +202,8 @@ select_images_from_csv() {
 image_tui_multiselect() {
   [ -t 0 ] || return 1
 
-  local images=(main management runtime ops gateway web data-process mcp terminal docs sandbox sandbox-full)
+  local images=(management runtime ops gateway web data-process mcp terminal docs sandbox sandbox-full)
   local details=(
-    "$(deployment_i18n image_build.detail.main)"
     "Independent Management API and configuration"
     "Independent AgentOS model and Agent execution Runtime"
     "Independent Operations backend"
@@ -220,7 +216,7 @@ image_tui_multiselect() {
     "Sandbox runtime for LLM-generated Python execution"
     "Extended sandbox with Node, office, browser, and Anthropic skill dependencies"
   )
-  local selected=(0 1 1 1 1 1 0 0 0 0 0 0)
+  local selected=(1 1 1 1 1 0 0 0 0 0 0)
   local cursor=0
   local i key key_tail selection
 
@@ -318,7 +314,7 @@ run_interactive_configuration() {
       else
         echo "Images:"
       fi
-      echo "  management, runtime, ops, gateway, web, data-process, mcp, terminal, docs, sandbox, sandbox-full, main"
+      echo "  management, runtime, ops, gateway, web, data-process, mcp, terminal, docs, sandbox, sandbox-full"
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         IMAGES="$(prompt_choice "请输入镜像（默认：management,runtime,ops,gateway,web）：" "management,runtime,ops,gateway,web")"
       else
@@ -528,7 +524,6 @@ build_one() {
 build_selected_image() {
   case "$1" in
     gateway) build_one nexent-gateway "$DOCKERFILE_DIR/gateway/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
-    main) build_one nexent "$DOCKERFILE_DIR/main/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
     management) build_one nexent-management "$DOCKERFILE_DIR/main/Dockerfile" --target management "${PY_MIRROR_ARGS[@]}" ;;
     runtime) build_one nexent-runtime "$DOCKERFILE_DIR/main/Dockerfile" --target runtime "${PY_MIRROR_ARGS[@]}" ;;
     ops) build_one "nexent-$1" "$DOCKERFILE_DIR/$1/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;

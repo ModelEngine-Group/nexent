@@ -69,17 +69,17 @@ for workflow in "$MAINLAND_WORKFLOW" "$OVERSEAS_WORKFLOW"; do
   done
 done
 
-output="$(bash "$BUILD_SCRIPT" --images main,web,mcp,data-process --version latest --registry general --dry-run)"
-assert_contains "$output" "nexent/nexent:latest" "image list should build main image with latest tag"
+output="$(bash "$BUILD_SCRIPT" --images management,web,mcp,data-process --version latest --registry general --dry-run)"
+assert_contains "$output" "nexent/nexent-management:latest" "image list should build Management with latest tag"
 assert_contains "$output" "nexent/nexent-web:latest" "image list should build web image with latest tag"
 assert_contains "$output" "nexent/nexent-mcp:latest" "image list should build mcp image with latest tag"
 assert_contains "$output" "nexent/nexent-data-process:latest" "image list should build data-process image with latest tag"
 assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "terminal image should not be built when terminal image is absent"
 assert_not_contains "$output" "--platform" "default build should use local architecture"
 
-output="$(bash "$BUILD_SCRIPT" --main --version latest --platform linux/amd64 --dry-run)"
+output="$(bash "$BUILD_SCRIPT" --management --version latest --platform linux/amd64 --dry-run)"
 assert_contains "$output" "--platform linux/amd64" "explicit platform should be forwarded"
-assert_contains "$output" "nexent/nexent:latest" "explicit platform build should still build selected image"
+assert_contains "$output" "nexent/nexent-management:latest" "explicit platform build should still build selected image"
 
 output="$(bash "$BUILD_SCRIPT" --sandbox --version v1.2.3 --dry-run)"
 assert_contains "$output" "nexent/nexent-sandbox:v1.2.3" "sandbox should build the default lightweight image"
@@ -121,16 +121,16 @@ assert_contains "$output" "dockerfiles/ops/Dockerfile" "Ops should use its own D
 assert_contains "$output" "MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple" "Ops should receive the mainland index"
 assert_not_contains "$output" "--target ops" "Ops should build independently of main"
 
-for removed_flag in --mcp-service --mcp-proxy; do
+for removed_flag in --main --mcp-service --mcp-proxy; do
   if output="$(bash "$ROOT_BUILD_SCRIPT" "$removed_flag" --version latest --dry-run 2>&1)"; then
     fail "removed option $removed_flag should be rejected"
   fi
   assert_contains "$output" "Unknown option: $removed_flag" "the removed flag should report an unknown option"
 done
 
-output="$(bash "$BUILD_SCRIPT" --main --version latest --no-cache --dry-run)"
+output="$(bash "$BUILD_SCRIPT" --runtime --version latest --no-cache --dry-run)"
 assert_contains "$output" "--no-cache" "explicit no-cache option should be forwarded"
-assert_contains "$output" "nexent/nexent:latest" "explicit no-cache build should still build selected image"
+assert_contains "$output" "nexent/nexent-runtime:latest" "explicit no-cache build should still build selected image"
 
 output="$(bash "$BUILD_SCRIPT" --web --version v9.9.9 --registry mainland --dry-run)"
 assert_contains "$output" "--no-cache" "mainland web build should avoid stale Docker cache"
@@ -158,6 +158,13 @@ output="$(bash "$BUILD_SCRIPT" --image web --version v1.2.3 --registry general -
 assert_contains "$output" "nexent/nexent-web:v1.2.3" "explicit image build should keep supporting selected versions"
 assert_not_contains "$output" "nexent/nexent:v1.2.3" "single image build should not build main image"
 
+for image_option in --image --images; do
+  if output="$(bash "$ROOT_BUILD_SCRIPT" "$image_option" main --dry-run 2>&1)"; then
+    fail "$image_option main should fail"
+  fi
+  assert_contains "$output" "Unsupported image: main" "$image_option should reject the retired image"
+done
+
 output="$(bash "$BUILD_SCRIPT" --components application --version latest --dry-run)"
 assert_not_contains "$output" "nexent/nexent:latest" "application should skip the combined backend image"
 for image in management runtime ops; do
@@ -167,7 +174,7 @@ done
 output="$(bash "$BUILD_SCRIPT" --components infrastructure,monitoring --version latest --dry-run)"
 assert_contains "$output" "No Nexent images selected for build." "legacy non-application components should produce no Nexent image builds"
 
-if bash "$BUILD_SCRIPT" --images main,unknown --dry-run >/tmp/nexent-image-build-invalid.log 2>&1; then
+if bash "$BUILD_SCRIPT" --images management,unknown --dry-run >/tmp/nexent-image-build-invalid.log 2>&1; then
   fail "unknown image should fail"
 fi
 assert_contains "$(cat /tmp/nexent-image-build-invalid.log)" "Unsupported image: unknown" "unknown image should explain the error"
@@ -178,11 +185,11 @@ fi
 assert_contains "$(cat /tmp/nexent-image-build-variant.log)" "Unknown option: --variant" "deprecated data-process variant option should be rejected"
 
 output="$(
-  printf 'main,web,mcp,data-process\n1\n1\n' | \
+  printf 'management,web,mcp,data-process\n1\n1\n' | \
     bash "$BUILD_SCRIPT" --interactive --dry-run
 )"
 assert_contains "$output" "Nexent image build configuration" "interactive mode should show configuration prompt"
-assert_contains "$output" "nexent/nexent:latest" "interactive mode should accept latest version selection"
+assert_contains "$output" "nexent/nexent-management:latest" "interactive mode should accept latest version selection"
 assert_contains "$output" "nexent/nexent-web:latest" "interactive image selection should include web image"
 assert_contains "$output" "nexent/nexent-mcp:latest" "interactive image selection should include mcp image"
 assert_contains "$output" "nexent/nexent-data-process:latest" "interactive image selection should include data-process image"

@@ -22,7 +22,6 @@ Image builds are forwarded to: deploy/images/build.sh
 Offline package builds are forwarded to: deploy/offline/build_offline_package.sh
 
 Available image names for --images LIST:
-  main          nexent/nexent (legacy combined image)
   management    nexent/nexent-management
   runtime       nexent/nexent-runtime
   ops           nexent/nexent-ops
@@ -34,7 +33,7 @@ Available image names for --images LIST:
   docs          nexent/nexent-docs
   sandbox       nexent/nexent-sandbox
   sandbox-full  nexent/nexent-sandbox-full
-  all           Build the images above, excluding main and sandbox-full
+  all           Build the images above, excluding sandbox-full
 
 Examples:
   bash build.sh --all --version latest --dry-run
