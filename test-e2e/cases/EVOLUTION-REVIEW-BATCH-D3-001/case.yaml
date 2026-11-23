@@ -1,0 +1,43 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-REVIEW-BATCH-D3-001
+  feature_id: AGENT-EVOLUTION-ONLINE
+  business_rule_ids: [AGENT-EVOLUTION-ONLINE-RULE-01, AGENT-EVOLUTION-ONLINE-RULE-03]
+  title: 同版本获准轮次跨会话复盘并排除已撤回记录
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证 Management 从已结束业务轮次登记五轮批次，Ops 读取真实轨迹文件，并在用户撤权后更新批次结果。
+  preconditions: [Linux 运行正式 pytest 环境，轨迹目录支持 POSIX 文件描述符操作；PostgreSQL 可创建一次性测试数据库。]
+  test_data:
+    profile: 一个租户、一个发布版本、三个会话的合成请求和私有轨迹目录。
+  steps:
+  - order: 1
+    action: 三个会话开启分析，按 2+1+2 登记已结束的业务轮次。首轮含纠正，立即读取该轮诊断。
+    expected: 首轮无需等待批次。前四轮未分批，第五轮后五条记录同属一个批次，正常轮次也有归档读取结果。
+  - order: 2
+    action: 关闭一个会话后提交未授权的新轮次。对另一个会话已取走的任务撤回历史授权，然后写回迟到结果。
+    expected: 新轮次不入批。撤权后旧结论清除，迟到结果被丢弃，重算后其他四轮保留。
+  expected_results: [五轮跨三个会话只产生一个批次，首轮纠正已有诊断。, 关闭后的轮次排除，撤回后跨会话批次保留四轮。]
+  forbidden_side_effects: [撤权后不得保存迟到的自动诊断。]
+  acceptance:
+  - id: AC-01
+    description: 真实数据库与已封存文件验证即时诊断与五轮批次。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 真实授权变更对新轮次、历史批次及迟到结果生效。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - 从已提交的运行、消息和轨迹记录开始；运行输入与 OTLP 事件为合成数据。实际执行 Management 分批、Ops 领取、归档读取、授权校验及批次重算。
+  observations: [每轮批次号、轨迹覆盖状态、即时诊断信号、撤权后的批次和逐轮结论。]
+  cleanup: [销毁独占 PostgreSQL 数据库和临时轨迹目录。]
