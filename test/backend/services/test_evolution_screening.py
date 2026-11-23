@@ -93,3 +93,23 @@ def test_criteria_are_optional_and_cannot_be_attached_to_another_task_or_a_basel
     with pytest.raises(ValidationError):
         DevelopmentExperimentRequest(**{**raw,"candidate_type":"baseline","candidate_id":None},
                                     screening={"target_case_ids":[1],"minimum":1})
+
+@pytest.mark.parametrize("old,new,gain", [
+    ("wrong", "correct_skip", 1), ("missed", "hit", 1), ("hit", "hit", 0),
+])
+def test_discovery_measures_choice_separately_from_delivery(old, new, gain):
+    plan, pairs = fixture("skill_choices_fixed")
+    plan["request"]["candidate_type"] = "skill_discovery"
+    for arm, choice in (("base", old), ("result", new)):
+        trial = pairs[1][arm]
+        trial.update(status="pass")
+        trial["result"].update(selection={"outcome": choice}, judgment={"status": "pass"})
+    decision = screen_development(plan, pairs, cancelled=False)
+    assert decision["gain"] == gain
+    assert decision["status"] == ("eligible" if gain else "failed")
+    del pairs[1]["base"]["result"]["selection"]
+    assert screen_development(plan, pairs, cancelled=False)["missing"] == {"missing_skill_selection": [1]}
+    with pytest.raises(ValidationError):
+        DevelopmentExperimentRequest(request_id="scope", agent_id=1, version_no=1, candidate_id=2,
+                                     candidate_type="prompt", case_ids=[1, 2], evaluator_id=7,
+                                     screening=plan["request"]["screening"])

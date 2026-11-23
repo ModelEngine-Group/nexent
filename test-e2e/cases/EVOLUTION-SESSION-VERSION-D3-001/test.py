@@ -42,6 +42,7 @@ def test_session_versions(runtime):
             "032_evolution_releases",
             "033_evolution_release_tools",
             "035_evolution_release_guides",
+            "036_evolution_skill_catalog_entry",
         ):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     tenant, owner, agent = "release-pilot", "chat-user", 901
@@ -168,3 +169,29 @@ def test_session_versions(runtime):
     assert "released_skill_guides" not in search_agent_info_by_agent_id(agent, tenant, 1)
     for version in (2,3):
         assert search_agent_info_by_agent_id(agent, tenant, version)["released_skill_guides"] == [first_guide]
+
+    from infrastructure.rdb.skill_execution_records import SkillInfo, SkillInstance, read_bound_skills
+    from management.db.evaluation.releases import _pin
+    from management.services.skill.service import SkillService
+
+    with get_db_session() as session:
+        shared = SkillInfo(tenant_id=tenant, skill_name="meeting-notes", skill_description="old", source="custom")
+        session.add(shared)
+        session.flush()
+        skill_id = shared.skill_id
+        for owner_agent, instance, versions in ((agent, 710, [1, 2]), (agent+1, 711, [2])):
+            for version in versions:
+                session.add(SkillInstance(tenant_id=tenant, agent_id=owner_agent, version_no=version,
+                                          skill_id=skill_id, skill_instance_id=instance, enabled=True))
+        session.flush()
+        source = {"instance_id": 710, "name": "meeting-notes", "description": "old", "config": {}}
+        package = ("d"*64, {"SKILL.md": b"same steps"})
+        pin = {"skill_id": skill_id, "row": source, "base": package, "result": package, "result_description": "new"}
+        _pin(session, tenant, agent, 1, pin, "base")
+        _pin(session, tenant, agent, 2, pin, "result")
+        shared.skill_description = "later catalog edit"
+    for owner_agent, version, expected in ((agent, 1, "old"), (agent, 2, "new"), (agent+1, 2, "later catalog edit")):
+        runtime_row, = read_bound_skills(owner_agent, version, tenant)
+        template_entry, = SkillService().get_enabled_skills_for_agent(owner_agent, tenant, version)
+        assert template_entry["description"] == runtime_row["description"] == expected
+    assert not read_bound_skills(agent, 2, "other-tenant")

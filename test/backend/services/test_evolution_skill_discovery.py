@@ -57,6 +57,7 @@ def test_permission_checked_before_and_after_rewrite(monkeypatch):
     model = Mock(return_value=dumps(dict(old="old", new="new", reason="conditions",
                                          evidence_ids=["missed", "overused", "correct"])))
     store = Mock()
+    monkeypatch.setattr(skill_candidates, "query_skill_instances_by_agent_id", lambda *_: [{"skill_id": 4, "enabled": True}])
     monkeypatch.setattr(skill_candidates, "feedback_skill_files", lambda *_: files)
     monkeypatch.setattr(skill_candidates, "store_skill_package", store)
     monkeypatch.setattr(skill_candidates, "invoke_chat_prompt_in_worker", model)

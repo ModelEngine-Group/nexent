@@ -209,14 +209,14 @@ class DevelopmentScreening(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     target_case_ids: list[int] = Field(min_length=1, max_length=100)
-    metric: Literal["tasks_fixed", "input_token_reduction_pct"] = "tasks_fixed"
+    metric: Literal["tasks_fixed", "skill_choices_fixed", "input_token_reduction_pct"] = "tasks_fixed"
     minimum: int = Field(ge=1, le=100)
 
     @model_validator(mode="after")
     def check_targets(self):
         if min(self.target_case_ids) <= 0 or len(set(self.target_case_ids)) != len(self.target_case_ids):
             raise ValueError("Choose distinct target tasks")
-        if self.metric == "tasks_fixed" and self.minimum > len(self.target_case_ids):
+        if self.metric != "input_token_reduction_pct" and self.minimum > len(self.target_case_ids):
             raise ValueError("The minimum gain exceeds the number of target tasks")
         return self
 
@@ -250,6 +250,8 @@ class DevelopmentExperimentRequest(BaseModel):
         if self.screening and (self.candidate_type == "baseline" or
                                set(self.screening.target_case_ids).difference(self.case_ids)):
             raise ValueError("Screen a candidate against targets from the selected development tasks")
+        if self.screening and self.screening.metric == "skill_choices_fixed" and self.candidate_type != "skill_discovery":
+            raise ValueError("The Skill selection metric requires a discovery description candidate")
         combined = self.candidate_type == "combination"
         if combined != (self.components is not None):
             raise ValueError("Select exactly two evaluated revisions for a combination")

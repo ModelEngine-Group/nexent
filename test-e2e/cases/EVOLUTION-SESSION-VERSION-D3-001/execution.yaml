@@ -9,6 +9,7 @@ acceptance_bindings:
   AC-02: [test_session_versions]
   AC-03: [test_session_versions]
   AC-04: [test_session_versions]
+  AC-05: [test_session_versions]
 preparation:
   families: []
   anchors: false

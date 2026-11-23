@@ -24,6 +24,7 @@ def screen_development(plan, pairs, *, cancelled):
     regression = plan["regression_cases"]
     gaps, failures = {}, {}
     skill_uses = set()
+    choices_fixed = 0
     fixed = base_tokens = candidate_tokens = 0
 
     for key, digest in plan["cases"].items():
@@ -62,6 +63,17 @@ def screen_development(plan, pairs, *, cancelled):
             if request["candidate_type"] == "skill_step" and any(
                     not (pair[arm]["result"].get("skill") or {}).get("guide_reads") for arm in ("base", "result")):
                 gaps.setdefault("skill_not_read", []).append(cid)
+        if criteria["metric"] == "skill_choices_fixed":
+            old_choice, new_choice = (
+                (trial["result"].get("selection") or {}).get("outcome") for trial in (base, result)
+            )
+            valid_choices = {"hit", "correct_skip", "wrong", "missed"}
+            if old_choice not in valid_choices or new_choice not in valid_choices:
+                gaps.setdefault("missing_skill_selection", []).append(cid)
+            elif result["status"] != "pass":
+                failures.setdefault("unfinished_selection_target", []).append(cid)
+            elif old_choice in {"wrong", "missed"} and new_choice in {"hit", "correct_skip"}:
+                choices_fixed += 1
         if criteria["metric"] == "input_token_reduction_pct":
             if result["status"] != "pass":
                 failures.setdefault("unfinished_token_target", []).append(cid)
@@ -81,6 +93,8 @@ def screen_development(plan, pairs, *, cancelled):
     gain = None
     if criteria["metric"] == "tasks_fixed":
         gain = fixed
+    elif criteria["metric"] == "skill_choices_fixed":
+        gain = choices_fixed
     elif not gaps:
         if base_tokens:
             gain = (base_tokens - candidate_tokens) * 100 / base_tokens

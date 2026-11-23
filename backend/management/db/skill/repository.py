@@ -94,6 +94,7 @@ def create_or_update_skill_by_skill_info(
 
     skill_info_dict = skill_info.__dict__ if hasattr(skill_info, "__dict__") else skill_info
     skill_info_dict = skill_info_dict.copy()
+    skill_info_dict.pop("released_catalog_entry", None)
     if not allow_system and is_system_agent(skill_info_dict.get("agent_id"), tenant_id) is True:
         raise ValueError("System Agent is managed by the platform")
     skill_info_dict.setdefault("tenant_id", tenant_id)

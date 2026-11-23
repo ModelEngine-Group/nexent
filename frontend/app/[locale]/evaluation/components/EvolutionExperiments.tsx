@@ -207,10 +207,14 @@ function Experiments({
   const { availableLlmModels } = useModelList();
   const [caseIds, setCases] = useState<number[]>([]);
   const [screen, setScreen] = useState(false);
-  const [metric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
+  const [chosenMetric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
   const [minimum, setMinimum] = useState<number | null>(1);
   const [targets, setTargets] = useState<number[]>([]);
   const [candidate, setCandidate] = useState<string>();
+  const discoveryCandidate = candidate?.startsWith("skill_discovery:");
+  const metric = chosenMetric === "skill_choices_fixed" && !discoveryCandidate ? "tasks_fixed" : chosenMetric;
+  const metricOptions: ScreeningCriteria["metric"][] = ["tasks_fixed", "input_token_reduction_pct"];
+  if (discoveryCandidate) metricOptions.unshift("skill_choices_fixed");
   const [sourceIds, setSources] = useState<number[]>([]);
   const [suggestion, setSuggestion] = useState<number>();
   const [targetCase, setTargetCase] = useState<number>();
@@ -404,7 +408,7 @@ function Experiments({
                 options={choices.cases.filter(c => caseIds.includes(c.case_id) && !fixedDigests.has(c.digest ?? ""))
                   .map(c => ({value:c.case_id, label:c.query}))} />
               <Select value={metric} onChange={setMetric} aria-label={t("evolution.screen.metric")}
-                options={(["tasks_fixed", "input_token_reduction_pct"] as const).map(value => ({
+                options={metricOptions.map(value => ({
                   value, label:t(`evolution.screen.${value}`),
                 }))} />
               <label>{t("evolution.screen.minimum")} <InputNumber min={1} max={100} precision={0} value={minimum}
@@ -453,7 +457,7 @@ function Experiments({
               disabled={
                 !candidate || (!!proposed && scopeLabels.size !== 2) ||
                 (candidate !== "baseline" && screen && (!targets.length || !minimum ||
-                  (metric === "tasks_fixed" && minimum > targets.length) ||
+                  (metric !== "input_token_reduction_pct" && minimum > targets.length) ||
                   targets.some(id => !caseIds.includes(id) || fixedDigests.has(choices.cases.find(c => c.case_id === id)?.digest ?? "")))) ||
                 (candidate === "combination" && (sourceIds.length !== 2 || !!suggestion || !sourceIds.every(id => eligible.some(e => e.experiment_id === id)))) ||
                 (candidate === "baseline" && !!suggestion) ||

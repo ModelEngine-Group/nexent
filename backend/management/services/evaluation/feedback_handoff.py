@@ -21,7 +21,7 @@ from management.db.evaluation.candidates import selectable_tool_names
 from management.services.evaluation.example_candidates import generate_example_candidates
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate
 from management.services.evaluation.replay_cases import get_development_case
-from management.services.evaluation.skill_candidates import feedback_skill_files, generate_skill_discovery_candidate, generate_skill_step_candidate
+from management.services.evaluation.skill_candidates import bound_catalog_description, feedback_skill_files, generate_skill_discovery_candidate, generate_skill_step_candidate
 
 
 def _approved_excerpt(excerpt, required_status, trial, task):
@@ -89,7 +89,7 @@ def _prepare_handoff(tenant, user, eid, request):
         if not skill:
             raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
         feedback = dict(method="S1", source_case_ids=source_ids, agent_id=agent_id, version_no=version, skill_id=request.skill_id,
-                        skill_name=skill["name"], source_text=skill.get("description") or "", goal=request.goal)
+                        skill_name=skill["name"], source_text=bound_catalog_description(skill, request.skill_id, bindings), goal=request.goal)
         files = feedback_skill_files(tenant, skill["name"], (agent_id, version))
         feedback["source_digest"] = sha256(encode_skill_package(files)).hexdigest()
         for category in ("missed", "overused", "correct"):

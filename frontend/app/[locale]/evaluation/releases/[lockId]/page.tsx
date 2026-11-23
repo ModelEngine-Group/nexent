@@ -77,6 +77,17 @@ export default function ReleasePage() {
                   current: data.current_version,
                 })}
               </Typography.Text>
+              {data.skill_description && (
+                <section>
+                  <Typography.Text strong>{data.skill_description.name}</Typography.Text>
+                  <dl>
+                    <dt>{t("evolution.release.previousDescription")}</dt>
+                    <dd>{data.skill_description.previous}</dd>
+                    <dt>{t("evolution.release.proposedDescription")}</dt>
+                    <dd>{data.skill_description.proposed}</dd>
+                  </dl>
+                </section>
+              )}
               {data.added_guide && <Typography.Text>
                 {t("evolution.release.addedGuide", {name:data.added_guide.name, digest:data.added_guide.digest.slice(0,12)})}
               </Typography.Text>}

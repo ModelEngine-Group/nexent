@@ -27,7 +27,10 @@ case:
   - order: 4
     action: 在 V2 挂载已确认的新指南，V3 继承。尝试再次加入同名指南并从其他范围读取。
     expected: V2 和 V3 引用同一包；草稿、V1 和其他范围看不到。重复名称不会产生下一版记录。
-  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。, 工具移除按版本保留且不能跨范围读取。, 新指南按版本和范围装载。]
+  - order: 5
+    action: 为同一 Skill 的两个智能体版本锁定新旧简介，随后修改共享目录，再分别读取 Management 模板和 Runtime 绑定。
+    expected: 两版分别保留原简介和新简介。引用同一 Skill 的另一智能体使用共享说明。
+  expected_results: [新旧会话使用各自版本。, 过时请求未入库，版本绑定按租户和所有者隔离。, 工具移除按版本保留且不能跨范围读取。, 新指南按版本和范围装载。, 新旧简介在模板和运行时一致且与其他智能体隔离。]
   forbidden_side_effects: [其他租户不能读取版本绑定；普通会话选版不能更改编辑草稿。]
   acceptance:
   - id: AC-01
@@ -48,6 +51,10 @@ case:
     description: 按版本继承候选编号和内容摘要，拒绝同名与跨范围引用。
     steps: [4]
     expected_results: [4]
+  - id: AC-05
+    description: 验证改写 Skill 简介的发布范围及旧版保留。
+    steps: [5]
+    expected_results: [5]
   execution:
     profiles:
     - name: mock

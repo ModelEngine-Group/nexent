@@ -63,7 +63,7 @@ export interface Trial {
   };
 }
 export interface ScreeningCriteria {
-  metric: "tasks_fixed" | "input_token_reduction_pct";
+  metric: "tasks_fixed" | "skill_choices_fixed" | "input_token_reduction_pct";
   minimum: number;
   target_case_ids: number[];
 }
@@ -134,6 +134,7 @@ export const evolutionService = {
   release: (id: number) => read<{
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
     candidate_digest: string; candidate_type: string; paused: boolean; excluded_tools?: string[];
+    skill_description?: {name: string; previous: string; proposed: string} | null;
     added_guide?: {candidate_id: number; name: string; digest: string} | null;
     summary: null | {decision: "passed" | "insufficient" | "failed"; valid_pairs: number; total_pairs: number; regressed: number};
     release: null | {new_version: number; rollback_at: string | null; disabled: boolean};

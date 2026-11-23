@@ -11,14 +11,14 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import SkillStepCandidateRequest
 from infrastructure.rdb.skill_candidate_records import candidate_skill_row, read_bound_skill_candidate
-from infrastructure.rdb.skill_execution_records import read_bound_skills
+from infrastructure.rdb.skill_execution_records import effective_skill_description, read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
 from infrastructure.skill_package import encode_skill_package, load_skill_package, released_skill_files, store_skill_package
 from management.clients.model import invoke_chat_prompt_in_worker
 from management.db.evaluation.candidates import store_skill_candidate
 from management.db.identity.group import query_group_ids_by_user_in_tenant
 from management.db.identity.user_tenant import get_user_role_by_tenant
-from management.db.skill.repository import get_skill_by_id
+from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from management.services.evaluation.prompt_candidates import propose_local_edit
 from management.services.skill.permission import resolve_skill_permission
 
@@ -30,6 +30,13 @@ def _editable_skill(tenant_id, user_id, skill_id):
                                              user_group_ids=set(query_group_ids_by_user_in_tenant(user_id, tenant_id) or [])) != PERMISSION_EDIT:
         raise AppException(ErrorCode.COMMON_FORBIDDEN)
     return skill
+
+
+def bound_catalog_description(skill, skill_id, bindings):
+    entries = [row for row in bindings if row["enabled"] and row["skill_id"] == skill_id]
+    if len(entries) != 1:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Expected one enabled Skill in the selected version")
+    return effective_skill_description(entries[0].get("released_catalog_entry"), skill.get("description")) or ""
 
 
 def feedback_skill_files(tenant, name, agent_version):
@@ -93,7 +100,8 @@ def generate_skill_discovery_candidate(feedback, feedback_id, model_id, tenant, 
 
     def approved_source():
         skill = _editable_skill(tenant, user, skill_id)
-        if (skill["name"] != feedback["skill_name"] or (skill.get("description") or "") != feedback["source_text"]):
+        bindings = query_skill_instances_by_agent_id(feedback["agent_id"], tenant, feedback["version_no"])
+        if skill["name"] != feedback["skill_name"] or bound_catalog_description(skill, skill_id, bindings) != feedback["source_text"]:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Skill description changed since evaluation")
         files = feedback_skill_files(tenant, skill["name"], (feedback["agent_id"], feedback["version_no"]))
         if sha256(encode_skill_package(files)).hexdigest() != feedback["source_digest"]:

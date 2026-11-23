@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Union
 
 from contracts.constants.environment import ROOT_DIR
+from infrastructure.rdb.skill_execution_records import effective_skill_description
 from infrastructure.system_configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
@@ -962,7 +963,9 @@ class SkillService(SkillArchiveOperations):
                     merged = {
                         "skill_id": skill_id,
                         "name": skill.get("name"),
-                        "description": skill.get("description", ""),
+                        "description": effective_skill_description(
+                            skill_instance.get("released_catalog_entry"), skill.get("description", "")
+                        ),
                         "content": skill.get("content", ""),
                         "enabled": skill_instance.get("enabled", True),
                         "tool_ids": skill.get("tool_ids", []),

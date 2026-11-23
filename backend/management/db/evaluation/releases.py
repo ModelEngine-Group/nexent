@@ -9,7 +9,7 @@ from contracts.errors.exceptions import AppException
 from contracts.evolution_sources import task_digest
 from contracts.roles import has_any_role
 from infrastructure.rdb.client import get_db_session
-from infrastructure.rdb.skill_execution_records import SkillInfo, release_skill
+from infrastructure.rdb.skill_execution_records import SkillInfo, effective_skill_description, release_skill
 from infrastructure.skill_execution import skill_execution_revision
 from management.db.agent.release_tools import publish_tool_selection
 from infrastructure.rdb.released_skill_guides import publish_guides
@@ -183,7 +183,7 @@ def _validate_skill_sources(session, tenant, records, pins):
             not skill
             or binding["skill_id"] != skill.skill_id
             or expected["name"] != skill.skill_name
-            or expected["description"] != skill.skill_description
+            or expected["description"] != effective_skill_description(binding.get("released_catalog_entry"), skill.skill_description)
             or expected["config"] != {**(skill.config_values or {}), **(binding["config_values"] or {})}
         ):
             reject("Authorized Skill metadata changed while preparing the release")
@@ -191,6 +191,16 @@ def _validate_skill_sources(session, tenant, records, pins):
 
 def _pin(session, tenant, agent, version, pin, variant):
     digest, files = pin[variant]
+    row = pin["row"]
+    if "result_description" in pin:
+        if variant == "result":
+            row = {**row, "description": pin["result_description"]}
+        session.execute(
+            SkillInstance.__table__.update().where(
+                SkillInstance.tenant_id == tenant, SkillInstance.agent_id == agent,
+                SkillInstance.version_no == version, SkillInstance.skill_instance_id == row["instance_id"],
+            ).values(released_catalog_entry={"description": row["description"]})
+        )
     values = dict(
         tenant_id=tenant,
         agent_id=agent,
@@ -198,7 +208,7 @@ def _pin(session, tenant, agent, version, pin, variant):
         instance_id=pin["row"]["instance_id"],
         skill_id=pin["skill_id"],
         digest=digest,
-        revision=skill_execution_revision(tenant, agent, version, pin["row"], files),
+        revision=skill_execution_revision(tenant, agent, version, row, files),
     )
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -401,6 +411,13 @@ def release_view(tenant, actor, lock):
         data = dict(row)
         cid = data.pop("resource_candidate_id")
         receipt = _receipt(session, tenant, lock)
+        if data["candidate_type"] == "skill_discovery":
+            description = session.execute(text("""
+                SELECT skill_name AS name, feedback->'edit'->>'old' AS previous, feedback->'edit'->>'new' AS proposed
+                FROM nexent.evolution_skill_candidate_t
+                WHERE tenant_id=:tenant AND candidate_id=:cid AND feedback->>'method'='S1'
+            """), {"tenant": tenant, "cid": cid}).mappings().one_or_none()
+            data["skill_description"] = dict(description) if description else None
         if data["candidate_type"] == "skill_new":
             if receipt:
                 from infrastructure.rdb.released_skill_guides import guides_for_version

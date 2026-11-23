@@ -6,7 +6,7 @@ from sqlalchemy import select
 from contracts.agentos import EvaluationAgentRun
 from contracts.errors.exceptions import AppException, SnapshotCompilationError
 from infrastructure.rdb.client import get_db_session
-from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
+from infrastructure.rdb.skill_candidate_records import candidate_skill_row, read_bound_skill_candidate
 from infrastructure.rdb.skill_execution_records import read_bound_skills, SkillInstance
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
 from infrastructure.skill_package import load_new_skill_package, load_skill_package, released_skill_files, store_skill_package
@@ -72,10 +72,10 @@ def _materials(tenant, ctx, prepared):
                 or new_ref.candidate_id != recipe["candidate_id"] or old_ref.model_copy(update={"arm": "result"}) != new_ref):
             releases.reject("Independent results do not identify a single new Skill package")
         load_new_skill_package(tenant, agent, new_ref.digest)
-    elif kind == "skill_step":
+    elif kind in {"skill_step", "skill_discovery"}:
         target = read_bound_skill_candidate(tenant, agent, version, recipe["candidate_id"])
-        if not target or target["method"] != "S2":
-            releases.reject("The tested Skill step is unavailable")
+        if not target or target["method"] != {"skill_step": "S2", "skill_discovery": "S1"}[kind]:
+            releases.reject("The independently tested Skill candidate is unavailable")
     else:
         releases.reject("This candidate does not yet have a live resource binding")
     with get_db_session() as session:
@@ -102,7 +102,12 @@ def _materials(tenant, ctx, prepared):
     for row in rows:
         instance = row["instance_id"]
         skill = skills[instance]
+        result_row = row
         if target and target["instance_id"] == instance:
+            try:
+                result_row = candidate_skill_row(row, target, "result")
+            except ValueError as exc:
+                releases.reject(str(exc))
             packages = {
                 arm: (target[arm + "_digest"], load_skill_package(tenant, skill, target[arm + "_digest"]))
                 for arm in ("base", "result")
@@ -116,11 +121,14 @@ def _materials(tenant, ctx, prepared):
             digest = store_skill_package(tenant, skill, files)
             packages = {"base": (digest, files), "result": (digest, files)}
         if any(
-            skill_execution_revision(tenant, agent, version, row, files) != expected[arm][instance]
+            skill_execution_revision(tenant, agent, version, result_row if arm == "result" else row, files) != expected[arm][instance]
             for arm, (_, files) in packages.items()
         ):
             releases.reject("Skill files or configuration changed after independent evaluation")
-        pins.append({"row": row, "skill_id": skill, **packages})
+        pin = {"row": row, "skill_id": skill, **packages}
+        if result_row is not row:
+            pin["result_description"] = result_row["description"]
+        pins.append(pin)
     baseline = prepared["base"].model_copy(deep=True)
     baseline.resource.skill_refs = [
         r.model_copy(update={"package_candidate_id": None, "package_variant": None})
@@ -128,6 +136,7 @@ def _materials(tenant, ctx, prepared):
     ]
     if kind == "skill_new":
         baseline.new_skill_trial = None
+    if kind in {"skill_new", "skill_discovery"}:
         baseline.observe_root_skill_choices = None
     baseline.tool_set_check = None
     return pins, prompt, snapshot_digest(baseline), removed

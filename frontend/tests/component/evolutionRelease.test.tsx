@@ -113,3 +113,13 @@ it("identifies the exact new Skill package before a publisher changes the defaul
   expect(await screen.findByText("intake abcdef12abcd")).toBeInTheDocument();
   expect(screen.getByRole("button", {name:"evolution.release.publish"})).toBeDisabled();
 });
+
+it("shows the old and proposed catalog description", async () => {
+  vi.mocked(api.release).mockResolvedValue({
+    ...passed, candidate_type: "skill_discovery",
+    skill_description: {name: "meeting", previous: "Summarize meetings", proposed: "Summarize meetings and handovers"},
+  });
+  open();
+  expect(await screen.findByText("Summarize meetings")).toBeInTheDocument();
+  expect(screen.getByText("Summarize meetings and handovers")).toBeInTheDocument();
+});

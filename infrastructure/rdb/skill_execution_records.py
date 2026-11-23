@@ -85,6 +85,7 @@ class SkillInstance(TableBase):
                      doc="Whether this skill is enabled for the agent")
     version_no = Column(Integer, default=0, primary_key=True, nullable=False,
                         doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    released_catalog_entry = Column(JSON(none_as_null=True), doc="Description pinned by a verified release")
     config_values = Column(
         JSON, doc="Per-agent runtime parameter values (mirrors ag_tool_instance_t.params)")
     config_schemas = Column(
@@ -106,6 +107,10 @@ class SkillToolRelation(TableBase):
                      doc="Foreign key to ag_tool_info_t.tool_id")
 
 
+def effective_skill_description(catalog_entry, shared_description):
+    return catalog_entry["description"] if catalog_entry is not None else shared_description
+
+
 def bound_skill_predicates(agent_id: int, version_no: int, tenant_id: str):
     return (
         SkillInstance.agent_id == agent_id,
@@ -125,7 +130,7 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
     statement = (
         select(
             SkillInstance.skill_instance_id, SkillInfo.skill_name, SkillInfo.skill_description,
-            SkillInfo.config_values, SkillInstance.config_values, release_skill.c.skill_id,
+            SkillInfo.config_values, SkillInstance.config_values, SkillInstance.released_catalog_entry, release_skill.c.skill_id,
             release_skill.c.digest, release_skill.c.revision, SkillInfo.skill_id,
         )
         .join(SkillInfo, SkillInfo.skill_id == SkillInstance.skill_id)
@@ -136,8 +141,8 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
     )
     with get_db_session() as session:
         rows = []
-        for instance, name, description, defaults, overrides, pinned_skill, digest, revision, skill in session.execute(statement):
-            row = {"instance_id": instance, "name": name, "description": description,
+        for instance, name, description, defaults, overrides, catalog_entry, pinned_skill, digest, revision, skill in session.execute(statement):
+            row = {"instance_id": instance, "name": name, "description": effective_skill_description(catalog_entry, description),
                    "config": {**(defaults or {}), **(overrides or {})}}
             if digest is not None:
                 if pinned_skill != skill:
