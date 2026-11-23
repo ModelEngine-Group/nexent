@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB, insert
 
 from infrastructure.rdb.base import SCHEMA, TableBase
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.conversation_record import ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 
 
@@ -31,11 +32,28 @@ class ConversationRunAdmission(TableBase):
     evolution_grant_epoch = Column(Integer, comment="Conversation evidence generation at admission.")
     evolution_valid_until = Column(TIMESTAMP(timezone=True), comment="Last instant this automatic grant may be consumed.")
     prepared_assistant_id = Column(Integer, doc="Assistant message reserved by Management for the admitted run.")
+    evolution_reply = Column(JSONB(none_as_null=True), doc="Owner-scoped receipt for an explicit chat suggestion.")
     prepared_automation_context = Column(JSONB(none_as_null=True), doc="Authorized proposal settings for the pending run.")
 
 
 class AdmissionScopeError(ValueError):
     """The signed actor cannot access this claim."""
+
+
+def read_suggestion_reply(identity):
+    """Runtime may only read the owner's committed receipt for this exact signed run."""
+    a = ConversationRunAdmission
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, identity.user_id, identity.tenant_id):
+            raise AdmissionScopeError
+        return session.scalar(select(a.evolution_reply).join(
+            ConversationRecord, ConversationRecord.conversation_id == a.conversation_id
+        ).where(
+            a.run_id == identity.run_id, a.conversation_id == identity.conversation_id,
+            a.created_by == identity.user_id, a.tenant_id == identity.tenant_id, a.delete_flag == "N",
+            a.prepared_assistant_id.is_not(None), ConversationRecord.created_by == identity.user_id,
+            ConversationRecord.delete_flag == "N",
+        ))
 
 
 class AdmissionRequestConflict(ValueError):

@@ -116,6 +116,8 @@ function Experiments({
   const { availableLlmModels } = useModelList();
   const [caseIds, setCases] = useState<number[]>([]);
   const [candidate, setCandidate] = useState<string>();
+  const [suggestion, setSuggestion] = useState<number>();
+  const [targetCase, setTargetCase] = useState<number>();
   const [evaluatorId, setEvaluator] = useState<number>();
   const [judge, setJudge] = useState<number>();
   const [selected, setSelected] = useState<number>();
@@ -151,6 +153,8 @@ function Experiments({
         version_no: version,
         candidate_type: kind,
         candidate_id: Number(id),
+        suggestion_id: suggestion,
+        suggestion_target_case_id: suggestion ? targetCase : undefined,
         case_ids: caseIds,
         evaluator_id: evaluatorId!,
         judge_model_id: needsJudge ? judge : undefined,
@@ -188,6 +192,22 @@ function Experiments({
       )}
       {choices && (
         <>
+          {!!choices.suggestions?.length && (
+            <Select
+              allowClear
+              aria-label={t("evolution.suggestion")}
+              placeholder={t("evolution.suggestion")}
+              value={suggestion}
+              onChange={(id) => {
+                setSuggestion(id);
+                setTargetCase(undefined);
+              }}
+              options={choices.suggestions.map((item) => ({
+                value: item.suggestion_id,
+                label: `S-${item.suggestion_id} · ${item.expected_behavior}`,
+              }))}
+            />
+          )}
           {!!choices.reviews?.length && (
             <details>
               <summary>{t("evolution.recentObservations")}</summary>
@@ -231,6 +251,18 @@ function Experiments({
             </Button>
           </Flex>
           <Flex gap={8} wrap>
+            {suggestion && (
+              <Select
+                aria-label={t("evolution.suggestionTarget")}
+                placeholder={t("evolution.suggestionTarget")}
+                style={{ minWidth: 220 }}
+                value={caseIds.includes(targetCase ?? 0) ? targetCase : undefined}
+                onChange={setTargetCase}
+                options={choices.cases.filter((c) => caseIds.includes(c.case_id)).map((c) => ({
+                  value: c.case_id, label: c.family,
+                }))}
+              />
+            )}
             <Select
               aria-label={t("evolution.evaluator")}
               placeholder={t("evolution.evaluator")}
@@ -258,7 +290,8 @@ function Experiments({
               type="primary"
               disabled={
                 !candidate ||
-                !caseIds.length ||
+                caseIds.length < (suggestion ? 2 : 1) ||
+                (!!suggestion && !caseIds.includes(targetCase ?? 0)) ||
                 !evaluatorId ||
                 (needsJudge && !judge)
               }

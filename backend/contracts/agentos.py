@@ -651,6 +651,8 @@ class PreparedConversationScope(AgentRunReference):
 class PreparedAgentRun(AgentRunSpec, PreparedConversationScope):
     """Execute an authorized snapshot for an existing conversation."""
 
+    await_evolution_reply: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
+
 
 class PreparedEphemeralRun(AgentRunSpec):
     """Execute a request-owned snapshot without creating a conversation."""

@@ -317,6 +317,8 @@
   "chat.evolution.autoAnalysis": "Allow analysis of future turns",
   "chat.evolution.withdraw": "Withdraw past consent",
   "evolution.recentObservations": "Recent online observations",
+  "evolution.suggestion": "Link a user suggestion (select a target and a protection case)",
+  "evolution.suggestionTarget": "Target case (other selected cases guard against regressions)",
   "evolution.batchNumber": "Review batch {{id}}",
   "evolution.waitingBatch": "Waiting for five turns",
   "evolution.observation.pending": "Queued",

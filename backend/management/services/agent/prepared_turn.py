@@ -26,6 +26,7 @@ from management.db.conversation import prepared_turn as store
 from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
 from management.services.agent.agentos_events import knowledge_scope_event_content, present_legacy_journal, present_public_resume
 from management.services.agent.context import strip_current_time_prefix
+from management.utils.suggestion_intent import intent as suggestion_intent
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
 from management.services.agent.prepared_projection import acknowledge_projection, resume_assistant_projection
 from nexent.core.concurrency import run_blocking
@@ -205,6 +206,16 @@ async def start_turn(
             "agent_id": snapshot.resource.agent_id if workbench is not None else request.agent_id,
             "automation": automation,
         }
+        if (not omitted_user and not request.is_debug and workbench is None
+                and (saved_user is None or saved_user.message_source == "CHAT")
+                and suggestion_intent(user_turn["query"]) and snapshot.resource.origin == "PERSISTED"
+                and snapshot.resource.version_no > 0):
+            user_turn["suggestion_scope"] = {
+                "agent": snapshot.resource.agent_id, "version": snapshot.resource.version_no,
+                "language": payload.language,
+                "instances": [ref.instance_id for ref in snapshot.resource.skill_refs],
+            }
+            snapshot = snapshot.model_copy(update={"await_evolution_reply": True})
         if request.annotations is not None:
             user_turn["annotations"] = [item.model_dump(mode="json") for item in request.annotations]
         if snapshot.memory_enabled:

@@ -317,6 +317,8 @@
   "chat.evolution.autoAnalysis": "允许自动分析后续对话",
   "chat.evolution.withdraw": "撤回历史授权",
   "evolution.recentObservations": "最近的在线诊断",
+  "evolution.suggestion": "关联业务用户的建议（需选目标题和保护题）",
+  "evolution.suggestionTarget": "建议的目标题（其他已选题用于回归）",
   "evolution.batchNumber": "第 {{id}} 批复盘",
   "evolution.waitingBatch": "等待凑满五轮",
   "evolution.observation.pending": "等待取证",

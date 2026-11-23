@@ -69,6 +69,8 @@ async def create_experiment(request, tenant, user):
     existing = await _io("read-experiment-submission", jobs.previous_submission, tenant, user, request)
     if existing is not None:
         return existing
+    if request.suggestion_id is not None and request.suggestion_target_case_id is None:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select the target task for this suggestion")
     if not EVOLUTION_REPLAY_RUNTIME_URL:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Configure the isolated replay Runtime before starting a trial")
     rule = await _io("read-experiment-evaluator", get_evaluator, request.evaluator_id, tenant)

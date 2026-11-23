@@ -20,6 +20,7 @@ interface Rule {
   status: string;
 }
 export interface Workspace {
+  suggestions?: { suggestion_id: number; expected_behavior: string; skill_id: number; experiment_id: number | null }[];
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[] }[];
   candidates: { candidate_id: number; kind: string; name: string }[];
   cases: { case_id: number; family: string; query: string }[];
@@ -76,6 +77,8 @@ export const evolutionService = {
     attachments: { name: string; object_name: string }[];
   }) => read<{ case_id: number }>(`${root}/development-cases`, body),
   submit: (body: {
+    suggestion_id?: number;
+    suggestion_target_case_id?: number;
     request_id: string;
     agent_id: number;
     version_no: number;

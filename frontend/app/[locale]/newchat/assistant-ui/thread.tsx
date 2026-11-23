@@ -1882,6 +1882,13 @@ const AssistantMessage: FC<{
                 }
                 if (
                   (part as typeof part & { name?: string }).name ===
+                  "evolution-receipt"
+                ) {
+                  const receipt = (part as typeof part & { data?: unknown }).data;
+                  return typeof receipt === "string" ? <p role="status">{receipt}</p> : null;
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
                   "automation-proposal"
                 ) {
                   return (

@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentRunReference, PreparedAgentRun
 from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.rdb.agent_admission import read_suggestion_reply
 from infrastructure.rdb.agent_execution import (
     ActiveExecutionError, RunIdentity, begin_execution, finish_execution, mark_running, stop_requested, track_execution,
 )
@@ -82,7 +83,29 @@ async def _append_event(journal, sequence, kind, payload):
     await _control_io("agentos-prepared-event", journal.append, sequence, f"event: {kind}\ndata: {data}\n\n")
 
 
+async def _committed_suggestion(identity):
+    # Admission returns before Management binds the original user message. Recovery also uses this fence.
+    async with asyncio.timeout(60):
+        while True:
+            receipt = await _control_io("agentos-suggestion-receipt", read_suggestion_reply, identity)
+            if receipt is not None:
+                return receipt
+            await asyncio.sleep(0.2)
+
+
 async def _run_snapshot(payload, actor, identity, journal, slot=None):
+    receipt = None
+    if getattr(payload, "await_evolution_reply", None) is True:
+        versions = {"agent_id": payload.resource.agent_id, "agent_version_no": payload.resource.version_no}
+        if not await _control_io("agentos-suggestion-running", mark_running, identity, versions):
+            return "stopped"
+        receipt = await _committed_suggestion(identity)
+        if not receipt["business"]:
+            await _append_event(journal, 1, "agentos_observer",
+                                {"type": "final_answer", "answer_phase": "complete", "content": receipt["message"]})
+            return "completed"
+        if receipt["message"]:
+            await _append_event(journal, 1, "agentos_observer", {"type": "evolution_receipt", "content": receipt["message"]})
     info = await load_prepared_run(payload, actor, prepare_run_snapshot)
     try:
         agent_run_manager.register_agent_run(identity.conversation_id, info, identity.user_id)
@@ -120,12 +143,14 @@ async def _run_snapshot(payload, actor, identity, journal, slot=None):
         history = ExecutionHistory()
         info.observer.execution_history = history
         facts = {}
-        index = 0
+        index = 1 if receipt and receipt["message"] else 0
         with agent_monitoring_context(metadata):
             async with aclosing(_snapshot_chunks(info)) as chunks:
                 async for chunk in chunks:
                     # Re-encode JSON to keep each payload within one SSE data line.
                     observer_event = json.loads(chunk)
+                    if observer_event.get("type") == "evolution_receipt":
+                        continue
                     if observer_event.get("type") == "skill_artifact":
                         raise ValueError("Prepared runs cannot journal local skill artifact paths")
                     if observer_event.get("type") == "execution_result":

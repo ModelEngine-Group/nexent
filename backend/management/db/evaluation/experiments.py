@@ -43,6 +43,23 @@ def submit(tenant, user, request, plan):
             if existing.request_digest != params["digest"]:
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Experiment request ID already used")
             return existing.experiment_id
+        if request.suggestion_id is not None:
+            link = {**params, "sid": request.suggestion_id, "eid": eid}
+            suggestion = session.execute(text("""
+                SELECT s.experiment_id FROM nexent.evolution_suggestion_t s
+                JOIN nexent.conversation_record_t c ON c.conversation_id=s.conversation_id
+                    AND c.created_by=s.submitter_id AND c.delete_flag='N'
+                WHERE s.suggestion_id=:sid AND s.tenant_id=:tenant AND s.agent_id=:agent AND s.version_no=:version
+                  AND s.status='submitted' FOR UPDATE OF s
+            """), link).one_or_none()
+            # Check after obtaining the row lock so a concurrent submitter's committed trial rows are visible.
+            if suggestion is None or (suggestion.experiment_id is not None and session.scalar(text("""
+                SELECT EXISTS (SELECT 1 FROM nexent.evolution_trial_t
+                    WHERE experiment_id=:previous AND status IN ('running','pending'))
+            """), {"previous":suggestion.experiment_id})):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Suggestion unavailable or already being evaluated")
+            session.execute(text("""UPDATE nexent.evolution_suggestion_t SET experiment_id=:eid,update_time=now()
+                WHERE suggestion_id=:sid"""), link)
         session.execute(text("""
             INSERT INTO nexent.evolution_trial_t (experiment_id, case_id, variant) VALUES (:eid, :case, :variant)
         """), [dict(eid=eid, case=case, variant=v) for case in request.case_ids for v in ("base", "result")])
@@ -141,6 +158,13 @@ def read_plan(tenant, eid):
 def workspace_choices(tenant, agent_id, version):
     params = dict(tenant=tenant, agent=agent_id, version=version)
     queries = {
+        "suggestions": """
+            SELECT s.suggestion_id, s.expected_behavior, s.skill_id, s.experiment_id FROM nexent.evolution_suggestion_t s
+            JOIN nexent.conversation_record_t c ON c.conversation_id=s.conversation_id AND c.created_by=s.submitter_id
+            WHERE s.tenant_id=:tenant AND s.agent_id=:agent AND s.version_no=:version AND s.status='submitted'
+                AND c.delete_flag='N'
+            ORDER BY suggestion_id DESC LIMIT 100
+        """,
         "cases": """
             SELECT case_id, task->>'family' AS family, left(task->>'query', 160) AS query
             FROM nexent.evolution_replay_case_t WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version

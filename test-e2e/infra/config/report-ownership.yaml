@@ -159,6 +159,7 @@ feature_overrides:
   V5-PERF-04: knowledge
   V5-PERF-05: task
   AGENT-EVOLUTION-REPLAY: evaluation
+  AGENT-EVOLUTION-ONLINE: evaluation
   V5-PERF-06: evaluation
   V5-PERF-07: context
   V5-PERF-08: mcp

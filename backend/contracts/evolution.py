@@ -88,6 +88,8 @@ class PromptEdit(BaseModel):
 
 class DevelopmentExperimentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    suggestion_id: int | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
+    suggestion_target_case_id: int | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
@@ -105,6 +107,15 @@ class DevelopmentExperimentRequest(BaseModel):
         if min(values) < 1 or len(values) != len(set(values)):
             raise ValueError("Select distinct, confirmed development tasks")
         return values
+
+    @model_validator(mode="after")
+    def check_suggestion_cases(self):
+        if self.suggestion_id is not None and len(self.case_ids) < 2:
+            raise ValueError("Include the target and a protection task for a Skill suggestion")
+        if self.suggestion_target_case_id is not None and (
+                self.suggestion_id is None or self.suggestion_target_case_id not in self.case_ids):
+            raise ValueError("The suggestion target must be one of the selected tasks")
+        return self
 
 
 class FeedbackExcerpt(BaseModel):

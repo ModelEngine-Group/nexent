@@ -2,11 +2,13 @@
 """Management-owned public conversation admission and projection markers."""
 
 import json
+import logging
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from contracts.agent import WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, WorkbenchSkillLookup, WorkbenchSkillMounts
@@ -20,6 +22,7 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.models import ConversationMessageUnit
+from management.db.conversation.suggestions import record_intent
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from management.db.conversation.repository import (
     _assert_workbench_topology, _enforce_conversation_turn_limit, _lock_conversation_limit_scope,
@@ -624,7 +627,18 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 "role": "assistant", "content": "",
             }, turn.user_id, status="streaming", streaming_owner="management", db_session=session, **source_options)
             conversation.chat_mode = user_turn["chat_mode"]
-            if user_turn.get("evolution_eligible") and source_message_id is not None:
+            if user_turn.get("suggestion_scope") and source_message_id is not None and not omitted_user:
+                try:
+                    with session.begin_nested():
+                        receipt = record_intent(session, turn, source_message_id, user_turn)
+                except SQLAlchemyError as exc:
+                    logging.getLogger(__name__).warning("suggestion.store_failed type=%s", type(exc).__name__)
+                    receipt = {"business": True, "message": (
+                        "I couldn't process the suggestion. Please try again." if user_turn["suggestion_scope"]["language"] == "en"
+                        else "本次建议处理失败，请稍后重试。")}
+                row.evolution_reply = {**receipt, "source": source_message_id}
+            if (user_turn.get("evolution_eligible") and source_message_id is not None
+                    and (row.evolution_reply or {}).get("business", True)):
                 row.evolution_source_message_id = source_message_id
             if workbench is None:
                 conversation.agent_id = user_turn["agent_id"]

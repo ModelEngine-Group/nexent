@@ -2627,6 +2627,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "evolution_receipt") {
+            flushOpenReasoning();
+            contentParts.push({ type: "data", name: "evolution-receipt", data: chunk.content });
+            yield buildStreamResult(contentParts);
+            continue;
+          }
+
           // Handle picture_web: accumulate image URLs and attach them to the
           // most recent tool call (matched by unit_index when available) so the
           // ToolFallback can render them inline.
@@ -3070,6 +3077,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
+          } else if (chunk.type === "evolution_receipt") {
+            parentReasoning.close();
+            contentParts.push({ type: "data", name: "evolution-receipt", data: chunk.content });
+            yield buildStreamResult(contentParts);
           } else if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {

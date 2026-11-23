@@ -1179,6 +1179,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "evolution_receipt") {
+            flushReasoning();
+            content.push({ type: "data", name: "evolution-receipt", data: part.content });
+            continue;
+          }
           if (part.type === "automation_proposal") {
             flushReasoning();
             const proposal = parseAutomationProposal(part.content);

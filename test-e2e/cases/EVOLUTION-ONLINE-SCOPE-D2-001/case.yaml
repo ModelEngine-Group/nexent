@@ -1,0 +1,40 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-ONLINE-SCOPE-D2-001
+  feature_id: AGENT-EVOLUTION-ONLINE
+  business_rule_ids: [AGENT-EVOLUTION-ONLINE-RULE-01, AGENT-EVOLUTION-ONLINE-RULE-02]
+  title: 使用真实会话身份撤回证据和读取当前版本的建议
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 通过 Management HTTP 入口核对授权记录与建议的可见范围。
+  preconditions: [隔离 PostgreSQL 实例允许创建临时数据库。]
+  test_data:
+    profile: 本人及他人的会话，两条已取证轮次，已发布业务智能体与不同版本的合成建议。
+  steps:
+  - order: 1
+    action: 本人开启再关闭开关，通过撤回接口清除旧授权，并尝试撤回他人会话。
+    expected: 关闭保留证据，撤回清除本人证据，他人记录保留并返回 404。
+  - order: 2
+    action: 编辑者读取指定版本的评测工作台，然后读取未向本人共享的智能体工作台。
+    expected: 只返回所选版本已提交的建议，无编辑权时拒绝访问。
+  expected_results: [撤回立即清除相应的诊断。, 编辑者能看到提交给本版本的一条建议。]
+  forbidden_side_effects: [他人会话的授权与证据未受影响。, 工作台不泄露其他版本的建议或仅在澄清中的原话。]
+  acceptance:
+  - id: AC-01
+    description: 本人开关、撤回接口与数据库记录一致；相同凭据无法撤回他人会话。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 逐项核对返回的建议与版本范围，并验证不可访问智能体的结果。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [2]
+  contract:
+    protocol: HTTP API
+    request_expectations: [使用原生用户登录会话调用会话设置和评测工作台接口。]
+    response_expectations: [设置返回 enabled；成功的工作台返回 suggestions，拒绝时不含建议正文。]

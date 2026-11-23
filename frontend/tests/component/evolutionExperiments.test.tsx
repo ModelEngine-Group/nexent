@@ -46,10 +46,13 @@ it("selects a published scope and opens its paired results with the original sta
   vi.mocked(evolutionService.versions).mockResolvedValue([
     { version_no: 1, version_name: "Pilot" },
   ]);
-  vi.mocked(evolutionService.evaluators).mockResolvedValue([]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([
+    { evaluator_id: 3, name: "Rules", evaluator_type: "code", status: "PUBLISHED" },
+  ]);
   vi.mocked(evolutionService.workspace).mockResolvedValue({
-    candidates: [],
-    cases: [{ case_id: 9, family: "Owners", query: "List" }],
+    candidates: [{ candidate_id: 5, kind: "skill_step", name: "Skill" }],
+    suggestions: [{ suggestion_id: 17, expected_behavior: "Keep sources", skill_id: 2, experiment_id: null }],
+    cases: [{ case_id: 9, family: "Owners", query: "List" }, { case_id: 10, family: "Sources", query: "Extract" }],
     experiments: [{ experiment_id: 42, create_time: "2026-11-23T00:00:00Z" }],
     reviews: [{ turn_id: 3, batch_id: null, state: "observed", signals: ["tool_error"] }],
   });
@@ -88,4 +91,19 @@ it("selects a published scope and opens its paired results with the original sta
   expect(screen.getByText("evolution.state.improved")).toBeInTheDocument();
   expect(evolutionService.workspace).toHaveBeenCalledWith(7, 1);
   expect(evolutionService.submit).not.toHaveBeenCalled();
+  await choose("evolution.suggestion", "S-17 · Keep sources");
+  await choose("evolution.candidate", "#5 · Skill");
+  await choose("evolution.evaluator", "Rules");
+  await choose("evolution.cases", "Owners · List");
+  const compare = screen.getByRole("button", { name: "evolution.compare" });
+  expect(compare).toBeDisabled();
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.cases" }), { key: "Escape" });
+  await choose("evolution.cases", "Sources · Extract");
+  expect(compare).toBeDisabled();
+  await choose("evolution.suggestionTarget", "Sources");
+  vi.mocked(evolutionService.submit).mockResolvedValue({ experiment_id: 42 });
+  fireEvent.click(compare);
+  await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
+    suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
+  })));
 });

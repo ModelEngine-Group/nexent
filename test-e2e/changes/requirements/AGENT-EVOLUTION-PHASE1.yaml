@@ -7,12 +7,12 @@ change:
   description: 根据授权轨迹和业务评测反馈生成资源候选，同题评测、独立确认后按业务范围发布和回退。
   affected_features:
     existing: []
-    added: [AGENT-EVOLUTION-REPLAY]
+    added: [AGENT-EVOLUTION-REPLAY, AGENT-EVOLUTION-ONLINE]
     modified: [V5-PW-EVAL-RUN-01]
     retired: []
   affected_cases:
     existing: []
-    added: [EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001]
+    added: [EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001]
     modified: []
     retired: []
   traditional_ut:
@@ -20,6 +20,7 @@ change:
     test_selectors:
     - test/backend/database/test_evolution_consent.py
     - test/backend/ops/test_evolution_review.py
+    - test/backend/services/test_evolution_suggestion.py
     - test/backend/services/test_evolution_observation.py
     - test/backend/services/test_evolution_prompt_candidates.py
     - test/backend/services/test_evolution_skill_package.py
@@ -31,6 +32,7 @@ change:
     behaviors:
     - 会话授权按原始请求生效，重试沿用原授权。
     - 撤回或到期后重试不能沿用旧授权，缺证轮次与没有发现问题的轮次分别统计。
+    - 只有人工原话中的明确改进意图可以登记；一次性交付和引用内容不能代替提交授权。
     - 判据缺证或裁判故障时不能把样本判为业务失败。
     - 提示词局部改写保留占位符及相近成功例，权限变化时丢弃生成结果。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
