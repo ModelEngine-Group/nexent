@@ -32,9 +32,11 @@ from .retrieval_config import (
     ALL_CHANNELS,
     CONFIG_KEYS,
     DEFAULTS,
+    active_channels,
     build_payload,
     resolve_config,
 )
+from . import metadata_filter as metadata_filter_rules
 
 
 logger = logging.getLogger("aidp_search_tool")
@@ -165,13 +167,21 @@ class AidpSearchTool(Tool):
         },
         "vector_candidates": {"description_zh": "向量初步检索条数；固定整数，1–500"},
         "full_text_candidates": {"description_zh": "全文初步检索条数；固定整数，1–500"},
-        "hybrid_top_k": {"description_zh": "向量／全文部分返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "hybrid_top_k": {"description_zh": "向量／全文部分返回上限；固定整数，最小为 1（0 会被 AIDP 拒绝），最终仍受总返回上限约束"},
         "graph_top_k": {"description_zh": "图谱返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
         "vector_score_threshold": {"description_zh": "向量检索分数阈值，范围 0–1"},
         "full_text_score_threshold": {"description_zh": "全文检索分数阈值，范围 0–1"},
         "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
         "graph_reranking_enable": {"description_zh": "图谱是否参与统一重排；固定布尔值"},
         "query_expansion_enable": {"description_zh": "是否启用查询扩展"},
+        "ontology_enhance_enable": {
+            "description": "Use the bound ontology's entities and relations to enhance retrieval",
+            "description_zh": "使用已关联本体库的实体及同义、上位、下位关系增强检索",
+        },
+        "rule_enable": {
+            "description": "Use enabled ontology rules to adjust candidate scores",
+            "description_zh": "使用本体库中已启用的规则调整候选结果分数",
+        },
     }
 
     output_type = "string"
@@ -199,13 +209,20 @@ class AidpSearchTool(Tool):
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
         vector_candidates: int = Field(default=10, ge=1, le=500, description="Vector candidates"),
         full_text_candidates: int = Field(default=10, ge=1, le=500, description="Full-text candidates"),
-        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero means no separate cap, still bounded by top_k"),
+        hybrid_top_k: Optional[int] = Field(default=None, ge=0, le=100, description="Vector/full-text cap; real AIDP rejects 0 (ge=1), so zero is normalized to the total cap"),
         graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero means no separate cap, still bounded by top_k"),
         vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
         full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
         graph_reranking_enable: bool = Field(default=True, description="Include graph results in unified reranking"),
         query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
+        ontology_enhance_enable: bool = Field(default=False, description="Enable ontology entity enhancement"),
+        rule_enable: bool = Field(default=False, description="Enable ontology rule enhancement"),
+        metadata_filter: dict = Field(
+            default_factory=dict,
+            exclude=True,
+            description="Server-installed conversation metadata filter: {enabled, match, conditions}",
+        ),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):
         super().__init__()
@@ -240,11 +257,16 @@ class AidpSearchTool(Tool):
             "graph_score_threshold": graph_score_threshold,
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
+            "ontology_enhance_enable": ontology_enhance_enable,
+            "rule_enable": rule_enable,
         }
         config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
         resolved = resolve_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
+        self.metadata_filter = metadata_filter_rules.normalize_metadata_filter(
+            unwrap_field_info(metadata_filter)
+        )
         self.observer = _resolve_field_default(observer, None)
         # Runtime whitelist populated by the backend (create_agent_info).
         # When the whitelist has been explicitly installed (even as an empty
@@ -309,8 +331,18 @@ class AidpSearchTool(Tool):
         path = f"/KnowledgeBase/Tenants/{self.tenant_id}/Retrieval/FusionSearch"
         return urljoin(self.base_url, path)
 
-    def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
-        return build_payload({key: getattr(self, key) for key in CONFIG_KEYS}, query, kds_list)
+    def _build_retrieve_payload(
+        self,
+        query: str,
+        kds_list: List[str],
+        metadata_condition: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return build_payload(
+            {key: getattr(self, key) for key in CONFIG_KEYS},
+            query,
+            kds_list,
+            metadata_condition,
+        )
 
     def _emit_running_prompt(self, query: str) -> None:
         """Push the running prompt + query card to the observer if any."""
@@ -447,11 +479,16 @@ class AidpSearchTool(Tool):
                 json.dumps({"images_url": images_url}, ensure_ascii=False),
             )
 
-    def _execute_request(self, query: str, kds_list: List[str]):
+    def _execute_request(
+        self,
+        query: str,
+        kds_list: List[str],
+        metadata_condition: Optional[Dict[str, Any]] = None,
+    ):
         """Retrieve records through the shared transport and response boundary."""
         return post_retrieval(
             self._http_client, self._build_retrieve_url(), self.api_key,
-            self._build_retrieve_payload(query.strip(), kds_list),
+            self._build_retrieve_payload(query.strip(), kds_list, metadata_condition),
         )
 
     def _build_image_url(self, file_url: str) -> str:
@@ -600,8 +637,6 @@ class AidpSearchTool(Tool):
         scope = self._resolve_search_scope(kds_list)
         search_kds_list = scope.used_scope
 
-        self._emit_running_prompt(query)
-
         logger.info(
             "AidpSearchTool called query='%s' kds_list=%s method=%s top_k=%d",
             query,
@@ -623,7 +658,24 @@ class AidpSearchTool(Tool):
                 scope.scope_was_specified,
             )
 
-        records = self._execute_request(query, search_kds_list)
+        metadata_condition = None
+        if self.metadata_filter.get("enabled"):
+            if "graph_search" in active_channels(self.search_method):
+                # Graph retrieval does not consume metadata_condition. The
+                # conversation filter is ignored for graph-enabled methods so
+                # the retrieval still runs; the assistant UI hides the filter
+                # entry for these Agents.
+                logger.info(
+                    "AIDP metadata filter ignored because graph retrieval is enabled"
+                )
+            else:
+                metadata_condition = metadata_filter_rules.build_metadata_condition(
+                    self.metadata_filter
+                )
+
+        self._emit_running_prompt(query)
+
+        records = self._execute_request(query, search_kds_list, metadata_condition)
 
         if not records:
             logger.info(

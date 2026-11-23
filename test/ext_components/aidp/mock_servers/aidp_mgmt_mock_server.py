@@ -73,7 +73,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -166,6 +166,23 @@ _FOLDERS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
 # survive an upload, but they are kept in memory only: ``_save_state`` serializes
 # metadata, and a mock restart legitimately loses the bytes it received.
 _DOCUMENT_PAYLOADS: dict[str, bytes] = {}
+
+# Ontology, binding, metadata-definition and chunk state. AIDP owns these
+# objects in production; the mock keeps small deterministic fixtures so the
+# ontology UI and its proxy can be exercised without a live AIDP deployment.
+_ONTOLOGY_DOMAINS: Dict[str, Dict[str, Any]] = {}
+_ONTOLOGY_ENTITIES: Dict[str, List[Dict[str, Any]]] = {}
+_ONTOLOGY_RELATIONS: Dict[str, List[Dict[str, Any]]] = {}
+_ONTOLOGY_BINDINGS: List[Dict[str, Any]] = []
+_ONTOLOGY_METADATA: Dict[str, List[Dict[str, str]]] = {}
+_ONTOLOGY_RULES: Dict[str, List[Dict[str, Any]]] = {}
+_ONTOLOGY_CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
+
+# Deterministic failure knobs for partial-result coverage. They stay in memory
+# only so a restart starts from a clean plan, matching the other fault knobs.
+_ONTOLOGY_IMPORT_FAIL_API_NAMES: set[str] = set()
+_ONTOLOGY_METADATA_FAIL_CHUNK_IDS: set[str] = set()
+_ONTOLOGY_ASYNC_THRESHOLD = 200
 
 # =============================================================================
 # Failure injection counters (used to test retry logic end-to-end)
@@ -419,6 +436,349 @@ def _seed_sensitive_words_if_empty() -> None:
         _SENSITIVE_WORDS[kds_id] = {item["id"]: dict(item) for item in words}
 
 
+def _seed_ontology_data() -> None:
+    """Populate deterministic ontology, binding, metadata and chunk fixtures.
+
+    Two ontology domains are bound to three of the seeded knowledge bases so a
+    fresh mock already demonstrates the one-knowledge-base-to-one-domain rule
+    and the shared binding count shown on every entity row.
+    """
+    _ONTOLOGY_DOMAINS.clear()
+    _ONTOLOGY_ENTITIES.clear()
+    _ONTOLOGY_RELATIONS.clear()
+    _ONTOLOGY_BINDINGS.clear()
+    _ONTOLOGY_METADATA.clear()
+    _ONTOLOGY_RULES.clear()
+    _ONTOLOGY_CHUNKS_BY_KB.clear()
+
+    _ONTOLOGY_DOMAINS.update(
+        {
+            "1": {
+                "od_id": 1,
+                "name": "电商本体",
+                "description": "商品、类目与平台关系的本体示例",
+                "metadata_count": 3,
+                "entity_count": 4,
+                "rule_count": 2,
+                "created_by": "李东升",
+                "create_time": "2026-01-23",
+                "update_time": "2026-01-24",
+            },
+            "2": {
+                "od_id": 2,
+                "name": "客服本体",
+                "description": "售后与客服问题分类的本体示例",
+                "metadata_count": 1,
+                "entity_count": 2,
+                "rule_count": 1,
+                "created_by": "赵晓宇",
+                "create_time": "2026-02-10",
+                "update_time": "2026-02-12",
+            },
+        }
+    )
+
+    def entity(
+        entity_id: str,
+        api_name: str,
+        display_name: str,
+        kind: str,
+        description: str,
+        *,
+        type_id: Optional[str] = None,
+        properties: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "entity_id": entity_id,
+            "api_name": api_name,
+            "display_name": display_name,
+            "description": description,
+            "kind": kind,
+            "type_id": type_id,
+            "properties": properties or [],
+            "primary_properties": [item["api_name"] for item in (properties or [])],
+            "parent_entities": [],
+            "synonym_entities": [],
+            "child_entities": [],
+            "chunk_count": 0,
+            "extended_properties": [],
+            "create_time": "2023-01-12 15:30:00",
+            "update_time": "2023-01-12 15:30:00",
+        }
+
+    _ONTOLOGY_ENTITIES["1"] = [
+        entity("101", "Category", "类目", "type", "商品所属的顶层类目"),
+        entity("102", "Brand", "品牌", "type", "商品品牌"),
+        entity(
+            "201",
+            "Smartphone",
+            "智能手机",
+            "entity",
+            "在售的智能手机商品",
+            type_id="101",
+            properties=[
+                {"api_name": "price", "display_name": "价格", "value": "3999"},
+                {"api_name": "screen_size", "display_name": "屏幕尺寸", "value": "6.1"},
+            ],
+        ),
+        entity(
+            "202",
+            "Notebook",
+            "笔记本电脑",
+            "entity",
+            "在售的笔记本电脑商品",
+            type_id="101",
+            properties=[
+                {"api_name": "price", "display_name": "价格", "value": "6999"},
+            ],
+        ),
+    ]
+    _ONTOLOGY_ENTITIES["1"][0].update(
+        {
+            "child_entities": ["Smartphone", "Notebook"],
+            "chunk_count": 86,
+            "extended_properties": [{"key": "业务域", "value": "商品"}],
+        }
+    )
+    _ONTOLOGY_ENTITIES["1"][2].update(
+        {
+            "parent_entities": ["Category"],
+            "synonym_entities": ["Phone"],
+            "chunk_count": 120,
+            "extended_properties": [{"key": "数据来源", "value": "商品库"}],
+        }
+    )
+    _ONTOLOGY_ENTITIES["1"][3].update(
+        {
+            "parent_entities": ["Category"],
+            "chunk_count": 48,
+            "extended_properties": [{"key": "数据来源", "value": "商品库"}],
+        }
+    )
+    _ONTOLOGY_RELATIONS["1"] = [
+        {
+            "api_name": "belongs_to",
+            "display_name": "属于类目",
+            "source_api_name": "Smartphone",
+            "source_kind": "entity",
+            "object_api_name": "Category",
+            "object_kind": "type",
+            "source_ids": [],
+        },
+        {
+            "api_name": "belongs_to",
+            "display_name": "属于类目",
+            "source_api_name": "Notebook",
+            "source_kind": "entity",
+            "object_api_name": "Category",
+            "object_kind": "type",
+            "source_ids": [],
+        },
+    ]
+    _ONTOLOGY_ENTITIES["2"] = [
+        entity("301", "Issue", "问题类型", "type", "客服问题的一级分类"),
+        entity(
+            "401",
+            "RefundRequest",
+            "退款申请",
+            "entity",
+            "用户发起的退款申请",
+            type_id="301",
+        ),
+    ]
+    _ONTOLOGY_RELATIONS["2"] = []
+
+    _ONTOLOGY_BINDINGS.extend(
+        [
+            {
+                "id": 1,
+                "od_id": 1,
+                "kds_id": "aidp-kb-faq",
+                "kb_name": "AIDP FAQ",
+                "create_time": "2026-02-01 09:00:00",
+            },
+            {
+                "id": 2,
+                "od_id": 1,
+                "kds_id": "aidp-kb-product",
+                "kb_name": "AIDP Product Handbook",
+                "create_time": "2026-02-01 09:05:00",
+            },
+            {
+                "id": 3,
+                "od_id": 2,
+                "kds_id": "aidp-kb-api",
+                "kb_name": "AIDP API Guide",
+                "create_time": "2026-02-10 14:00:00",
+            },
+        ]
+    )
+
+    _ONTOLOGY_METADATA["1"] = [
+        {"id": 101, "fieldName": "doc_type", "fieldType": "string", "columnIndex": 1},
+        {"id": 102, "fieldName": "publish_year", "fieldType": "number", "columnIndex": 2},
+        {"id": 103, "fieldName": "effective_date", "fieldType": "date", "columnIndex": 3},
+    ]
+    _ONTOLOGY_RULES["1"] = [
+        {
+            "rule_id": 1,
+            "name": "制度文档加分",
+            "description": "命中文档类型为制度时提高排序分数",
+            "enabled": True,
+            "condition": {
+                "type": "json",
+                "value": {
+                    "logical_operator": "and",
+                    "conditions": [
+                        {
+                            "field": "metadata_json.doc_type",
+                            "operator": "is",
+                            "value": "Policy",
+                        }
+                    ],
+                },
+            },
+            "action": {
+                "type": "json",
+                "value": {
+                    "effect_mode": "multiply",
+                    "coefficient": 0.25,
+                },
+            },
+            "created_at": "2026-03-01 10:00:00",
+            "updated_at": "2026-03-05 09:30:00",
+        },
+        {
+            "rule_id": 2,
+            "name": "常见问题降权",
+            "description": "命中 FAQ 文档时降低排序分数",
+            "enabled": False,
+            "condition": {
+                "type": "json",
+                "value": {
+                    "logical_operator": "or",
+                    "conditions": [
+                        {
+                            "field": "title",
+                            "operator": "contains",
+                            "value": "FAQ",
+                        },
+                        {
+                            "field": "chunk_type",
+                            "operator": "not_empty",
+                            "value": "",
+                        },
+                    ],
+                },
+            },
+            "action": {
+                "type": "json",
+                "value": {
+                    "effect_mode": "add",
+                    "coefficient": -0.1,
+                },
+            },
+            "created_at": "2026-03-02 11:00:00",
+            "updated_at": "2026-03-06 15:20:00",
+        },
+    ]
+    _ONTOLOGY_RULES["2"] = [
+        {
+            "rule_id": 3,
+            "name": "客服问题加权",
+            "description": "客服问题类型提高排序分数",
+            "enabled": True,
+            "condition": {
+                "type": "json",
+                "value": {
+                    "logical_operator": "and",
+                    "conditions": [
+                        {
+                            "field": "metadata_json.channel",
+                            "operator": "is",
+                            "value": "在线",
+                        }
+                    ],
+                },
+            },
+            "action": {
+                "type": "json",
+                "value": {
+                    "effect_mode": "multiply",
+                    "coefficient": 0.15,
+                },
+            },
+            "created_at": "2026-03-03 08:00:00",
+            "updated_at": "2026-03-03 08:00:00",
+        }
+    ]
+    _ONTOLOGY_METADATA["2"] = [
+        {"id": 201, "fieldName": "channel", "fieldType": "string", "columnIndex": 1},
+    ]
+
+    faq_file_uuid = "00000000-0000-4000-8000-000000000001"
+    troubleshooting_uuid = "00000000-0000-4000-8000-000000000002"
+
+    def chunk(
+        chunk_id: int,
+        text_value: str,
+        file_name: str,
+        file_uuid: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        chunk_type: str = "TEXT",
+        page_ids: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "chunk_id": chunk_id,
+            "chunk_text": text_value,
+            "chunk_type": chunk_type,
+            "file_name": file_name,
+            "file_url": f"aidp://{file_uuid}",
+            "page_ids": page_ids or [],
+            "metadata": metadata or {},
+            "_file_uuid": file_uuid,
+        }
+
+    _ONTOLOGY_CHUNKS_BY_KB["aidp-kb-faq"] = [
+        chunk(
+            1001,
+            "如何在 Nexent 中创建 AIDP 知识库？进入知识库配置页面，点击新建知识库并填写名称、描述与切片参数。",
+            "常见问题汇总.txt",
+            faq_file_uuid,
+            {"doc_type": "FAQ", "publish_year": 2025, "effective_date": "2025-01-01"},
+             page_ids=[1],
+        ),
+        chunk(
+            1002,
+            "知识库上传文件后可以在上传任务页签中查看处理进度，失败文件支持重试。",
+            "常见问题汇总.txt",
+            faq_file_uuid,
+            {"doc_type": "FAQ", "publish_year": 2025},
+        ),
+        chunk(
+            1003,
+            "一个知识库最多绑定一个本体库，一个本体库可以绑定多个知识库。",
+            "常见问题汇总.txt",
+            faq_file_uuid,
+            {},
+        ),
+        chunk(
+            1004,
+            "If ingestion fails, inspect the failure reason column and retry the affected files.",
+            "troubleshooting.md",
+            troubleshooting_uuid,
+            {"doc_type": "Guide", "publish_year": 2024},
+        ),
+        chunk(
+            1005,
+            "Chunk metadata is displayed in the chunk detail drawer and in retrieval sources.",
+            "troubleshooting.md",
+            troubleshooting_uuid,
+            {},
+        ),
+    ]
+
+
 def _save_state() -> None:
     """Atomically persist KB, document and sensitive-word state to disk.
 
@@ -433,6 +793,15 @@ def _save_state() -> None:
         "documents_by_kb": _DOCUMENTS_BY_KB,
         "sensitive_words_by_kb": _SENSITIVE_WORDS,
         "folders_by_kb": _FOLDERS_BY_KB,
+        "ontology": {
+            "domains": _ONTOLOGY_DOMAINS,
+            "entities": _ONTOLOGY_ENTITIES,
+            "relations": _ONTOLOGY_RELATIONS,
+            "bindings": _ONTOLOGY_BINDINGS,
+            "metadata": _ONTOLOGY_METADATA,
+            "rules": _ONTOLOGY_RULES,
+            "chunks_by_kb": _ONTOLOGY_CHUNKS_BY_KB,
+        },
     }
     tmp_path = _STATE_FILE.with_suffix(".json.tmp")
     try:
@@ -471,6 +840,31 @@ def _load_state() -> None:
                 if isinstance(kb, dict):
                     kb.pop("sensitive_intercept_enalbe", None)
             _seed_sensitive_words_if_empty()
+            ontology = payload.get("ontology")
+            if isinstance(ontology, dict) and ontology.get("domains"):
+                _ONTOLOGY_DOMAINS.update(ontology.get("domains") or {})
+                _ONTOLOGY_ENTITIES.update(ontology.get("entities") or {})
+                _ONTOLOGY_RELATIONS.update(ontology.get("relations") or {})
+                _ONTOLOGY_RULES.update(ontology.get("rules") or {})
+                _ONTOLOGY_BINDINGS.extend(ontology.get("bindings") or [])
+                for domain in _ONTOLOGY_DOMAINS.values():
+                    if isinstance(domain, dict) and domain.get("od_id") is not None:
+                        domain["od_id"] = int(domain["od_id"])
+                _ONTOLOGY_BINDINGS[:] = [
+                    {
+                        "id": binding.get("id"),
+                        "od_id": int(binding["od_id"]),
+                        "kds_id": str(binding["kds_id"]),
+                        "kb_name": binding.get("kb_name"),
+                        "create_time": binding.get("create_time"),
+                    }
+                    for binding in _ONTOLOGY_BINDINGS
+                    if binding.get("od_id") is not None
+                ]
+                _ONTOLOGY_METADATA.update(ontology.get("metadata") or {})
+                _ONTOLOGY_CHUNKS_BY_KB.update(ontology.get("chunks_by_kb") or {})
+            else:
+                _seed_ontology_data()
             logger.info(
                 "STATE LOAD  restored %d KBs from %s",
                 len(_KNOWLEDGE_BASES), _STATE_FILE,
@@ -483,6 +877,7 @@ def _load_state() -> None:
             )
 
     _seed_initial_data()
+    _seed_ontology_data()
     _save_state()
     logger.info(
         "STATE INIT  seeded %d KBs -> %s", len(_KNOWLEDGE_BASES), _STATE_FILE,
@@ -501,6 +896,30 @@ def _ensure_document_uuids() -> None:
             document["file_uuid"] = str(
                 uuid.uuid5(uuid.NAMESPACE_URL, f"mock-aidp:{kds_id}:{file_ino_no}")
             )
+
+
+def _ensure_ontology_chunks() -> None:
+    """Bind seeded ontology chunks to the knowledge base's current document UUIDs.
+
+    The demo fixture rewrites ``aidp-kb-faq`` file UUIDs on startup, so chunks
+    seeded with the legacy literals would otherwise point at files the file
+    list no longer exposes. Keep the first two visible files as the chunk
+    sources and let the rest of the fixture stay untouched.
+    """
+    documents = _active_documents("aidp-kb-faq")
+    if len(documents) < 2:
+        return
+    sources = [documents[0]] * 3 + [documents[1]] * 2
+    for index, chunk in enumerate(_ONTOLOGY_CHUNKS_BY_KB.get("aidp-kb-faq", [])):
+        if index >= len(sources):
+            break
+        document = sources[index]
+        file_uuid = str(document.get("file_uuid") or "")
+        if not file_uuid:
+            continue
+        chunk["_file_uuid"] = file_uuid
+        chunk["file_name"] = document.get("file_name") or chunk.get("file_name")
+        chunk["file_url"] = f"aidp://{file_uuid}"
 
 
 _load_state()
@@ -1401,7 +1820,9 @@ class HybridSearchConfig(BaseModel):
 
     vector_candidates: int = Field(default=10, ge=1, le=500)
     full_text_candidates: int = Field(default=10, ge=1, le=500)
-    hybrid_top_k: int = Field(0, ge=0, le=100)
+    # Present values mirror the real AIDP contract (1-100); omission means
+    # "no separate cap", which the mock evaluates as falling back to topk.
+    hybrid_top_k: Optional[int] = Field(None, ge=1, le=100)
     vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -1409,7 +1830,7 @@ class HybridSearchConfig(BaseModel):
 class GraphSearchConfig(BaseModel):
     """Per-channel knobs for the graph part of a FusionSearch call."""
 
-    graph_top_k: int = Field(0, ge=0, le=100)
+    graph_top_k: Optional[int] = Field(None, ge=1, le=100)
     graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     graph_reranking_enable: bool = True
 
@@ -1437,6 +1858,8 @@ class FusionSearchRequest(BaseModel):
     hybrid_search_config: Optional[HybridSearchConfig] = None
     graph_search_config: Optional[GraphSearchConfig] = None
     metadata_condition: Optional[MetadataCondition] = None
+    ontology_enhance_enable: bool = False
+    rule_enable: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -1470,8 +1893,8 @@ class FusionSearchRequest(BaseModel):
             raise ValueError("hybrid_search_config must not be sent for pure graph retrieval")
         if not graph and self.graph_search_config is not None:
             raise ValueError("graph_search_config must not be sent without graph retrieval")
-        h = self.hybrid_search_config.hybrid_top_k if self.hybrid_search_config else 0
-        g = self.graph_search_config.graph_top_k if self.graph_search_config else 0
+        h = (self.hybrid_search_config.hybrid_top_k or 0) if self.hybrid_search_config else 0
+        g = (self.graph_search_config.graph_top_k or 0) if self.graph_search_config else 0
         if hybrid and h > self.topk:
             raise ValueError("hybrid_top_k must not exceed topk")
         if graph and g > self.topk:
@@ -1576,6 +1999,12 @@ class FailNextMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(FailNextMiddleware)
+
+# Bind ontology chunk fixtures to the document UUIDs the demo fixture settled
+# on. This runs after every helper it needs is defined, still before the first
+# request can be served.
+_ensure_ontology_chunks()
+_save_state()
 
 
 # =============================================================================
@@ -2950,22 +3379,76 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
+def _metadata_value(chunk: Dict[str, Any], field: str) -> str:
+    """Read a filterable field, falling back to the chunk title for file names.
+
+    Real AIDP stores ``original_file_name`` with the file identity; the static
+    chunk fixtures only carry a title, so the title is the local equivalent.
+    """
+    value = str(chunk.get("metadata", {}).get(field, ""))
+    if not value and field in ("original_file_name", "file_name"):
+        value = str(chunk.get("title") or "")
+    return value
+
+
+def _chunks_for_kb(kds_id: str) -> List[Dict[str, Any]]:
+    """Return the KB's searchable chunks.
+
+    Static fixtures cover the seed KBs. KBs created or imported at runtime (the
+    file-scope demo KBs) only exist in the state documents, so synthesize one
+    searchable chunk per active document. The synthesized chunk carries
+    ``original_file_name`` so the conversation metadata filter can be exercised
+    locally the same way the real service applies it.
+    """
+    chunks = _CHUNKS_BY_KB.get(kds_id)
+    if chunks:
+        return chunks
+    synthetic: List[Dict[str, Any]] = []
+    id_base = 900000 + (sum(ord(char) for char in kds_id) % 1000) * 100
+    for index, document in enumerate(_active_documents(kds_id)):
+        name = str(document.get("file_name") or "").strip()
+        if not name:
+            continue
+        synthetic.append({
+            "id": id_base + index,
+            "score": round(0.9 - index * 0.001, 4),
+            "title": name,
+            "text": f"{name} local mock content for metadata-filter verification.",
+            "metadata": {
+                "original_file_name": name,
+                "knowledge_base_id": kds_id,
+            },
+            "chunk_type": "text",
+            "file_url": "",
+            "pages": [1],
+            "retrieval_sources": ["vector_search", "full_text_search"],
+        })
+    return synthetic
+
+
 def _match_metadata(chunk: Dict[str, Any], condition: Optional[MetadataCondition]) -> bool:
     if not condition or not condition.conditions:
         return True
-    meta = chunk.get("metadata", {})
     results = []
     for c in condition.conditions:
         field = c.get("name", "")
         op = c.get("comparison_operator", "contains")
         val = c.get("value", "")
-        cv = str(meta.get(field, ""))
+        cv = _metadata_value(chunk, field)
+        lowered_cv = cv.lower()
+        lowered_val = str(val).lower()
         if op == "contains":
-            results.append(val.lower() in cv.lower())
-        elif op == "equals":
-            results.append(cv.lower() == val.lower())
-        elif op == "not_equals":
-            results.append(cv.lower() != val.lower())
+            results.append(lowered_val in lowered_cv)
+        elif op in ("equals", "is"):
+            results.append(lowered_cv == lowered_val)
+        elif op in ("not_equals", "is not"):
+            results.append(lowered_cv != lowered_val)
+        elif op == "start with":
+            results.append(lowered_cv.startswith(lowered_val))
+        elif op == "end with":
+            results.append(lowered_cv.endswith(lowered_val))
+        elif op == "not contains":
+            results.append(lowered_val not in lowered_cv)
         elif op == "empty":
             results.append(cv in ("", "None"))
         elif op == "not_empty":
@@ -2973,6 +3456,15 @@ def _match_metadata(chunk: Dict[str, Any], condition: Optional[MetadataCondition
         else:
             results.append(False)
     return all(results) if condition.logical_operator == "and" else any(results)
+
+
+_LAST_FUSION_REQUEST: Optional[Dict[str, Any]] = None
+
+
+@app.get("/_mock/last-fusion-search")
+def get_last_fusion_search() -> JSONResponse:
+    """Expose the last accepted FusionSearch body for request-shape checks."""
+    return JSONResponse(content={"request": _LAST_FUSION_REQUEST})
 
 
 @app.post(f"/KnowledgeBase/Tenants/{TENANT}/Retrieval/FusionSearch")
@@ -2997,6 +3489,8 @@ def fusion_search(
       the hit, which may be fewer than the requested set.
     """
     _check_auth(authorization)
+    global _LAST_FUSION_REQUEST
+    _LAST_FUSION_REQUEST = request.model_dump()
 
     channels = set(_RETRIEVAL_CHANNELS if request.search_method == "hybrid_search"
                    else request.search_method.split("|"))
@@ -3008,7 +3502,7 @@ def fusion_search(
     for kb_id in request.kds_list:
         kb = _KNOWLEDGE_BASES.get(kb_id, {})
         graph_available = bool(kb.get("is_exist_graph"))
-        for chunk in _CHUNKS_BY_KB.get(kb_id, []):
+        for chunk in _chunks_for_kb(kb_id):
             if not _match_metadata(chunk, request.metadata_condition):
                 continue
             if not request.multi_modal_enable and chunk.get("chunk_type") == "image":
@@ -3069,7 +3563,7 @@ def fusion_search(
     results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
 
     # Hybrid caps the combined vector+full-text part; graph is capped above.
-    if hybrid and hybrid.hybrid_top_k > 0:
+    if hybrid and (hybrid.hybrid_top_k or 0) > 0:
         hybrid_hits = [hit for hit in results
                        if {"vector_search", "full_text_search"} & set(hit["sources"])]
         overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}
@@ -3100,8 +3594,11 @@ def fusion_search(
             item["pages"] = chunk.get("pages", [])
         payload.append(item)
 
-    logger.info("SEARCH  query=%r kds=%r method=%s returned=%d",
-                request.query, request.kds_list, request.search_method, len(payload))
+    logger.info("SEARCH  query=%r kds=%r metadata=%r method=%s returned=%d",
+                request.query, request.kds_list,
+                (request.metadata_condition.model_dump(exclude_none=True)
+                 if request.metadata_condition is not None else None),
+                request.search_method, len(payload))
     return JSONResponse(content={"result": payload, "total_return_count": len(payload)})
 
 
@@ -3399,6 +3896,1647 @@ def delete_sensitive_word(
     del words[word_id]
     _save_state()
     return StarletteResponse(status_code=204)
+# Ontology, binding, metadata definition and chunk endpoints
+# =============================================================================
+
+_ONTOLOGY_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/OntologyDomain"
+_ONTOLOGY_PLURAL_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/OntologyDomains"
+
+
+def _ontology_domain_or_404(domain_id: str) -> Dict[str, Any]:
+    domain = _ONTOLOGY_DOMAINS.get(str(domain_id))
+    if domain is None:
+        raise HTTPException(status_code=404, detail="Ontology domain not found")
+    return domain
+
+
+def _next_numeric_id(values: List[Any], prefix: int = 0) -> str:
+    numeric = [int(value) for value in values if str(value).isdigit()]
+    return str(max(numeric, default=prefix) + 1)
+
+
+def _public_entity(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+def _public_chunk(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+@app.get(_ONTOLOGY_PREFIX)
+def list_ontology_domains(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    items = list(_ONTOLOGY_DOMAINS.values())
+    if search and search.strip():
+        needle = search.strip().lower()
+        # The confirmed UI only promises name search; AIDP has not confirmed
+        # whether description participates.
+        items = [
+            item
+            for item in items
+            if needle in str(item.get("name", "")).lower()
+        ]
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start:start + page_size]
+    next_link = (
+        f"{_ONTOLOGY_PREFIX}?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {"value": page_items, "total_count": total, "next_link": next_link}
+
+
+@app.put(_ONTOLOGY_PREFIX)
+def create_ontology_domain(
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    domain_id = _next_numeric_id(list(_ONTOLOGY_DOMAINS))
+    record = {
+        "od_id": int(domain_id),
+        "name": name,
+        "description": str(body.get("description") or ""),
+        "metadata_count": 0,
+        "entity_count": 0,
+        "created_by": "演示用户",
+        "create_time": int(time.time()),
+        "update_time": int(time.time()),
+    }
+    _ONTOLOGY_DOMAINS[domain_id] = record
+    _ONTOLOGY_ENTITIES.setdefault(domain_id, [])
+    _ONTOLOGY_RELATIONS.setdefault(domain_id, [])
+    _ONTOLOGY_METADATA.setdefault(domain_id, [])
+    _save_state()
+    return JSONResponse(
+        status_code=201,
+        content={
+            "domain_id": int(domain_id),
+            "message": "create ontology domain success",
+        },
+    )
+
+
+# Bindings are registered before /OntologyDomain/{domain_id} so the static
+# segment is not captured as a domain id.
+# Confirmed Bindings contract: create under OntologyDomain (singular), list
+# under OntologyDomains/{DomainId} (plural), delete by BindingId.
+@app.put(f"{_ONTOLOGY_PREFIX}/Bindings")
+def create_ontology_binding_confirmed(
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    raw_domain_id = body.get("domain_id", body.get("od_id"))
+    try:
+        domain_id = int(raw_domain_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="domain_id must be an integer")
+    kds_id = str(body.get("kb_id") or body.get("kds_id") or "")
+    if str(domain_id) not in _ONTOLOGY_DOMAINS:
+        raise HTTPException(status_code=404, detail="Ontology domain not found")
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    for binding in _ONTOLOGY_BINDINGS:
+        if binding["kds_id"] != kds_id:
+            continue
+        if binding["od_id"] == domain_id:
+            return binding
+        raise HTTPException(
+            status_code=409,
+            detail="ONTOLOGY_KDS_BIND_CONFLICT(1055): knowledge base is already bound or unbinding",
+        )
+    binding = {
+        "id": max([int(item.get("id") or 0) for item in _ONTOLOGY_BINDINGS] or [0]) + 1,
+        "od_id": domain_id,
+        "kds_id": kds_id,
+        "kb_name": (_KNOWLEDGE_BASES.get(kds_id) or {}).get("kds_name"),
+        "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _ONTOLOGY_BINDINGS.append(binding)
+    _save_state()
+    return {"id": binding["id"], "kb_id": kds_id, "domain_id": domain_id}
+
+
+@app.get(f"{_ONTOLOGY_PLURAL_PREFIX}/{{domain_id}}/Bindings")
+def list_domain_bindings_confirmed(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if binding["od_id"] == int(domain_id)
+    ]
+    total = len(rows)
+    start = (page - 1) * page_size
+    items = [
+        {
+            # The real example omits BindingId; the demo keeps it so unbind can
+            # be demonstrated, and the UI labels that difference in red.
+            "id": row.get("id"),
+            "kb_id": row["kds_id"],
+            "kb_name": row.get("kb_name"),
+            "domain_id": row["od_id"],
+            "domain_name": (_ONTOLOGY_DOMAINS.get(str(row["od_id"])) or {}).get("name"),
+            "create_time": row.get("create_time"),
+        }
+        for row in rows[start:start + page_size]
+    ]
+    next_link = (
+        f"{_ONTOLOGY_PLURAL_PREFIX}/{domain_id}/Bindings?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {"data": {"items": items, "total_count": total, "next_link": next_link}}
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/Bindings/{{binding_id}}")
+def delete_ontology_binding_confirmed(
+    binding_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    before = len(_ONTOLOGY_BINDINGS)
+    _ONTOLOGY_BINDINGS[:] = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if str(binding.get("id")) != str(binding_id)
+    ]
+    if len(_ONTOLOGY_BINDINGS) == before:
+        raise HTTPException(status_code=404, detail="Binding not found")
+    _save_state()
+    return JSONResponse(status_code=200, content={"data": None})
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/Bindings")
+def list_ontology_bindings(
+    od_id: Optional[int] = Query(default=None),
+    kds_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    rows = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if (od_id is None or binding["od_id"] == od_id)
+        and (kds_id is None or binding["kds_id"] == str(kds_id))
+    ]
+    return {"value": rows, "total_count": len(rows), "next_link": None}
+
+
+@app.post(f"{_ONTOLOGY_PREFIX}/Bindings")
+def create_ontology_binding(
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    raw_od_id = body.get("od_id")
+    if not isinstance(raw_od_id, int) or isinstance(raw_od_id, bool):
+        raise HTTPException(status_code=400, detail="od_id must be an integer")
+    od_id = raw_od_id
+    kds_id = str(body.get("kds_id") or "")
+    if str(od_id) not in _ONTOLOGY_DOMAINS:
+        raise HTTPException(status_code=404, detail="Ontology domain not found")
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    for binding in _ONTOLOGY_BINDINGS:
+        if binding["kds_id"] != kds_id:
+            continue
+        if binding["od_id"] == od_id:
+            return binding
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge base is already bound to another ontology domain",
+        )
+    binding = {
+        "id": max([int(item.get("id") or 0) for item in _ONTOLOGY_BINDINGS] or [0]) + 1,
+        "od_id": od_id,
+        "kds_id": kds_id,
+        "kb_name": (_KNOWLEDGE_BASES.get(kds_id) or {}).get("kds_name"),
+        "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _ONTOLOGY_BINDINGS.append(binding)
+    _save_state()
+    return binding
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/Bindings")
+def delete_ontology_binding(
+    od_id: int = Query(...),
+    kds_id: str = Query(...),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    before = len(_ONTOLOGY_BINDINGS)
+    _ONTOLOGY_BINDINGS[:] = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if not (binding["od_id"] == od_id and binding["kds_id"] == str(kds_id))
+    ]
+    if len(_ONTOLOGY_BINDINGS) == before:
+        raise HTTPException(status_code=404, detail="Binding not found")
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+# Confirmed real-contract routes: bind/unbind live on the KB side and take no
+# body; the domain-side list answers value/next_link/total_count without any
+# BindingId. The legacy routes above stay for older demo seeds.
+@app.post(f"/KnowledgeBase/KnowledgeBases/{{kds_id}}/OntologyDomain/{{domain_id}}/Bind")
+def bind_kb_to_ontology(
+    kds_id: str,
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    if domain_id not in _ONTOLOGY_DOMAINS:
+        raise HTTPException(status_code=404, detail="Ontology domain not found")
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    for binding in _ONTOLOGY_BINDINGS:
+        if binding["kds_id"] != kds_id:
+            continue
+        if binding["od_id"] == int(domain_id):
+            return {
+                "domain_id": int(domain_id),
+                "kb_id": kds_id,
+                "id": binding.get("id"),
+                "failed_kbs": [],
+                "partial_failure": False,
+            }
+        raise HTTPException(
+            status_code=409,
+            detail="ONTOLOGY_KDS_BIND_CONFLICT(1055): knowledge base is already bound or unbinding",
+        )
+    binding = {
+        "id": max([int(item.get("id") or 0) for item in _ONTOLOGY_BINDINGS] or [0]) + 1,
+        "od_id": int(domain_id),
+        "kds_id": kds_id,
+        "kb_name": (_KNOWLEDGE_BASES.get(kds_id) or {}).get("kds_name"),
+        "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _ONTOLOGY_BINDINGS.append(binding)
+    _save_state()
+    return {
+        "domain_id": int(domain_id),
+        "kb_id": kds_id,
+        "id": binding["id"],
+        "failed_kbs": [],
+        "partial_failure": False,
+    }
+
+
+@app.post(f"/KnowledgeBase/KnowledgeBases/{{kds_id}}/OntologyDomain/{{domain_id}}/Unbind")
+def unbind_kb_from_ontology(
+    kds_id: str,
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    before = len(_ONTOLOGY_BINDINGS)
+    _ONTOLOGY_BINDINGS[:] = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if not (
+            binding["od_id"] == int(domain_id) and binding["kds_id"] == kds_id
+        )
+    ]
+    if len(_ONTOLOGY_BINDINGS) == before:
+        raise HTTPException(status_code=404, detail="Binding not found")
+    _save_state()
+    return {
+        "tag_clear_task": {
+            "task_id": 456,
+            "task_type": "ontology_tag_clear",
+        }
+    }
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Bindings")
+def list_domain_bindings_real(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = [
+        binding
+        for binding in _ONTOLOGY_BINDINGS
+        if binding["od_id"] == int(domain_id)
+    ]
+    total = len(rows)
+    start = (page - 1) * page_size
+    items = [
+        {
+            "binding_type": "ontology",
+            "domain_id": row["od_id"],
+            "kb_id": row["kds_id"],
+        }
+        for row in rows[start:start + page_size]
+    ]
+    next_link = (
+        f"{_ONTOLOGY_PREFIX}/{domain_id}/Bindings?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {"value": items, "total_count": total, "next_link": next_link}
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}")
+def get_ontology_domain(
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    domain = _ontology_domain_or_404(domain_id)
+    # Confirmed contract wraps the row in a named `domain` object whose id key
+    # is `id` (the list uses domain_id/od_id).
+    return {
+        "domain": {
+            "id": int(domain_id),
+            "name": domain.get("name"),
+            "description": domain.get("description") or "",
+            "create_time": domain.get("create_time"),
+            "update_time": domain.get("update_time"),
+            "entity_version": 1,
+            "metadata_version": 1,
+            "rule_version": 1,
+        }
+    }
+
+
+@app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}")
+def update_ontology_domain(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    domain = _ontology_domain_or_404(domain_id)
+    if "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        domain["name"] = name
+    if "description" in body:
+        domain["description"] = str(body.get("description") or "")
+    _save_state()
+    return domain
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}")
+def delete_ontology_domain(
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    domain_id = str(domain_id)
+    if domain_id not in _ONTOLOGY_DOMAINS:
+        raise HTTPException(status_code=404, detail="Ontology domain not found")
+    _ONTOLOGY_DOMAINS.pop(domain_id, None)
+    _ONTOLOGY_ENTITIES.pop(domain_id, None)
+    _ONTOLOGY_RELATIONS.pop(domain_id, None)
+    _ONTOLOGY_METADATA.pop(domain_id, None)
+    _ONTOLOGY_BINDINGS[:] = [
+        binding for binding in _ONTOLOGY_BINDINGS if binding["od_id"] != int(domain_id)
+    ]
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Entities")
+def list_ontology_entities(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    size: Optional[int] = Query(None, ge=1, le=100),
+    keyword: Optional[str] = None,
+    kind: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    page_size = size or page_size
+    _ontology_domain_or_404(domain_id)
+    items = list(_ONTOLOGY_ENTITIES.get(str(domain_id), []))
+    if kind:
+        items = [item for item in items if item.get("kind") == kind]
+    if keyword and keyword.strip():
+        needle = keyword.strip().lower()
+        items = [
+            item
+            for item in items
+            if needle in str(item.get("api_name", "")).lower()
+            or needle in str(item.get("display_name", "")).lower()
+        ]
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start:start + page_size]
+    next_link = (
+        f"{_ONTOLOGY_PREFIX}/{domain_id}/Entities?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {
+        "items": [_public_entity(item) for item in page_items],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "next_link": next_link,
+    }
+
+
+@app.put(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Entities")
+def create_ontology_entity(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    domain_id = str(domain_id)
+    api_name = str(body.get("api_name") or "").strip()
+    kind = str(body.get("kind") or "").lower()
+    if not api_name or kind not in ("type", "entity"):
+        raise HTTPException(status_code=400, detail="api_name and kind are required")
+    entities = _ONTOLOGY_ENTITIES.setdefault(domain_id, [])
+    for item in entities:
+        if item.get("api_name") == api_name and item.get("kind") == kind:
+            raise HTTPException(status_code=409, detail="Entity already exists")
+    entity_id = _next_numeric_id([item.get("entity_id") for item in entities], 100)
+    record = {
+        "entity_id": entity_id,
+        "api_name": api_name,
+        "display_name": body.get("display_name") or api_name,
+        "description": body.get("description") or "",
+        "kind": kind,
+        "type_id": body.get("type_id"),
+        "properties": body.get("properties") or [],
+        "primary_properties": body.get("primary_properties") or [],
+        "parent_entities": body.get("parent_entities") or [],
+        "synonym_entities": body.get("synonym_entities") or [],
+        "child_entities": [],
+        "chunk_count": 0,
+        "extended_properties": [],
+    }
+    entities.append(record)
+    _save_state()
+    # Confirmed create answers a small receipt keyed by entity_id (or type_id).
+    if kind == "type":
+        return {
+            "type_id": int(entity_id),
+            "api_name": api_name,
+            "display_name": record["display_name"],
+            "description": record["description"],
+        }
+    return {
+        "entity_id": int(entity_id),
+        "api_name": api_name,
+        "display_name": record["display_name"],
+        "description": record["description"],
+    }
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Entities/{{entity_id}}")
+def get_ontology_entity(
+    domain_id: str,
+    entity_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
+        if str(item.get("entity_id")) == str(entity_id):
+            # Confirmed contract: named `entity` wrapper, no id inside, and a
+            # permanently empty neighbor list.
+            entity = _public_entity(item)
+            entity.pop("entity_id", None)
+            return {"entity": entity, "neighbor": []}
+    raise HTTPException(status_code=404, detail="Entity not found")
+
+
+@app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Entities/{{entity_id}}")
+def update_ontology_entity(
+    domain_id: str,
+    entity_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    forbidden = {"parent_entities", "synonym_entities", "type_id", "kind", "api_name"}
+    if forbidden.intersection(body):
+        raise HTTPException(
+            status_code=400,
+            detail="parent_entities, synonym_entities, type_id, kind and api_name are not editable",
+        )
+    for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
+        if str(item.get("entity_id")) != str(entity_id):
+            continue
+        for key in ("display_name", "description", "properties", "primary_properties"):
+            if key in body:
+                item[key] = body.get(key)
+        _save_state()
+        return {
+            "id": int(entity_id),
+            "name": item.get("api_name"),
+            "description": item.get("description") or "",
+            "graph_updated": False,
+        }
+    raise HTTPException(status_code=404, detail="Entity not found")
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Entities/{{entity_id}}")
+def delete_ontology_entity(
+    domain_id: str,
+    entity_id: str,
+    kind: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    entities = _ONTOLOGY_ENTITIES.get(str(domain_id), [])
+    remaining = [
+        item
+        for item in entities
+        if str(item.get("entity_id")) != str(entity_id)
+        or (kind and item.get("kind") != kind)
+    ]
+    if len(remaining) == len(entities):
+        raise HTTPException(status_code=404, detail="Entity not found")
+    _ONTOLOGY_ENTITIES[str(domain_id)] = remaining
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+def _public_rule(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in item.items() if not key.startswith("_")}
+
+
+def _rule_or_404(domain_id: str, rule_id: str) -> Dict[str, Any]:
+    for item in _ONTOLOGY_RULES.get(str(domain_id), []):
+        if str(item.get("rule_id")) == str(rule_id):
+            return item
+    raise HTTPException(status_code=404, detail="Rule not found")
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Rules")
+def list_ontology_rules(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=200),
+    enabled_only: bool = False,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    items = list(_ONTOLOGY_RULES.get(str(domain_id), []))
+    if enabled_only:
+        items = [item for item in items if item.get("enabled")]
+    items.sort(key=lambda item: int(item.get("rule_id") or 0))
+    total = len(items)
+    start = (page - 1) * size
+    return {
+        "value": [_public_rule(item) for item in items[start:start + size]],
+        "total_count": total,
+    }
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Rules/Count")
+def count_ontology_rules(
+    domain_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    return {"count": len(_ONTOLOGY_RULES.get(str(domain_id), []))}
+
+
+@app.put(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Rules")
+def create_ontology_rule(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    domain_id = str(domain_id)
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if len(name.encode("utf-8")) > 128:
+        raise HTTPException(status_code=400, detail="name must not exceed 128 UTF-8 bytes")
+    description = str(body.get("description") or "")
+    if len(description.encode("utf-8")) > 512:
+        raise HTTPException(
+            status_code=400,
+            detail="description must not exceed 512 UTF-8 bytes",
+        )
+    condition = body.get("condition")
+    action = body.get("action")
+    if not isinstance(condition, dict) or not isinstance(action, dict):
+        raise HTTPException(status_code=400, detail="condition and action are required")
+    rules = _ONTOLOGY_RULES.setdefault(domain_id, [])
+    if len(rules) >= 100:
+        raise HTTPException(status_code=400, detail="At most 100 rules are allowed")
+    if any(item.get("name") == name for item in rules):
+        raise HTTPException(status_code=409, detail="Rule name already exists")
+    rule_id = max([int(item.get("rule_id") or 0) for item in rules] or [0]) + 1
+    now = int(time.time())
+    record = {
+        "rule_id": rule_id,
+        "name": name,
+        "description": description,
+        "enabled": bool(body.get("enabled", True)),
+        "condition": condition,
+        "action": action,
+        # Confirmed rule contract uses created_time/updated_time in unix seconds.
+        "created_time": now,
+        "updated_time": now,
+    }
+    rules.append(record)
+    _save_state()
+    return _public_rule(record)
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Rules/{{rule_id}}")
+def get_ontology_rule(
+    domain_id: str,
+    rule_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    return _public_rule(_rule_or_404(domain_id, rule_id))
+
+
+@app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Rules/{{rule_id}}")
+def update_ontology_rule(
+    domain_id: str,
+    rule_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    current = _rule_or_404(domain_id, rule_id)
+    name = str(body.get("name") or current.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if any(
+        item is not current and item.get("name") == name
+        for item in _ONTOLOGY_RULES.get(str(domain_id), [])
+    ):
+        raise HTTPException(status_code=409, detail="Rule name already exists")
+    for key in ("name", "description", "enabled", "condition", "action"):
+        if key in body:
+            current[key] = body.get(key)
+    current["updated_time"] = int(time.time())
+    _save_state()
+    return _public_rule(current)
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Rules/{{rule_id}}")
+def delete_ontology_rule(
+    domain_id: str,
+    rule_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rules = _ONTOLOGY_RULES.get(str(domain_id), [])
+    remaining = [item for item in rules if str(item.get("rule_id")) != str(rule_id)]
+    if len(remaining) == len(rules):
+        raise HTTPException(status_code=404, detail="Rule not found")
+    _ONTOLOGY_RULES[str(domain_id)] = remaining
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata")
+def list_ontology_metadata(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    fields = list(_ONTOLOGY_METADATA.get(str(domain_id), []))
+    total = len(fields)
+    start = (page - 1) * page_size
+    page_items = fields[start:start + page_size]
+    next_link = (
+        f"{_ONTOLOGY_PREFIX}/{domain_id}/Metadata?page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {
+        "value": page_items,
+        "total_count": total,
+        "next_link": next_link,
+        "has_next": next_link is not None,
+    }
+
+
+@app.put(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata")
+def create_ontology_metadata(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    domain_id = str(domain_id)
+    field_name = str(body.get("fieldName") or "").strip()
+    field_type = str(body.get("fieldType") or "")
+    if not field_name:
+        raise HTTPException(status_code=400, detail="fieldName is required")
+    if len(field_name) > 63 or len(field_name.encode("utf-8")) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="fieldName must not exceed 63 characters or 64 UTF-8 bytes",
+        )
+    if field_type not in ("string", "number", "date"):
+        raise HTTPException(status_code=422, detail="fieldType must be string, number or date")
+    fields = _ONTOLOGY_METADATA.setdefault(domain_id, [])
+    if len(fields) >= 20:
+        raise HTTPException(status_code=400, detail="At most 20 metadata fields are allowed")
+    if any(item["fieldName"] == field_name for item in fields):
+        raise HTTPException(status_code=400, detail="fieldName already exists")
+    all_ids = [
+        int(item["id"])
+        for group in _ONTOLOGY_METADATA.values()
+        for item in group
+        if str(item.get("id", "")).isdigit()
+    ]
+    record = {
+        "id": (max(all_ids) + 1) if all_ids else 1,
+        "fieldName": field_name,
+        "fieldType": field_type,
+        "columnIndex": len(fields) + 1,
+    }
+    fields.append(record)
+    _save_state()
+    # Confirmed create answers a sync receipt; task_id=-1 means no async task.
+    return {
+        "column_index": record["columnIndex"],
+        "failed_kbs": [],
+        "field_name": record["fieldName"],
+        "field_type": record["fieldType"],
+        "metadata_id": record["id"],
+        "partial_failure": False,
+        "task_id": -1,
+    }
+
+
+def _mock_metadata_field(domain_id: str, metadata_id: str) -> Optional[Dict[str, Any]]:
+    for item in _ONTOLOGY_METADATA.get(str(domain_id), []):
+        if str(item.get("id")) == str(metadata_id):
+            return item
+    return None
+
+
+@app.post(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata/BatchUnbindAsync")
+def batch_unbind_ontology_metadata(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    ids = body.get("metadata_id_list") or []
+    creator = str(body.get("creator") or "").strip()
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="metadata_id_list is required")
+    if not creator:
+        raise HTTPException(status_code=400, detail="creator is required")
+    fields = _ONTOLOGY_METADATA.get(str(domain_id), [])
+    known = {str(item.get("id")) for item in fields}
+    if not {str(value) for value in ids}.issubset(known):
+        raise HTTPException(status_code=404, detail="Metadata field not found")
+    _save_state()
+    return JSONResponse(
+        status_code=200,
+        content={
+            "task_id": "mock-unbind-001",
+            "status": "RUNNING",
+            "progress": 0,
+            "creator": creator,
+        },
+    )
+
+
+@app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata/{{metadata_id}}")
+def rename_ontology_metadata_by_id(
+    domain_id: str,
+    metadata_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    domain_id = str(domain_id)
+    new_name = str(body.get("fieldName") or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="fieldName is required")
+    if len(new_name) > 63 or len(new_name.encode("utf-8")) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="fieldName must not exceed 63 characters or 64 UTF-8 bytes",
+        )
+    fields = _ONTOLOGY_METADATA.get(domain_id, [])
+    current = _mock_metadata_field(domain_id, metadata_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Metadata field not found")
+    if any(item["fieldName"] == new_name and item is not current for item in fields):
+        raise HTTPException(status_code=400, detail="fieldName already exists")
+    current["fieldName"] = new_name
+    _save_state()
+    return current
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata/{{metadata_id}}")
+def delete_ontology_metadata_by_id(
+    domain_id: str,
+    metadata_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    current = _mock_metadata_field(str(domain_id), metadata_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Metadata field not found")
+    fields = _ONTOLOGY_METADATA.get(str(domain_id), [])
+    _ONTOLOGY_METADATA[str(domain_id)] = [
+        item for item in fields if item is not current
+    ]
+    _save_state()
+    # Confirmed delete is synchronous and reports dropped KBs.
+    return {
+        "deleted": True,
+        "dropped_kbs": [],
+        "failed_kbs": [],
+    }
+
+
+@app.patch(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata")
+def rename_ontology_metadata(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    domain_id = str(domain_id)
+    field_name = str(body.get("fieldName") or "").strip()
+    new_name = str(body.get("newFieldName") or "").strip()
+    if not field_name or not new_name:
+        raise HTTPException(status_code=400, detail="fieldName and newFieldName are required")
+    if len(new_name) > 63 or len(new_name.encode("utf-8")) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="newFieldName must not exceed 63 characters or 64 UTF-8 bytes",
+        )
+    fields = _ONTOLOGY_METADATA.get(domain_id, [])
+    if any(item["fieldName"] == new_name for item in fields):
+        raise HTTPException(status_code=400, detail="fieldName already exists")
+    for item in fields:
+        if item["fieldName"] == field_name:
+            item["fieldName"] = new_name
+            _save_state()
+            return item
+    raise HTTPException(status_code=404, detail="Metadata field not found")
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Metadata")
+def delete_ontology_metadata(
+    domain_id: str,
+    fieldName: str = Query(...),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    domain_id = str(domain_id)
+    bound_kds = {
+        binding["kds_id"]
+        for binding in _ONTOLOGY_BINDINGS
+        if binding["od_id"] == int(domain_id)
+    }
+    for kds_id in bound_kds:
+        for chunk in _ONTOLOGY_CHUNKS_BY_KB.get(kds_id, []):
+            if fieldName in (chunk.get("metadata") or {}):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Metadata field is in use by chunks and cannot be deleted",
+                )
+    fields = _ONTOLOGY_METADATA.get(domain_id, [])
+    remaining = [item for item in fields if item["fieldName"] != fieldName]
+    if len(remaining) == len(fields):
+        raise HTTPException(status_code=404, detail="Metadata field not found")
+    _ONTOLOGY_METADATA[domain_id] = remaining
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+def _chunk_belongs_to(kds_id: str, chunk_id: Any) -> Optional[Dict[str, Any]]:
+    for chunk in _ONTOLOGY_CHUNKS_BY_KB.get(kds_id, []):
+        if str(chunk.get("chunk_id")) == str(chunk_id):
+            return chunk
+    return None
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks")
+def list_chunks(
+    kds_id: str,
+    file_uuid: str = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    items = [
+        chunk
+        for chunk in _ONTOLOGY_CHUNKS_BY_KB.get(kds_id, [])
+        if chunk.get("_file_uuid") == file_uuid
+    ]
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start:start + page_size]
+    next_link = (
+        f"{_KB_PREFIX}/{kds_id}/Chunks?file_uuid={file_uuid}&page={page + 1}&page_size={page_size}"
+        if start + page_size < total
+        else None
+    )
+    return {
+        "value": [_public_chunk(item) for item in page_items],
+        "total_count": total,
+        "next_link": next_link,
+    }
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def get_chunk(
+    kds_id: str,
+    chunk_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    chunk = _chunk_belongs_to(kds_id, chunk_id)
+    if chunk is None:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return _public_chunk(chunk)
+
+
+@app.patch(f"{_KB_PREFIX}/{{kds_id}}/Chunks/BatchMetadataJson")
+def batch_chunk_metadata(
+    kds_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    raw_od_id = body.get("od_id")
+    if not isinstance(raw_od_id, int) or isinstance(raw_od_id, bool):
+        raise HTTPException(status_code=400, detail="od_id must be an integer")
+    od_id = raw_od_id
+    metadata = body.get("metadata_json") or {}
+    chunk_ids = body.get("chunk_id_list") or []
+    if not any(
+        binding["od_id"] == od_id and binding["kds_id"] == kds_id
+        for binding in _ONTOLOGY_BINDINGS
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Knowledge base is not bound to the ontology domain",
+        )
+    defined = {
+        item["fieldName"] for item in _ONTOLOGY_METADATA.get(str(od_id), [])
+    }
+    if not metadata or not set(metadata).issubset(defined):
+        raise HTTPException(
+            status_code=400,
+            detail="metadata_json contains undefined fields",
+        )
+    success_list: List[Dict[str, Any]] = []
+    failed_list: List[Dict[str, Any]] = []
+    for chunk_id in chunk_ids:
+        chunk = _chunk_belongs_to(kds_id, chunk_id)
+        if chunk is None:
+            failed_list.append({"chunk_id": chunk_id, "message_zh": "Chunk 不存在"})
+            continue
+        if str(chunk_id) in _ONTOLOGY_METADATA_FAIL_CHUNK_IDS:
+            failed_list.append({"chunk_id": chunk_id, "message_zh": "模拟标注失败"})
+            continue
+        chunk.setdefault("metadata", {}).update(metadata)
+        success_list.append({"chunk_id": chunk.get("chunk_id")})
+    _save_state()
+    # Confirmed contract answers counters, not per-chunk lists.
+    return {
+        "kds_id": kds_id,
+        "od_id": str(od_id),
+        "partial_failure": bool(failed_list),
+        "total_chunks": len(chunk_ids),
+        "updated_chunks": len(success_list),
+    }
+
+
+# =============================================================================
+# Relations, tasks and KB-side chunk aliases (confirmed real contracts)
+# =============================================================================
+
+_KB_SIDE_PREFIX = "/KnowledgeBase/KnowledgeBases"
+_TASK_STORE: List[Dict[str, Any]] = [
+    {
+        "id": "1",
+        "task_type": "metadata_index_create",
+        "status": "completed",
+        "progress": 100,
+        "description": "",
+        "error_message": "",
+        "start_time": 1794901958,
+        "end_time": 1794901958,
+    },
+    {
+        "id": "2",
+        "task_type": "ontology_tag_clear",
+        "status": "failed",
+        "progress": 50,
+        "description": "",
+        "error_message": "mock tag clear failure",
+        "start_time": 1794902000,
+        "end_time": 1794902300,
+    },
+]
+
+
+def _entity_by_api_name(domain_id: str, api_name: str) -> Optional[Dict[str, Any]]:
+    for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
+        if item.get("api_name") == api_name:
+            return item
+    return None
+
+
+def _relation_endpoint(domain_id: str, kind: str, entity_id: Any) -> Dict[str, Any]:
+    for item in _ONTOLOGY_ENTITIES.get(str(domain_id), []):
+        if str(item.get("entity_id")) == str(entity_id):
+            return {
+                "entity_id": item.get("entity_id"),
+                "api_name": item.get("api_name"),
+                "display_name": item.get("display_name"),
+                "kind": item.get("kind"),
+            }
+    raise HTTPException(status_code=404, detail="Relation endpoint not found")
+
+
+def _relation_rows(domain_id: str, relation_type: Optional[str]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for item in _ONTOLOGY_RELATIONS.get(str(domain_id), []):
+        api_name = str(item.get("api_name") or "")
+        if relation_type and api_name != relation_type:
+            continue
+        if "subject_entity" in item:
+            rows.append(item)
+            continue
+        source = _entity_by_api_name(domain_id, str(item.get("source_api_name")))
+        target = _entity_by_api_name(domain_id, str(item.get("object_api_name")))
+        rows.append(
+            {
+                "relation_id": item.get("relation_id"),
+                "api_name": api_name,
+                "display_name": item.get("display_name") or "",
+                "subject_entity": {
+                    "entity_id": (source or {}).get("entity_id"),
+                    "api_name": (source or {}).get("api_name"),
+                    "display_name": (source or {}).get("display_name"),
+                    "kind": (source or {}).get("kind"),
+                },
+                "object_entity": {
+                    "entity_id": (target or {}).get("entity_id"),
+                    "api_name": (target or {}).get("api_name"),
+                    "display_name": (target or {}).get("display_name"),
+                    "kind": (target or {}).get("kind"),
+                },
+                "create_time": item.get("create_time"),
+            }
+        )
+    return rows
+
+
+@app.get(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Relations")
+def list_ontology_relations(
+    domain_id: str,
+    page: int = Query(1, ge=1),
+    size: int = Query(100, ge=1, le=500),
+    relation_type: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = _relation_rows(domain_id, relation_type)
+    total = len(rows)
+    start = (page - 1) * size
+    return {
+        "items": rows[start:start + size],
+        "page": page,
+        "page_size": size,
+        "total": total,
+        "next_link": None,
+    }
+
+
+@app.put(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Relations")
+def create_ontology_relation(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    api_name = str(body.get("api_name") or "")
+    if api_name not in ("is", "is-a"):
+        raise HTTPException(status_code=400, detail="api_name must be is or is-a")
+    subject = _relation_endpoint(domain_id, body.get("source_kind"), body.get("source_id"))
+    obj = _relation_endpoint(domain_id, body.get("object_kind"), body.get("object_id"))
+    rows = _ONTOLOGY_RELATIONS.setdefault(str(domain_id), [])
+    relation_id = max([int(item.get("relation_id") or 0) for item in rows] or [0]) + 1
+    rows.append(
+        {
+            "relation_id": relation_id,
+            "api_name": api_name,
+            "display_name": body.get("display_name") or "",
+            "subject_entity": subject,
+            "object_entity": obj,
+            "create_time": int(time.time()),
+        }
+    )
+    _save_state()
+    return {"message": "create relation success", "relation_id": relation_id}
+
+
+@app.delete(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/Relations/{{relation_id}}")
+def delete_ontology_relation(
+    domain_id: str,
+    relation_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    _ontology_domain_or_404(domain_id)
+    rows = _ONTOLOGY_RELATIONS.get(str(domain_id), [])
+    remaining = [
+        item for item in rows if str(item.get("relation_id")) != str(relation_id)
+    ]
+    if len(remaining) == len(rows):
+        raise HTTPException(status_code=404, detail="Relation not found")
+    _ONTOLOGY_RELATIONS[str(domain_id)] = remaining
+    _save_state()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get(f"/KnowledgeBase/Tenants/{TENANT}/Tasks")
+def list_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    task_type: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    rows = [
+        item for item in _TASK_STORE if not task_type or item["task_type"] == task_type
+    ]
+    total = len(rows)
+    start = (page - 1) * page_size
+    return {
+        "page": page,
+        "page_size": page_size,
+        "task_count": total,
+        "total": total,
+        "task_list": rows[start:start + page_size],
+    }
+
+
+@app.get(f"/KnowledgeBase/Tenants/{TENANT}/Tasks/{{task_id}}")
+def get_task(
+    task_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    for item in _TASK_STORE:
+        if str(item["id"]) == str(task_id):
+            return item
+    raise HTTPException(status_code=404, detail="Task not found")
+
+
+@app.get(f"{_KB_SIDE_PREFIX}/{{kds_id}}/Chunks")
+def list_chunks_kb_side(
+    kds_id: str,
+    file_uuid: Optional[str] = Query(default=None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    return list_chunks(
+        kds_id=kds_id,
+        file_uuid=file_uuid or "",
+        page=page,
+        page_size=page_size,
+        authorization=authorization,
+    )
+
+
+@app.get(f"{_KB_SIDE_PREFIX}/{{kds_id}}/Chunks/{{chunk_id}}")
+def get_chunk_kb_side(
+    kds_id: str,
+    chunk_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    return get_chunk(
+        kds_id=kds_id, chunk_id=chunk_id, authorization=authorization
+    )
+
+
+@app.patch(f"{_KB_SIDE_PREFIX}/{{kds_id}}/Chunks/BatchMetadataJson")
+def batch_chunk_metadata_kb_side(
+    kds_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    return batch_chunk_metadata(
+        kds_id=kds_id, body=body, authorization=authorization
+    )
+
+
+def _export_entity(item: Dict[str, Any], include_properties: bool) -> Dict[str, Any]:
+    result = {
+        "api_name": item.get("api_name"),
+        "display_name": item.get("display_name"),
+        "description": item.get("description") or "",
+    }
+    if include_properties:
+        result["properties"] = item.get("properties") or []
+        result["primary_properties"] = item.get("primary_properties") or []
+        result["source_info"] = item.get("source_info") or []
+    return result
+
+
+@app.post(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/batch/export")
+def export_ontology(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    domain = _ontology_domain_or_404(domain_id)
+    raw_domain_id = body.get("DOMAIN_ID")
+    if not isinstance(raw_domain_id, int) or isinstance(raw_domain_id, bool):
+        raise HTTPException(status_code=400, detail="DOMAIN_ID must be an integer")
+    if raw_domain_id != int(domain_id):
+        raise HTTPException(status_code=400, detail="DOMAIN_ID does not match the path domain")
+    include_properties = body.get("INCLUDE_PROPERTIES", True) is not False
+    include_relations = body.get("INCLUDE_RELATIONS", True) is not False
+    requested_kind = body.get("KIND")
+    entities = list(_ONTOLOGY_ENTITIES.get(str(domain_id), []))
+    types = [
+        _export_entity(item, include_properties)
+        for item in entities
+        if item.get("kind") == "type" and requested_kind in (None, "", "type")
+    ]
+    entity_rows = [
+        _export_entity(item, include_properties)
+        for item in entities
+        if item.get("kind") == "entity" and requested_kind in (None, "", "entity")
+    ]
+    relations = []
+    if include_relations:
+        relations = [
+            {
+                "api_name": item.get("api_name"),
+                "display_name": item.get("display_name"),
+                "source_api_name": item.get("source_api_name"),
+                "source_kind": item.get("source_kind"),
+                "object_api_name": item.get("object_api_name"),
+                "object_kind": item.get("object_kind"),
+                "source_ids": item.get("source_ids") or [],
+            }
+            for item in _ONTOLOGY_RELATIONS.get(str(domain_id), [])
+        ]
+    total = len(types) + len(entity_rows) + len(relations)
+    if total > _ONTOLOGY_ASYNC_THRESHOLD:
+        return {
+            "code": 200,
+            "message": "OK",
+            "data": {
+                "task_id": f"ontology-export-{uuid.uuid4().hex[:12]}",
+                "status": "pending",
+                "progress": 0,
+            },
+        }
+    return {
+        "code": 200,
+        "message": "OK",
+        "data": {
+            domain["name"]: {
+                "display_name": domain["name"],
+                "description": domain.get("description") or "",
+                "types": types,
+                "entities": entity_rows,
+                "relations": relations,
+            }
+        },
+    }
+
+
+@app.post(f"{_ONTOLOGY_PREFIX}/{{domain_id}}/batch/import")
+def import_ontology(
+    domain_id: str,
+    body: Dict[str, Any] = Body(...),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    _check_auth(authorization)
+    domain_id = str(domain_id)
+    _ontology_domain_or_404(domain_id)
+    # Confirmed payload: {"<target domain name>": {types, entities, relations}}.
+    # The legacy flat DOMAIN_ID/ENTITIES/RELATIONS shape stays accepted.
+    incoming_types: List[Any] = []
+    incoming_entities: List[Any] = []
+    incoming_relations: List[Any] = []
+    if "DOMAIN_ID" in body:
+        raw_domain_id = body.get("DOMAIN_ID")
+        if not isinstance(raw_domain_id, int) or isinstance(raw_domain_id, bool):
+            raise HTTPException(status_code=400, detail="DOMAIN_ID must be an integer")
+        if raw_domain_id != int(domain_id):
+            raise HTTPException(status_code=400, detail="DOMAIN_ID does not match the path domain")
+        incoming_entities = body.get("ENTITIES") or []
+        incoming_relations = body.get("RELATIONS") or []
+    else:
+        group = next(
+            (
+                value
+                for value in body.values()
+                if isinstance(value, dict) and ({"types", "entities", "relations"} & set(value))
+            ),
+            None,
+        )
+        if group is None:
+            raise HTTPException(status_code=400, detail="import payload is invalid")
+        incoming_types = group.get("types") or []
+        incoming_entities = group.get("entities") or []
+        incoming_relations = group.get("relations") or []
+    incoming = [
+        ("type", item) for item in incoming_types
+    ] + [("entity", item) for item in incoming_entities]
+    total = len(incoming) + len(incoming_relations)
+    if total > _ONTOLOGY_ASYNC_THRESHOLD:
+        return {
+            "execution_mode": "async",
+            "task_id": 12345,
+            "task_type": "ontology_batch_import",
+            "status": "pending",
+            "progress": 0,
+            "result": None,
+        }
+
+    entities = _ONTOLOGY_ENTITIES.setdefault(domain_id, [])
+    existing = {(item.get("api_name"), item.get("kind")) for item in entities}
+    imported_count = 0
+    skipped_count = 0
+    failed_count = 0
+    errors: List[Dict[str, Any]] = []
+
+    for index, (kind, item) in enumerate(incoming):
+        if not isinstance(item, dict):
+            failed_count += 1
+            errors.append(
+                {
+                    "index": index,
+                    "type": kind,
+                    "api_name": None,
+                    "error_code": 4001,
+                    "message_zh": "条目不是对象",
+                    "message_en": "Item is not an object",
+                }
+            )
+            continue
+        api_name = str(item.get("api_name") or "").strip()
+        if not api_name:
+            failed_count += 1
+            errors.append(
+                {
+                    "index": index,
+                    "type": kind,
+                    "api_name": None,
+                    "error_code": 4001,
+                    "message_zh": "api_name 不合法",
+                    "message_en": "api_name is invalid",
+                }
+            )
+            continue
+        if (api_name, kind) in existing:
+            skipped_count += 1
+            continue
+        if api_name in _ONTOLOGY_IMPORT_FAIL_API_NAMES:
+            failed_count += 1
+            errors.append(
+                {
+                    "index": index,
+                    "type": "entity",
+                    "api_name": api_name,
+                    "error_code": 4002,
+                    "message_zh": "模拟导入失败",
+                    "message_en": "Simulated import failure",
+                }
+            )
+            continue
+        record = {
+            "entity_id": _next_numeric_id(
+                [item.get("entity_id") for item in entities], 100
+            ),
+            "api_name": api_name,
+            "display_name": item.get("display_name") or api_name,
+            "description": item.get("description") or "",
+            "kind": kind,
+            "type_id": item.get("type_id"),
+            "properties": item.get("properties") or [],
+            "primary_properties": item.get("primary_properties") or [],
+            "parent_entities": [],
+            "synonym_entities": [],
+        }
+        entities.append(record)
+        existing.add((api_name, kind))
+        imported_count += 1
+
+    entity_lookup = {
+        item.get("api_name"): item.get("kind") for item in entities
+    }
+    relation_imported = 0
+    relation_failed = 0
+    relation_rows = _ONTOLOGY_RELATIONS.setdefault(domain_id, [])
+    existing_relations = {item.get("api_name") for item in relation_rows}
+    for index, item in enumerate(incoming_relations):
+        if not isinstance(item, dict):
+            relation_failed += 1
+            errors.append(
+                {
+                    "index": index,
+                    "type": "relation",
+                    "api_name": None,
+                    "error_code": 4001,
+                    "message_zh": "关系条目不是对象",
+                    "message_en": "Relation item is not an object",
+                }
+            )
+            continue
+        api_name = str(item.get("api_name") or "").strip()
+        source = str(item.get("source_api_name") or "").strip()
+        target = str(item.get("object_api_name") or "").strip()
+        if (
+            not api_name
+            or source not in entity_lookup
+            or target not in entity_lookup
+        ):
+            relation_failed += 1
+            errors.append(
+                {
+                    "index": index,
+                    "type": "relation",
+                    "api_name": api_name or None,
+                    "error_code": 4001,
+                    "message_zh": "关系端点无法定位",
+                    "message_en": "Relation endpoint cannot be resolved",
+                }
+            )
+            continue
+        if api_name in existing_relations and source in {
+            item.get("source_api_name") for item in relation_rows
+        }:
+            relation_imported += 1
+            continue
+        relation_rows.append(
+            {
+                "api_name": api_name,
+                "display_name": item.get("display_name") or api_name,
+                "source_api_name": source,
+                "source_kind": item.get("source_kind") or entity_lookup[source],
+                "object_api_name": target,
+                "object_kind": item.get("object_kind") or entity_lookup[target],
+                "source_ids": item.get("source_ids") or [],
+            }
+        )
+        relation_imported += 1
+
+    _save_state()
+    return {
+        "execution_mode": "sync",
+        "task_id": None,
+        "status": "completed",
+        "progress": 100,
+        "result": {
+            "imported_count": imported_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+            "relation_imported": relation_imported,
+            "relation_failed": relation_failed,
+            "first_error": errors[0] if errors else None,
+            "errors": errors,
+        },
+    }
+
+
+@app.post("/_mock/ontology-file")
+def seed_ontology_file(
+    kds_id: str = Query(...),
+    file_name: str = Query("ontology-chunk.txt"),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Attach one completed file with three chunks to a product-created KB.
+
+    The ontology UI lists files through the normal KnowledgeFiles endpoint and
+    then reads chunks through the ontology chunk proxy. A newly created KB has
+    no ingested files, so this test-only hook supplies a deterministic file and
+    chunks without bypassing either product endpoint.
+    """
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    file_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mock-ontology:{kds_id}:{file_name}"))
+    documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    if not any(str(document.get("file_uuid")) == file_uuid for document in documents):
+        documents.append(
+            {
+                "file_uuid": file_uuid,
+                "file_ino_no": 7000 + len(documents),
+                "file_name": file_name,
+                "file_size": 2048,
+                "file_type": "txt",
+                "create_time": int(time.time()),
+                "status": 1,
+            }
+        )
+    existing_ids = {
+        str(chunk.get("chunk_id")) for chunk in _ONTOLOGY_CHUNKS_BY_KB.get(kds_id, [])
+    }
+    chunk_ids: List[int] = []
+    for index in range(3):
+        chunk_id = 5000 + len(_ONTOLOGY_CHUNKS_BY_KB.get(kds_id, [])) + index + 1
+        if str(chunk_id) in existing_ids:
+            continue
+        _ONTOLOGY_CHUNKS_BY_KB.setdefault(kds_id, []).append(
+            {
+                "chunk_id": chunk_id,
+                "chunk_text": f"本体标注演示切片 {index + 1}：该片段用于验证 Metadata 写入与回显。",
+                "chunk_type": "TEXT",
+                "file_name": file_name,
+                "file_url": f"aidp://{file_uuid}",
+                "page_ids": [index + 1],
+                "metadata": {},
+                "_file_uuid": file_uuid,
+            }
+        )
+        chunk_ids.append(chunk_id)
+    _save_state()
+    return {"file_uuid": file_uuid, "file_name": file_name, "chunk_ids": chunk_ids}
+
+
+@app.post("/_mock/ontology-import-fail")
+def configure_ontology_import_fail(
+    api_names: str = Query(default=""),
+) -> Dict[str, Any]:
+    _ONTOLOGY_IMPORT_FAIL_API_NAMES.clear()
+    _ONTOLOGY_IMPORT_FAIL_API_NAMES.update(
+        name.strip() for name in api_names.split(",") if name.strip()
+    )
+    return {"api_names": sorted(_ONTOLOGY_IMPORT_FAIL_API_NAMES)}
+
+
+@app.post("/_mock/ontology-metadata-fail")
+def configure_ontology_metadata_fail(
+    chunk_ids: str = Query(default=""),
+) -> Dict[str, Any]:
+    _ONTOLOGY_METADATA_FAIL_CHUNK_IDS.clear()
+    _ONTOLOGY_METADATA_FAIL_CHUNK_IDS.update(
+        chunk_id.strip() for chunk_id in chunk_ids.split(",") if chunk_id.strip()
+    )
+    return {"chunk_ids": sorted(_ONTOLOGY_METADATA_FAIL_CHUNK_IDS)}
 
 
 # =============================================================================
@@ -3429,8 +5567,12 @@ def reset_state() -> Dict[str, str]:
     _KNOWLEDGE_BASES.clear()
     _DOCUMENTS_BY_KB.clear()
     _DOCUMENT_PAYLOADS.clear()
+    _ONTOLOGY_IMPORT_FAIL_API_NAMES.clear()
+    _ONTOLOGY_METADATA_FAIL_CHUNK_IDS.clear()
     _SENSITIVE_WORDS.clear()
     _seed_initial_data()
+    _seed_ontology_data()
+    _ensure_ontology_chunks()
     _save_state()
     logger.info("RESET  state restored to seeds, persisted to %s", _STATE_FILE)
     return {"status": "reset"}

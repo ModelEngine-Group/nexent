@@ -72,10 +72,10 @@ def test_wire_channels_and_sources(provider, method):
         assert ("graph_search_config" in payload) == ("graph_search" in enabled)
         assert ("hybrid_search_config" in payload) == bool(enabled & {"vector_search","full_text_search"})
         if "graph_search_config" in payload:
-            assert payload["graph_search_config"] == {"graph_top_k":0,"graph_score_threshold":0,"graph_reranking_enable":False}
+            assert payload["graph_search_config"] == {"graph_score_threshold":0,"graph_reranking_enable":False}
         if "hybrid_search_config" in payload:
             h=payload["hybrid_search_config"]
-            assert h["hybrid_top_k"] == 0
+            assert "hybrid_top_k" not in h  # 0 means no separate cap: the key is omitted
             for channel,prefix in (("vector_search","vector"),("full_text_search","full_text")):
                 assert (f"{prefix}_candidates" in h) == (channel in enabled)
                 if channel in enabled:

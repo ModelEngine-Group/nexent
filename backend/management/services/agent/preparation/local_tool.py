@@ -24,7 +24,7 @@ def export_scoped_shared_aidp(
     if row is None:
         raise ValueError("Scoped shared AIDP requires an available tenant catalog tool")
     options = ScopedSharedAidpOptions.model_validate(tool.params)
-    base = build_local_tool(row, language, None, row["inputs"])
+    base = build_local_tool(row, language, tool.description_zh, row["inputs"])
     if base.model_copy(update={"params": options.model_dump(), "metadata": tool.metadata}) != tool:
         raise ValueError("Scoped shared AIDP differs from its catalog tool")
     binding = ScopedSharedAidpBinding(

@@ -45,6 +45,8 @@ interface AidpCreateKbSectionsProps {
   groupsUnavailable: boolean;
   t: TFunction;
   canConfigureGroupPermissions: boolean;
+  /** The stepper renders permission fields in its own "user groups" step. */
+  showGroupFields?: boolean;
   groupOptions: AidpGroupOption[];
   ingroupPermission?: string;
   llmModelOptions: AidpModelOption[];
@@ -66,6 +68,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
   groupsUnavailable,
   t,
   canConfigureGroupPermissions,
+  showGroupFields = true,
   groupOptions,
   ingroupPermission,
   llmModelOptions,
@@ -258,7 +261,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           >
             <Switch aria-label={t("aidpKnowledge.sensitiveIntercept")} />
           </Form.Item>
-          {canConfigureGroupPermissions && (
+          {showGroupFields && canConfigureGroupPermissions && (
             <>
               <div
                 className={`${typography.muted} mb-2 mt-1 text-xs leading-5 md:col-span-2`}

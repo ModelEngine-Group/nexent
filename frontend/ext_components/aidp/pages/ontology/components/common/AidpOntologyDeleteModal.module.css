@@ -1,0 +1,24 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.description {
+  margin: 0;
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.confirmBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confirmLabel {
+  color: #191919;
+  font-size: 14px;
+  line-height: 22px;
+}

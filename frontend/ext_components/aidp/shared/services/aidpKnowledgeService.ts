@@ -35,6 +35,7 @@ import type {
   AidpFolderOperationResult,
   AidpFileMoveResponse,
   AidpFileRenameResponse,
+  AidpDocumentItem,
 } from "../types/management";
 
 function buildUrl(
@@ -69,6 +70,29 @@ class AidpKnowledgeService {
       log.warn("Knowledge base deletion preview unavailable:", error);
       return null;
     }
+  }
+
+  async batchGetKbs(kdsIds: string[]): Promise<{
+    value: Array<{
+      kds_id: string;
+      kds_name: string;
+      description: string;
+      created_at: string | null;
+      resource_status: string;
+    }>;
+  }> {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.aidpMgmt.kbBatchRead,
+      {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ kds_ids: kdsIds }),
+      }
+    );
+    return response.json();
   }
 
   /**
@@ -482,6 +506,31 @@ class AidpKnowledgeService {
     if (response.status === 204) return {};
     const text = await response.text();
     return text ? (JSON.parse(text) as AidpFileRenameResponse) : {};
+  }
+
+  /**
+   * List only files AIDP confirms as ingested; upload history stays separate.
+   * Backed by the /files endpoint (not the legacy /documents view).
+   */
+  async listIngestedFiles(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    signal?: AbortSignal
+  ): Promise<AidpDocumentItem[]> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return Array.isArray(result.value) ? result.value : [];
   }
 
   /**

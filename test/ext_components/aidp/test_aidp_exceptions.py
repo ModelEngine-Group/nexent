@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``aidp_exceptions`` domain exception classes.
 
 Each exception carries structured context (kb_id, tenant_id, etc.) and produces

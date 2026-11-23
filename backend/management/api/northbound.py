@@ -13,37 +13,16 @@ from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 import httpx
+from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
-from contracts.constants.constants import (
-    ASSET_OWNER_TENANT_ID,
-    CONFIG_SERVICE_NAME,
-    RATE_LIMIT_EXCEEDED_DETAIL,
-)
-from contracts.constants.environment import MINIO_ENDPOINT
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, RATE_LIMIT_EXCEEDED_DETAIL, CONFIG_SERVICE_NAME
+from contracts.knowledge import VectorDatabaseType, HybridSearchRequest, ProcessParams
 from contracts.conversation import GenerateTitleRequest
-from contracts.errors.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    ForbiddenError,
-    LimitExceededError,
-    NotFoundException,
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
-from contracts.knowledge import HybridSearchRequest, ProcessParams, VectorDatabaseType
 from contracts.tool import ToolParamsRequest
-from ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-)
 from fastapi import (
     APIRouter,
     Body,
@@ -63,15 +42,19 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from management.services.permission.identity.northbound import (
-    get_northbound_context as _get_northbound_context,
-)
-from management.services.permission.identity.session import (
-    generate_session_jwt,
-    get_user_language,
-)
+from management.services.permission.identity.session import generate_session_jwt, get_user_language
+from management.services.permission.identity.northbound import get_northbound_context as _get_northbound_context
 from pydantic import ValidationError as PydanticValidationError
-from starlette.background import BackgroundTask
+from contracts.a2a import JSONRPCRequest
+from contracts.agent import reject_legacy_agent_fields
+from contracts.authentication import NorthboundContext
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, NORTHBOUND_SERVICE_NAME, RATE_LIMIT_EXCEEDED_DETAIL
+from contracts.constants.environment import MINIO_ENDPOINT
+from contracts.conversation import GenerateTitleRequest
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, NotFoundException, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
+from contracts.knowledge import HybridSearchRequest, ProcessParams, VectorDatabaseType
+from contracts.tool import ToolParamsRequest
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.agent.a2a.service import (
@@ -102,6 +85,7 @@ from management.services.permission.api_keys import (
     revoke_user_api_keys,
 )
 from management.api.file.http import build_content_disposition_header, build_storage_proxy_url
+from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
     generate_conversation_title,
     get_agent_info_by_name_for_northbound,
@@ -630,6 +614,12 @@ async def download_knowledge_base_file(
     kds_id: Annotated[str, Path(description="AIDP knowledge base ID")],
     file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
 ):
+    from ext_components.aidp.consts.aidp_exceptions import (
+        AidpKbNotFoundError,
+        AidpKbPermissionDeniedError,
+    )
+    from starlette.background import BackgroundTask
+
     ctx: NorthboundContext = await _get_northbound_context(request)
     try:
         _require_aidp_permission(
