@@ -142,9 +142,16 @@ ZH_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/..
 assert_contains "$ZH_OFFLINE_DRY_RUN" "=== DRY RUN 模式 ===" "offline dry-run should follow Chinese locale"
 assert_contains "$ZH_OFFLINE_DRY_RUN" "目标：docker" "offline dry-run target label should follow Chinese locale"
 
-LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,monitoring --monitoring-provider langfuse --image-source general --target docker --dry-run)"
-assert_contains "$LANGFUSE_OFFLINE_DRY_RUN" "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" "offline Langfuse package should use the Quay MinIO image"
-assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" "docker.io/minio/minio" "offline Langfuse package should not use the Docker Hub MinIO image"
+for image_source in general mainland; do
+  expected_minio="$(APP_VERSION=v2.2.0; source "$SCRIPT_DIR/../env/image-source.$image_source.env"; printf '%s' "$MINIO_IMAGE")"
+  for target in docker k8s all; do
+    LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" \
+      --version v2.2.0 --platform amd64 --components monitoring --monitoring-provider langfuse \
+      --image-source "$image_source" --image-registry-prefix registry.local/nexent --target "$target" --dry-run)"
+    assert_eq '1' "$(grep -Fxc "registry.local/nexent/$expected_minio" <<< "$LANGFUSE_OFFLINE_DRY_RUN")" "offline $target should list the selected MinIO image once for $image_source"
+    assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" 'quay.io/minio/minio:' "offline $target should only use the selected mirror for $image_source"
+  done
+done
 
 if DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --unknown >/tmp/nexent-image-build-zh-invalid.log 2>&1; then
   echo "FAIL: unknown image build option should fail"
@@ -837,8 +844,8 @@ assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'quay.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}' "docker compose Langfuse should use the Quay MinIO image"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: quay.io/minio/minio" "k8s Langfuse should use the Quay MinIO image"
+assert_eq '    image: ${MINIO_IMAGE}' "$(grep -A1 '^  langfuse-minio:$' "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml" | tail -n 1)" "docker compose Langfuse should use the core MinIO image reference"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: nexent/minio" "standalone Helm Langfuse should default to the general MinIO mirror"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
