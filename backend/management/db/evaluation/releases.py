@@ -201,7 +201,10 @@ def _pin(session, tenant, agent, version, pin, variant):
                 SkillInstance.version_no == version, SkillInstance.skill_instance_id == row["instance_id"],
             ).values(released_catalog_entry={"description": row["description"]})
         )
+    if variant == "result" and pin.get("result_image"):
+        row = {**row, "script_image": pin["result_image"]}
     values = dict(
+        sandbox_image=row.get("script_image"),
         tenant_id=tenant,
         agent_id=agent,
         version_no=version,
@@ -389,6 +392,10 @@ def release_view(tenant, actor, lock):
             SELECT e.agent_id,e.version_no AS base_version,e.experiment_id,c.digest AS candidate_digest,
                    c.recipe->'components' AS components,
                    e.plan->'tool_mapping' AS tool_mapping,
+                   CASE WHEN e.plan ? 'script_build' THEN jsonb_build_object(
+                       'name',e.plan->'script_build'->>'name','path',e.plan->'script_build'->>'path',
+                       'function',e.plan->'script_build'->>'function','image',e.plan->'script_build'->>'image')
+                   END AS script_build,
                    c.recipe->>'candidate_type' AS candidate_type,(c.recipe->>'candidate_id')::bigint AS resource_candidate_id,
                    a.current_version_no AS current_version,
                    r.summary,COALESCE(s.paused,false) AS paused,

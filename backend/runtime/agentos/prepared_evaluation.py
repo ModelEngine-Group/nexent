@@ -175,7 +175,7 @@ def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
     root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
-    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None, new_skill_trial=None,
+    workbench_version=None, allow_debug_planning=False, workbench_debug_run_id=None, omit_skill_candidate=None, new_skill_trial=None, script_trial=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -205,7 +205,7 @@ def _materialize_agent(
     local_tools, mounted_skills = materialize_skill_tools(
         visible, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
         public_reference=public_reference, workbench_version=workbench_version,
-        debug_run_id=workbench_debug_run_id,
+        debug_run_id=workbench_debug_run_id, **({"script_trial": True} if script_trial else {}),
     )
     if resource.released_skill_guides:
         visible = mount_released_guides(visible, actor, workspace_path, local_tools, language)
@@ -411,6 +411,8 @@ def prepare_run_snapshot(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 **({"omit_skill_candidate": payload.omit_root_skill_candidate_id}
                    if isinstance(payload, PreparedEvaluationRun) and payload.omit_root_skill_candidate_id else {}),
+                **({"script_trial": True} if EVOLUTION_REPLAY_RUNTIME and isinstance(payload, PreparedEvaluationRun)
+                   and payload.replay_trial_id else {}),
                 **({"new_skill_trial": payload.new_skill_trial}
                    if isinstance(payload, PreparedEvaluationRun) and payload.new_skill_trial else {}),
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,

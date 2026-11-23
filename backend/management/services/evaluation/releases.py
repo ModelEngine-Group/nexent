@@ -85,10 +85,12 @@ def _materials(tenant, ctx, prepared):
                     or new_ref.candidate_id != candidate_id or old_ref.model_copy(update={"arm": "result"}) != new_ref):
                 releases.reject("Independent results do not identify a single new Skill package")
             load_new_skill_package(tenant, agent, new_ref.digest)
-        elif part_kind in {"skill_step", "skill_discovery"}:
+        elif part_kind in {"skill_step", "skill_discovery", "skill_script"}:
             target = read_bound_skill_candidate(tenant, agent, version, candidate_id)
-            if not target or target["method"] != {"skill_step": "S2", "skill_discovery": "S1"}[part_kind]:
+            if not target or target["method"] != {"skill_step": "S2", "skill_discovery": "S1", "skill_script": "S4"}[part_kind]:
                 releases.reject("The independently tested Skill candidate is unavailable")
+            if part_kind == "skill_script" and target["script_build"] != ctx["plan"].get("script_build"):
+                releases.reject("The confirmed script build differs from the reviewed candidate")
             instance = target["instance_id"]
             if instance in targets or any(
                 not any(ref.instance_id == instance and ref.package_candidate_id == candidate_id
@@ -148,7 +150,9 @@ def _materials(tenant, ctx, prepared):
         ):
             releases.reject("Skill files or configuration changed after independent evaluation")
         pin = {"row": row, "skill_id": skill, **packages}
-        if result_row is not row:
+        if result_row.get("script_image"):
+            pin["result_image"] = result_row["script_image"]
+        if result_row["description"] != row["description"]:
             pin["result_description"] = result_row["description"]
         pins.append(pin)
     baseline = prepared["base"].model_copy(deep=True)

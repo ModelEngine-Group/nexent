@@ -31,11 +31,14 @@ def test_script_process(tmp_path):
         executor = SimpleNamespace(container=container, _nexent_backend="docker")
         arguments = {"skill_name": "weekly", "script_path": "scripts/report.py", "params": "business-value"}
         expectation = {"rules": [{"name": "run_skill_script", "arguments": arguments,
-                                  "min_calls": 1, "max_calls": 1, "expected_script_stdout": "BUSINESS-VALUE\n"}]}
-        baseline = "import sys\ndef report(value):\n    return value\nprint(report(sys.argv[1]))\n"
+                                  "min_calls": 1, "max_calls": 1, "expected_script_stdout": "BUSINESS-VALUE\n",
+                                  "expected_script_files": {"report.txt": "BUSINESS-VALUE"}}]}
+        baseline = ("import sys\nfrom pathlib import Path\ndef report(value):\n    return value\n"
+                    "value = report(sys.argv[1])\nPath('report.txt').write_text(value)\nprint(value)\n")
         candidate = replace_function(baseline, "report", "def report(value):\n    return value.upper()")
         scripts = [baseline, candidate,
-                   'import sys\nsys.exit(3)', 'print("unused")']
+                   'import sys\nsys.exit(3)', 'print("unused")', candidate.replace("write_text(value)", "write_text('wrong')"),
+                   candidate + "Path('extra.txt').write_text('extra')\n"]
         for index, source in enumerate(scripts):
             root = tmp_path / str(index)
             skill = root / "org" / "weekly"
@@ -56,15 +59,25 @@ def test_script_process(tmp_path):
                 tool.forward(**arguments)
             observation = ReplayToolObservation.model_validate(recorder.receipt())
             grade = judge_tool_use(expectation, observation)
-            assert grade["status"] == ["fail", "pass", "fail", "missing_evidence"][index], grade
+            assert grade["status"] == ["fail", "pass", "fail", "missing_evidence", "fail", "fail"][index], grade
             assert "business-value" not in json.dumps(recorder.receipt()).lower()
-            if index < 3:
+            if index != 3:
                 process, = grade["script_evidence"]
                 assert process["script"] == hashlib.sha256(script.read_bytes()).hexdigest()
                 assert process["image"] == image.id and process["input_matches"]
+                assert process["files_match"] == (index == 1)
+                if index in (4, 5):
+                    assert process["stdout_matches"]
                 assert process["exit_code"] == (3 if index == 2 else 0)
             else:
                 assert grade["reason"] == "unverified_skill_process"
+
+        for backend, required in [(runner, "sha256:" + "0" * 64), (None, image.id)]:
+            pinned = RunSkillScriptTool(local_skills_dir=str(root), tenant_id="org", workspace_path=workspace,
+                authorized_skill_names=["weekly"], isolated_skills_root=True, execution_backend=backend,
+                required_script_images={"weekly": required})
+            with pytest.raises(SkillScriptExecutionError, match="verified sandbox image"):
+                pinned.forward(**arguments)
     finally:
         try:
             container.remove(force=True)

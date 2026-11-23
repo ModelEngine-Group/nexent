@@ -39,18 +39,25 @@ def judge_dialogue_tools(expectation, observations, *, absent=frozenset()):
             if call.name != name:
                 continue
             expected_stdout = rule.get("expected_script_stdout")
-            if expected_stdout is not None:
+            expected_files = rule.get("expected_script_files")
+            if expected_stdout is not None or expected_files is not None:
                 process = call.skill_process
                 if process is None:
                     return {"status": "missing_evidence", "reason": "unverified_skill_process", "call": index}
                 args = rule["arguments"]
                 expected_input = (argument_digest(args["skill_name"]), argument_digest(args["script_path"]),
                                   argument_digest(shlex.split(args.get("params", ""))))
-                expected_output = sha256(expected_stdout.encode("utf-8")).hexdigest()
+                if expected_files is not None and process.files is None:
+                    return {"status": "missing_evidence", "reason": "unverified_script_files", "call": index}
+                expected_changes = {sha256(name.encode()).hexdigest(): sha256(content.encode()).hexdigest()
+                                    for name, content in (expected_files or {}).items()}
+                files_match = process.files.changes == expected_changes if process.files else None
+                stdout_match = (process.stdout == sha256(expected_stdout.encode()).hexdigest()
+                                if expected_stdout is not None else None)
                 same_input = (process.skill, process.path, process.argv) == expected_input
                 script_evidence.append({**process.model_dump(), "call": index, "input_matches": same_input,
-                                        "stdout_matches": process.stdout == expected_output})
-                if not same_input or process.exit_code != 0 or process.stdout != expected_output:
+                                        "stdout_matches": stdout_match, "files_match": files_match})
+                if not same_input or process.exit_code != 0 or stdout_match is False or expected_files is not None and not files_match:
                     issues.append({"tool": name, "reason": "wrong_script_result", "call": index})
             if call.requested_arguments is not None:
                 for key, expected in rule["arguments"].items():
@@ -85,3 +92,25 @@ def mapping_effect(old, new):
     if old["effective"] != old["requested"] or old["expected"] != new["expected"] or new["effective"] != new["expected"]:
         return None
     return "protected" if old["effective"] == old["expected"] else "corrected"
+
+
+def observed_script(result, build, arm):
+    """Return only the input fingerprint and verdict for one matching sandbox process."""
+    processes = (result.get("tool_use") or {}).get("script_evidence", [])
+    if len(processes) != 1:
+        return None
+    process = processes[0]
+    if (not process["input_matches"] or process["script"] != build[arm] or process["image"] != build["image"]
+            or process["skill"] != argument_digest(build["name"]) or process["path"] != argument_digest(build["path"])):
+        return None
+    if process.get("files_match") is None or not process.get("files"):
+        return None
+    return {"argv": process["argv"], "initial": process["files"]["initial"],
+            "passed": process["exit_code"] == 0 and process["stdout_matches"] is not False and process["files_match"]}
+
+
+def script_effect(base, result):
+    if (base is None or result is None or base["argv"] != result["argv"] or base["initial"] != result["initial"]
+            or not result["passed"]):
+        return None
+    return "protected" if base["passed"] else "corrected"

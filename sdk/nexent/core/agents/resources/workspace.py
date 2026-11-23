@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import tarfile
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
@@ -134,7 +135,20 @@ def cleanup_run_workspace(
     try:
         removed = workspace.exists()
         if removed:
-            shutil.rmtree(workspace)
+            if os.name == "nt":
+                def remove_readonly(function, path, error):
+                    # Frozen Skill files have the Windows read-only attribute.
+                    info = os.lstat(path)
+                    if (function not in (os.unlink, os.remove, os.rmdir)
+                            or not isinstance(error[1], PermissionError)
+                            or not info.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+                            or info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                        raise error[1]
+                    os.chmod(path, info.st_mode | stat.S_IWRITE)
+                    function(path)
+                shutil.rmtree(workspace, onerror=remove_readonly)
+            else:
+                shutil.rmtree(workspace)
         try:
             workspace.parent.rmdir()
         except OSError:

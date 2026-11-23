@@ -12,7 +12,8 @@ from contracts.evolution import DevelopmentExperimentRequest
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import skill_execution_revision
-from infrastructure.skill_package import encode_skill_package
+from infrastructure.skill_package import encode_skill_package, store_skill_package
+from management.db.evaluation.candidates import store_skill_candidate
 from management.clients.model import invoke_chat_prompt_in_worker
 from management.db.evaluation import experiments as jobs
 from management.services.evaluation.evolution_access import require_business_agent_edit
@@ -49,7 +50,7 @@ def _script_example(case, trial, status, baseline, skill_name):
     result = trial.get("result") or {}
     grade = result.get("tool_use") or {}
     rules = [r for r in (case["task"].get("tool_use") or {}).get("rules", ())
-             if r["name"] == "run_skill_script" and r.get("expected_script_stdout") is not None]
+             if r["name"] == "run_skill_script" and (r.get("expected_script_stdout") is not None or r.get("expected_script_files") is not None)]
     entries = grade.get("script_evidence", [])
     if (trial.get("status") != status or grade.get("status") != status or not trial.get("receipt_id")
             or result.get("case_digest") != case["digest"] or result.get("snapshot_digest") != baseline
@@ -57,12 +58,14 @@ def _script_example(case, trial, status, baseline, skill_name):
         invalid("Select a graded failure and a passing protection case with one verified script process each")
     rule, process = rules[0], entries[0]
     args = rule["arguments"]
+    files_ok = rule.get("expected_script_files") is None or process.get("files_match") is True
     if (args["skill_name"] != skill_name or not process["input_matches"]
             or any(issue.get("reason") not in {"raised", "wrong_script_result"} or issue.get("tool") != rule["name"]
                    for issue in grade["issues"])
-            or (process["exit_code"] == 0 and process["stdout_matches"]) != (status == "pass")):
+            or (process["exit_code"] == 0 and process["stdout_matches"] is not False and files_ok) != (status == "pass")):
         invalid("The process evidence does not locate the outcome in the selected Skill script")
-    return {"params": args.get("params", ""), "expected_stdout": rule["expected_script_stdout"],
+    return {"params": args.get("params", ""), "expected_stdout": rule.get("expected_script_stdout"),
+            **({"expected_files": rule["expected_script_files"]} if rule.get("expected_script_files") is not None else {}),
             "path": args["script_path"], "process": process, "receipt_id": trial["receipt_id"]}
 
 
@@ -109,6 +112,8 @@ def _freeze(tenant, user, eid, request, spec):
     if (fail["receipt_id"] == repeat["receipt_id"] or
             any(repeat["process"][k] != target[k] for k in ("path", "skill", "script", "image", "argv", "exit_code", "stdout"))):
         invalid("The independent execution did not reproduce the same script fault")
+    if repeat["process"].get("files") != target.get("files"):
+        invalid("The repeated execution observed different output files")
     if any(good["process"][k] != target[k] for k in ("skill", "path", "script", "image")):
         invalid("The passing example must exercise the same script and sandbox image")
     files = feedback_skill_files(tenant, name, (agent, version))
@@ -196,7 +201,9 @@ def draft_script(tenant, user, fid, request):
         for key in ("failure", "protection"):
             example = feedback[key]
             examples[key] = {"params": example["params"], "expected_stdout": example["expected_stdout"],
-                             "exit_code": example["process"]["exit_code"], "output_matched": example["process"]["stdout_matches"]}
+                             "exit_code": example["process"]["exit_code"], "output_matched": example["process"]["stdout_matches"],
+                             **({"expected_files": example["expected_files"], "files_matched": example["process"].get("files_match")}
+                                if "expected_files" in example else {})}
         original = "".join(before.splitlines(keepends=True)[function.lineno - 1:function.end_lineno])
         if len(original) > 32768:
             invalid("Select a smaller function or submit a maintainer edit")
@@ -217,3 +224,37 @@ def draft_script(tenant, user, fid, request):
             "draft_digest": sha256(encode_skill_package({**files, path: after.encode()})).hexdigest(),
             "replacement": replacement, "diff": "".join(difflib.unified_diff(
                 before.splitlines(keepends=True), after.splitlines(keepends=True), fromfile=path, tofile=path))}
+
+
+def build_reviewed_script(tenant, user, fid, request):
+    feedback = jobs.read_handoff(tenant, fid)
+    if not feedback or feedback["method"] != "S4":
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+    files = _approved_files(tenant, user, feedback)
+    if feedback["source_digest"] != request.source_digest:
+        invalid("The selected review belongs to another source package")
+    path = feedback["script_path"]
+    source = _source_text(files[path])
+    after = replace_function(source, feedback["function"], request.replacement)
+    try:
+        compile(after, path, "exec", dont_inherit=True)
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The reviewed script does not compile") from exc
+    built = {**files, path: after.encode("utf-8")}
+    if sha256(encode_skill_package(built)).hexdigest() != request.draft_digest:
+        invalid("The submitted change differs from the reviewed diff")
+    skill_id = feedback["skill_id"]
+    base = store_skill_package(tenant, skill_id, files)
+    result = store_skill_package(tenant, skill_id, built)
+    if (base, result) != (request.source_digest, request.draft_digest):
+        invalid("Stored packages differ from the reviewed build")
+    _approved_files(tenant, user, feedback)
+    build = {"path": path, "function": feedback["function"], "name": feedback["skill_name"],
+             "image": feedback["failure"]["process"]["image"], "base": sha256(files[path]).hexdigest(),
+             "result": sha256(built[path]).hexdigest(), "source_keys": feedback["source_keys"],
+             "source_cases": feedback["source_case_ids"], "agent": feedback["agent_id"], "version": feedback["version_no"]}
+    skill = {"skill_id": skill_id, "name": feedback["skill_name"]}
+    candidate = store_skill_candidate(tenant, skill, user, base, result,
+                                      {"method": "S4", "feedback_id": fid, "script_build": build})
+    return {"candidate_id": candidate, "method": "S4", "package_digest": result,
+            "script_digest": build["result"], "image": build["image"]}

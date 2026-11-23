@@ -10,8 +10,8 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
-from contracts.skill_script_repair import ScriptDraftRequest, ScriptRepairFeedback
-from management.services.evaluation.skill_script_repairs import draft_script, share_script_feedback
+from contracts.skill_script_repair import ReviewedScriptBuild, ScriptDraftRequest, ScriptRepairFeedback
+from management.services.evaluation.skill_script_repairs import build_reviewed_script, draft_script, share_script_feedback
 from contracts.new_skill_candidates import NewSkillBriefRequest
 from contracts.releases import PromotionRequest, RollbackRequest
 from management.db.evaluation.experiments import read_handoff
@@ -201,6 +201,14 @@ async def freeze_script_examples(experiment_id: int, request: ScriptRepairFeedba
 async def preview_script_draft(feedback_id: int, request: ScriptDraftRequest, authorization: str | None = Header(None)):
     user, tenant = get_current_user_id(authorization)
     result = await run_blocking("draft-skill-function", draft_script, tenant, user, feedback_id, request,
+                                lane="evaluation", owner="management")
+    return {"data": result}
+
+
+@router.post("/feedback/{feedback_id}/skill-script-build")
+async def create_reviewed_script_build(feedback_id: int, request: ReviewedScriptBuild, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking("build-reviewed-skill-script", build_reviewed_script, tenant, user, feedback_id, request,
                                 lane="evaluation", owner="management")
     return {"data": result}
 

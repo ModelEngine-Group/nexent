@@ -70,7 +70,7 @@ async def _snapshot(request, tenant, user, variant):
     if request.components:
         return await _combination_snapshot(request, tenant, user, variant)
     options = {}
-    if request.candidate_type in {"skill_step", "skill_discovery"}:
+    if request.candidate_type in {"skill_step", "skill_discovery", "skill_script"}:
         options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
     elif request.candidate_type == "prompt" and variant == "result":
         options = {"prompt_candidate_id": request.candidate_id}
@@ -209,24 +209,31 @@ async def create_experiment(request, tenant, user):
     excluded = await _excluded_sources(request, tenant)
     if request.components:
         await _check_components(request, tenant, user)
-    if request.candidate_type in {"skill_step", "skill_discovery"}:
+    script_build = None
+    if request.candidate_type in {"skill_step", "skill_discovery", "skill_script"}:
         bound = await _io("verify-skill-method", read_bound_skill_candidate, tenant, request.agent_id,
                           request.version_no, request.candidate_id)
-        method = "S1" if request.candidate_type == "skill_discovery" else "S2"
+        method = {"skill_discovery": "S1", "skill_step": "S2", "skill_script": "S4"}[request.candidate_type]
         if not bound or bound["method"] != method:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose the experiment matching the Skill candidate")
+        if method == "S4":
+            script_build = bound["script_build"]
+            excluded.update(script_build["source_keys"])
     fixed = {}
     if request.candidate_type != "baseline":
         fixed = await _io("freeze-fixed-regression-suite", freeze_regression_members, tenant, user,
                           request.agent_id, request.version_no)
     if request.screening and set(request.screening.target_case_ids).intersection(map(int, fixed)):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select development targets outside the fixed regression suite")
+    source_cases = script_build["source_cases"] if script_build else []
+    if set(source_cases).intersection([*request.case_ids, *map(int, fixed)]):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Keep original script examples separate from fresh tasks and regression")
     cases = {}
     trace_baseline_digest = None
     development_sources, fixed_sources = set(), set()
     proposed_name = (await _new_skill_proposal(request, tenant))["name"] if request.candidate_type == "skill_new" else None
     applicable = set()
-    for case_id in dict.fromkeys([*request.case_ids, *map(int, fixed)]):
+    for case_id in dict.fromkeys([*request.case_ids, *map(int, fixed), *source_cases]):
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
         sources = example_source_keys(case["task"])
@@ -236,7 +243,7 @@ async def create_experiment(request, tenant, user):
                 trace_baseline_digest = snapshot_digest(await _snapshot(baseline, tenant, user, "base"))
             await _io("verify-reproduced-trace-case", require_trace_baseline, tenant, request.agent_id,
                       request.version_no, case, rule, request.language, request.judge_model_id, trace_baseline_digest)
-        if excluded.intersection(sources):
+        if case_id not in source_cases and excluded.intersection(sources):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the examples used to generate the candidate")
         if (request.evaluates_skill_choices() and case_id in request.case_ids
                 and case["task"].get("expected_skill_names") is None):
@@ -267,6 +274,8 @@ async def create_experiment(request, tenant, user):
         if request.candidate_type == "tool_mapping":
             mapping_arms[variant] = spec.resource
     plan = {"request": request.model_dump(), "snapshots": snapshots, "cases": cases, "evaluator": rule}
+    if script_build:
+        plan["script_build"] = script_build
     if mapping_arms:
         from management.services.evaluation.tool_mapping_candidates import mapping_difference
         plan["tool_mapping"] = mapping_difference(mapping_arms["base"], mapping_arms["result"])
@@ -371,6 +380,7 @@ def experiment_report(tenant, user, eid, *, cancel=False):
         decision["screening"] = screen_development(plan, pairs, cancelled=scope["cancelled"] or cancel)
     return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
             **decision,
+            **({"script_source_cases": scope["script_source_cases"]} if scope.get("script_source_cases") else {}),
             **({"fixed_regression": regression_coverage(fixed, pairs, ("base", "only_a", "only_b", "result")
                                                        if scope.get("components") else ("base", "result"))}
                if fixed is not None else {}),
@@ -492,6 +502,11 @@ async def run_verified_arm(request, job, case, spec, client, stage_input):
             raise
     try:
         task = case["task"]
+        if request.candidate_type == "skill_script" and task.get("tool_use"):
+            rules = [{**rule, "expected_script_files": rule.get("expected_script_files") or {}}
+                     if rule["name"] == "run_skill_script" and rule.get("expected_script_stdout") is not None else rule
+                     for rule in task["tool_use"]["rules"]]
+            task = {**task, "tool_use": {**task["tool_use"], "rules": rules}}
         started = time.monotonic_ns()
         observations, turns, error = await run_turns(client, spec, task, load_input, job, user, tenant)
         execution_ms = (time.monotonic_ns() - started + 999999) // 1000000

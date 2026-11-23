@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { ToolExpectation } from "@/services/evolutionService";
 
 export interface ToolRuleFields {
-  toolRules?: { name: string; min: number; max?: number; args?: string; checkScript?: boolean; stdout?: string }[];
+  toolRules?: { name: string; min: number; max?: number; args?: string; checkScript?: boolean; stdout?: string; fileCheck?: boolean; files?: string }[];
   toolOrder?: string;
 }
 
@@ -13,6 +13,7 @@ export function toolExpectation({ toolRules, toolOrder }: ToolRuleFields): ToolE
   if (!toolRules?.length) return undefined;
   return {
     rules: toolRules.map(r => ({
+      ...(r.name.trim() === "run_skill_script" && r.fileCheck ? {expected_script_files: JSON.parse(r.files?.trim() || "{}")} : {}),
       ...(r.name.trim() === "run_skill_script" && r.checkScript ? { expected_script_stdout: r.stdout ?? "" } : {}),
       name: r.name.trim(), min_calls: r.min, max_calls: r.max ?? null, arguments: JSON.parse(r.args?.trim() || "{}"),
     })),
@@ -56,6 +57,15 @@ export default function ToolUseRules() {
         {rules[f.name].checkScript && <Form.Item name={[f.name, "stdout"]} label={t("evolution.scriptStdout")}>
           <Input.TextArea rows={3} maxLength={16384} />
         </Form.Item>}
+        <Form.Item name={[f.name, "fileCheck"]} valuePropName="checked"><Checkbox>{t("evolution.checkScriptFiles")}</Checkbox></Form.Item>
+        {rules[f.name].fileCheck && <Form.Item name={[f.name,"files"]} label={t("evolution.expectedScriptFiles")}
+          rules={[{validator: async (_,value) => {
+            try {
+              const obj = JSON.parse(value?.trim() || "{}");
+              if (obj && typeof obj === "object" && !Array.isArray(obj) && Object.values(obj).every(v => typeof v === "string")) return;
+            } catch { /* Report a localized form error. */ }
+            throw new Error(t("evolution.expectedScriptFiles"));
+          }}]}><Input.TextArea rows={2} placeholder={'{"report.txt":"..."}'}/></Form.Item>}
       </>}
       <Button onClick={() => remove(f.name)}>{t("evolution.removeToolRule")}</Button>
     </div>)}

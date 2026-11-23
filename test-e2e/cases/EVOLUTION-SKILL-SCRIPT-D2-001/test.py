@@ -51,7 +51,7 @@ def test_script_feedback_http(runtime, monkeypatch, tmp_path):
     models.TableBase.metadata.create_all(db_client.engine)
     path = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cur:
-        for n in (18, 19, 20, 25, 28, 33, 34):
+        for n in (17, 18, 19, 20, 25, 28, 33, 34):
             (file,) = path.glob(f"v2.9.0_{n:03}_*.sql")
             cur.execute(file.read_text(encoding="utf-8"))
     seed_membership_roles(editor, ["DEV"])
@@ -140,6 +140,31 @@ def test_script_feedback_http(runtime, monkeypatch, tmp_path):
             draft = client.post(url,headers=designer_header,json=fix)
             assert draft.is_success, draft.text
             assert "+    return value.upper()" in draft.json()["data"]["diff"]
+            import io
+            from infrastructure import skill_package
+            from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
+
+            objects = {}
+            def put(stream, key):
+                objects[key] = stream.read()
+                return True, key
+
+            monkeypatch.setattr(skill_package.minio_client, "upload_fileobj", put)
+            monkeypatch.setattr(skill_package.minio_client, "get_file_stream", lambda key: (True, io.BytesIO(objects[key])))
+            payload = {k: draft.json()["data"][k] for k in ("source_digest", "draft_digest", "replacement")}
+            build_url = f"/api/agent-evolution/feedback/{fid}/skill-script-build"
+            assert client.post(build_url,headers=editor_header,json=payload).status_code == 403
+            assert client.post(build_url,headers=designer_header,json={**payload, "draft_digest":"0"*64}).status_code == 400
+            assert not objects
+            built = client.post(build_url,headers=designer_header,json=payload)
+            assert built.is_success, built.text
+            candidate = built.json()["data"]["candidate_id"]
+            assert client.post(build_url,headers=designer_header,json=payload).json()["data"]["candidate_id"] == candidate
+            bound = read_bound_skill_candidate(tenant, agent, 1, candidate)
+            assert bound["script_build"]["source_cases"] == ids
+            assert not read_bound_skill_candidate(tenant, agent, 0, candidate)
+            assert skill_package.load_skill_package(tenant, 8, bound["base_digest"])[path] == original
+            assert b"return value.upper()" in skill_package.load_skill_package(tenant, 8, bound["result_digest"])[path]
             assert (directory / path).read_bytes() == original
             (directory / "requirements.txt").write_text("example==1",encoding="utf8")
             assert client.post(url,headers=designer_header,json=fix).status_code == 400

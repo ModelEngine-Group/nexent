@@ -4,7 +4,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
-from contracts.replay_files import FileStateCheck
+from contracts.replay_files import FileStateCheck, TextFiles
 
 
 class DevelopmentFeedback(BaseModel):
@@ -64,12 +64,13 @@ class ToolUseRule(BaseModel):
     name: str = Field(min_length=1, max_length=180, pattern=r"^\S+$")
     min_calls: int = Field(default=1, ge=0, le=512)
     max_calls: int | None = Field(default=None, ge=0, le=512)
+    expected_script_files: TextFiles | None = Field(default=None, exclude_if=lambda v: v is None)
     expected_script_stdout: str | None = Field(default=None, max_length=16384, exclude_if=lambda v: v is None)
     arguments: dict[str, JsonValue] = Field(default_factory=dict, max_length=32)
 
     @model_validator(mode="after")
     def valid_bounds(self):
-        if self.expected_script_stdout is not None:
+        if self.expected_script_stdout is not None or self.expected_script_files is not None:
             import shlex
             if (self.name != "run_skill_script" or self.arguments.get("source", "skill") != "skill"
                     or not all(isinstance(self.arguments.get(k), str) and self.arguments[k].strip()
@@ -237,7 +238,7 @@ class DevelopmentExperimentRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
-    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "skill_new", "baseline", "tool_set", "tool_mapping", "combination"]
+    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "skill_new", "skill_script", "baseline", "tool_set", "tool_mapping", "combination"]
     candidate_id: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
     components: list[EvaluatedCandidate] | None = Field(default=None, min_length=2, max_length=2, exclude_if=lambda v: v is None)
     case_ids: list[int] = Field(min_length=1, max_length=100)

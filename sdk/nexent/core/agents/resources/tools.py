@@ -263,6 +263,8 @@ class ToolResources:
                 observer=self.observer,
                 authorized_skill_names=params.get("authorized_skill_names"),
             )
+            if params.get("required_script_images"):
+                kwargs["required_script_images"] = params["required_script_images"]
             if params.get("isolated_skills_root"):
                 kwargs["isolated_skills_root"] = True
             if params.get("workspace_path"):

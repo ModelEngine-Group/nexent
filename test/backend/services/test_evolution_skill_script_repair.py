@@ -126,3 +126,33 @@ def test_script_evaluation_never_falls_back_to_host_execution(tmp_path):
     assert "Docker sandbox" in result
     tool.skill_manager.run_skill_script.assert_not_called()
     assert "skill_process" not in recorder.receipt()["calls"][0]
+
+def test_script_gain_needs_same_input_state_image_and_build():
+    from management.services.evaluation.tool_use import observed_script, script_effect
+
+    build = {"base": "old", "result": "new", "image": "image", "name": "weekly", "path": "scripts/weekly.py"}
+    process = {"input_matches": True, "script": "old", "image": "image", "skill": argument_digest("weekly"),
+               "path": argument_digest("scripts/weekly.py"), "argv": "args", "exit_code": 0, "stdout_matches": None,
+               "files_match": False, "files": {"initial": "state", "changes": {}}}
+    def observed(arm, **changes):
+        return observed_script({"tool_use": {"script_evidence": [{**process, **changes}]}}, build, arm)
+
+    base = observed("base")
+    current = observed("result", script="new", files_match=True)
+    assert script_effect(base, current) == "corrected"
+    assert script_effect(observed("base", files_match=True), current) == "protected"
+    for changes in ({"image": "wrong"}, {"script": "old"}, {"input_matches": False}, {"files_match": None},
+                    {"files": {"initial": "other"}}, {"argv": "other"}, {"files_match": False}):
+        assert script_effect(base, observed("result", **{"script": "new", "files_match": True, **changes})) is None
+
+
+def test_output_state_distinguishes_rewrites_deletions_and_incomplete_evidence():
+    from nexent.core.agents.resources.replay_scripts import file_changes
+
+    old = [5, {"a": ["content", 20, 1, 33188]}]
+    replaced = [6, {"a": ["content", 30, 3, 33188]}]
+    assert file_changes(old, old)["changes"] == {}
+    assert file_changes(old, replaced)["changes"] == {"a": "content"}
+    assert file_changes(old, [6, {}])["changes"] == {"a": None}
+    assert file_changes(old, [6, old[1]]) is None
+    assert file_changes(None, replaced) is None

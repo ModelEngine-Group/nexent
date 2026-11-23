@@ -2,7 +2,7 @@
 """Decide whether a development candidate can be submitted for independent confirmation."""
 
 from management.services.evaluation.confirmation_results import new_skill_use
-from management.services.evaluation.tool_use import mapping_effect, observed_mapping
+from management.services.evaluation.tool_use import mapping_effect, observed_mapping, observed_script, script_effect
 
 
 def _verified(row, case_digest, arm_digest, rubric):
@@ -68,6 +68,7 @@ def screen_development(plan, pairs, *, cancelled):
     gaps, failures = {}, {}
     skill_uses = set()
     mapping_effects = set()
+    script_effects = set()
     choices_fixed = 0
     fixed = base_tokens = candidate_tokens = 0
 
@@ -102,6 +103,26 @@ def screen_development(plan, pairs, *, cancelled):
                     mapping_effects.add(effect)
             if effect == "protected" and base["status"] == "pass":
                 mapping_effects.add(effect)
+        if request["candidate_type"] == "skill_script" and "base" in verified:
+            build = plan["script_build"]
+            base = pair["base"]
+            effect = script_effect(observed_script(base["result"], build, "base"),
+                                   observed_script(evidence, build, "result"))
+            passed = result["status"] == "pass"
+            corrected = passed and base["status"] == "fail" and effect == "corrected"
+            protected = passed and base["status"] == "pass" and effect == "protected"
+            source_failure, source_guard = build["source_cases"]
+            if cid in (source_failure, source_guard):
+                if not (corrected if cid == source_failure else protected):
+                    failures.setdefault("script_original_check_failed", []).append(cid)
+                continue
+            if cid in targets and base["status"] == "fail" and passed:
+                if corrected:
+                    script_effects.add("corrected")
+                else:
+                    gaps.setdefault("script_unproven_gain", []).append(cid)
+            if protected:
+                script_effects.add("protected")
         if cid not in targets:
             if result["status"] != "pass":
                 failures.setdefault("protection_failed", []).append(cid)
@@ -139,6 +160,8 @@ def screen_development(plan, pairs, *, cancelled):
                 base_tokens += counts[0]
                 candidate_tokens += counts[1]
 
+    if request["candidate_type"] == "skill_script" and script_effects != {"corrected", "protected"}:
+        gaps["script_scope_coverage"] = []
     if request["candidate_type"] == "tool_mapping" and mapping_effects != {"corrected", "protected"}:
         gaps["mapping_scope_coverage"] = []
     if request["candidate_type"] == "combination" and not gaps:

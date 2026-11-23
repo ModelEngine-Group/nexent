@@ -4,7 +4,7 @@
 from collections import Counter
 from math import ceil
 
-from management.services.evaluation.tool_use import mapping_effect, observed_mapping
+from management.services.evaluation.tool_use import mapping_effect, observed_mapping, observed_script, script_effect
 
 
 def new_skill_use(evidence):
@@ -22,7 +22,7 @@ def new_skill_use(evidence):
     return "skipped" if not selection["reads"].get(name) else "incorrect"
 
 
-def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=(), mapping=None):
+def arm_measurement(status, result, *, task=None, require_selection=False, step_ids=(), mapping=None, script_build=None, arm=None):
     task = task or {}
     file_grade = result.get("file_state") or {}
     tool_grade = result.get("tool_use") or {}
@@ -49,6 +49,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False, step_
     }:
         status = "fail"
     return {
+        **({"script_observation": observed_script(result, script_build, arm)} if script_build else {}),
         **({"mapping_observation": observed_mapping(result, mapping)} if mapping else {}),
         **({"read_step_ids": sorted({
             skill["candidate_id"] for skill in (result.get("skills") or [result.get("skill") or {}])
@@ -70,7 +71,7 @@ def arm_measurement(status, result, *, task=None, require_selection=False, step_
     }
 
 
-def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=(), require_mapping=False):
+def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=False, required_step_ids=(), require_script=False, require_mapping=False):
     # Private family names and individual task outcomes never appear in the returned object.
     valid, families, timings, token_pairs = [], Counter(), [], []
     failed, missing = [], []
@@ -95,6 +96,19 @@ def comparison_summary(policy, pairs, *, require_guide=False, require_new_skill=
             timings.append(candidate["ms"])
         if base["status"] == candidate["status"] == "pass":
             token_pairs.append((base["tokens"], candidate["tokens"]))
+    if require_script:
+        effects = set()
+        for _, old, new in pairs:
+            if old["status"] not in {"pass", "fail"} or new["status"] != "pass":
+                continue
+            effect = script_effect(old.get("script_observation"), new.get("script_observation"))
+            if old["status"] == "fail" and effect != "corrected":
+                missing.append("script_unproven_gain")
+                break
+            if (old["status"], effect) in {("pass", "protected"), ("fail", "corrected")}:
+                effects.add(effect)
+        if effects != {"corrected", "protected"}:
+            missing.append("script_scope_coverage")
     if require_mapping:
         effects = set()
         for _, old, new in pairs:

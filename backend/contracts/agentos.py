@@ -780,7 +780,16 @@ class SkillTrialObservation(RunSpecModel):
     guide_reads: int = Field(ge=0)
 
 
+ScriptHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class ScriptFileEvidence(RunSpecModel):
+    initial: ScriptHash
+    changes: dict[ScriptHash, ScriptHash | None] = Field(max_length=64)
+
+
 class SkillProcessEvidence(RunSpecModel):
+    files: ScriptFileEvidence | None = Field(default=None, exclude_if=lambda v: v is None)
     skill: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     path: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     argv: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]

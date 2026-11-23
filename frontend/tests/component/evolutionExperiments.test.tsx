@@ -47,6 +47,7 @@ vi.mock("@/services/evolutionService", () => ({
     toolSetCandidates: vi.fn(),
     toolMappingCandidate: vi.fn(),
     scriptDraft: vi.fn(),
+    buildScript: vi.fn(),
     setFixedRegression: vi.fn(),
   },
 }));
@@ -502,7 +503,7 @@ it("keeps exact stdout for script tasks and drops stale script checks for other 
 it("previews the maintainer's function diff without starting an experiment", async () => {
   const replacement = "def report(value):\n    return value.upper()";
   vi.mocked(evolutionService.scriptDraft).mockResolvedValue({script_path:"scripts/report.py", function:"report",
-    replacement, diff:"+    return value.upper()", draft_digest:"pinned"});
+    replacement, diff:"+    return value.upper()", draft_digest:"pinned", source_digest:"baseline"});
   render(<QueryClientProvider client={new QueryClient()}><ScriptDraftForm/></QueryClientProvider>);
   fireEvent.click(screen.getByText("evolution.scriptDraft", {selector:"summary"}));
   fireEvent.change(screen.getByRole("spinbutton", {name:"evolution.feedbackId"}), {target:{value:"32"}});
@@ -511,4 +512,10 @@ it("previews the maintainer's function diff without starting an experiment", asy
   fireEvent.click(screen.getByRole("button", {name:"evolution.scriptDraft"}));
   expect(await screen.findByText("+ return value.upper()")).toBeInTheDocument();
   expect(evolutionService.scriptDraft).toHaveBeenCalledWith(32,{replacement});
+  expect(evolutionService.buildScript).not.toHaveBeenCalled();
+  vi.mocked(evolutionService.buildScript).mockResolvedValue({candidate_id:55,method:"S4",image:"image",package_digest:"pinned"});
+  fireEvent.click(screen.getByRole("button", {name:"evolution.reviewedBuild"}));
+  await waitFor(() => expect(evolutionService.buildScript).toHaveBeenCalledWith(32,{
+    replacement, draft_digest:"pinned", source_digest:"baseline",
+  }));
 });

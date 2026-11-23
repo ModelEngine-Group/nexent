@@ -70,6 +70,7 @@ def scope(tenant, eid):
     with get_db_session() as session:
         row = session.execute(text("""
             SELECT agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
+                   plan->'script_build'->'source_cases' AS script_source_cases,
                    plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
                    ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
                    ARRAY(SELECT jsonb_object_keys(plan->'snapshots')) AS planned_arms
@@ -192,9 +193,11 @@ def workspace_choices(tenant, agent_id, version):
             FROM nexent.evolution_candidate_t c
             WHERE c.tenant_id=:tenant AND c.agent_id=:agent AND c.base_version_no=:version
             UNION ALL
-            SELECT s.candidate_id, CASE s.feedback->>'method' WHEN 'S1' THEN 'skill_discovery' ELSE 'skill_step' END,
+            SELECT s.candidate_id, CASE s.feedback->>'method' WHEN 'S1' THEN 'skill_discovery' WHEN 'S4' THEN 'skill_script' ELSE 'skill_step' END,
                 s.skill_name, s.create_time FROM nexent.evolution_skill_candidate_t s
-            WHERE s.tenant_id=:tenant AND EXISTS (
+            WHERE s.tenant_id=:tenant AND (s.feedback->>'method' IS DISTINCT FROM 'S4' OR
+                (s.feedback->'script_build'->>'agent'=CAST(:agent AS text)
+                 AND s.feedback->'script_build'->>'version'=CAST(:version AS text))) AND EXISTS (
                 SELECT 1 FROM nexent.ag_skill_instance_t i WHERE i.skill_id=s.skill_id AND i.tenant_id=:tenant
                 AND i.agent_id=:agent AND i.version_no=:version AND i.enabled AND i.delete_flag='N')
             UNION ALL

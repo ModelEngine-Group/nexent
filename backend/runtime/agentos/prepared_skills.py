@@ -118,7 +118,7 @@ def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | Non
 
 
 def materialize_skill_tools(
-    resource, actor, workspace_path: str, *, publish_artifacts: bool = False,
+    resource, actor, workspace_path: str, *, publish_artifacts: bool = False, script_trial: bool = False,
     public_reference=None, workbench_version: int | None = None,
     debug_run_id: str | None = None,
 ) -> tuple[dict[str, ToolConfig], list[dict]]:
@@ -165,6 +165,7 @@ def materialize_skill_tools(
     stage_root = skill_stage_path(workspace_path, create=True)
     stage = stage_root / uuid4().hex
     configs = {}
+    script_images = {}
     stage.mkdir(parents=True, mode=0o700)
     for ref in refs:
         row = rows[ref.skill_id if workbench_refs else ref.instance_id]
@@ -184,6 +185,10 @@ def materialize_skill_tools(
                 bound = skill_candidate_records.read_bound_skill_candidate(tenant, resource.agent_id, resource.version_no, candidate)
                 if not bound or bound["instance_id"] != ref.instance_id:
                     raise ValueError("Skill candidate is outside the Agent binding")
+                if bound.get("method") == "S4":
+                    if not script_trial:
+                        raise ValueError("Reviewed script candidates require an isolated replay trial")
+                    script_images[name] = bound["script_build"]["image"]
                 revision_row = skill_candidate_records.candidate_skill_row(revision_row, bound, ref.package_variant)
                 rows[ref.instance_id] = revision_row
                 files = load_skill_package(tenant, bound["skill_id"], bound[ref.package_variant + "_digest"])
@@ -192,6 +197,8 @@ def materialize_skill_tools(
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc
         if not compare_digest(revision, ref.revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"})
+        if row.get("script_image"):
+            script_images[name] = row["script_image"]
         configs[name] = row["config"]
         root = stage / skill_path_segment(tenant) / skill_path_segment(name)
         for relative_path, contents in files.items():
@@ -209,6 +216,8 @@ def materialize_skill_tools(
         builtin = EvaluationSkillTool(binding.tool_id)
         builtin_params = dict(params)
         if builtin is EvaluationSkillTool.SCRIPT:
+            if script_images:
+                builtin_params["required_script_images"] = script_images
             builtin_params["workspace_path"] = workspace_path
             if publish_artifacts:
                 builtin_params["publish_file_artifacts"] = True

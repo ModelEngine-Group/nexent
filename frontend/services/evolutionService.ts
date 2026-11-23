@@ -58,7 +58,7 @@ export interface Trial {
       model_inputs?: number; instruction_mentions?: string[]; native_definitions?: string[] };
     new_skill_trial?: {candidate_id: number; name: string; digest: string; arm: "base" | "result"};
     tool_use?: { status: string; reason?: string; script_evidence?: {
-      call: number; exit_code: number; input_matches: boolean; stdout_matches: boolean; script: string; image: string;
+      call: number; exit_code: number; input_matches: boolean; stdout_matches: boolean | null; files_match?: boolean | null; script: string; image: string;
     }[]; argument_evidence?: {
       tool: string; field: string; call: number; requested: string | null; effective: string | null; expected: string;
     }[]; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
@@ -73,6 +73,7 @@ export interface ScreeningCriteria {
 }
 
 export interface ExperimentReport {
+  script_source_cases?: number[];
   screening?: { status: "eligible" | "failed" | "incomplete"; criteria: ScreeningCriteria; gain: number | null;
     failures: Record<string, number[]>; missing: Record<string, number[]> };
   components?: EvaluatedCandidate[];
@@ -138,6 +139,7 @@ export const evolutionService = {
   release: (id: number) => read<{
     agent_id: number; experiment_id: number; base_version: number; current_version: number;
     candidate_digest: string; candidate_type: string; paused: boolean; excluded_tools?: string[];
+    script_build?: {name: string; path: string; function: string; image: string} | null;
     tool_mapping?: {tool: string; field: string; proposed: Record<string, {kind: string; values?: string[]}>} | null;
     components?: {experiment_id: number; candidate_type: string; candidate_id: number}[] | null;
     skill_description?: {name: string; previous: string; proposed: string} | null;
@@ -215,8 +217,11 @@ export const evolutionService = {
   shareScriptFeedback: (id: number, body: ScriptFeedback) =>
     read<{feedback_id: number}>(`${root}/experiments/${id}/skill-script-feedback`, body),
   scriptDraft: (id: number, body: {model_id: number} | {replacement: string}) =>
-    read<{script_path: string; function: string; replacement: string; diff: string; draft_digest: string}>(
+    read<{script_path: string; function: string; replacement: string; diff: string; draft_digest: string; source_digest: string}>(
       `${root}/feedback/${id}/skill-script-draft`, body),
+  buildScript: (id: number, body: {replacement: string; draft_digest: string; source_digest: string}) =>
+    read<{candidate_id: number; method: string; package_digest: string; image: string}>(
+      `${root}/feedback/${id}/skill-script-build`, body),
   shareDiscovery: (id: number, body: { method: "S1"; skill_id: number; goal: string } &
     Record<"missed" | "overused" | "correct", { case_id: number; query_excerpt: string }>) =>
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
@@ -237,7 +242,7 @@ export const evolutionService = {
 };
 
 export interface ToolExpectation {
-  rules: { name: string; min_calls: number; max_calls: number | null; expected_script_stdout?: string; arguments: Record<string, unknown> }[];
+  rules: { name: string; min_calls: number; max_calls: number | null; expected_script_stdout?: string; expected_script_files?: Record<string, string>; arguments: Record<string, unknown> }[];
   order?: string[];
 }
 

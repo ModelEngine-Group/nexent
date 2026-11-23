@@ -137,3 +137,15 @@ it("identifies both tested revisions in a combined release", async () => {
   expect(screen.getByText("#8 from 16")).toBeInTheDocument();
   expect(screen.getByText("file_analysis")).toBeInTheDocument();
 });
+
+it("shows the approved script and the sandbox image verified before release", async () => {
+  const image = `sha256:${"a".repeat(64)}`;
+  vi.mocked(api.release).mockResolvedValue({
+    ...passed, candidate_type: "skill_script",
+    script_build: {name: "weekly", path: "scripts/weekly.py", function: "normalize", image},
+  });
+  open();
+  expect(await screen.findByText("scripts/weekly.py")).toBeInTheDocument();
+  expect(screen.getByText("normalize")).toBeInTheDocument();
+  expect(screen.getByText(image)).toBeInTheDocument();
+});

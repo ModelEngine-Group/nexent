@@ -32,3 +32,10 @@ class ScriptDraftRequest(BaseModel):
         if (self.model_id is None) == (self.replacement is None):
             raise ValueError("Supply a maintainer edit or choose one drafting model")
         return self
+
+
+class ReviewedScriptBuild(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    draft_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    replacement: str = Field(min_length=1, max_length=32768)

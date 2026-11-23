@@ -69,6 +69,7 @@ class RunSkillScriptTool(Tool):
         isolated_skills_root: bool = False,
         artifact_path_resolver: Optional[Callable[[str], str]] = None,
         artifact_uploader: Optional[Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]]] = None,
+        required_script_images: Optional[Dict[str, str]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -93,6 +94,7 @@ class RunSkillScriptTool(Tool):
         self.workspace_path = workspace_path
         self.on_complete = on_complete
         self.execution_backend = execution_backend
+        self.required_script_images = dict(required_script_images or {})
         self.isolated_skills_root = isolated_skills_root
         self.artifact_path_resolver = artifact_path_resolver
         self.artifact_uploader = artifact_uploader
@@ -283,6 +285,11 @@ class RunSkillScriptTool(Tool):
                 raise PermissionError(
                     f"Skill '{skill_name}' is not enabled for agent {self.agent_id}"
                 )
+            required_image = self.required_script_images.get(skill_name)
+            if required_image:
+                from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner
+                if not isinstance(self.execution_backend, SandboxSkillScriptRunner) or self.execution_backend.image_id != required_image:
+                    raise SkillScriptExecutionError("The verified sandbox image is unavailable for this Skill version")
             manager = self._get_skill_manager()
             if self.execution_backend is not None:
                 backend_kwargs = dict(

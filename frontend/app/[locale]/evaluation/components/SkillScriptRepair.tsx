@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Radio, Select } from "antd";
 import { useState } from "react";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -10,9 +10,9 @@ import { evolutionService as api, type ExperimentReport, type ScriptFeedback, ty
 function ApprovedScriptInput({ id, agent, version, viewer }: { id?: number; agent: number; version: number; viewer: string }) {
   const data = useQuery({ queryKey: ["feedback-case", viewer, agent, version, id], enabled: !!id,
     queryFn: () => api.developmentCase(agent, version, id!), retry: false });
-  const rule = data.data?.task.tool_use?.rules.find(r => r.expected_script_stdout !== undefined);
+  const rule = data.data?.task.tool_use?.rules.find(r => r.expected_script_stdout !== undefined || r.expected_script_files !== undefined);
   if (data.error) return <Alert type="error" message={data.error.message}/>;
-  return rule ? <pre>{JSON.stringify({arguments: rule.arguments, expected_stdout: rule.expected_script_stdout}, null, 2)}</pre> : null;
+  return rule ? <pre>{JSON.stringify({arguments: rule.arguments, expected_stdout: rule.expected_script_stdout, expected_files: rule.expected_script_files}, null, 2)}</pre> : null;
 }
 
 export function ScriptFeedbackForm({report, workspace, agent, version, viewer}: {
@@ -59,6 +59,7 @@ export function ScriptFeedbackForm({report, workspace, agent, version, viewer}: 
 }
 
 export function ScriptDraftForm() {
+  const queries = useQueryClient();
   const {availableLlmModels} = useModelList();
   const models = availableLlmModels.map(model => ({value: model.id, label: model.displayName || model.name}));
   const {t} = useTranslation("common");
@@ -67,16 +68,24 @@ export function ScriptDraftForm() {
   const [code,setCode] = useState("");
   const [model,setModel] = useState<number>();
   const draft = useMutation({mutationFn:() => api.scriptDraft(id!, manual ? {replacement:code} : {model_id:model!})});
+  const build = useMutation({mutationFn:() => {
+    const reviewed = draft.data!;
+    return api.buildScript(id!, {replacement: reviewed.replacement, draft_digest: reviewed.draft_digest, source_digest: reviewed.source_digest});
+  }, onSuccess: () => queries.invalidateQueries({queryKey: ["evolution"]})});
+  const reset = () => { draft.reset(); build.reset(); };
   return <details><summary>{t("evolution.scriptDraft")}</summary><Form layout="vertical">
-    <Form.Item label={t("evolution.feedbackId")}><InputNumber aria-label={t("evolution.feedbackId")} value={id} min={1} precision={0} onChange={v => {setId(v); draft.reset();}}/></Form.Item>
-    <Radio.Group value={manual} onChange={e => {setManual(e.target.value); draft.reset();}} options={[
+    <Form.Item label={t("evolution.feedbackId")}><InputNumber aria-label={t("evolution.feedbackId")} value={id} min={1} precision={0} onChange={v => {setId(v); reset();}}/></Form.Item>
+    <Radio.Group value={manual} onChange={e => {setManual(e.target.value); reset();}} options={[
       {label:t("evolution.scriptModel"), value:false},{label:t("evolution.scriptManual"),value:true}]}/>
     {manual ? <Form.Item label={t("evolution.scriptReplacement")}><Input.TextArea aria-label={t("evolution.scriptReplacement")} rows={6} maxLength={32768} value={code}
-      onChange={e => {setCode(e.target.value); draft.reset();}}/></Form.Item>
-      : <Form.Item label={t("evolution.scriptModel")}><Select options={models} value={model} onChange={v => {setModel(v); draft.reset();}}/></Form.Item>}
-    <Button disabled={!id || (manual ? !code.trim() : !model)} loading={draft.isPending} onClick={() => draft.mutate()}>{t("evolution.scriptDraft")}</Button>
+      onChange={e => {setCode(e.target.value); reset();}}/></Form.Item>
+      : <Form.Item label={t("evolution.scriptModel")}><Select options={models} value={model} onChange={v => {setModel(v); reset();}}/></Form.Item>}
+    <Button disabled={!id || (manual ? !code.trim() : !model)} loading={draft.isPending} onClick={() => {build.reset(); draft.mutate();}}>{t("evolution.scriptDraft")}</Button>
   </Form>
     {draft.error && <Alert type="error" message={draft.error.message}/>}
-    {draft.data && <><strong>{draft.data.script_path} · {draft.data.function}</strong><pre>{draft.data.diff}</pre></>}
+    {draft.data && <><strong>{draft.data.script_path} · {draft.data.function}</strong><pre>{draft.data.diff}</pre>
+      <Button disabled={build.isSuccess} loading={build.isPending} onClick={() => build.mutate()}>{t("evolution.reviewedBuild")}</Button>
+      {build.error && <Alert type="error" message={build.error.message}/>}
+      {build.data && <p>{t("evolution.scriptBuildCreated", {id:build.data.candidate_id})}</p>}</>}
   </details>;
 }

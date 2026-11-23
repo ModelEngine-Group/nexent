@@ -77,6 +77,10 @@ export default function ReleasePage() {
                   current: data.current_version,
                 })}
               </Typography.Text>
+              {data.script_build && <Typography.Paragraph>
+                {data.script_build.name} · <code>{data.script_build.path}</code> · <code>{data.script_build.function}</code>
+                <br/>{t("evolution.verifiedImage")} <code>{data.script_build.image}</code>
+              </Typography.Paragraph>}
               {data.tool_mapping && <Typography.Text>
                 {data.tool_mapping.tool}.{data.tool_mapping.field} · {t(`evolution.mapping.${data.tool_mapping.proposed[data.tool_mapping.field].kind}`)}
               </Typography.Text>}

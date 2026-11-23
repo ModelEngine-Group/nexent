@@ -132,6 +132,10 @@ class SandboxSkillScriptRunner:
         """Return whether this runner has a real Docker execution target."""
         return self._container is not None and getattr(self._executor, "_nexent_backend", None) == "docker"
 
+    @property
+    def image_id(self) -> str | None:
+        return self._container.attrs.get("Image") if self.available else None
+
     @staticmethod
     def _output_text(output: Any) -> str:
         if isinstance(output, bytes):
@@ -430,8 +434,9 @@ class SandboxSkillScriptRunner:
         }
         if self._network_enabled and interpreter_args[0] == "bash":
             self._ensure_network_pnpm_store(workspace_dir)
-        from nexent.core.agents.resources.replay_scripts import identify_script, record_script_exit
+        from nexent.core.agents.resources.replay_scripts import file_changes, identify_script, output_snapshot, record_script_exit
         identity = identify_script(self._container, sandbox_script) if normalized_source == "skill" else None
+        initial_outputs = output_snapshot(self._container, output_dir) if identity is not None else None
         result = self._container.exec_run(
             command,
             user="sandbox",
@@ -446,7 +451,8 @@ class SandboxSkillScriptRunner:
         else:
             stdout, stderr = raw_output, b""
         if identity is not None:
-            record_script_exit(identity, skill_name, Path(normalized_script).as_posix(), argv, exit_code, stdout)
+            files = file_changes(initial_outputs, output_snapshot(self._container, output_dir))
+            record_script_exit(identity, skill_name, Path(normalized_script).as_posix(), argv, exit_code, stdout, files)
         output = self._output_text(stdout)
         error_output = self._output_text(stderr)
         if exit_code == 124 or exit_code == 137:

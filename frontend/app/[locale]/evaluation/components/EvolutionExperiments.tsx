@@ -587,7 +587,8 @@ function Experiments({
                 dataIndex: "id",
                 render: (id) => {
                   const task = choices?.cases.find(c => String(c.case_id) === id);
-                  return task ? `#${id} · ${task.family}` : `#${id}`;
+                  const label = task ? `#${id} · ${task.family}` : `#${id}`;
+                  return report.data?.script_source_cases?.includes(Number(id)) ? `${label} · ${t("evolution.scriptRecheck")}` : label;
                 },
               },
               ...(report.data.components ? ["base", "only_a", "only_b", "result"] :
@@ -627,10 +628,12 @@ function Experiments({
                       {t("evolution.toolAndDelivery", { tool: t(`evolution.state.${trial.result.tool_use.status}`),
                         delivery: t(`evolution.state.${trial.result.judgment?.status}`) })}
                       <div>{trial.result.tool_use.sequence?.join(" → ")}</div>
+                      {trial.result.tool_use.reason === "unverified_script_files" && <div>{t("evolution.scriptFilesMissing")}</div>}
                       {trial.result.tool_use.reason === "unverified_skill_process" && <div>{t("evolution.scriptMissing")}</div>}
                       {trial.result.tool_use.script_evidence?.map(s => <div key={s.call}>{t("evolution.scriptOutcome", {
                         call: s.call, code: s.exit_code, input: t(s.input_matches ? "evolution.match" : "evolution.mismatch"),
-                        output: t(s.stdout_matches ? "evolution.match" : "evolution.mismatch"),
+                        output: t(s.stdout_matches == null ? "evolution.notChecked" : s.stdout_matches ? "evolution.match" : "evolution.mismatch"),
+                        files: t(s.files_match == null ? "evolution.notChecked" : s.files_match ? "evolution.match" : "evolution.mismatch"),
                       })}</div>)}
                       {trial.result.tool_use.issues?.map((issue, i) => <div key={i}>
                         {issue.tool} {t(`evolution.issue.${issue.reason}`)} {issue.fields?.join(", ")}

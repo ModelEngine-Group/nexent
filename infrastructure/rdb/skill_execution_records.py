@@ -11,7 +11,7 @@ release_skill = Table(
     Column("tenant_id", String(100), primary_key=True), Column("agent_id", Integer, primary_key=True),
     Column("version_no", Integer, primary_key=True), Column("instance_id", Integer, primary_key=True),
     Column("skill_id", Integer, nullable=False), Column("digest", String(64), nullable=False),
-    Column("revision", String(64), nullable=False), schema=SCHEMA,
+    Column("revision", String(64), nullable=False), Column("sandbox_image", String(71)), schema=SCHEMA,
 )
 
 
@@ -131,7 +131,7 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
         select(
             SkillInstance.skill_instance_id, SkillInfo.skill_name, SkillInfo.skill_description,
             SkillInfo.config_values, SkillInstance.config_values, SkillInstance.released_catalog_entry, release_skill.c.skill_id,
-            release_skill.c.digest, release_skill.c.revision, SkillInfo.skill_id,
+            release_skill.c.digest, release_skill.c.revision, release_skill.c.sandbox_image, SkillInfo.skill_id,
         )
         .join(SkillInfo, SkillInfo.skill_id == SkillInstance.skill_id)
         .outerjoin(release_skill, and_(release_skill.c.tenant_id==SkillInstance.tenant_id,
@@ -141,9 +141,11 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
     )
     with get_db_session() as session:
         rows = []
-        for instance, name, description, defaults, overrides, catalog_entry, pinned_skill, digest, revision, skill in session.execute(statement):
+        for instance, name, description, defaults, overrides, catalog_entry, pinned_skill, digest, revision, image, skill in session.execute(statement):
             row = {"instance_id": instance, "name": name, "description": effective_skill_description(catalog_entry, description),
                    "config": {**(defaults or {}), **(overrides or {})}}
+            if image is not None:
+                row["script_image"] = image
             if digest is not None:
                 if pinned_skill != skill:
                     raise ValueError("Published Skill binding was replaced")
