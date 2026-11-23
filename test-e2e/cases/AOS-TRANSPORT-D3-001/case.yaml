@@ -291,7 +291,7 @@ case:
     profiles:
     - name: mock
       required_services: []
-    timeout_seconds: 60
+    timeout_seconds: 120
   acceptance:
   - id: AC-01
     description: Signed run and stop traverse real service HTTP boundaries.

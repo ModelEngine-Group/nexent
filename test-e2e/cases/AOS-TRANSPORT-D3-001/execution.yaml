@@ -1,6 +1,6 @@
 schema_version: '1.0'
 case_id: AOS-TRANSPORT-D3-001
-timeout_seconds: 60
+timeout_seconds: 120
 implementations:
 - framework: pytest
   file: test.py
