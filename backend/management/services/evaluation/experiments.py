@@ -26,6 +26,7 @@ from management.services.evaluation.evolution_access import published_business_a
 from management.services.evaluation.example_candidates import example_source_keys
 from management.services.evaluation.replay_cases import freeze_regression_members, get_development_case, remove_trial_inputs, stage_case_input
 from management.services.evaluation.scoring import grade_observed_case
+from management.services.evaluation.skill_candidates import pin_skill_candidate
 from management.services.evaluation.tool_use import judge_tool_use
 from management.services.evaluation.tool_set_candidates import resolve_tool_set
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -60,6 +61,8 @@ async def _io(name, fn, *args):
 
 
 async def _snapshot(request, tenant, user, variant):
+    if request.components:
+        return await _combination_snapshot(request, tenant, user, variant)
     options = {}
     if request.candidate_type in {"skill_step", "skill_discovery"}:
         options = {"skill_candidate_id": request.candidate_id, "skill_variant": "base" if variant == "no_skill" else variant}
@@ -83,11 +86,80 @@ async def _snapshot(request, tenant, user, variant):
     return spec
 
 
+async def _combination_snapshot(request, tenant, user, arm):
+    active = {"base": (False, False), "only_a": (True, False), "only_b": (False, True), "result": (True, True)}[arm]
+    run = EvaluationAgentRun(agent_id=request.agent_id, version_no=request.version_no, query="")
+    options = {}
+    skill_parts = []
+    tool_check = None
+    for part, changed in zip(request.components, active, strict=True):
+        if part.candidate_type.startswith("skill_"):
+            skill_parts.append((part, "result" if changed else "base"))
+        elif part.candidate_type == "prompt" and changed:
+            options["prompt_candidate_id"] = part.candidate_id
+        elif part.candidate_type == "tool_set":
+            released = await prepare_evaluation_snapshot(run, user, tenant, language=request.language)
+            removed = await _io("resolve-combined-tool-set", resolve_tool_set, tenant, request.agent_id,
+                                request.version_no, part.candidate_id, released, snapshot_digest(released))
+            tool_check = ToolSetCheck(arm="result" if changed else "base", removed=removed)
+            if changed:
+                options["excluded_root_tools"] = frozenset(removed)
+    spec = await prepare_evaluation_snapshot(run, user, tenant, language=request.language, **options)
+    for part, variant in skill_parts:
+        await _io("pin-combined-skill", pin_skill_candidate, spec.resource, tenant, part.candidate_id, variant)
+    if tool_check:
+        spec = spec.model_copy(update={"tool_set_check": tool_check})
+    if any(part.candidate_type == "skill_discovery" for part, _ in skill_parts):
+        spec = spec.model_copy(update={"observe_root_skill_choices": True})
+    return spec
+
+
+async def _check_components(request, tenant, user):
+    skill_instances = set()
+    for part in request.components:
+        plan = await _io("load-single-component", jobs.read_plan, tenant, part.experiment_id, True)
+        source = (plan or {}).get("request", {})
+        if (source.get("agent_id"), source.get("version_no"), source.get("candidate_type"), source.get("candidate_id")) != (
+                request.agent_id, request.version_no, part.candidate_type, part.candidate_id):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select single experiments for this released Agent")
+        rows = await _io("read-component-results", jobs.trials, tenant, part.experiment_id)
+        valid = set()
+        for row in rows:
+            if not row["receipt_id"] or row["status"] not in {"pass", "fail"}:
+                continue
+            case_digest = plan["cases"].get(str(row["case_id"]))
+            arm_digest = plan["snapshots"].get(row["variant"])
+            result = row["result"] or {}
+            if (case_digest and arm_digest and result.get("case_digest") == case_digest
+                    and result.get("snapshot_digest") == arm_digest):
+                valid.add((row["case_id"], row["variant"]))
+        if (any(r["status"] in {"pending", "running", "cancelled"} for r in rows)
+                or not any((cid, "base") in valid for cid, arm in valid if arm == "result")):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Finish both single experiments with a graded pair")
+        if part.candidate_type.startswith("skill_"):
+            binding = await _io("check-combined-skill-binding", read_bound_skill_candidate, tenant, request.agent_id,
+                                request.version_no, part.candidate_id)
+            if not binding or binding["instance_id"] in skill_instances:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select two different resource bindings")
+            skill_instances.add(binding["instance_id"])
+        for arm in ("base", "result"):
+            compiled = await _snapshot(DevelopmentExperimentRequest.model_validate(source), tenant, user, arm)
+            if source.get("language", "zh") != request.language or snapshot_digest(compiled) != plan["snapshots"][arm]:
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "A component changed since its single experiment")
+
+
 async def _excluded_sources(request, tenant):
-    if request.candidate_type != "prompt":
+    if request.components:
+        prompt = next((p for p in request.components if p.candidate_type == "prompt"), None)
+        if not prompt:
+            return set()
+        candidate_id = prompt.candidate_id
+    elif request.candidate_type == "prompt":
+        candidate_id = request.candidate_id
+    else:
         return set()
     return await _io("read-training-sources", prompt_example_sources, tenant, request.agent_id,
-                     request.version_no, request.candidate_id)
+                     request.version_no, candidate_id)
 
 
 async def create_experiment(request, tenant, user):
@@ -105,6 +177,8 @@ async def create_experiment(request, tenant, user):
     if rule["evaluator_type"] != "code" and request.judge_model_id is None:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Select a judge model for this evaluator")
     excluded = await _excluded_sources(request, tenant)
+    if request.components:
+        await _check_components(request, tenant, user)
     if request.candidate_type in {"skill_step", "skill_discovery"}:
         bound = await _io("verify-skill-method", read_bound_skill_candidate, tenant, request.agent_id,
                           request.version_no, request.candidate_id)
@@ -136,7 +210,8 @@ async def create_experiment(request, tenant, user):
     if development_sources & fixed_sources:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Choose development materials outside the fixed regression suite")
     snapshots = {}
-    arms = {"baseline": ("base",), "skill_step": ("base", "result", "no_skill")}.get(
+    arms = {"baseline": ("base",), "skill_step": ("base", "result", "no_skill"),
+            "combination": ("base", "only_a", "only_b", "result")}.get(
         request.candidate_type, ("base", "result"))
     for variant in arms:
         spec = await _snapshot(request, tenant, user, variant)
@@ -147,18 +222,32 @@ async def create_experiment(request, tenant, user):
     return await _io("submit-development-experiment", jobs.submit, tenant, user, request, plan)
 
 
-def regression_coverage(frozen, pairs):
+def regression_coverage(frozen, pairs, arms=("base", "result")):
     failed, incomplete = [], []
     for key in frozen:
         case_id = int(key)
         pair = pairs.get(case_id, {})
-        baseline = pair.get("base", {}).get("status")
         candidate = pair.get("result", {}).get("status")
-        if baseline not in {"pass", "fail"} or candidate not in {"pass", "fail"}:
+        if any(pair.get(arm, {}).get("status") not in {"pass", "fail"} for arm in arms):
             incomplete.append(case_id)
         elif candidate == "fail":
             failed.append(case_id)
     return {"case_ids": sorted(map(int, frozen)), "failed": sorted(failed), "incomplete": sorted(incomplete)}
+
+
+def combination_effect(pair, labels):
+    base, a, b, combined = (pair.get(arm, {}).get("status") for arm in ("base", "only_a", "only_b", "result"))
+    effect = "unchanged_or_shared"
+    if any(s not in {"pass", "fail"} for s in (base, a, b, combined)):
+        effect = "inconclusive"
+    elif combined == "fail" and "pass" in (a, b):
+        effect = "lost_single_pass"
+    elif base == "fail" and combined == "pass":
+        effect = "retained_single_gain" if "pass" in (a, b) else "joint_only"
+    return {"effect": effect, "a_vs_base": labels.get((base, a), "inconclusive"),
+            "b_vs_base": labels.get((base, b), "inconclusive"),
+            "combined_vs_a": labels.get((a, combined), "inconclusive"),
+            "combined_vs_b": labels.get((b, combined), "inconclusive")}
 
 
 def experiment_report(tenant, user, eid, *, cancel=False):
@@ -181,6 +270,7 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     labels = {("fail", "pass"): "improved", ("pass", "fail"): "regressed",
               ("pass", "pass"): "both_pass", ("fail", "fail"): "both_fail"}
     valid_triplets = verified_guide_pairs = 0
+    effects = Counter()
     valid_baselines = 0
     selection_counts = {}
     for pair in pairs.values():
@@ -199,6 +289,9 @@ def experiment_report(tenant, user, eid, *, cancel=False):
         outcome = labels.get((pair["base"]["status"], pair["result"]["status"]), "inconclusive")
         counts[outcome] += 1
         pair["comparison"] = outcome
+        if scope.get("components"):
+            pair["combination"] = combination_effect(pair, labels)
+            effects[pair["combination"]["effect"]] += 1
         if "no_skill" in pair:
             control = pair["no_skill"]["status"]
             complete = outcome != "inconclusive" and control in {"pass", "fail"}
@@ -218,7 +311,11 @@ def experiment_report(tenant, user, eid, *, cancel=False):
         status = "cancelled" if "cancelled" in states else "finished"
     pair_count = sum("result" in p for p in pairs.values())
     return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
-            **({"fixed_regression": regression_coverage(fixed, pairs)} if fixed is not None else {}),
+            **({"fixed_regression": regression_coverage(fixed, pairs, ("base", "only_a", "only_b", "result")
+                                                       if scope.get("components") else ("base", "result"))}
+               if fixed is not None else {}),
+            **({"components": scope["components"], "valid_quartets": sum(effects.values()) - effects["inconclusive"],
+                "combination_counts": dict(effects)} if scope.get("components") else {}),
             "status": status, "total_pairs": pair_count,
             "total_tasks": len(pairs), "valid_baselines": valid_baselines, "selection_counts": selection_counts,
             **({"valid_triplets": valid_triplets, "verified_guide_pairs": verified_guide_pairs}
@@ -328,16 +425,19 @@ async def execute_trial(job):
         return "invalid", {"error": "missing_or_unsuccessful_runtime_receipt"}
     if receipt.outcome != "completed":
         return "invalid", {"error": "unsuccessful_runtime", "runtime_outcome": receipt.outcome}
-    skill = receipt.skill
-    if "no_skill" in job["plan"]["snapshots"] or request.candidate_type == "skill_discovery":
-        target = next((ref for ref in spec.resource.skill_refs if ref.package_candidate_id == request.candidate_id), None)
-        omitted = job["variant"] == "no_skill"
-        if (not target or not skill or skill.candidate_id != request.candidate_id or skill.instance_id != target.instance_id
-                or skill.variant != job["variant"] or skill.mounted_revision != (None if omitted else target.revision)
-                or omitted and (skill.listed or skill.guide_reads)):
+    skills = [receipt.skill] if receipt.skill else (receipt.skills or [])
+    targets = {ref.package_candidate_id: ref for ref in spec.resource.skill_refs if ref.package_candidate_id}
+    if (len(skills) != len(targets) or {s.candidate_id for s in skills} != set(targets)
+            or receipt.skill and receipt.skills):
+        return "invalid", {"error": "skill_observation_mismatch"}
+    for skill in skills:
+        target = targets[skill.candidate_id]
+        omitted = spec.omit_root_skill_candidate_id == skill.candidate_id
+        if (skill.instance_id != target.instance_id or skill.variant != ("no_skill" if omitted else target.package_variant)
+                or skill.mounted_revision != (None if omitted else target.revision) or omitted and (skill.listed or skill.guide_reads)):
             return "invalid", {"error": "skill_observation_mismatch"}
     selection = None
-    if request.candidate_type in {"baseline", "skill_discovery"} and case["task"].get("expected_skill_names") is not None:
+    if spec.observe_root_skill_choices and case["task"].get("expected_skill_names") is not None:
         reads = receipt.root_guide_reads
         listed = {item["content"]["name"] for item in (spec.resource.evaluation_options.context_items or [])
                   if item.get("type") == "skill"}
@@ -350,12 +450,12 @@ async def execute_trial(job):
                                lane="evaluation", owner="management")
     absent = set()
     catalog = receipt.tool_catalog
-    if request.candidate_type == "tool_set":
+    if spec.tool_set_check:
         if catalog is None or not catalog.model_inputs:
             return "invalid", {"error": "missing_tool_catalog"}
         removed = set(spec.tool_set_check.removed)
         actual = set(catalog.executable)
-        if job["variant"] == "result":
+        if spec.tool_set_check.arm == "result":
             if removed.intersection(actual.union(catalog.schema_tools, catalog.prompt_tools,
                                                  catalog.instruction_mentions, catalog.native_definitions)):
                 return "invalid", {"error": "excluded_tool_remains_visible_or_callable", "tool_catalog": catalog.model_dump()}
@@ -371,7 +471,8 @@ async def execute_trial(job):
                              **({"tool_catalog": catalog.model_dump()} if catalog else {}),
                              **({"guide_reads": receipt.root_guide_reads} if request.candidate_type == "baseline"
                                 and receipt.root_guide_reads is not None else {}),
-                             **({"skill": skill.model_dump()} if skill else {}),
+                             **({"skill": receipt.skill.model_dump()} if receipt.skill else {}),
+                             **({"skills": [s.model_dump() for s in skills]} if receipt.skills else {}),
                              **({"selection": selection} if selection else {}),
                              "reported_step_input_tokens": reported_step_input_tokens(observed.events),
                              "events_digest": task_digest(observed.events), "case_digest": case["digest"],

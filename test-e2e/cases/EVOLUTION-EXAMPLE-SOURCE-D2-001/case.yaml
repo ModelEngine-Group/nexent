@@ -21,7 +21,10 @@ case:
   - order: 2
     action: 通过接口把一条业务题两次加入固定回归，在下一版装载题单，提交只选无关专项题的候选。再移出该固定题，用旧实验中同源材料请求生成候选。
     expected: 题单及指定评估器版本跨版本保留。同源开发材料被拒；无关专项题会带上固定题。移出后旧实验仍按冻结分区拒绝生成。
-  expected_results: [原题和同源改写题均被拦截。, 固定题按智能体复用、自动纳入对比且历史分区受保护。]
+  - order: 3
+    action: 使用受控资源快照提交两个单项实验。分别在单项未完成、提供错误候选号、单项有效且候选号吻合时提交组合，再重复提交。
+    expected: 前两次被拒。有效组合只创建一次，数据库中每题有原版、A、B、A+B 四条待执行记录。
+  expected_results: [原题和同源改写题均被拦截。, 固定题按智能体复用、自动纳入对比且历史分区受保护。, 仅有效的单项实验可组合，重复请求复用同一次四组试跑。]
   forbidden_side_effects: [拒绝的请求均未创建任何实验或试跑作业。]
   acceptance:
   - id: AC-01
@@ -33,6 +36,11 @@ case:
     description: 真实登录、题目来源隔离、跨发布版本和冻结后移出题集。
     steps: [2]
     expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: 通过 HTTP 及真实数据库校验单项来源、组合去重和四组任务创建。
+    steps: [3]
+    expected_results: [3]
     forbidden_side_effects: [1]
   contract:
     protocol: HTTP API

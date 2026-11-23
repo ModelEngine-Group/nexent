@@ -63,3 +63,18 @@ def test_grade_and_compare(monkeypatch):
     skip = ToolUseExpectation(rules=[{"name": "read", "min_calls": 0, "max_calls": 0}]).model_dump()
     assert judge_tool_use(skip, removed, absent={"read"})["status"] == "pass"
     assert judge_tool_use(skip, removed)["status"] == "missing_evidence"
+    arms = ["base", "only_a", "only_b", "result"]
+    scope = {"agent_id": 1, "version_no": 1, "planned_cases": ["1", "2", "3"], "planned_arms": arms,
+             "regression_cases": {"2": {}, "3": {}}, "components": [{"experiment_id": 4}, {"experiment_id": 5}]}
+    monkeypatch.setattr(service.jobs, "scope", lambda *args: scope)
+    rows[:] = [
+        {"case_id": cid, "variant": arm, "status": outcome, "result": {}}
+        for cid, scores in enumerate([("fail", "fail", "fail", "pass"), ("pass", "pass", "pass", "fail"),
+                                      ("pass", "pass", None, "pass")], 1)
+        for arm, outcome in zip(arms, scores) if outcome is not None
+    ]
+    report = service.experiment_report("tenant", "editor", 8)
+    assert report["valid_quartets"] == 2
+    assert report["combination_counts"] == {"joint_only": 1, "lost_single_pass": 1, "inconclusive": 1}
+    assert report["fixed_regression"]["failed"] == [2]
+    assert report["fixed_regression"]["incomplete"] == [3]

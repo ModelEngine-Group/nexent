@@ -69,7 +69,7 @@ def submit(tenant, user, request, plan):
 def scope(tenant, eid):
     with get_db_session() as session:
         row = session.execute(text("""
-            SELECT agent_id, version_no, plan->'regression_cases' AS regression_cases,
+            SELECT agent_id, version_no, plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
                    ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
                    ARRAY(SELECT jsonb_object_keys(plan->'snapshots')) AS planned_arms
               FROM nexent.evolution_experiment_t WHERE tenant_id=:tenant AND experiment_id=:eid
@@ -151,11 +151,12 @@ def read_handoff(tenant, fid):
         """), dict(tenant=tenant, fid=fid))
 
 
-def read_plan(tenant, eid):
+def read_plan(tenant, eid, active_only=False):
     with get_db_session() as session:
         return session.scalar(text("""
             SELECT plan FROM nexent.evolution_experiment_t WHERE tenant_id=:tenant AND experiment_id=:eid
-        """), dict(tenant=tenant, eid=eid))
+                AND (NOT :active_only OR NOT cancelled)
+        """), dict(tenant=tenant, eid=eid, active_only=active_only))
 
 
 def workspace_choices(tenant, agent_id, version):
@@ -194,8 +195,18 @@ def workspace_choices(tenant, agent_id, version):
             ORDER BY create_time DESC LIMIT 200
         """,
         "experiments": """
-            SELECT experiment_id, create_time FROM nexent.evolution_experiment_t
-            WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version ORDER BY experiment_id DESC LIMIT 100
+            SELECT e.experiment_id, e.create_time, plan->'request'->>'candidate_type' AS candidate_type,
+                   (plan->'request'->>'candidate_id')::bigint AS candidate_id,
+                   (plan->'request'->>'candidate_id' IS NOT NULL AND NOT e.cancelled AND
+                    NOT EXISTS (SELECT 1 FROM nexent.evolution_trial_t t WHERE t.experiment_id=e.experiment_id
+                                AND t.status IN ('running','pending','cancelled')) AND
+                    EXISTS (SELECT 1 FROM nexent.evolution_trial_t t JOIN nexent.evolution_trial_t b
+                                USING (experiment_id, case_id) WHERE t.experiment_id=e.experiment_id
+                                AND t.variant='result' AND b.variant='base' AND t.status IN ('pass','fail')
+                                AND b.status IN ('pass','fail') AND t.receipt_id IS NOT NULL AND b.receipt_id IS NOT NULL))
+                       AS eligible_component
+              FROM nexent.evolution_experiment_t e
+             WHERE tenant_id=:tenant AND agent_id=:agent AND version_no=:version ORDER BY experiment_id DESC LIMIT 100
         """,
     }
     with get_db_session() as session:

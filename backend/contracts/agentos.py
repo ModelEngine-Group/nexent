@@ -778,6 +778,7 @@ class ReplayReceipt(RunSpecModel):
     trial_id: str = Field(pattern=RUN_ID_PATTERN)
     outcome: str = Field(min_length=1)
     skill: SkillTrialObservation | None = Field(default=None, exclude_if=lambda v: v is None)
+    skills: list[SkillTrialObservation] | None = Field(default=None, min_length=2, max_length=2, exclude_if=lambda v: v is None)
     root_guide_reads: dict[str, PositiveInt] | None = Field(default=None, exclude_if=lambda v: v is None)
     tool_observation: ReplayToolObservation | None = Field(default=None, exclude_if=lambda v: v is None)
     tool_catalog: ToolCatalogObservation | None = Field(default=None, exclude_if=lambda v: v is None)

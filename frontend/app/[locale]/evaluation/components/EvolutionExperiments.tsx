@@ -141,6 +141,7 @@ function Experiments({
   const { availableLlmModels } = useModelList();
   const [caseIds, setCases] = useState<number[]>([]);
   const [candidate, setCandidate] = useState<string>();
+  const [sourceIds, setSources] = useState<number[]>([]);
   const [suggestion, setSuggestion] = useState<number>();
   const [targetCase, setTargetCase] = useState<number>();
   const [evaluatorId, setEvaluator] = useState<number>();
@@ -173,10 +174,15 @@ function Experiments({
   const start = useMutation({
     mutationFn: () => {
       const [kind, id] = candidate!.split(":");
+      const components = kind === "combination" ? sourceIds.map(selectedId => {
+        const source = workspace.data!.experiments.find(e => e.experiment_id === selectedId)!;
+        return { experiment_id: selectedId, candidate_type: source.candidate_type!, candidate_id: source.candidate_id! };
+      }) : undefined;
       const params = {
         agent_id: agent,
         version_no: version,
         candidate_type: kind,
+        components,
         candidate_id: id ? Number(id) : undefined,
         suggestion_id: suggestion,
         suggestion_target_case_id: suggestion ? targetCase : undefined,
@@ -203,6 +209,7 @@ function Experiments({
     },
   });
   const choices = workspace.data;
+  const eligible = choices?.experiments.filter(e => e.eligible_component && e.candidate_type && e.candidate_id) || [];
   const fixedIds = new Set(report.data?.fixed_regression?.case_ids ?? []);
   const fixedDigests = new Set(choices?.fixed_regression?.map(c => c.digest));
   choices?.cases.forEach(c => { if (c.digest && fixedDigests.has(c.digest)) fixedIds.add(c.case_id); });
@@ -224,7 +231,7 @@ function Experiments({
       )}
       {choices && (
         <>
-          {!!choices.suggestions?.length && (
+          {candidate !== "combination" && !!choices.suggestions?.length && (
             <Select
               allowClear
               aria-label={t("evolution.suggestion")}
@@ -263,12 +270,18 @@ function Experiments({
               placeholder={t("evolution.candidate")}
               style={{ minWidth: 220 }}
               value={candidate}
-              onChange={setCandidate}
-              options={[{ value: "baseline", label: t("evolution.baselineSelection") }, ...choices.candidates.map((c) => ({
+              onChange={v => { setCandidate(v); if (v === "combination") { setSuggestion(undefined); setTargetCase(undefined); } }}
+              options={[{ value: "baseline", label: t("evolution.baselineSelection") },
+                ...(eligible.length >= 2 ? [{value:"combination", label:t("evolution.combination")}] : []), ...choices.candidates.map((c) => ({
                 value: `${c.kind}:${c.candidate_id}`,
                 label: `#${c.candidate_id} · ${c.name}`,
               }))]}
             />
+            {candidate === "combination" && <Select mode="multiple" maxCount={2} aria-label={t("evolution.chooseComponents")}
+              placeholder={t("evolution.chooseComponents")} value={sourceIds} onChange={setSources} style={{minWidth: 260}}
+              options={eligible.map(e => ({ value: e.experiment_id, label: t("evolution.sourceExperiment", {
+                experiment: e.experiment_id, candidate: e.candidate_id, type: t(`evolution.kind.${e.candidate_type}`),
+              }) }))} />}
             <Select
               mode="multiple"
               aria-label={t("evolution.cases")}
@@ -325,6 +338,7 @@ function Experiments({
               type="primary"
               disabled={
                 !candidate ||
+                (candidate === "combination" && (sourceIds.length !== 2 || !!suggestion || !sourceIds.every(id => eligible.some(e => e.experiment_id === id)))) ||
                 (candidate === "baseline" && !!suggestion) ||
                 (discoveryRun && caseIds.some(id => {
                   const c = choices.cases.find(task => task.case_id === id);
@@ -365,6 +379,10 @@ function Experiments({
             </Typography.Text>
             {report.data.valid_triplets !== undefined && <Typography.Text>{t("evolution.skillCoverage", {
               valid: report.data.valid_triplets, total: report.data.total_pairs, read: report.data.verified_guide_pairs,
+            })}</Typography.Text>}
+            {report.data.components && <Typography.Text>{t("evolution.quartets", {
+              valid: report.data.valid_quartets, total: report.data.total_tasks,
+              a: report.data.components[0].experiment_id, b: report.data.components[1].experiment_id,
             })}</Typography.Text>}
             {report.data.fixed_regression && <Typography.Text>{t("evolution.fixedCoverage", {
               total: report.data.fixed_regression.case_ids.length,
@@ -414,12 +432,16 @@ function Experiments({
                   return task ? `#${id} · ${task.family}` : `#${id}`;
                 },
               },
-              ...(baselineReport ? ["base"] : report.data.valid_triplets === undefined ? ["base", "result"] : ["no_skill", "base", "result"]).map((key) => ({
-                title: t(`evolution.${key}`),
+              ...(report.data.components ? ["base", "only_a", "only_b", "result"] :
+                baselineReport ? ["base"] : report.data.valid_triplets === undefined ? ["base", "result"] : ["no_skill", "base", "result"]).map((key) => ({
+                title: t(report.data?.components && key === "result" ? "evolution.combinedAB" : `evolution.${key}`),
                 dataIndex: key,
                 render: (trial?: Trial) => trial && (
                   <div>
                     <strong>{t(`evolution.state.${trial.status}`)}</strong>
+                    {trial.result?.skills?.map(s => <div key={s.candidate_id}>{t("evolution.mountedSkill", {
+                      id: s.candidate_id, revision: s.mounted_revision, reads: s.guide_reads,
+                    })}</div>)}
                     {trial.result?.evaluator_id && <div>{t("evolution.usedRubric", {
                       id: trial.result.evaluator_id, version: trial.result.evaluator_version,
                     })}</div>}
@@ -465,6 +487,9 @@ function Experiments({
                 title: t("evolution.change"),
                 dataIndex: "comparison",
                 render: (value, row) => <div>{t(`evolution.state.${value}`)}
+                  {row.combination && <div>{t(`evolution.effect.${row.combination.effect}`)} · {t("evolution.comparedSingles", {
+                    a: t(`evolution.state.${row.combination.combined_vs_a}`), b: t(`evolution.state.${row.combination.combined_vs_b}`),
+                  })}</div>}
                   {row.skill_vs_absent && <div>{t("evolution.skillVsAbsent", {
                     old: t(`evolution.state.${row.skill_vs_absent.base}`),
                     next: t(`evolution.state.${row.skill_vs_absent.result}`),

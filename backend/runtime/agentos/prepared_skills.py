@@ -44,11 +44,12 @@ def root_without_target_skill(resource, actor, candidate_id):
     return resource.model_copy(update={"skill_refs": remaining, "tools": tools, "evaluation_options": options})
 
 
-def skill_trial_observation(payload, info, actor):
+def skill_trial_observation(payload, info, actor, candidate_id=None):
     """Inspect the mounted root Agent after Runtime has built its executable tools."""
     from contracts.agentos import SkillTrialObservation
 
-    refs = [ref for ref in payload.resource.skill_refs if ref.package_candidate_id is not None]
+    refs = [ref for ref in payload.resource.skill_refs if ref.package_candidate_id is not None
+            and (candidate_id is None or candidate_id == ref.package_candidate_id)]
     if not refs:
         return None, None
     if len(refs) != 1:
@@ -78,7 +79,7 @@ def skill_trial_observation(payload, info, actor):
 
 
 @contextmanager
-def observe_trial_guide_choices(info, tenant, target_path, track_all):
+def observe_trial_guide_choices(info, tenant, target_paths, track_all):
     from nexent.core.tools.read_skill_md_tool import observe_guide_reads
 
     with ExitStack() as stack:
@@ -93,10 +94,10 @@ def observe_trial_guide_choices(info, tenant, target_path, track_all):
                     if not path.is_file():
                         raise ValueError("Missing guide for an authorized Skill")
                     by_path[path] = all_reads[name] = stack.enter_context(observe_guide_reads(path))
-        target = by_path.get(target_path)
-        if target is None and target_path is not None:
-            target = stack.enter_context(observe_guide_reads(target_path))
-        yield target, all_reads
+        for path in target_paths:
+            if path is not None and path not in by_path:
+                by_path[path] = stack.enter_context(observe_guide_reads(path))
+        yield by_path, all_reads
 
 
 def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | None:

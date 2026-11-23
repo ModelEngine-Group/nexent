@@ -27,8 +27,10 @@ export interface Workspace {
   reviews?: { turn_id: number; batch_id: number | null; state: string; signals: string[] }[];
   candidates: { candidate_id: number; kind: string; name: string }[];
   cases: { case_id: number; digest?: string; family: string; query: string; expected_skill_names?: string[] | null }[];
-  experiments: { experiment_id: number; create_time: string }[];
+  experiments: { experiment_id: number; create_time: string; candidate_type?: string;
+    candidate_id?: number; eligible_component?: boolean }[];
 }
+export interface EvaluatedCandidate { experiment_id: number; candidate_type: string; candidate_id: number }
 export interface Trial {
   status: string;
   result?: {
@@ -37,6 +39,7 @@ export interface Trial {
     answer?: string;
     reported_step_input_tokens?: number | null;
     skill?: { guide_reads: number; listed: boolean; mounted_revision: string | null };
+    skills?: { candidate_id: number; guide_reads: number; listed: boolean; mounted_revision: string | null }[];
     selection?: { expected: string[]; reads: Record<string, number>; outcome: string };
     guide_reads?: Record<string, number>;
     tool_catalog?: { core: string; prompt_tools: string[]; schema_tools: string[]; executable: string[];
@@ -47,6 +50,8 @@ export interface Trial {
   };
 }
 export interface ExperimentReport {
+  components?: EvaluatedCandidate[];
+  valid_quartets?: number;
   fixed_regression?: { case_ids: number[]; failed: number[]; incomplete: number[] };
   experiment_id: number;
   status: string;
@@ -56,7 +61,8 @@ export interface ExperimentReport {
   total_tasks?: number;
   valid_triplets?: number;
   verified_guide_pairs?: number;
-  pairs: Record<string, { base: Trial; result?: Trial; no_skill?: Trial; comparison: string;
+  pairs: Record<string, { base: Trial; result?: Trial; no_skill?: Trial; only_a?: Trial; only_b?: Trial; comparison: string;
+    combination?: { effect: string; a_vs_base: string; b_vs_base: string; combined_vs_a: string; combined_vs_b: string };
     skill_vs_absent?: { base: string; result: string } }>;
 }
 
@@ -107,6 +113,7 @@ export const evolutionService = {
     attachments: { name: string; object_name: string }[];
   }) => read<{ case_id: number }>(`${root}/development-cases`, body),
   submit: (body: {
+    components?: EvaluatedCandidate[];
     suggestion_id?: number;
     suggestion_target_case_id?: number;
     request_id: string;

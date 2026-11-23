@@ -525,24 +525,29 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
 
     status = "failed"
     try:
-        skill, path = None, None
+        observations = []
         recorder = None
         if payload.watch_tool_arguments or payload.tool_set_check:
             from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
             recorder = ReplayToolRecorder(info.agent_config, payload.watch_tool_arguments or {},
                                          payload.tool_set_check.removed if payload.tool_set_check else ())
             info.observer.replay_tool_recorder = recorder
-        if payload.replay_trial_id and any(ref.package_candidate_id for ref in payload.resource.skill_refs):
-            skill, path = await run_blocking("observe-trial-skill", skill_trial_observation, payload, info, actor,
-                                             lane="control-io", owner="runtime")
-        with observe_trial_guide_choices(info, actor.tenant_id, path, payload.observe_root_skill_choices) as (reads, all_reads):
+        if payload.replay_trial_id:
+            for ref in payload.resource.skill_refs:
+                if ref.package_candidate_id:
+                    observations.append(await run_blocking("observe-trial-skill", skill_trial_observation,
+                        payload, info, actor, ref.package_candidate_id, lane="control-io", owner="runtime"))
+        with observe_trial_guide_choices(info, actor.tenant_id, [path for _, path in observations],
+                                        payload.observe_root_skill_choices) as (reads, all_reads):
             result = await collect_observer_output(info, agent_run, runtime_thread_manager)
         status = info.attempt_outcome or "completed"
         if payload.replay_trial_id is not None:
-            if skill:
-                skill.guide_reads = reads.count if reads is not None else 0
+            for skill, path in observations:
+                skill.guide_reads = reads[path].count if path is not None else 0
             result.replay_receipt = ReplayReceipt(trial_id=payload.replay_trial_id,
-                outcome=info.attempt_outcome or "unconfirmed", skill=skill,
+                outcome=info.attempt_outcome or "unconfirmed",
+                skill=observations[0][0] if len(observations) == 1 else None,
+                skills=[s for s, _ in observations] if len(observations) > 1 else None,
                 tool_observation=recorder.receipt() if recorder is not None else None,
                 tool_catalog=recorder.catalog if payload.tool_set_check and recorder is not None else None,
                 root_guide_reads={name: read.count for name, read in all_reads.items() if read.count}

@@ -163,6 +163,13 @@ class RegressionMembershipRequest(BaseModel):
     language: Literal["zh", "en"] = "zh"
 
 
+class EvaluatedCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    experiment_id: int = Field(gt=0)
+    candidate_type: Literal["prompt", "tool_set", "skill_step", "skill_discovery"]
+    candidate_id: int = Field(gt=0)
+
+
 class DevelopmentExperimentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     suggestion_id: int | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
@@ -170,8 +177,9 @@ class DevelopmentExperimentRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     agent_id: int = Field(gt=0)
     version_no: int = Field(gt=0)
-    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "baseline", "tool_set"]
+    candidate_type: Literal["prompt", "skill_step", "skill_discovery", "baseline", "tool_set", "combination"]
     candidate_id: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
+    components: list[EvaluatedCandidate] | None = Field(default=None, min_length=2, max_length=2, exclude_if=lambda v: v is None)
     case_ids: list[int] = Field(min_length=1, max_length=100)
     evaluator_id: int = Field(gt=0)
     judge_model_id: int | None = Field(default=None, gt=0)
@@ -187,9 +195,17 @@ class DevelopmentExperimentRequest(BaseModel):
 
     @model_validator(mode="after")
     def check_suggestion_cases(self):
-        if (self.candidate_type == "baseline") != (self.candidate_id is None):
+        combined = self.candidate_type == "combination"
+        if combined != (self.components is not None):
+            raise ValueError("Select exactly two evaluated revisions for a combination")
+        if self.components:
+            a, b = self.components
+            if (a.experiment_id == b.experiment_id or a.candidate_type == b.candidate_type
+                    and (a.candidate_type in {"prompt", "tool_set"} or a.candidate_id == b.candidate_id)):
+                raise ValueError("Select two revisions of different resources")
+        if (self.candidate_type in {"baseline", "combination"}) != (self.candidate_id is None):
             raise ValueError("Select a candidate only when comparing a change")
-        if self.candidate_type == "baseline" and self.suggestion_id is not None:
+        if self.candidate_type in {"baseline", "combination"} and self.suggestion_id is not None:
             raise ValueError("A suggestion trial requires a candidate")
         if self.suggestion_id is not None and len(self.case_ids) < 2:
             raise ValueError("Include the target and a protection task for a Skill suggestion")

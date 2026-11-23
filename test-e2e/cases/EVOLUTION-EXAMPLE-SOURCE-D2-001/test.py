@@ -37,7 +37,7 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
     migrations = Path(__file__).resolve().parents[3] / "deploy/sql/migrations"
     with db_client.engine.begin() as conn, conn.connection.driver_connection.cursor() as cursor:
         for name in ("016_evolution_candidates", "018_evolution_replay_cases", "019_evolution_experiments",
-                     "025_evolution_regression_cases"):
+                     "025_evolution_regression_cases", "026_evolution_combination"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for version in (0, 1, 2):
@@ -122,6 +122,42 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch):
             assert 400 <= response.status_code < 500 and "Fixed regression" in response.text, response.text
             with get_db_session() as session:
                 assert session.scalar(text("SELECT count(*) FROM nexent.evolution_experiment_t")) == 1
+            tool_submission = {**submission, "request_id": "tool-source", "case_ids": [fresh["case_id"]],
+                               "candidate_type": "tool_set", "candidate_id": 19}
+            response = client.post(root + "/experiments", headers=headers, json=tool_submission)
+            assert response.status_code == 202, response.text
+            tool_experiment = response.json()["data"]["experiment_id"]
+            parts = [
+                {"experiment_id": source_experiment, "candidate_id": candidate_v2, "candidate_type": "prompt"},
+                {"experiment_id": tool_experiment, "candidate_id": 19, "candidate_type": "tool_set"},
+            ]
+            combined = {**submission, "request_id": "combination", "candidate_type": "combination", "candidate_id": None,
+                        "components": parts, "case_ids": [fresh["case_id"]]}
+            response = client.post(root + "/experiments", headers=headers, json=combined)
+            assert 400 <= response.status_code < 500 and "graded pair" in response.text, response.text
+            for single in (source_experiment, tool_experiment):
+                frozen = jobs.read_plan(tenant, single)
+                while trial := jobs.claim(single):
+                    assert jobs.finish(trial, "pass", {"snapshot_digest": frozen["snapshots"][trial["variant"]],
+                                                      "case_digest": frozen["cases"][str(trial["case_id"])]})
+            forged = {**combined, "components": [parts[0], {**parts[1], "candidate_id": 20}]}
+            response = client.post(root + "/experiments", headers=headers, json=forged)
+            assert 400 <= response.status_code < 500 and "single experiments" in response.text, response.text
+            response = client.post(root + "/experiments", headers=headers, json=combined)
+            assert response.status_code == 202, response.text
+            combo_id = response.json()["data"]["experiment_id"]
+            retry = client.post(root + "/experiments", headers=headers, json=combined)
+            assert retry.status_code == 202 and retry.json()["data"]["experiment_id"] == combo_id
+            trial_rows = jobs.trials(tenant, combo_id)
+            assert len(trial_rows) == 4
+            assert {row["variant"] for row in trial_rows} == {"base", "only_a", "only_b", "result"}
+            assert all(row["status"] == "pending" for row in trial_rows)
+            cancelled = client.post(root + f"/experiments/{tool_experiment}/cancel", headers=headers)
+            assert cancelled.is_success
+            response = client.post(root + "/experiments", headers=headers, json={**combined, "request_id": "after-cancel"})
+            assert 400 <= response.status_code < 500 and "single experiments" in response.text, response.text
+            with get_db_session() as session:
+                assert session.scalar(text("SELECT count(*) FROM nexent.evolution_experiment_t")) == 3
     finally:
         clear_default_thread_manager(config_thread_manager)
         asyncio.run(config_thread_manager.shutdown(timeout=5))

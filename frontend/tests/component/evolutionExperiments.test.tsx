@@ -18,7 +18,11 @@ vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({ availableLlmModels: [] }),
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "zh" } }),
+  useTranslation: () => ({
+    t: (key: string, args?: { experiment: number }) =>
+      key === "evolution.sourceExperiment" ? key + "#" + args?.experiment : key,
+    i18n: { language: "zh" },
+  }),
 }));
 vi.mock("@/services/evolutionService", () => ({
   evolutionService: {
@@ -140,6 +144,58 @@ it("selects a published scope and opens its paired results with the original sta
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
   })));
+});
+
+it("combines two finished single experiments in selection order and shows the four outcomes", async () => {
+  vi.mocked(evolutionService.agents).mockResolvedValue([{ agent_id: 7, name: "Meeting agent" }]);
+  vi.mocked(evolutionService.versions).mockResolvedValue([{ version_no: 1, version_name: "Pilot" }]);
+  vi.mocked(evolutionService.evaluators).mockResolvedValue([
+    { evaluator_id: 3, name: "Rules", evaluator_type: "code", status: "PUBLISHED" },
+  ]);
+  const components = [
+    { experiment_id: 9, candidate_id: 5, candidate_type: "tool_set" },
+    { experiment_id: 8, candidate_id: 4, candidate_type: "prompt" },
+  ];
+  vi.mocked(evolutionService.workspace).mockResolvedValue({
+    candidates: [], cases: [{ case_id: 13, family: "Meeting", query: "List actions" }],
+    experiments: components.map(part => ({ ...part, create_time: "2026-11-23", eligible_component: true })),
+  });
+  const passed = { status: "pass" };
+  const failed = { status: "fail" };
+  vi.mocked(evolutionService.report).mockResolvedValue({
+    experiment_id: 12, status: "finished", components, valid_pairs: 2, total_pairs: 2, valid_quartets: 2,
+    pairs: {
+      "13": { base: failed, only_a: failed, only_b: failed, result: passed, comparison: "improved",
+        combination: { effect: "joint_only", a_vs_base: "both_fail", b_vs_base: "both_fail",
+          combined_vs_a: "improved", combined_vs_b: "improved" } },
+      "14": { base: passed, only_a: passed, only_b: passed, result: failed, comparison: "regressed",
+        combination: { effect: "lost_single_pass", a_vs_base: "both_pass", b_vs_base: "both_pass",
+          combined_vs_a: "regressed", combined_vs_b: "regressed" } },
+    },
+  });
+  vi.mocked(evolutionService.submit).mockResolvedValue({ experiment_id: 12 });
+  render(<QueryClientProvider client={new QueryClient()}><EvolutionExperiments /></QueryClientProvider>);
+  await choose("agentEvaluation.agentLabel", "Meeting agent");
+  await choose("agentEvaluation.agentVersionLabel", "V1 Pilot");
+  await choose("evolution.candidate", "evolution.combination");
+  await choose("evolution.evaluator", "Rules");
+  await choose("evolution.cases", "Meeting · List actions");
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.cases" }), { key: "Escape" });
+  await choose("evolution.chooseComponents", "evolution.sourceExperiment#9");
+  const compare = screen.getByRole("button", { name: "evolution.compare" });
+  expect(compare).toBeDisabled();
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "evolution.chooseComponents" }), { key: "Escape" });
+  await choose("evolution.chooseComponents", "evolution.sourceExperiment#8");
+  fireEvent.click(compare);
+  await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
+    candidate_type: "combination", case_ids: [13], components,
+  })));
+  expect(await screen.findByText("evolution.quartets")).toBeInTheDocument();
+  for (const key of ["base", "only_a", "only_b", "combinedAB"]) {
+    expect(screen.getByRole("columnheader", { name: "evolution." + key })).toBeInTheDocument();
+  }
+  expect(screen.getByText(/evolution.effect.joint_only/)).toBeInTheDocument();
+  expect(screen.getByText(/evolution.effect.lost_single_pass/)).toBeInTheDocument();
 });
 
 it("hands off a tool failure when the answer passed, with approved input and argument fields", async () => {

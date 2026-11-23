@@ -7,6 +7,7 @@ implementations:
 acceptance_bindings:
   AC-01: [test_reject_same_source_before_trial_submission]
   AC-02: [test_reject_same_source_before_trial_submission]
+  AC-03: [test_reject_same_source_before_trial_submission]
 preparation:
   families: []
   anchors: false

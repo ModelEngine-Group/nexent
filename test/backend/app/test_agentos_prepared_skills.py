@@ -100,6 +100,61 @@ def skill_snapshot(mocker, tmp_path):
     return agent, binding, directory, row, runtime_read
 
 
+@pytest.mark.parametrize("variants", [("base", "base"), ("result", "base"), ("base", "result"), ("result", "result")])
+def test_two_skill_packages_stage_and_count_independently(skill_snapshot, mocker, variants):
+    from contracts.agentos import EvaluationSkillTool, SkillExecutionBinding
+    from infrastructure import skill_execution, skill_package
+    from infrastructure.rdb import skill_candidate_records
+    from management.services.evaluation import skill_candidates
+    from runtime.agentos import prepared_skills
+
+    agent, model, directory, first, runtime_read = skill_snapshot
+    actor = ServicePrincipal("editor", "tenant-a")
+    spec = evaluation_snapshot.export_snapshot(agent, [model], "query", None, tenant_id=actor.tenant_id,
+                                               conversation_id=-42, language="en")
+    second = dict(first, instance_id=44, name="other", description="Other guide")
+    other_dir = directory.parent / "other"
+    other_dir.mkdir()
+    (other_dir / "SKILL.md").write_text("---\nname: other\ndescription: Other guide\n---\nsecond guide", encoding="utf-8")
+    packages, records = {}, {}
+    for cid, row in ((31, first), (32, second)):
+        base = skill_execution.capture_skill_files(actor.tenant_id, row["name"])
+        packages[cid, "old"] = base
+        packages[cid, "new"] = {**base, "SKILL.md": base["SKILL.md"] + b" revised"}
+        records[cid] = dict(instance_id=row["instance_id"], skill_id=cid, skill_name=row["name"],
+                            base_digest="old", result_digest="new", method="S2")
+    resource = spec.resource
+    revision = skill_execution.skill_execution_revision(actor.tenant_id, resource.agent_id, resource.version_no,
+                                                        second, packages[32, "old"])
+    resource.skill_refs.append(SkillExecutionBinding(instance_id=44, revision=revision))
+    resource.evaluation_options.context_items.append(
+        {"id": "skill:other", "type": "skill", "content": {"name": "other", "description": "Other guide"}})
+    runtime_read.return_value = [first, second]
+    mocker.patch.object(skill_candidates, "read_bound_skills", return_value=[first, second])
+    for module in (skill_candidates, skill_candidate_records):
+        mocker.patch.object(module, "read_bound_skill_candidate", side_effect=lambda tenant, agent, version, cid: records[cid])
+    for module in (skill_candidates, skill_package):
+        mocker.patch.object(module, "load_skill_package", side_effect=lambda tenant, cid, digest: packages[cid, digest])
+    for cid, arm in zip((31, 32), variants):
+        skill_candidates.pin_skill_candidate(resource, actor.tenant_id, cid, arm)
+    info = prepared_evaluation.prepare_evaluation_run(spec, actor)
+    try:
+        observations = [prepared_skills.skill_trial_observation(spec, info, actor, cid) for cid in (31, 32)]
+        paths = [path for _, path in observations]
+        assert [obs.variant for obs, _ in observations] == list(variants)
+        assert [obs.mounted_revision for obs, _ in observations] == [ref.revision for ref in resource.skill_refs]
+        config = next(t for t in info.agent_config.tools if t.name == EvaluationSkillTool.GUIDE)
+        reader = NexentAgent.create_builtin_tool(None, config)
+        with prepared_skills.observe_trial_guide_choices(info, actor.tenant_id, paths, True) as (by_path, by_name):
+            for name, variant in zip(("summarize", "other"), variants):
+                assert ("revised" in reader.forward(name)) == (variant == "result")
+            reader.forward("other")
+            assert [by_path[path].count for path in paths] == [1, 2]
+            assert {name: counter.count for name, counter in by_name.items()} == {"summarize": 1, "other": 2}
+    finally:
+        prepared_evaluation._remove_skill_files(info.workspace_path)
+
+
 def test_omitting_one_of_two_skills_removes_only_its_files_and_discovery(skill_snapshot, mocker):
     from contracts.agentos import EvaluationSkillTool, SkillExecutionBinding
     from contracts.constants import environment
