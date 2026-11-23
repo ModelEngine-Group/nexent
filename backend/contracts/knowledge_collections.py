@@ -99,6 +99,16 @@ class KnowledgeCollectionStatus(KnowledgeCollectionLookup):
 
 class KnowledgeCollectionsAuthorization(KnowledgeSearchAuthorization):
     view: Literal['resources', 'inventory', 'usage'] = 'resources'
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_layout(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        if not self.selected_files:
+            result.pop("selected_files", None)
+        return result
 
 
 class KnowledgeCollectionsGrant(Contract):
@@ -133,6 +143,10 @@ class KnowledgeCollectionsDescribe(PinnedKnowledgeCollections):
     @model_serializer(mode="wrap")
     def serialize_describe(self, handler):
         result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        if not self.selected_files:
+            result.pop("selected_files", None)
         if not self.include_vector_media:
             result.pop("include_vector_media", None)
         return result

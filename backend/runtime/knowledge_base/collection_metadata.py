@@ -42,6 +42,7 @@ from runtime.model.display import knowledge_model_display
 from infrastructure.knowledge_collection_metadata import (
     collection_metadata_vector_ports,
 )
+from infrastructure.vdb.native_analytics import native_collection_analytics
 
 logger = logging.getLogger(__name__)
 SUMMARY_FIELDS = tuple(VectorSummaryField(name, (('location', 'nexent_public_chunk_v1', field), ('location', field)))
@@ -79,6 +80,10 @@ def _vector_media(vectors, resource, *, context):
 
 
 class KnowledgeCollectionMetadataService:
+    def _collection_ports(self, request, actor, resource, *, context):
+        ports = native_collection_analytics if request.native_documents else self.ports
+        return ports(actor, resource, context=context)
+
     def __init__(self, client, *, ports=collection_metadata_vector_ports, display=knowledge_model_display, operation_seconds=30):
         if type(operation_seconds) not in {int, float} or not 0 < operation_seconds <= 180:
             raise InvalidInput()
@@ -87,7 +92,7 @@ class KnowledgeCollectionMetadataService:
 
     async def _grant(self, request, actor):
         grant = await self.client.authorize_collection_metadata(KnowledgeCollectionsAuthorization(
-            knowledge_ids=request.knowledge_ids, view=request.view), actor.user_id, actor.tenant_id)
+            knowledge_ids=request.knowledge_ids, view=request.view, native_documents=request.native_documents), actor.user_id, actor.tenant_id)
         if (not isinstance(grant, KnowledgeCollectionsGrant)
             or {g.knowledge_id for g in grant.knowledge_bases} != set(request.knowledge_ids)):
             raise ScopeDenied()
@@ -102,7 +107,7 @@ class KnowledgeCollectionMetadataService:
         for key in request.knowledge_ids:
             context.remaining()
             resource = resources[key]
-            with self.ports(actor, resource, context=context) as vectors:
+            with self._collection_ports(request, actor, resource, context=context) as vectors:
                 scope = vectors.scope
                 if (scope.service_role != 'runtime' or scope.system or scope.resource_prefix
                     or scope.tenant_id != resource.resource_tenant_id or scope.actor_id != actor.user_id
@@ -118,7 +123,8 @@ class KnowledgeCollectionMetadataService:
                         raise Unavailable(operation_id=context.operation_id)
                     values.update(dimensions=info.dimensions, metric=info.metric)
                     if request.include_vector_media:
-                        values["vector_media"] = _vector_media(vectors, resource, context=context)
+                        values["vector_media"] = (vectors.vector_media(resource.collection, context=context)
+                            if request.native_documents else _vector_media(vectors, resource, context=context))
                     if request.include_statistics:
                         try:
                             values['statistics'] = _metrics(vectors.statistics(resource.collection, SUMMARY_FIELDS,

@@ -95,7 +95,8 @@ class KnowledgeInventory:
                 raise Conflict()
             try:
                 response = await self.client.describe_knowledge_collections(KnowledgeCollectionsDescribe(
-                    knowledge_ids=list(expected), expected_revisions=expected, include_statistics=statistics, view=view),
+                    knowledge_ids=list(expected), expected_revisions=expected, include_statistics=statistics, view=view,
+                    native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED),
                     actor.user_id, actor.tenant_id)
             except RuntimeUpstreamError as error:
                 kind = {403: ScopeDenied, 409: Conflict, 504: DeadlineExceeded}.get(error.status_code)

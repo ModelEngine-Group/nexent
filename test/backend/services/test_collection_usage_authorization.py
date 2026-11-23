@@ -83,9 +83,9 @@ def quota_metadata(resources, mocker):  # noqa: F811
                 port.close()
             closed.append(True)
 
-    def invoke(ids):
+    def invoke(ids, *, native_documents=False):
         return authorize_collection_metadata(
-            KnowledgeCollectionsAuthorization(knowledge_ids=ids, view="usage"),
+            KnowledgeCollectionsAuthorization(knowledge_ids=ids, view="usage", native_documents=native_documents),
             actor,
             context=context(),
             ports=ports,
@@ -149,6 +149,8 @@ def test_datamate_local_collection_usage_only_has_no_model_binding(quota_metadat
     grant = s.invoke([1]).knowledge_bases[0]
     assert grant.collection == 'kb-one' and grant.embedding_model_id is None
     assert grant.resource_tenant_id == s.actor.tenant_id
+    with pytest.raises(ScopeDenied):
+        s.invoke([1], native_documents=True)
 
 
 def test_unknown_provider_is_not_authorized_as_local_collection(quota_metadata):

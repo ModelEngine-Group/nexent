@@ -3,6 +3,7 @@
 
 import logging
 
+from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeUpstreamError
 from contracts.knowledge_collections import (
     KnowledgeCollectionsUsage,
@@ -22,16 +23,22 @@ logger = logging.getLogger(__name__)
 
 async def collection_usage_statistics(client, actor, rows, context, *, include_datamate=False):
     selected = [row for row in rows if row.get('index_name') and (include_datamate or row.get('knowledge_sources') != 'datamate')]
+    by_layout = {}
+    for row in selected:
+        native = environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED and row.get("knowledge_sources") != "datamate"
+        by_layout.setdefault(native, []).append(row)
+    batches = ((native, rows[start:start + 100]) for native, rows in by_layout.items()
+               for start in range(0, len(rows), 100))
     observed = {}
-    for start in range(0, len(selected), 100):
+    for native, batch in batches:
         context.remaining()
-        batch = selected[start:start + 100]
         expected = {row['knowledge_id']: knowledge_search_revision(row) for row in batch}
         if len(expected) != len(batch):
             raise Conflict()
         try:
             response = await client.knowledge_collection_usage(KnowledgeCollectionsUsage(
-                knowledge_ids=list(expected), expected_revisions=expected), actor.user_id, actor.tenant_id)
+                knowledge_ids=list(expected), expected_revisions=expected,
+                native_documents=native), actor.user_id, actor.tenant_id)
         except RuntimeUpstreamError as error:
             kind = {403: ScopeDenied, 409: Conflict}.get(error.status_code)
             if kind is not None:

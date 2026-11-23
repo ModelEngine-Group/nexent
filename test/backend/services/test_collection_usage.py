@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-BE-DPR-COL-USAGE-02 keep quota telemetry scalar-only and model-free."""
 
+from unittest.mock import Mock
+
 import pytest
 from contracts.knowledge_collections import (
     KnowledgeCollectionsDescribe,
@@ -9,6 +11,7 @@ from contracts.knowledge_collections import (
 from nexent.storage.errors import Conflict, DeadlineExceeded, ScopeDenied, Unavailable
 from nexent.storage.models import VectorCollectionStatistics, VectorFieldStatistics
 from pydantic import ValidationError
+from runtime.knowledge_base import collection_metadata
 from runtime.knowledge_base.collection_usage import KnowledgeCollectionUsageService
 
 from test.backend.services.test_collection_metadata_runtime import (
@@ -129,3 +132,16 @@ async def test_foreign_provider_scope_is_rejected(boundary):  # noqa: F811
     with pytest.raises(ScopeDenied):
         await worker.describe(request(s),s.actor)
     s.vectors[2].statistics.assert_not_called()
+
+
+async def test_native_quota_reads_original_collection_without_model_or_body(boundary, monkeypatch):  # noqa: F811
+    worker = service(boundary)
+    native = Mock(side_effect=boundary.ports)
+    monkeypatch.setattr(collection_metadata, "native_collection_analytics", native)
+    worker.ports = Mock(side_effect=AssertionError("Managed collection should not be consulted"))
+    result = await worker.describe(request(boundary).model_copy(update={"native_documents": True}), boundary.actor)
+    assert native.call_count == 2
+    assert result.items[0].statistics.model_dump() == {"record_count": 4, "source_count": 2, "size_bytes": 10}
+    worker.ports.assert_not_called()
+    for port in boundary.vectors.values():
+        port.describe_collection.assert_not_called()

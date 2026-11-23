@@ -112,7 +112,8 @@ class KnowledgeSummaryService:
             async with asyncio.timeout(threshold):
                 resource = await self._resource(index_name, user_id, tenant_id, context=context)
                 result = await self.client.sample_knowledge(KnowledgeSample(knowledge_id=resource.knowledge_id,
-                    expected_revision=resource.revision, document_limit=count), user_id, tenant_id)
+                    expected_revision=resource.revision, document_limit=count,
+                    native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED), user_id, tenant_id)
                 self._validate(result, resource, count)
                 if await self._resource(index_name, user_id, tenant_id, context=context) != resource:
                     raise Conflict()

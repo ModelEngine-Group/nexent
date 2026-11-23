@@ -29,6 +29,8 @@ from runtime.knowledge_base.publication import published_files, published_job
 
 from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.knowledge_runtime import knowledge_search_ports
+from infrastructure.vdb.native_knowledge import native_search_revisions
+from infrastructure.vdb.native_sample import sample_native_knowledge
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,17 @@ class KnowledgeSampleService(PublishedKnowledgeReader):
                     raise Conflict()
                 model = ModelVersion(model_id=metadata.model_id, revision=metadata.revision)
                 dimensions = await self.models.embedding_dimensions(model, actor)
+                if request.native_documents:
+                    revision, documents = await self._blocking(sample_native_knowledge, actor, resource,
+                                                                dimensions, request.document_limit, context=context)
+                    if await self._grant(request, actor) != grant:
+                        raise Conflict()
+                    await self.models.embedding_dimensions(model, actor)
+                    final = await self._blocking(native_search_revisions, actor, [resource], context=context)
+                    if final != {resource.knowledge_id: revision}:
+                        raise Conflict()
+                    return KnowledgeSampleResult(knowledge_id=request.knowledge_id, knowledge_revision=resource.revision,
+                        data_revision=revision, embedding_model=model, documents=documents)
                 with self.ports(actor, grant, dimensions, context=context) as (records, vectors):
                     validate_read_ports(records, vectors, grant, actor)
                     records = records[request.knowledge_id]

@@ -13,6 +13,7 @@ from contracts.knowledge_collections import (
     KnowledgeCollectionsDescribe,
     KnowledgeCollectionsGrant,
     KnowledgeModelDisplay,
+    KnowledgeVectorMedia,
 )
 from nexent.storage.errors import (
     CapabilityUnsupported,
@@ -244,3 +245,18 @@ async def test_expired_parent_never_starts_authorization(boundary):
     with pytest.raises(DeadlineExceeded):
         await s.service.describe(s.request, s.actor, context=OperationContext('expired', monotonic() - 1))
     s.client.authorize_collection_metadata.assert_not_awaited()
+
+
+async def test_native_metadata_selects_original_index_ports(boundary, monkeypatch):
+    s = boundary
+    native = Mock(side_effect=s.ports)
+    monkeypatch.setattr(module, "native_collection_analytics", native)
+    s.service.ports = Mock(side_effect=AssertionError("Managed collection should not be consulted"))
+    for port in s.vectors.values():
+        port.vector_media = Mock(return_value=KnowledgeVectorMedia(text=2, image=1, unclassified=0))
+    s.request = s.request.model_copy(update={"native_documents": True, "include_vector_media": True,
+                                           "include_statistics": True})
+    result = await invoke(s)
+    assert native.call_count == 2 and [row.statistics.record_count for row in result.items] == [4, 4]
+    assert all(row.vector_media.image == 1 for row in result.items)
+    s.service.ports.assert_not_called()

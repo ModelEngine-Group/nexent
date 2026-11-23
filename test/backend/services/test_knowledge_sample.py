@@ -156,3 +156,38 @@ async def test_deadline_cancels_metadata_query_without_storage_or_retry(sample):
     assert cancelled == [True] and s.closed == []
     s.models.get.assert_awaited_once()
     s.vectors.scan.assert_not_called()
+
+
+@pytest.mark.parametrize("changed", [False, True])
+async def test_native_sample_uses_original_layout_and_rechecks_data_revision(sample, mocker, changed):
+    s, request, grant, _, service = sample
+    sample_native = mocker.patch("runtime.knowledge_base.sample.sample_native_knowledge", return_value=("b" * 64, []))
+    revision = mocker.patch("runtime.knowledge_base.sample.native_search_revisions",
+                            return_value={1: ("c" if changed else "b") * 64})
+    request = request.model_copy(update={"native_documents": True})
+    if changed:
+        with pytest.raises(Conflict):
+            await service.sample(request, s.actor)
+    else:
+        assert (await service.sample(request, s.actor)).data_revision == "b" * 64
+    assert sample_native.call_args.args[:2] == (s.actor, grant.knowledge_bases[0])
+    assert revision.call_args.args == (s.actor, grant.knowledge_bases)
+    s.vectors.scan.assert_not_called()
+    s.models.invoke.assert_not_awaited()
+
+
+def test_native_sample_reservoir_stays_bounded_when_random_slot_equals_limit(monkeypatch):
+    from infrastructure.vdb import native_sample
+
+    records = [(str(i), {"path_or_url": f"document/{i}", "content": str(i), "embedding": [0.5]})
+               for i in range(5)]
+    monkeypatch.setattr(native_sample.random, "randrange", lambda size: 2)
+
+    def scan(fields, selected=None):
+        if selected is None:
+            return iter(records)
+        paths = selected["bool"]["should"][0]["terms"]["nexent_sample_path"]
+        return (row for row in records if row[1]["path_or_url"] in paths)
+
+    result = native_sample._samples(scan, type("Resource", (), {"knowledge_id": 1})(), 1, 2)
+    assert [doc.path_or_url for doc in result] == ["document/0", "document/1"]

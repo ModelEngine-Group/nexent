@@ -35,7 +35,7 @@ class KnowledgeCollectionUsageService(KnowledgeCollectionMetadataService):
         for key in request.knowledge_ids:
             context.remaining()
             resource = resources[key]
-            with self.ports(actor, resource, context=context) as vectors:
+            with self._collection_ports(request, actor, resource, context=context) as vectors:
                 scope = vectors.scope
                 if (
                     scope.service_role != "runtime"

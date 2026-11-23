@@ -99,7 +99,7 @@ class RuntimeKnowledgeInspector:
         if include_vector_media:
             response = await self.client.describe_knowledge_collections(KnowledgeCollectionsDescribe(
                 knowledge_ids=[knowledge_id], expected_revisions={knowledge_id: resource.revision},
-                include_vector_media=True), actor.user_id, actor.tenant_id)
+                include_vector_media=True, native_documents=environment.KNOWLEDGE_RUNTIME_HYBRID_ENABLED), actor.user_id, actor.tenant_id)
             if len(response.items) != 1:
                 raise Conflict()
             item = response.items[0]

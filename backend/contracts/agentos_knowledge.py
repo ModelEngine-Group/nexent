@@ -495,6 +495,14 @@ class KnowledgeSample(Contract):
     knowledge_id: int = Field(gt=0)
     document_limit: int = Field(default=200, ge=1, le=200)
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    native_documents: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_layout(self, handler):
+        result = handler(self)
+        if not self.native_documents:
+            result.pop("native_documents", None)
+        return result
 
 
 class KnowledgeBaseInspect(Contract):
