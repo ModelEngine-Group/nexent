@@ -215,12 +215,10 @@ export default function MineMcpServiceCard({
     <ResourceCard
       actionsOnly={presentation?.layout === "list"}
       className="h-full"
-      title={
+      title={service.name}
+      subtitle={
         repositoryCard ? (
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate" title={service.name}>
-              {service.name}
-            </span>
             <span className="shrink-0 rounded bg-[#D0D8FD]/50 px-2 text-xs leading-5 font-normal text-[#1F55B5]">
               {deploymentLabel}
             </span>
@@ -231,11 +229,6 @@ export default function MineMcpServiceCard({
             )}
           </span>
         ) : (
-          service.name
-        )
-      }
-      subtitle={
-        !repositoryCard && (
           <span
             className={`inline-flex items-center gap-1.5 ${
               connectionStatus === "success"
@@ -275,41 +268,43 @@ export default function MineMcpServiceCard({
         )
       }
       description={service.description || t("mcpTools.detail.noDescription")}
-      tags={(!repositoryCard || tags.length > 0) && (
-        <>
-          {!repositoryCard && (
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              {deploymentLabel}
-            </span>
-          )}
-          {tags.slice(0, 3).map((tag) => (
-            <span
-              key={`${service.name}-${tag}`}
-              className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {tag}
-            </span>
-          ))}
-          {tags.length > 3 ? (
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              +{tags.length - 3}
-            </span>
-          ) : null}
-          {item.kind === "local" ? (
-            <ResourceTagChips
-              resourceType="mcp_service"
-              resourceId={String(item.service.mcpId)}
-              max={3}
-              refreshKey={tagRefreshKey}
-            />
-          ) : null}
-          {!repositoryCard && (
-            <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
-              {t("mcpTools.repository.toolCount", { count: toolCount })}
-            </span>
-          )}
-        </>
-      )}
+      tags={
+        (!repositoryCard || isLocal || tags.length > 0) && (
+          <>
+            {!repositoryCard && (
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {deploymentLabel}
+              </span>
+            )}
+            {tags.slice(0, 3).map((tag) => (
+              <span
+                key={`${service.name}-${tag}`}
+                className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                {tag}
+              </span>
+            ))}
+            {tags.length > 3 ? (
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                +{tags.length - 3}
+              </span>
+            ) : null}
+            {item.kind === "local" ? (
+              <ResourceTagChips
+                resourceType="mcp_service"
+                resourceId={String(item.service.mcpId)}
+                max={3}
+                refreshKey={tagRefreshKey}
+              />
+            ) : null}
+            {!repositoryCard && (
+              <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                {t("mcpTools.repository.toolCount", { count: toolCount })}
+              </span>
+            )}
+          </>
+        )
+      }
       meta={
         repositoryCard ? (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">

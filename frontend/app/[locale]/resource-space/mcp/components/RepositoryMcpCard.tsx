@@ -70,21 +70,19 @@ export default function RepositoryMcpCard({
     <ResourceCard
       actionsOnly={repositoryList}
       className="h-full"
-      title={
+      title={service.name}
+      subtitle={
         presentation ? (
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate" title={service.name}>
-              {service.name}
+            <span className="truncate" title={author}>
+              {author}
             </span>
             <span className="h-5 shrink-0 rounded bg-[rgba(208,216,253,0.5)] px-2 text-xs leading-5 font-normal text-[#1F55B5]">
               {deploymentLabel}
             </span>
           </span>
-        ) : (
-          service.name
-        )
+        ) : undefined
       }
-      subtitle={presentation ? <span title={author}>{author}</span> : undefined}
       footerLayout="inline"
       icon={
         repositoryCard ? (
@@ -106,13 +104,9 @@ export default function RepositoryMcpCard({
       description={service.description || t("mcpTools.detail.noDescription")}
       tags={
         repositoryCard ? (
-          // Always reserve the tag row so repository cards keep equal heights
-          // regardless of whether the service has tags.
-          <div className="h-6">
-            {tags.length > 0 ? (
-              <AgentCardTags labels={tags} maxVisible={5} />
-            ) : null}
-          </div>
+          tags.length > 0 ? (
+            <AgentCardTags labels={tags} maxVisible={5} />
+          ) : null
         ) : (
           <>
             {!presentation && (

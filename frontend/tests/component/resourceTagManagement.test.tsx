@@ -18,6 +18,41 @@ vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: { getAssignments: vi.fn(), replaceAssignments: vi.fn() },
 }));
 
+it("confirms a draft tag selection locally before a resource exists", async () => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const onConfirmSelection = vi.fn();
+  const onClose = vi.fn();
+  const definition = {
+    definition_id: 8,
+    definition_key: "chart",
+    definition_name: "Chart",
+    selection_mode: "no_value",
+    status: "active",
+    values: [{ value_id: 9, display_value: "Chart", status: "active" }],
+  } as TagDefinition;
+
+  render(
+    <App>
+      <ResourceTagAssignmentModal
+        open
+        resourceType="mcp_service"
+        resourceId=""
+        definitions={[definition]}
+        canEdit
+        onClose={onClose}
+        onConfirmSelection={onConfirmSelection}
+      />
+    </App>
+  );
+  await user.click(screen.getByRole("button", { name: /Chart/ }));
+  await user.click(screen.getByRole("button", { name: "common.confirm" }));
+  expect(onConfirmSelection).toHaveBeenCalledWith({ 8: [9] });
+  expect(onClose).toHaveBeenCalledOnce();
+  expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
+  expect(tagManagementApi.replaceAssignments).not.toHaveBeenCalled();
+});
+
 it("saves assignments through the reachable editor and disables readonly tag inputs", async () => {
   const user = userEvent.setup();
   const onSaved = vi.fn();

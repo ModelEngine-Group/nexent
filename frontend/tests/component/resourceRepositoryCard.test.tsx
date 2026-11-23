@@ -6,6 +6,40 @@ import ResourceCard from "@/components/resource/ResourceCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
 
 describe("repository card presentation compatibility", () => {
+  it.each([
+    ["mcp", "mine"],
+    ["mcp", "repository"],
+    ["agent", "repository"],
+    ["skill", "repository"],
+  ])(
+    "uses the shared header, description and tag rows for %s in %s",
+    (resourceType, view) => {
+      render(
+        <RepositoryPresentationContext.Provider
+          value={{
+            layout: "cards",
+            resourceType,
+            query: new URLSearchParams({ view }),
+          }}
+        >
+          <ResourceCard
+            title="Resource"
+            subtitle={view === "mine" ? undefined : "Author"}
+            description="Short description"
+            tags={<span>Tag</span>}
+          />
+        </RepositoryPresentationContext.Provider>
+      );
+      const heading = screen.getByRole("heading", { name: "Resource" });
+      expect(heading.parentElement?.parentElement).toHaveClass("h-14");
+      expect(screen.getByText("Short description")).toHaveClass("h-10");
+      expect(screen.getByText("Tag").parentElement).toHaveClass(
+        "min-h-6",
+        "mt-2.5"
+      );
+    }
+  );
+
   it("keeps agent list actions in template-then-management order", () => {
     render(
       <RepositoryPresentationContext.Provider

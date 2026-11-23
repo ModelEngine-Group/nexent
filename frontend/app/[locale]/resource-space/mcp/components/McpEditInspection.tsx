@@ -5,7 +5,6 @@ import { App, Button, Collapse, Empty, Spin } from "antd";
 import { ChevronDown, Copy, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpContainerLogOutput } from "@/components/mcp/McpContainerLogsModal";
-import panel from "@/components/resource/resource-panel.module.css";
 import type { McpTool } from "@/types/agentConfig";
 
 const codeStyle =
@@ -191,9 +190,9 @@ export default function McpEditInspection({
   const hiddenToolCount = Math.max(0, tools.length - 4);
 
   return (
-    <div ref={inspectionRef} className="space-y-4">
+    <div ref={inspectionRef} className="space-y-6">
       <section
-        className={`${panel.editSection} space-y-3`}
+        className="space-y-3"
         aria-labelledby="mcp-edit-tools"
       >
         <div>
@@ -263,7 +262,7 @@ export default function McpEditInspection({
       </section>
       {(serverJson || containerConfig || showLogs) && (
         <section
-          className={`${panel.editSection} space-y-3`}
+          className="space-y-3"
           aria-labelledby="mcp-edit-advanced"
         >
           <div>

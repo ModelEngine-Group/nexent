@@ -18,6 +18,7 @@ interface SkillGroupSelectionProps {
   disabled?: boolean;
   isError?: boolean;
   onRetry?: () => void;
+  preserveUnlistedSelection?: boolean;
 }
 
 /** Form-controlled group IDs retain selections across the table's local pages. */
@@ -30,6 +31,7 @@ export default function SkillGroupSelection({
   disabled = false,
   isError = false,
   onRetry,
+  preserveUnlistedSelection = false,
 }: SkillGroupSelectionProps) {
   const { t } = useTranslation("common");
   const [page, setPage] = useState(1);
@@ -65,7 +67,12 @@ export default function SkillGroupSelection({
           preserveSelectedRowKeys: true,
           columnWidth: 40,
           onChange: (keys) =>
-            onChange?.(keys.map(Number).filter((id) => ids.has(id))),
+            onChange?.([
+              ...(preserveUnlistedSelection
+                ? value.filter((id) => !ids.has(id))
+                : []),
+              ...keys.map(Number).filter((id) => ids.has(id)),
+            ]),
           getCheckboxProps: (group) => ({
             disabled: disabled || loading,
             "aria-label": group.group_name,

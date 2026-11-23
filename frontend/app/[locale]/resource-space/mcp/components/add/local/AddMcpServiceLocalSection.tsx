@@ -2,17 +2,17 @@
 
 import { useEffect, useState } from "react";
 import {
+  App,
   Button,
   ConfigProvider,
   Form,
   Input,
   InputNumber,
   Select,
-  Steps,
   Upload,
 } from "antd";
 import type { UploadFile } from "antd";
-import { Upload as UploadIcon } from "lucide-react";
+import { RefreshCw, Upload as UploadIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpDeploymentType, McpTransportType } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
@@ -22,9 +22,15 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import McpGroupSelectionTable from "../../shared/McpGroupSelectionTable";
 import McpDeploymentCards from "../../shared/McpDeploymentCards";
+import McpConfigurationSteps from "../../shared/McpConfigurationSteps";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { Can } from "@/components/permission/Can";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagChips from "@/components/tag/TagChips";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import McpTagField from "../../shared/McpTagField";
+import { testMcpConnectionService } from "@/services/mcpToolsService";
 
 const VALIDATION_FIELDS_BY_DEPLOYMENT: Record<
   McpDeploymentType,
@@ -91,6 +97,7 @@ export default function AddMcpServiceLocalSection({
   onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [draft, setDraft] = useState<LocalAddMcpDraft>(() =>
@@ -105,6 +112,33 @@ export default function AddMcpServiceLocalSection({
   );
   const [logsOpen, setLogsOpen] = useState(false);
   const [step, setStep] = useState(0);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [tagSelection, setTagSelection] = useState<Record<number, number[]>>(
+    {}
+  );
+  const tagLibraries = useTagLibraries({ enabled: tagsOpen });
+  const defaultTagLibrary = tagLibraries.data?.find(
+    (library) => library.bucket_key === "default_resource"
+  );
+  const tagDefinitions = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const selectedTags = (tagDefinitions.data ?? []).flatMap((definition) =>
+    (definition.values ?? [])
+      .filter((value) =>
+        tagSelection[definition.definition_id]?.includes(value.value_id)
+      )
+      .map((value) => ({
+        definition_id: definition.definition_id,
+        definition_key: definition.definition_key,
+        definition_name: definition.definition_name,
+        selection_mode: definition.selection_mode,
+        value_id: value.value_id,
+        display_value: value.display_value,
+        value_status: value.status,
+      }))
+  );
   const { isReady, can } = usePermission();
   const canSelectGroups = isReady && can("group:read");
   const { user } = useAuthorizationContext();
@@ -115,6 +149,7 @@ export default function AddMcpServiceLocalSection({
     onSuccess: () => {
       setDraft(createInitialDraft());
       setDeploymentType(McpDeploymentType.REMOTE_LINK);
+      setTagSelection({});
       form.resetFields();
       onAdded();
     },
@@ -204,7 +239,33 @@ export default function AddMcpServiceLocalSection({
       setDeploymentStarted(true);
       setDeployedContainerId(null);
     }
-    await submit(draft);
+    await submit(draft, Object.values(tagSelection).flat());
+  };
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    try {
+      const values = await form
+        .validateFields(["serverUrl", "customHeaders", "authorizationToken"])
+        .catch(() => null);
+      if (!values) return;
+
+      const headers = values.customHeaders?.trim();
+      const result = await testMcpConnectionService({
+        server_url: values.serverUrl.trim(),
+        authorization_token: values.authorizationToken?.trim() || undefined,
+        custom_headers: headers ? JSON.parse(headers) : undefined,
+      });
+      if (result.data.success) {
+        message.success(
+          t("mcpTools.registry.quickAddPicker.connectionSuccess")
+        );
+      } else {
+        message.error(t("mcpTools.add.error.connectionFailed"));
+      }
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   if (!active) return null;
@@ -237,25 +298,7 @@ export default function AddMcpServiceLocalSection({
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4 pt-4">
-        {canSelectGroups && (
-          <Steps
-            className="relative shrink-0 !justify-between before:absolute before:inset-x-10 before:top-3 before:h-px before:bg-[#0067D1]"
-            classNames={{
-              item: "!flex-none",
-              itemRail: "!hidden",
-              itemWrapper: "relative z-10 !gap-2 bg-white",
-              itemTitle: "!text-sm",
-            }}
-            current={step}
-            size="small"
-            titlePlacement="vertical"
-            responsive={false}
-            items={[
-              { title: t("mcpTools.addModal.configureStep") },
-              { title: t("mcpTools.addModal.groupsStep") },
-            ]}
-          />
-        )}
+        {canSelectGroups && <McpConfigurationSteps current={step} />}
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-width:thin]">
           <Form form={form} layout="vertical" colon={false}>
             <div hidden={showGroupStep}>
@@ -396,6 +439,7 @@ export default function AddMcpServiceLocalSection({
                 <Form.Item
                   label={t("mcpTools.addModal.customHeaders")}
                   name="customHeaders"
+                  rules={rules.customHeaders}
                 >
                   <Input.TextArea
                     placeholder={t(
@@ -421,6 +465,16 @@ export default function AddMcpServiceLocalSection({
                   />
                 </Form.Item>
               )}
+              <McpTagField
+                disabled={submitting}
+                onEdit={() => setTagsOpen(true)}
+              >
+                {selectedTags.length > 0 ? (
+                  <TagChips assignments={selectedTags} max={4} singleLine />
+                ) : (
+                  <span className="text-sm text-muted-foreground">—</span>
+                )}
+              </McpTagField>
             </div>
             {canSelectGroups && (
               <div hidden={!showGroupStep}>
@@ -476,6 +530,17 @@ export default function AddMcpServiceLocalSection({
           </Form>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-4">
+          {isRemote && !showGroupStep && (
+            <Button
+              className="mr-auto"
+              icon={<RefreshCw size={14} aria-hidden />}
+              loading={testingConnection}
+              disabled={!draft.serverUrl.trim() || submitting}
+              onClick={handleTestConnection}
+            >
+              {t("mcpTools.editDetail.testConnection")}
+            </Button>
+          )}
           {deploymentStarted && (
             <Button className="mr-auto" onClick={() => setLogsOpen(true)}>
               {t("mcpTools.detail.viewContainerLogs")}
@@ -501,7 +566,9 @@ export default function AddMcpServiceLocalSection({
                 : handleSubmit
             }
             loading={submitting}
-            disabled={isLocalImage && !draft.uploadImageFile}
+            disabled={
+              testingConnection || (isLocalImage && !draft.uploadImageFile)
+            }
           >
             {t(
               canSelectGroups && !showGroupStep
@@ -520,6 +587,17 @@ export default function AddMcpServiceLocalSection({
             containerId={deployedContainerId}
           />
         )}
+        <ResourceTagAssignmentModal
+          open={tagsOpen}
+          onClose={() => setTagsOpen(false)}
+          resourceType="mcp_service"
+          resourceId=""
+          definitions={tagDefinitions.data ?? []}
+          definitionsLoading={tagLibraries.loading || tagDefinitions.loading}
+          canEdit
+          initialSelection={tagSelection}
+          onConfirmSelection={setTagSelection}
+        />
       </div>
     </ConfigProvider>
   );

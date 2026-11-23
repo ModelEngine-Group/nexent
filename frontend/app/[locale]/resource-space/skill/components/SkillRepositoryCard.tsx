@@ -117,11 +117,9 @@ export function SkillRepositoryCard({
       }
       tags={
         presentation ? (
-          // Always reserve the tag row so repository cards keep equal heights
-          // across tabs (agent/MCP reserve the same h-6 row).
-          <div className="flex h-6 w-full min-w-0 items-center gap-2">
-            {tags.length > 0 ? <AgentCardTags labels={tags} maxVisible={5} /> : null}
-          </div>
+          tags.length > 0 ? (
+            <AgentCardTags labels={tags} maxVisible={5} />
+          ) : null
         ) : tags.length > 0 ? (
           <>{tagChips}</>
         ) : null

@@ -217,7 +217,7 @@ export function AgentSpace({ active }: { active: boolean }) {
           <RepositoryAgentIcon
             agentId={listing.agent_id}
             iconUrl={listing.icon_url}
-            size={presentation ? 56 : 44}
+            size={presentation ? 48 : 44}
             iconSize={20}
             className={presentation ? REPOSITORY_AVATAR_CLASS : undefined}
           />
@@ -258,11 +258,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
         tags={
           presentation ? (
-            // Always reserve the tag row so repository cards keep equal
-            // heights regardless of whether the listing has tags.
-            <div className="flex h-6 w-full min-w-0 items-center gap-2">
-              {tagChips}
-            </div>
+            tagChips
           ) : tags.length > 0 || toolCount > 0 ? (
             <div className="flex w-full min-w-0 items-center gap-3">
               {tagChips}

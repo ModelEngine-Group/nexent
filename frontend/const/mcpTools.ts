@@ -76,9 +76,6 @@ export const MCP_ADD_SERVICE_MODAL_WIDTH_LOCAL = 560;
 /** Add MCP modal width for registry / community browser tabs. */
 export const MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS = 1100;
 
-/** Edit drawer width: 720px content plus 24px padding on each side. */
-export const MCP_EDIT_SERVICE_DRAWER_WIDTH = 960;
-
 /** Fixed content column width for the local add-MCP form (matches local tab modal). */
 export const MCP_ADD_SERVICE_LOCAL_SECTION_WIDTH_PX = 560;
 

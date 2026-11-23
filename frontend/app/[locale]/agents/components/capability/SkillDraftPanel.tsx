@@ -8,6 +8,7 @@ import type {
   Dispatch,
   KeyboardEvent,
   MutableRefObject,
+  ReactNode,
   SetStateAction,
 } from "react";
 import type { FormInstance } from "antd";
@@ -20,6 +21,7 @@ import {
   Maximize2,
   Pencil,
   Plus,
+  Search,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -45,6 +47,8 @@ interface SkillDraftPanelProps {
   readOnly?: boolean;
   repositoryLayout?: boolean;
   repositoryEditor?: boolean;
+  showRepositoryGroups?: boolean;
+  repositoryGroupSettings?: ReactNode;
   onNameChange?: (event: ChangeEvent<HTMLInputElement>) => void;
   textareaRefs?: MutableRefObject<Record<string, unknown>>;
   shouldAutoScrollRef?: MutableRefObject<Record<string, boolean>>;
@@ -69,6 +73,8 @@ export default function SkillDraftPanel({
   readOnly = false,
   repositoryLayout = false,
   repositoryEditor = false,
+  showRepositoryGroups = false,
+  repositoryGroupSettings,
   onNameChange,
   textareaRefs,
   shouldAutoScrollRef,
@@ -100,7 +106,7 @@ export default function SkillDraftPanel({
   const visibleSkillTabs = dedupeSkillTabs(skillTabs);
   const fileSearchTerm = fileSearch.trim().toLowerCase();
   const listedSkillTabs =
-    repositoryLayout && fileSearchTerm
+    (repositoryEditor || repositoryLayout) && fileSearchTerm
       ? visibleSkillTabs.filter((tab) =>
           tab.path.toLowerCase().includes(fileSearchTerm)
         )
@@ -248,18 +254,43 @@ export default function SkillDraftPanel({
     );
   };
 
+  const renderTags = () =>
+    tagResourceId ? (
+      <Form.Item
+        label={t("skillManagement.form.tags")}
+        style={repositoryEditor ? undefined : { marginBottom: 10 }}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+            <ResourceTagChips
+              resourceType="skill"
+              resourceId={tagResourceId}
+              max={4}
+              refreshKey={tagPreviewRefreshKey}
+              singleLine
+            />
+          </div>
+          {canAssignTags && onAssignTags ? (
+            <Button type="link" size="small" onClick={onAssignTags}>
+              {t("tagManagement.action.editTags")}
+            </Button>
+          ) : null}
+        </div>
+      </Form.Item>
+    ) : null;
+
   return (
     <div
-      className={`flex min-h-0 flex-col ${repositoryEditor ? "gap-4 lg:h-full lg:overflow-y-auto" : repositoryLayout ? "gap-6" : "h-full gap-2 overflow-hidden"} ${className || ""}`}
+      className={`flex min-h-0 flex-col ${repositoryEditor ? (showRepositoryGroups ? "" : resourcePanel.editSection) : repositoryLayout ? "gap-6" : "h-full gap-2 overflow-hidden"} ${className || ""}`}
     >
       <div
         className={
           repositoryEditor
-            ? `${resourcePanel.editSection} shrink-0`
+            ? "shrink-0"
             : "shrink-0 rounded-2xl border border-slate-200 bg-white px-5 pb-2 pt-3 shadow-sm"
         }
       >
-        {repositoryEditor && (
+        {repositoryEditor && !showRepositoryGroups && (
           <h3 className="mb-3 text-body-2 font-semibold">
             {t("resourceCenter.agentDetail.basicInfo")}
           </h3>
@@ -274,157 +305,145 @@ export default function SkillDraftPanel({
           }}
           disabled={readOnly}
         >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="name"
-                label={t("skillManagement.form.name")}
-                style={{ marginBottom: 10 }}
-                rules={[
-                  {
-                    required: true,
-                    message: t("skillManagement.form.nameRequired"),
-                  },
-                ]}
-              >
-                <Input
-                  onChange={onNameChange}
-                  placeholder={t("skillManagement.form.namePlaceholder")}
-                  allowClear={!readOnly}
-                  readOnly={readOnly}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="source"
-                label={t("skillManagement.form.source")}
-                style={{ marginBottom: 10 }}
-              >
-                <Select
-                  labelRender={({ label, value }) => {
-                    if (value === "official" || value === "官方") {
-                      return t("skillPool.group.official");
-                    }
-                    if (value === "custom" || value === "自定义") {
-                      return t("skillPool.group.custom");
-                    }
-                    return label ?? value;
-                  }}
-                  options={[
-                    { label: t("skillPool.group.custom"), value: "custom" },
+          <div hidden={showRepositoryGroups}>
+            <Row gutter={16}>
+              <Col span={repositoryEditor ? 24 : 12}>
+                <Form.Item
+                  name="name"
+                  label={t("skillManagement.form.name")}
+                  style={repositoryEditor ? undefined : { marginBottom: 10 }}
+                  rules={[
+                    {
+                      required: true,
+                      message: t("skillManagement.form.nameRequired"),
+                    },
                   ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          {!readOnly ? (
-            <Can permission="group:read">
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="group_ids"
-                    label={t("agent.userGroup")}
-                    style={{ marginBottom: 10 }}
-                  >
-                    <Select
-                      mode="multiple"
-                      placeholder={t("agent.userGroup")}
-                      options={groupSelectOptions}
-                      allowClear
-                      disabled={!canEditGroupSettings}
-                      showSearch={canEditGroupSettings}
-                      labelRender={({ label, value }) =>
-                        groupNamesById.get(Number(value)) ?? label
-                      }
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="ingroup_permission"
-                    label={t("tenantResources.knowledgeBase.permission")}
-                    style={{ marginBottom: 10 }}
-                  >
-                    <Select
-                      placeholder={t(
-                        "tenantResources.knowledgeBase.permission"
-                      )}
-                      disabled={!canEditGroupSettings}
-                      options={[
-                        {
-                          value: "EDIT",
-                          label: t(
-                            "tenantResources.knowledgeBase.permission.EDIT"
-                          ),
-                        },
-                        {
-                          value: "READ_ONLY",
-                          label: t(
-                            "tenantResources.knowledgeBase.permission.READ_ONLY"
-                          ),
-                        },
-                        {
-                          value: "PRIVATE",
-                          label: t(
-                            "tenantResources.knowledgeBase.permission.PRIVATE"
-                          ),
-                        },
-                      ]}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </Can>
-          ) : null}
-
-          <Form.Item
-            name="description"
-            label={t("skillManagement.form.description")}
-            style={{ marginBottom: 10 }}
-            rules={[
-              {
-                required: true,
-                message: t("skillManagement.form.descriptionRequired"),
-              },
-            ]}
-          >
-            <TextArea
-              rows={2}
-              placeholder={t("skillManagement.form.descriptionPlaceholder")}
-              readOnly={readOnly}
-              style={{ resize: "none" }}
-            />
-          </Form.Item>
-          {tagResourceId ? (
-            <Form.Item
-              label={t("skillManagement.form.tags")}
-              style={{ marginBottom: 10 }}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-                  <ResourceTagChips
-                    resourceType="skill"
-                    resourceId={tagResourceId}
-                    max={4}
-                    refreshKey={tagPreviewRefreshKey}
-                    singleLine
+                >
+                  <Input
+                    onChange={onNameChange}
+                    placeholder={t("skillManagement.form.namePlaceholder")}
+                    allowClear={!readOnly}
+                    readOnly={readOnly}
                   />
-                </div>
-                {canAssignTags && onAssignTags ? (
-                  <Button type="link" size="small" onClick={onAssignTags}>
-                    {t("tagManagement.action.editTags")}
-                  </Button>
-                ) : null}
-              </div>
+                </Form.Item>
+              </Col>
+              <Col span={repositoryEditor ? 24 : 12}>
+                <Form.Item
+                  name="source"
+                  label={t("skillManagement.form.source")}
+                  style={repositoryEditor ? undefined : { marginBottom: 10 }}
+                >
+                  <Select
+                    labelRender={({ label, value }) => {
+                      if (value === "official" || value === "官方") {
+                        return t("skillPool.group.official");
+                      }
+                      if (value === "custom" || value === "自定义") {
+                        return t("skillPool.group.custom");
+                      }
+                      return label ?? value;
+                    }}
+                    options={[
+                      { label: t("skillPool.group.custom"), value: "custom" },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {!readOnly && !repositoryEditor ? (
+              <Can permission="group:read">
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="group_ids"
+                      label={t("agent.userGroup")}
+                      style={
+                        repositoryEditor ? undefined : { marginBottom: 10 }
+                      }
+                    >
+                      <Select
+                        mode="multiple"
+                        placeholder={t("agent.userGroup")}
+                        options={groupSelectOptions}
+                        allowClear
+                        disabled={!canEditGroupSettings}
+                        showSearch={canEditGroupSettings}
+                        labelRender={({ label, value }) =>
+                          groupNamesById.get(Number(value)) ?? label
+                        }
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="ingroup_permission"
+                      label={t("tenantResources.knowledgeBase.permission")}
+                      style={
+                        repositoryEditor ? undefined : { marginBottom: 10 }
+                      }
+                    >
+                      <Select
+                        placeholder={t(
+                          "tenantResources.knowledgeBase.permission"
+                        )}
+                        disabled={!canEditGroupSettings}
+                        options={[
+                          {
+                            value: "EDIT",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.EDIT"
+                            ),
+                          },
+                          {
+                            value: "READ_ONLY",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.READ_ONLY"
+                            ),
+                          },
+                          {
+                            value: "PRIVATE",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.PRIVATE"
+                            ),
+                          },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Can>
+            ) : null}
+
+            {repositoryEditor && renderTags()}
+            <Form.Item
+              name="description"
+              label={t("skillManagement.form.description")}
+              style={repositoryEditor ? undefined : { marginBottom: 10 }}
+              rules={[
+                {
+                  required: true,
+                  message: t("skillManagement.form.descriptionRequired"),
+                },
+              ]}
+            >
+              <TextArea
+                rows={repositoryEditor ? 4 : 2}
+                showCount={repositoryEditor}
+                count={repositoryEditor ? { max: 1000 } : undefined}
+                placeholder={t("skillManagement.form.descriptionPlaceholder")}
+                readOnly={readOnly}
+                style={repositoryEditor ? undefined : { resize: "none" }}
+              />
             </Form.Item>
-          ) : null}
+            {!repositoryEditor && renderTags()}
+          </div>
+          {repositoryGroupSettings}
         </Form>
       </div>
 
       <div
-        className={`flex min-h-0 flex-1 flex-col ${repositoryLayout ? "min-h-[692px]" : readOnly ? "min-h-[300px]" : ""}`}
+        className={`${showRepositoryGroups ? "hidden" : "flex"} min-h-0 flex-1 flex-col ${repositoryLayout ? "min-h-[692px]" : readOnly ? "min-h-[300px]" : ""}`}
       >
         {repositoryEditor && (
           <h3 className="mb-2 text-body-2 font-semibold">
@@ -434,7 +453,7 @@ export default function SkillDraftPanel({
         <div
           className={
             repositoryEditor
-              ? `${panel.panel} min-h-[280px] flex-1`
+              ? `${panel.panel} h-[460px]`
               : "flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
           }
         >
@@ -480,9 +499,15 @@ export default function SkillDraftPanel({
                 />
               ) : null}
             </div>
-            {repositoryLayout && (
+            {(repositoryEditor || repositoryLayout) && (
               <Input
+                className={
+                  repositoryEditor
+                    ? "!mx-2 !mt-2 !w-[calc(100%-1rem)]"
+                    : undefined
+                }
                 allowClear
+                prefix={repositoryEditor ? <Search size={14} /> : undefined}
                 aria-label={t("resourceCenter.search")}
                 placeholder={t("resourceCenter.search")}
                 value={fileSearch}

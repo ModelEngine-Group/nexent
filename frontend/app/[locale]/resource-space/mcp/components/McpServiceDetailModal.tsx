@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { useEffect, useState } from "react";
-import { ArrowRight, RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import {
   App,
   Button,
@@ -10,15 +10,14 @@ import {
   Input,
   InputNumber,
   Select,
-  Steps,
 } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   McpDeploymentType,
   McpServiceStatus,
   McpTransportType,
-  MCP_EDIT_SERVICE_DRAWER_WIDTH,
 } from "@/const/mcpTools";
+import { RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH } from "@/const/resourceRepository";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { resolveDeploymentType, toPrettyRegistryJson } from "@/lib/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
@@ -33,8 +32,10 @@ import panel from "@/components/resource/resource-panel.module.css";
 import { Drawer } from "antd";
 import McpHeaderFields from "./McpHeaderFields";
 import RepositoryMcpIcon from "./shared/RepositoryMcpIcon";
+import McpConfigurationSteps from "./shared/McpConfigurationSteps";
 import McpDeploymentCards from "./shared/McpDeploymentCards";
 import McpGroupSelectionTable from "./shared/McpGroupSelectionTable";
+import McpTagField from "./shared/McpTagField";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
@@ -243,7 +244,7 @@ export default function McpServiceDetailModal({
       <ConfigProvider
         theme={{
           components: {
-            Form: { itemMarginBottom: 16 },
+            Form: { itemMarginBottom: 16, verticalLabelPadding: "0 0 8px" },
           },
         }}
       >
@@ -256,57 +257,48 @@ export default function McpServiceDetailModal({
             />
           }
           closable={{ placement: "end", "aria-label": t("common.close") }}
-          size={`min(${MCP_EDIT_SERVICE_DRAWER_WIDTH}px, 100vw)`}
+          size={`min(${RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH}px, 100vw)`}
           classNames={{
             body: "repository-detail-body mcp-edit-drawer-body !mb-4",
           }}
           onClose={onClose}
           footer={
-            <div className={panel.footerActions}>
-              {selectedService.permission === "EDIT" && (
-                <Button
-                  type="text"
-                  danger
-                  className="mr-auto"
-                  icon={<Trash2 size={15} aria-hidden />}
-                  loading={detail.deleting}
-                  disabled={detail.saving}
-                  onClick={() =>
-                    modal.confirm({
-                      centered: true,
-                      title: t("mcpTools.mine.deleteConfirmTitle"),
-                      content: t("mcpTools.mine.deleteConfirmDescription", {
-                        name: selectedService.name,
-                      }),
-                      okText: t("common.delete"),
-                      cancelText: t("common.cancel"),
-                      okButtonProps: { danger: true },
-                      onOk: detail.remove,
-                    })
-                  }
-                >
-                  {t("common.delete")}
-                </Button>
+            <div className="flex flex-wrap items-center justify-end gap-4">
+              {!showGroupStep && (
+                <div className="mr-auto flex flex-wrap items-center gap-2">
+                  <Button
+                    icon={<RefreshCw size={14} aria-hidden />}
+                    loading={detail.healthChecking}
+                    disabled={
+                      connectionChanged ||
+                      detail.saving ||
+                      detail.loadingTools ||
+                      isReadOnly
+                    }
+                    onClick={async () => {
+                      if (connectionChanged || isReadOnly) return;
+                      if (await detail.runHealthCheck())
+                        await detail.refreshTools();
+                    }}
+                  >
+                    {t("mcpTools.editDetail.testConnection")}
+                  </Button>
+                  {connectionChanged && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("mcpTools.editDetail.saveBeforeTest")}
+                    </p>
+                  )}
+                </div>
               )}
-              <Button className="min-w-[88px]" onClick={onClose}>
-                {t("common.cancel")}
-              </Button>
+              <Button onClick={onClose}>{t("common.close")}</Button>
               {showGroupStep && (
-                <Button className="min-w-[88px]" onClick={() => setStep(0)}>
-                  {t("common.back")}
-                </Button>
+                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
               )}
               <Button
                 type="primary"
-                className="min-w-[88px]"
+                autoInsertSpace={false}
                 loading={detail.saving}
-                disabled={isReadOnly || detail.deleting}
-                icon={
-                  canSelectGroups && !showGroupStep && !isReadOnly ? (
-                    <ArrowRight size={15} aria-hidden />
-                  ) : undefined
-                }
-                iconPlacement="end"
+                disabled={isReadOnly}
                 onClick={async () => {
                   if (!canSelectGroups || showGroupStep) {
                     await handleSave();
@@ -332,250 +324,171 @@ export default function McpServiceDetailModal({
           }
         >
           <div className="flex w-full min-w-0 flex-col gap-4 bg-background">
-            {canSelectGroups && (
-              <Steps
-                className="shrink-0 border-b border-border pb-3"
-                current={showGroupStep ? 1 : 0}
-                size="small"
-                responsive={false}
-                items={[
-                  {
-                    title: t("mcpTools.addModal.configureStep"),
-                    content: t("mcpTools.editDetail.configureStepDescription"),
-                  },
-                  {
-                    title: t("mcpTools.editDetail.accessStep"),
-                    content: t("mcpTools.editDetail.accessStepDescription"),
-                  },
-                ]}
-              />
-            )}
+            {canSelectGroups && <McpConfigurationSteps current={step} />}
             <Form
               form={form}
               layout="vertical"
               colon={false}
               className={`${panel.editForm} space-y-4`}
             >
-              <div className={showGroupStep ? "hidden" : "flex flex-col gap-4"}>
-                <section
-                  className={`${panel.editSection} flex flex-col gap-4`}
-                  aria-labelledby="mcp-edit-basic"
+              <div hidden={showGroupStep}>
+                <McpDeploymentCards
+                  ariaLabel={t("mcpTools.addModal.configureStep")}
+                  value={deploymentType}
+                  includeLocalImage={enableUploadImage}
+                  className="!mb-4"
+                />
+                <Form.Item
+                  name="name"
+                  label={t("mcpTools.addModal.name")}
+                  rules={rules.name}
                 >
-                  <h3 id="mcp-edit-basic" className="text-body-2 font-semibold">
-                    {t("mcpTools.editDetail.basic")}
-                  </h3>
-                  <Form.Item
-                    name="name"
-                    label={t("mcpTools.addModal.name")}
-                    rules={rules.name}
-                    className="!mb-0"
-                  >
-                    <Input
-                      placeholder={t(
-                        isLocalImage
-                          ? "mcpConfig.uploadImage.serviceNamePlaceholder"
-                          : "mcpConfig.editServer.serviceNamePlaceholder"
+                  <Input
+                    placeholder={t(
+                      isLocalImage
+                        ? "mcpConfig.uploadImage.serviceNamePlaceholder"
+                        : "mcpConfig.editServer.serviceNamePlaceholder"
+                    )}
+                    maxLength={isLocalImage ? undefined : 20}
+                    autoComplete={isRemoteLink ? "off" : undefined}
+                    disabled={isReadOnly}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="description"
+                  label={t("common.description")}
+                  rules={rules.description}
+                  extra={t("mcpTools.editDetail.descriptionHint")}
+                >
+                  <Input.TextArea
+                    rows={4}
+                    placeholder={t("mcpTools.detail.serviceDescription")}
+                    disabled={isReadOnly}
+                  />
+                </Form.Item>
+                {(isRemoteLink || isApi) && (
+                  <div className="grid items-start gap-x-3 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.4fr)]">
+                    <Form.Item
+                      name="serverUrl"
+                      label={t(
+                        isApi
+                          ? "mcpConfig.openapiService.form.serverUrl"
+                          : "mcpTools.addModal.serverUrl"
                       )}
-                      maxLength={isLocalImage ? undefined : 20}
-                      autoComplete={isRemoteLink ? "off" : undefined}
-                      disabled={isReadOnly}
+                      rules={rules.httpUrl}
+                      className={isApi ? "col-span-full" : undefined}
+                    >
+                      <Input
+                        placeholder={t(
+                          isApi
+                            ? "mcpConfig.openapiService.form.serverUrlPlaceholder"
+                            : "mcpConfig.addServer.urlPlaceholder"
+                        )}
+                        autoComplete="off"
+                        disabled={isReadOnly}
+                      />
+                    </Form.Item>
+                    {isRemoteLink && (
+                      <Form.Item label={t("mcpTools.editDetail.protocol")}>
+                        <Input
+                          readOnly
+                          aria-label={t("mcpTools.editDetail.protocol")}
+                          value={
+                            remoteType === "streamable-http"
+                              ? "Streamable HTTP"
+                              : remoteType === "sse"
+                                ? "SSE"
+                                : t("mcpTools.editDetail.protocolAuto")
+                          }
+                        />
+                      </Form.Item>
+                    )}
+                  </div>
+                )}
+                {(isContainer || isLocalImage) && (
+                  <Form.Item
+                    label={t("mcpConfig.addContainer.port")}
+                    extra={
+                      isLocalImage
+                        ? t("mcpConfig.uploadImage.fileHint")
+                        : undefined
+                    }
+                  >
+                    <InputNumber
+                      value={draft.containerPort}
+                      min={1}
+                      max={65535}
+                      className="!w-full"
+                      controls={false}
+                      disabled
                     />
                   </Form.Item>
+                )}
+                {isApi && (
                   <Form.Item
-                    name="description"
-                    label={t("common.description")}
-                    rules={rules.description}
-                    extra={t("mcpTools.editDetail.descriptionHint")}
-                    className="!mb-0"
+                    name="openApiJson"
+                    label={t("mcpConfig.openapiService.form.openapiJson")}
+                    rules={rules.openApiJson}
+                    extra={t("mcpConfig.openApiToMcp.form.apiJsonHint")}
                   >
                     <Input.TextArea
                       rows={4}
-                      placeholder={t("mcpTools.detail.serviceDescription")}
+                      placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                       disabled={isReadOnly}
                     />
                   </Form.Item>
+                )}
+                {isContainer && (
                   <Form.Item
-                    label={t("mcpTools.detail.tags")}
-                    className="!mb-0"
+                    name="containerConfigJson"
+                    label={t("mcpTools.detail.containerConfig")}
+                    rules={rules.containerConfig}
+                    extra={t("mcpConfig.addContainer.configHint")}
                   >
-                    <div className="flex min-h-8 min-w-0 items-center gap-2 rounded border border-[#C9C9C9] px-3">
-                      <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-                        <ResourceTagChips
-                          resourceType="mcp_service"
-                          resourceId={String(selectedService.mcpId)}
-                          max={4}
-                          refreshKey={tagPreviewRefreshKey}
-                          singleLine
-                          emptyText={
-                            <span className="text-sm text-slate-400">—</span>
-                          }
-                        />
-                      </div>
-                      <Button
-                        type="link"
-                        size="small"
-                        disabled={isReadOnly}
-                        onClick={() => setAssignOpen(true)}
-                      >
-                        {t("tagManagement.action.editTags")}
-                      </Button>
-                    </div>
-                  </Form.Item>
-                </section>
-                <section
-                  className={`${panel.editSection} flex flex-col gap-4`}
-                  aria-labelledby="mcp-edit-connection"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3
-                      id="mcp-edit-connection"
-                      className="text-body-2 font-semibold"
-                    >
-                      {t("mcpTools.editDetail.connection")}
-                    </h3>
-                    <Button
-                      size="small"
-                      icon={<RefreshCw size={14} aria-hidden />}
-                      loading={detail.healthChecking}
-                      disabled={
-                        connectionChanged ||
-                        detail.saving ||
-                        detail.loadingTools ||
-                        isReadOnly
-                      }
-                      onClick={async () => {
-                        if (connectionChanged || isReadOnly) return;
-                        if (await detail.runHealthCheck())
-                          await detail.refreshTools();
-                      }}
-                    >
-                      {t("mcpTools.editDetail.testConnection")}
-                    </Button>
-                  </div>
-                  {connectionChanged && (
-                    <p className="text-xs text-muted-foreground">
-                      {t("mcpTools.editDetail.saveBeforeTest")}
-                    </p>
-                  )}
-                  <McpDeploymentCards
-                    ariaLabel={t("mcpTools.detail.addMethod")}
-                    value={deploymentType}
-                    includeLocalImage={enableUploadImage}
-                  />
-                  {(isRemoteLink || isApi) && (
-                    <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.4fr)]">
-                      <Form.Item
-                        name="serverUrl"
-                        label={t("mcpTools.detail.serverUrl")}
-                        rules={rules.httpUrl}
-                        className="!mb-0"
-                      >
-                        <Input
-                          placeholder={t(
-                            isApi
-                              ? "mcpConfig.openapiService.form.serverUrlPlaceholder"
-                              : "mcpConfig.addServer.urlPlaceholder"
-                          )}
-                          autoComplete="off"
-                          disabled={isReadOnly}
-                        />
-                      </Form.Item>
-                      {isRemoteLink && (
-                        <Form.Item
-                          label={t("mcpTools.editDetail.protocol")}
-                          className="!mb-0"
-                        >
-                          <Input
-                            readOnly
-                            aria-label={t("mcpTools.editDetail.protocol")}
-                            value={
-                              remoteType === "streamable-http"
-                                ? "Streamable HTTP"
-                                : remoteType === "sse"
-                                  ? "SSE"
-                                  : t("mcpTools.editDetail.protocolAuto")
-                            }
-                          />
-                        </Form.Item>
+                    <Input.TextArea
+                      rows={4}
+                      className="font-mono"
+                      placeholder={t(
+                        "mcpConfig.addContainer.configPlaceholder"
                       )}
-                    </div>
-                  )}
-                  {(isRemoteLink || isLocalImage) && (
-                    <Form.Item
-                      name="authorizationToken"
-                      label={t("mcpConfig.editServer.authorizationToken")}
-                      rules={rules.authToken}
-                      extra={t("mcpTools.editDetail.tokenHint")}
-                      className="!mb-0"
-                    >
-                      <Input.Password
-                        placeholder={t(
-                          "mcpConfig.editServer.authorizationTokenPlaceholder"
-                        )}
-                        autoComplete="new-password"
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
-                  )}
-                  {(isRemoteLink || isApi) && (
-                    <McpHeaderFields readOnly={isReadOnly} />
-                  )}
-                  {isApi && (
-                    <Form.Item
-                      name="openApiJson"
-                      label={t("mcpConfig.openapiService.form.openapiJson")}
-                      rules={rules.openApiJson}
-                      extra={t("mcpConfig.openApiToMcp.form.apiJsonHint")}
-                      className="!mb-0"
-                    >
-                      <Input.TextArea
-                        rows={6}
-                        placeholder={t(
-                          "mcpConfig.openApiToMcp.jsonPlaceholder"
-                        )}
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
-                  )}
-                  {isContainer && (
-                    <Form.Item
-                      name="containerConfigJson"
-                      label={t("mcpTools.detail.containerConfig")}
-                      rules={rules.containerConfig}
-                      extra={t("mcpConfig.addContainer.configHint")}
-                      className="!mb-0"
-                    >
-                      <Input.TextArea
-                        rows={6}
-                        className="font-mono"
-                        placeholder={t(
-                          "mcpConfig.addContainer.configPlaceholder"
-                        )}
-                        disabled={isReadOnly}
-                      />
-                    </Form.Item>
-                  )}
-                  {(isContainer || isLocalImage) && (
-                    <Form.Item
-                      label={t("mcpConfig.addContainer.port")}
-                      extra={
-                        isLocalImage
-                          ? t("mcpConfig.uploadImage.fileHint")
-                          : undefined
-                      }
-                      className="!mb-0"
-                    >
-                      <InputNumber
-                        value={draft.containerPort}
-                        min={1}
-                        max={65535}
-                        className="!w-full"
-                        controls={false}
-                        disabled
-                      />
-                    </Form.Item>
-                  )}
-                </section>
+                      disabled={isReadOnly}
+                    />
+                  </Form.Item>
+                )}
+                {(isRemoteLink || isApi) && (
+                  <McpHeaderFields readOnly={isReadOnly} />
+                )}
+                {(isRemoteLink || isLocalImage) && (
+                  <Form.Item
+                    name="authorizationToken"
+                    label={t("mcpTools.addModal.bearerTokenOptional")}
+                    rules={rules.authToken}
+                    extra={t("mcpTools.editDetail.tokenHint")}
+                  >
+                    <Input.Password
+                      placeholder={t(
+                        "mcpConfig.editServer.authorizationTokenPlaceholder"
+                      )}
+                      autoComplete="new-password"
+                      disabled={isReadOnly}
+                    />
+                  </Form.Item>
+                )}
+                <McpTagField
+                  disabled={isReadOnly}
+                  onEdit={() => setAssignOpen(true)}
+                >
+                  <ResourceTagChips
+                    resourceType="mcp_service"
+                    resourceId={String(selectedService.mcpId)}
+                    max={4}
+                    refreshKey={tagPreviewRefreshKey}
+                    singleLine
+                    emptyText={
+                      <span className="text-sm text-muted-foreground">—</span>
+                    }
+                  />
+                </McpTagField>
               </div>
               {canSelectGroups && (
                 <div hidden={!showGroupStep}>

@@ -10,3 +10,4 @@ export const RESOURCE_REPOSITORY_TABS = [
 export const RESOURCE_TYPES = ["agent", "mcp", "skill"] as const;
 
 export const RESOURCE_REPOSITORY_DETAIL_DRAWER_WIDTH = 800;
+export const RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH = 1180;

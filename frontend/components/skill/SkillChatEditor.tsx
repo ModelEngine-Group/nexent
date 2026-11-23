@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Form, Input, Steps, Select } from "antd";
+import { Alert, App, Button, Form, Input, Select } from "antd";
 import { Maximize2, Minimize2, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -19,7 +19,7 @@ import { tagManagementApi } from "@/services/tagManagementService";
 import SkillCreationFiles from "@/components/skill/SkillCreationFiles";
 import resourcePanel from "@/components/resource/resource-panel.module.css";
 import SkillGroupSelection from "@/components/skill/SkillGroupSelection";
-import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
+import SkillConfigurationHeader from "@/components/skill/SkillConfigurationHeader";
 import { isValidSkillDraftPath } from "@/lib/skillCreationDraft";
 import type { SkillChatPayload } from "@/lib/skillChatDraft";
 import type { SkillFileContent } from "@/types/skill";
@@ -489,58 +489,49 @@ export default function SkillChatEditor({
           />
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-3 p-4">
-        <SkillTypeIcon
-          name={draft?.name || payload?.name || ""}
-          tags={payload?.tags}
-        />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-medium">
-            {draft?.name || t("skillChat.untitled")}
-          </h2>
-          <p className="text-xs text-[#777777]">
-            {cacheError
-              ? t("skillChat.localSaveFailed")
-              : savedAt
-                ? t("skillChat.localSavedAt", {
-                    time: new Date(savedAt).toLocaleTimeString(),
-                  })
-                : t("skillChat.localDraft")}
-          </p>
-        </div>
-        <Steps
-          current={tab === "configure" ? 0 : 1}
-          size="small"
-          responsive={false}
-          className="!w-full !max-w-[360px]"
-          items={[
-            { title: t("skillCreation.parameters") },
-            { title: t("skillCreation.groups") },
-          ]}
-        />
-        {tab === "groups" && (
-          <Button disabled={unavailable} onClick={() => setTab("configure")}>
-            {t("skillCreation.previous")}
-          </Button>
-        )}
-        <Button
-          type="primary"
-          className="min-w-[88px]"
-          loading={saving}
-          disabled={
-            unavailable ||
-            !draft ||
-            lookup !== "ready" ||
-            (tab === "groups" && (groupsLoading || groupsError)) ||
-            tagsLoading ||
-            librariesLoading ||
-            Boolean(tagsError || librariesError)
-          }
-          onClick={tab === "configure" ? nextStep : save}
-        >
-          {t(tab === "configure" ? "skillCreation.next" : "common.confirm")}
-        </Button>
-      </div>
+      <SkillConfigurationHeader
+        name={draft?.name || ""}
+        tags={payload?.tags}
+        subtitle={
+          cacheError
+            ? t("skillChat.localSaveFailed")
+            : savedAt
+              ? t("skillChat.localSavedAt", {
+                  time: new Date(savedAt).toLocaleTimeString(),
+                })
+              : t("skillChat.localDraft")
+        }
+        groupStep={tab === "groups"}
+        actions={
+          <>
+            {tab === "groups" && (
+              <Button
+                disabled={unavailable}
+                onClick={() => setTab("configure")}
+              >
+                {t("skillCreation.previous")}
+              </Button>
+            )}
+            <Button
+              type="primary"
+              className="min-w-[88px]"
+              loading={saving}
+              disabled={
+                unavailable ||
+                !draft ||
+                lookup !== "ready" ||
+                (tab === "groups" && (groupsLoading || groupsError)) ||
+                tagsLoading ||
+                librariesLoading ||
+                Boolean(tagsError || librariesError)
+              }
+              onClick={tab === "configure" ? nextStep : save}
+            >
+              {t(tab === "configure" ? "skillCreation.next" : "common.confirm")}
+            </Button>
+          </>
+        }
+      />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
         {running && (
           <Alert

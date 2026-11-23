@@ -17,6 +17,7 @@ import {
   Tabs,
   Form,
   Input,
+  Select,
   Button,
   message,
   Flex,
@@ -51,7 +52,11 @@ import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
 import SkillPanelTitle from "@/components/skill/SkillPanelTitle";
+import SkillConfigurationHeader from "@/components/skill/SkillConfigurationHeader";
+import SkillGroupSelection from "@/components/skill/SkillGroupSelection";
+import { usePermission } from "@/hooks/permission/usePermission";
 import resourcePanel from "@/components/resource/resource-panel.module.css";
+import { RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH } from "@/const/resourceRepository";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -167,6 +172,11 @@ export default function SkillBuildModal({
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
+  const isRepositoryEdit = repositoryLayout && isEditMode;
+  const { isReady, can } = usePermission();
+  const showGroupSteps = isRepositoryEdit && isReady && can("group:read");
+  const [groupStep, setGroupStep] = useState(false);
+  const showGroupStep = showGroupSteps && groupStep;
   const creationConversationId = useRef<string | undefined>(undefined);
   const savedCreatorSkillId = useRef<number | undefined>(undefined);
   const isAdmin = hasRole(user, ...CAN_EDIT_ALL_ROLES);
@@ -176,7 +186,12 @@ export default function SkillBuildModal({
       !!user?.id &&
       String(editingSkill.created_by) === String(user.id));
   const canEditGroupSettings = isAdmin || isCreator;
-  const { data: groupData } = useGroupList(user?.tenantId ?? null);
+  const {
+    data: groupData,
+    isLoading: groupsLoading,
+    isError: groupsError,
+    refetch: refreshGroups,
+  } = useGroupList(user?.tenantId ?? null);
   const groupNamesById = useMemo(
     () =>
       new Map(
@@ -364,6 +379,7 @@ export default function SkillBuildModal({
     };
 
     setActiveTab("interactive");
+    setGroupStep(false);
     setEditFilesError(null);
     setLoadedEditSkillId(null);
     setIsLoadingEditFiles(true);
@@ -465,6 +481,7 @@ export default function SkillBuildModal({
   };
 
   const closeModal = () => {
+    setGroupStep(false);
     form.resetFields();
     onCancel();
   };
@@ -943,6 +960,43 @@ export default function SkillBuildModal({
       activeSkillTab={activeSkillTab}
       setActiveSkillTab={setActiveSkillTab}
       repositoryEditor={repositoryLayout}
+      showRepositoryGroups={showGroupStep}
+      repositoryGroupSettings={
+        showGroupSteps ? (
+          <div hidden={!showGroupStep} className="rounded-lg bg-white p-4">
+            <Form.Item
+              name="ingroup_permission"
+              label={t("skillCreation.groupPermission")}
+            >
+              <Select
+                disabled={!canEditGroupSettings}
+                options={(["EDIT", "READ_ONLY", "PRIVATE"] as const).map(
+                  (value) => ({
+                    value,
+                    label: t(
+                      `tenantResources.knowledgeBase.permission.${value}`
+                    ),
+                  })
+                )}
+              />
+            </Form.Item>
+            <Form.Item name="group_ids" label={t("skillCreation.selectGroups")}>
+              <SkillGroupSelection
+                groups={
+                  canEditGroupSettings
+                    ? filteredGroups
+                    : (groupData?.groups ?? [])
+                }
+                loading={groupsLoading}
+                isError={groupsError}
+                disabled={!canEditGroupSettings}
+                preserveUnlistedSelection
+                onRetry={() => void refreshGroups()}
+              />
+            </Form.Item>
+          </div>
+        ) : undefined
+      }
       isStreaming={isStreaming}
       onNameChange={handleNameChange}
       textareaRefs={textareaRefs}
@@ -1035,7 +1089,7 @@ export default function SkillBuildModal({
         {...(repositoryLayout
           ? {
               onClose: handleModalClose,
-              size: "min(1180px, 100vw)",
+              size: `min(${RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH}px, 100vw)`,
               closable: {
                 placement: "end" as const,
                 "aria-label": t("common.close"),
@@ -1056,6 +1110,9 @@ export default function SkillBuildModal({
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
+                  ...(isRepositoryEdit
+                    ? { padding: 0, overflow: "hidden" }
+                    : {}),
                 },
               }
             : {
@@ -1076,44 +1133,49 @@ export default function SkillBuildModal({
                 },
               }
         }
-        footer={[
-          <Button
-            key="cancel"
-            className={repositoryLayout ? "min-w-[88px]" : undefined}
-            onClick={handleModalClose}
-          >
-            {t("common.cancel")}
-          </Button>,
-          isEditMode || activeTab === "interactive" ? (
-            <Button
-              key="submit"
-              type="primary"
-              className={repositoryLayout ? "min-w-[88px]" : undefined}
-              loading={isSubmitting}
-              onClick={handleManualSubmit}
-              disabled={
-                isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
-              }
-            >
-              {getConfirmButtonText()}
-            </Button>
-          ) : (
-            <Button
-              key="submit"
-              type="primary"
-              className={repositoryLayout ? "min-w-[88px]" : undefined}
-              loading={isSubmitting}
-              onClick={handleUploadSubmit}
-              disabled={
-                !uploadFile ||
-                !uploadExtractedSkillName.trim() ||
-                !uploadIsCreateMode
-              }
-            >
-              {getConfirmButtonText()}
-            </Button>
-          ),
-        ]}
+        footer={
+          isRepositoryEdit
+            ? null
+            : [
+                <Button
+                  key="cancel"
+                  className={repositoryLayout ? "min-w-[88px]" : undefined}
+                  onClick={handleModalClose}
+                >
+                  {t("common.cancel")}
+                </Button>,
+                isEditMode || activeTab === "interactive" ? (
+                  <Button
+                    key="submit"
+                    type="primary"
+                    className={repositoryLayout ? "min-w-[88px]" : undefined}
+                    loading={isSubmitting}
+                    onClick={handleManualSubmit}
+                    disabled={
+                      isEditMode &&
+                      (isLoadingEditFiles || Boolean(editFilesError))
+                    }
+                  >
+                    {getConfirmButtonText()}
+                  </Button>
+                ) : (
+                  <Button
+                    key="submit"
+                    type="primary"
+                    className={repositoryLayout ? "min-w-[88px]" : undefined}
+                    loading={isSubmitting}
+                    onClick={handleUploadSubmit}
+                    disabled={
+                      !uploadFile ||
+                      !uploadExtractedSkillName.trim() ||
+                      !uploadIsCreateMode
+                    }
+                  >
+                    {getConfirmButtonText()}
+                  </Button>
+                ),
+              ]
+        }
       >
         {(!repositoryLayout || !isEditMode) && (
           <Tabs
@@ -1136,6 +1198,59 @@ export default function SkillBuildModal({
                 <div className="h-16 w-16" />
               )}
             </Spin>
+          </div>
+        ) : isRepositoryEdit ? (
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+            <div className="flex min-h-[460px] min-w-0 flex-col p-3 lg:min-h-0 lg:w-2/5">
+              <div className="min-h-0 flex-1">{renderChatPanel()}</div>
+            </div>
+            <section className="flex min-h-[600px] min-w-0 flex-1 flex-col border-t border-border bg-muted/30 lg:min-h-0 lg:border-l lg:border-t-0">
+              <SkillConfigurationHeader
+                name={interactiveSkillName || editingSkillName}
+                tags={editingSkill?.tags}
+                groupStep={showGroupSteps ? showGroupStep : undefined}
+                actions={
+                  <>
+                    {showGroupStep && (
+                      <Button
+                        disabled={isSubmitting}
+                        onClick={() => setGroupStep(false)}
+                      >
+                        {t("skillCreation.previous")}
+                      </Button>
+                    )}
+                    <Button
+                      type="primary"
+                      className="min-w-[88px]"
+                      loading={isSubmitting}
+                      disabled={isLoadingEditFiles || Boolean(editFilesError)}
+                      onClick={async () => {
+                        if (!showGroupSteps || showGroupStep) {
+                          await handleManualSubmit();
+                          return;
+                        }
+                        if (
+                          await form
+                            .validateFields(["name", "description"])
+                            .catch(() => null)
+                        ) {
+                          setGroupStep(true);
+                        }
+                      }}
+                    >
+                      {t(
+                        showGroupSteps && !showGroupStep
+                          ? "skillCreation.next"
+                          : "skillManagement.mode.saveChanges"
+                      )}
+                    </Button>
+                  </>
+                }
+              />
+              <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+                {renderDraftPanel()}
+              </div>
+            </section>
           </div>
         ) : isEditMode || activeTab === "interactive" ? (
           <div

@@ -20,6 +20,7 @@ import SkillChatEditor from "./SkillChatEditor";
 import SkillPanelTitle from "./SkillPanelTitle";
 import SkillTypeIcon from "@/components/skill/SkillTypeIcon";
 import log from "@/lib/logger";
+import { RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH } from "@/const/resourceRepository";
 
 const EMPTY_SKILL_DRAFT: SkillChatPayload = {
   name: "",
@@ -151,7 +152,7 @@ export default function SkillChatCreateModal({
         />
       }
       onClose={() => close()}
-      size="min(1600px, 100vw)"
+      size={`min(${RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH}px, 100vw)`}
       styles={{
         section: {
           height: "100dvh",

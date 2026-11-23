@@ -5,6 +5,7 @@ import type { ComponentProps } from "react";
 import { expect, test, vi } from "vitest";
 import MineMcpServiceCard from "@/app/resource-space/mcp/components/MineMcpServiceCard";
 import { RepositoryPresentationContext } from "@/hooks/useRepositoryPresentation";
+import { tagManagementApi } from "@/services/tagManagementService";
 import type { McpServiceItem } from "@/types/mcpTools";
 import {
   McpHealthStatus,
@@ -16,7 +17,11 @@ import {
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("@/components/tag/ResourceTagChips", () => ({ default: () => null }));
+vi.mock("@/services/tagManagementService", () => ({
+  tagManagementApi: {
+    getAssignments: vi.fn().mockResolvedValue({ assignments: [] }),
+  },
+}));
 vi.mock("@/app/resource-space/components/ResourceReviewCenter", () => ({
   ResourceReviewLink: () => null,
 }));
@@ -64,6 +69,29 @@ function setup(
   );
   return props;
 }
+
+test("shows assigned tags on repository cards without legacy tags", async () => {
+  vi.mocked(tagManagementApi.getAssignments).mockResolvedValueOnce({
+    resource_type: "mcp_service",
+    resource_id: "7",
+    assignment_count: 1,
+    assignment_capacity: 100,
+    assignments: [
+      {
+        definition_id: 1,
+        definition_key: "category",
+        definition_name: "Category",
+        selection_mode: "single_select",
+        value_id: 4,
+        display_value: "Documents",
+        value_status: "active",
+      },
+    ],
+  });
+
+  setup("cards");
+  expect(await screen.findByText("Documents")).toBeInTheDocument();
+});
 
 test("offers listing instead of a version update for an offline MCP with an approved review", async () => {
   const props = setup("cards", {}, {

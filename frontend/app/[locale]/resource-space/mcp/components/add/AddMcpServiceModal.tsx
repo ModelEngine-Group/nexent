@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Drawer } from "antd";
-import { MCP_EDIT_SERVICE_DRAWER_WIDTH } from "@/const/mcpTools";
+import { RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH } from "@/const/resourceRepository";
 import { useTranslation } from "react-i18next";
 import { Button } from "antd";
 import { X } from "lucide-react";
@@ -39,7 +39,7 @@ export default function AddMcpServiceModal({
     <Drawer
       open
       placement="right"
-      size={`min(${MCP_EDIT_SERVICE_DRAWER_WIDTH}px, 100vw)`}
+      size={`min(${RESOURCE_REPOSITORY_EDIT_DRAWER_WIDTH}px, 100vw)`}
       title={
         <div className="flex h-7 items-center justify-between">
           <span className="text-xl font-normal leading-7 text-[#191919]">

@@ -5,6 +5,7 @@ import { App } from "antd";
 import { beforeEach, expect, test, vi } from "vitest";
 import McpServiceDetailModal from "@/app/resource-space/mcp/components/McpServiceDetailModal";
 import McpDeploymentCards from "@/app/resource-space/mcp/components/shared/McpDeploymentCards";
+import AddMcpServiceLocalSection from "@/app/resource-space/mcp/components/add/local/AddMcpServiceLocalSection";
 import {
   McpDeploymentType,
   McpHealthStatus,
@@ -21,6 +22,8 @@ const actions = vi.hoisted(() => ({
   save: vi.fn(),
   setDraft: vi.fn(),
   remove: vi.fn(),
+  testConnection: vi.fn(),
+  submit: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -41,6 +44,12 @@ vi.mock("@/hooks/mcpTools/useMcpServiceDetail", () => ({
       })),
     },
   }),
+}));
+vi.mock("@/hooks/mcpTools/useMcpAddLocal", () => ({
+  useMcpAddLocal: () => ({ submit: actions.submit, submitting: false }),
+}));
+vi.mock("@/services/mcpToolsService", () => ({
+  testMcpConnectionService: actions.testConnection,
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { tenantId: "tenant-1" } }),
@@ -68,6 +77,7 @@ vi.mock("@/components/tag/TagDefinitionManagementModal", () => ({
 }));
 vi.mock("@/components/mcp/McpContainerLogsModal", () => ({
   McpContainerLogOutput: () => null,
+  default: () => null,
 }));
 
 const savedService: McpServiceItem = {
@@ -106,8 +116,98 @@ beforeEach(() => {
   actions.save.mockResolvedValue(true);
 });
 
-test("the edit drawer shows the creation options with the saved type selected", () => {
+function openCreate() {
+  render(
+    <App>
+      <AddMcpServiceLocalSection active onAdded={vi.fn()} onClose={vi.fn()} />
+    </App>
+  );
+  return screen.getByRole("button", {
+    name: "mcpTools.editDetail.testConnection",
+  });
+}
+
+test("puts connection testing in the edit footer in place of delete", () => {
   openDetail();
+  const testButton = screen.getByRole("button", {
+    name: "mcpTools.editDetail.testConnection",
+  });
+  expect(testButton.closest(".ant-drawer-footer")).toContainElement(
+    screen.getByRole("button", { name: "mcpTools.addModal.next" })
+  );
+  expect(screen.queryByRole("button", { name: "common.delete" })).toBeNull();
+});
+
+test.each([
+  [true, "mcpTools.registry.quickAddPicker.connectionSuccess"],
+  [false, "mcpTools.add.error.connectionFailed"],
+])(
+  "tests an unsaved remote MCP and reports result %s",
+  async (success, toast) => {
+    actions.testConnection.mockResolvedValue({
+      success: true,
+      data: { success },
+    });
+    const testButton = openCreate();
+    expect(testButton).toBeDisabled();
+    expect(testButton.parentElement).toContainElement(
+      screen.getByRole("button", { name: "mcpTools.addModal.next" })
+    );
+    fireEvent.change(screen.getByLabelText("mcpTools.addModal.serverUrl"), {
+      target: { value: "https://example.test/mcp" },
+    });
+    fireEvent.change(screen.getByLabelText("mcpTools.addModal.customHeaders"), {
+      target: { value: '{"X-Test":"sample"}' },
+    });
+    fireEvent.change(
+      screen.getByLabelText("mcpTools.addModal.bearerTokenOptional"),
+      {
+        target: { value: "sample-token" },
+      }
+    );
+    fireEvent.click(testButton);
+    expect(await screen.findByText(toast)).toBeInTheDocument();
+    expect(actions.testConnection).toHaveBeenCalledExactlyOnceWith({
+      server_url: "https://example.test/mcp",
+      authorization_token: "sample-token",
+      custom_headers: { "X-Test": "sample" },
+    });
+    expect(actions.submit).not.toHaveBeenCalled();
+  }
+);
+
+test("rejects malformed headers before making a connection request", async () => {
+  const testButton = openCreate();
+  fireEvent.change(screen.getByLabelText("mcpTools.addModal.serverUrl"), {
+    target: { value: "https://example.test/mcp" },
+  });
+  fireEvent.change(screen.getByLabelText("mcpTools.addModal.customHeaders"), {
+    target: { value: "[]" },
+  });
+  fireEvent.click(testButton);
+  expect(
+    await screen.findByText("mcpConfig.message.invalidCustomHeaders")
+  ).toBeInTheDocument();
+  expect(actions.testConnection).not.toHaveBeenCalled();
+});
+
+test("the edit drawer follows the creation field order with the saved type selected", () => {
+  openDetail();
+  const fields = [
+    screen.getByRole("radiogroup"),
+    screen.getByLabelText("mcpTools.addModal.name"),
+    screen.getByLabelText("common.description"),
+    screen.getByLabelText("mcpTools.addModal.serverUrl"),
+    screen.getByLabelText("mcpTools.editDetail.headerName"),
+    screen.getByLabelText("mcpTools.addModal.bearerTokenOptional"),
+    screen.getByRole("button", { name: "tagManagement.action.editTags" }),
+  ];
+  fields.slice(1).forEach((field, index) => {
+    expect(
+      fields[index].compareDocumentPosition(field) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
   const options = screen.getAllByRole("radio");
   expect(options).toHaveLength(3);
   expect(options[0]).toHaveAccessibleName(/mcpConfig.addServer.title/);

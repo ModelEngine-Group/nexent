@@ -84,7 +84,10 @@ export default function ResourceCard({
   const footerInHeader = compact && !measuredMineMcp;
   const measuredSkill = presentation?.resourceType === "skill";
   const uniformRepositorySize =
-    measuredAgent || measuredMcp || measuredMineMcp || measuredSkill;
+    presentation?.resourceType === "agent" ||
+    measuredMcp ||
+    measuredMineMcp ||
+    measuredSkill;
   const constrainMineTags = uniformRepositorySize && !repositoryView;
   const actionsInFooter =
     measuredSkill && repositoryView && footerLayout === "inline";
@@ -135,15 +138,8 @@ export default function ResourceCard({
         !selected && "border-slate-200 dark:border-slate-700",
         disabled && "cursor-not-allowed opacity-50",
         className,
-        measuredAgent &&
-          "rounded-xl border-[rgba(201,201,201,0.4)] px-[24px] py-[16px]",
-        measuredMcp &&
-          "min-h-[140px] rounded-xl border-[rgba(201,201,201,0.4)] px-6 py-4",
-        measuredMineMcp &&
-          "min-h-[142px] rounded-xl border-[rgba(201,201,201,0.4)] bg-white px-6 py-4",
-        measuredSkill &&
-          "min-h-[154px] rounded-xl border-[rgba(201,201,201,0.4)] px-6 py-4",
-        uniformRepositorySize && "min-h-0 h-[240px] @min-[440px]:h-[216px]"
+        uniformRepositorySize &&
+          "min-h-0 h-[240px] rounded-xl border-[rgba(201,201,201,0.4)] px-6 py-4 @min-[440px]:h-[216px]"
       )}
       onDoubleClick={onDoubleClick}
     >
@@ -174,20 +170,21 @@ export default function ResourceCard({
             <div
               className={cn(
                 "flex shrink-0 gap-3",
-                fixedHeaderLayout ? "min-h-[60px] items-center" : "items-start",
-                measuredMineMcp && "min-h-12 items-center",
-                measuredAgent && "min-h-14",
-                measuredMcp && "min-h-14 items-center",
-                measuredSkill && "min-h-14 items-center"
+                uniformRepositorySize
+                  ? "h-14 items-center"
+                  : fixedHeaderLayout
+                    ? "min-h-[60px] items-center"
+                    : "items-start"
               )}
             >
               {icon ? <span className="shrink-0">{icon}</span> : null}
               <div
                 className={cn(
                   "min-w-0 flex-1",
-                  measuredAgent && "self-end",
-                  fixedHeaderLayout &&
-                    "flex min-h-11 flex-col justify-between self-center"
+                  uniformRepositorySize
+                    ? "grid grid-rows-[24px_20px] items-center gap-1"
+                    : fixedHeaderLayout &&
+                        "flex min-h-11 flex-col justify-between self-center"
                 )}
               >
                 <h2
@@ -195,16 +192,9 @@ export default function ResourceCard({
                   title={typeof title === "string" ? title : undefined}
                   className={cn(
                     "truncate text-base font-semibold text-slate-900 dark:text-slate-100",
-                    (measuredAgent ||
-                      measuredMcp ||
-                      measuredMineMcp ||
-                      measuredSkill) &&
+                    uniformRepositorySize &&
                       "font-['HarmonyOS_Sans_SC',sans-serif] font-medium leading-6 tracking-normal text-[#191919]",
-                    (measuredAgent ||
-                      measuredMcp ||
-                      measuredMineMcp ||
-                      measuredSkill) &&
-                      bracketIndentClass
+                    uniformRepositorySize && bracketIndentClass
                   )}
                 >
                   {title}
@@ -213,8 +203,8 @@ export default function ResourceCard({
                   <div
                     className={cn(
                       "mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400",
-                      (measuredAgent || measuredMcp || measuredSkill) &&
-                        "mt-2 font-['HarmonyHeiTi',sans-serif] font-normal leading-[18px] tracking-normal text-[rgba(25,25,25,0.7)]"
+                      uniformRepositorySize &&
+                        "mt-0 min-w-0 font-['HarmonyHeiTi',sans-serif] font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]"
                     )}
                   >
                     {subtitle}
@@ -231,10 +221,9 @@ export default function ResourceCard({
                   data-resource-card-action
                   className={cn(
                     "flex shrink-0 items-start gap-1",
-                    fixedHeaderLayout && "self-center",
-                    (measuredSkill || measuredMcp) && "self-start",
-                    measuredAgent &&
-                      (subtitle ? "mb-[22px] self-end" : "-mb-1 self-end"),
+                    uniformRepositorySize
+                      ? "self-start"
+                      : fixedHeaderLayout && "self-center",
                     actionClassName
                   )}
                   onDoubleClick={(event) => event.stopPropagation()}
@@ -246,14 +235,17 @@ export default function ResourceCard({
               ) : null}
             </div>
             <div
-              className={cn("flex flex-1 flex-col", constrainMineTags && "min-h-0")}
+              className={cn(
+                "flex flex-1 flex-col",
+                constrainMineTags && "min-h-0"
+              )}
             >
               {statusRow ? (
                 <div className={cn("min-w-0", !measuredAgent && "mt-1")}>
                   {statusRow}
                 </div>
               ) : null}
-              {description ? (
+              {description || uniformRepositorySize ? (
                 <div
                   className={
                     descriptionLabel ? "flex items-start gap-2" : "contents"
@@ -272,10 +264,8 @@ export default function ResourceCard({
                         : statusRow
                           ? "mt-3"
                           : "mt-4",
-                      (measuredAgent || measuredMcp || measuredMineMcp) &&
-                        "min-h-10 font-['HarmonyOS_Sans_SC',sans-serif] text-xs font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]",
-                      measuredSkill &&
-                        "min-h-10 font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-[18px] tracking-normal text-[#777777]"
+                      uniformRepositorySize &&
+                        "h-10 min-h-10 shrink-0 font-['HarmonyHeiTi',sans-serif] text-xs font-normal leading-5 tracking-normal text-[rgba(25,25,25,0.7)]"
                     )}
                     style={{
                       display: "-webkit-box",
@@ -289,14 +279,14 @@ export default function ResourceCard({
                   </div>
                 </div>
               ) : null}
-              {tags ? (
+              {tags || uniformRepositorySize ? (
                 <div
                   className={cn(
                     "flex flex-wrap gap-2 text-xs [&>*]:max-w-full [&>*]:[overflow-wrap:anywhere]",
                     "pb-2",
                     compact ? "mt-2.5" : description ? "mt-3" : "mt-4",
-                    constrainMineTags &&
-                      "pointer-events-auto min-h-0 overflow-y-auto"
+                    uniformRepositorySize && "min-h-6 items-start pb-0",
+                    constrainMineTags && "pointer-events-auto overflow-y-auto"
                   )}
                 >
                   {tags}
