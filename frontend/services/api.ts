@@ -41,6 +41,8 @@ export const API_ENDPOINTS = {
     authorization: `${API_BASE_URL}/ops/authorization`,
     scope: `${API_BASE_URL}/ops/scope`,
     resources: `${API_BASE_URL}/ops/resources`,
+    agentMonitoringSummary: `${API_BASE_URL}/ops/v1/monitoring/agents/summary`,
+    agentMonitoringTrends: `${API_BASE_URL}/ops/v1/monitoring/agents/trends`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,

@@ -11,3 +11,5 @@ implementations:
 acceptance_bindings:
   AC-01: [OPS-MONITORING-UI-D4-001]
   AC-02: [OPS-MONITORING-UI-D4-001]
+  AC-03: [OPS-MONITORING-UI-D4-001]
+  AC-04: [OPS-MONITORING-UI-D4-001]

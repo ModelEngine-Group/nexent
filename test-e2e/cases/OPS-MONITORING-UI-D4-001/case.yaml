@@ -4,14 +4,14 @@ module: OPS-PLATFORM
 case:
   case_id: OPS-MONITORING-UI-D4-001
   feature_id: OPS-MONITORING-UI
-  requirement_ids: [OPS-MONITORING-UI-20261123]
-  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02]
-  title: Scope monitoring filters in the browser
+  requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123]
+  business_rule_ids: [OPS-MONITORING-UI-RULE-01, OPS-MONITORING-UI-RULE-02, OPS-MONITORING-UI-RULE-03]
+  title: Scope monitoring filters and Agent metrics in the browser
   type: E2E
   priority: P1
   status: active
   automation: automated
-  objective: Verify the five-tab shell and dependent selections against controlled directory responses.
+  objective: Verify monitoring selections and Agent metric reads using controlled API responses.
   preconditions:
   - Current source Web is available and browser-local directory routes provide an authorized SU session and two distinct tenants.
   test_data:
@@ -26,15 +26,23 @@ case:
   - order: 3
     action: Select an MCP service in the session tenant and one of its tools, then select another service and refresh.
     expected: The tool selection clears, the new service's tool list remains scoped, and only applicable directories are queried again.
+  - order: 4
+    action: Inspect Agent cards and switch between call count, success rate and Token trend. Change the group and refresh.
+    expected: The inventory count stays stable under group and date filtering. Summary and trend requests use the current scope. Token values preserve large integers and report usage coverage separately from publication status. Refresh repeats both reads.
+  - order: 5
+    action: Hold a request, change the Agent scope, release the earlier response, and exercise empty and failed reads.
+    expected: Loading, missing samples, no data, failure and true zero are distinguishable. Earlier responses cannot replace the current Agent view.
   expected_results:
   - The dashboard exposes the intended filters with deterministic calendar dates and explicit unavailable statistics.
-  - Tenant and MCP service transitions clear their dependent selections, and refresh only re-reads applicable directories.
+  - Tenant and MCP service transitions clear their dependent selections. MCP refresh only re-reads applicable directories.
+  - Agent cards and trend match the active scope and preserve value and publication semantics.
+  - Statistics requests refresh within the active range and stale responses never overwrite it.
   forbidden_side_effects:
-  - No statistics endpoint, forced rebuild, or cross-tenant MCP tool directory request is sent.
+  - Statistics requests are limited to Agent summary and trend GETs. No forced rebuild or cross-tenant MCP tool directory request is sent.
   actor: Authorized super administrator
   journey: [Open dashboard, Change date interval, Scope a resource, Change tenant, Drill from MCP service to tool, Refresh]
   final_business_result:
-  - An operator can frame a valid monitoring scope before statistics are connected.
+  - An operator can select a valid monitoring scope and inspect the connected Agent statistics.
   failure_evidence: [Browser control assertions and sanitized request paths]
   execution:
     profiles:
@@ -49,4 +57,13 @@ case:
     description: Directory requests, dependent filters and refresh obey the tenant and service scopes.
     steps: [2, 3]
     expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Agent cards and trend preserve inventory scope, metric switching and coverage semantics.
+    steps: [4]
+    expected_results: [3]
+  - id: AC-04
+    description: Browser requests are isolated by scope and display refresh, empty and failure states.
+    steps: [4, 5]
+    expected_results: [4]
     forbidden_side_effects: [1]

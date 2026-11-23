@@ -11,8 +11,10 @@ feature:
   - rule_id: OPS-MONITORING-UI-RULE-01
     description: The existing dashboard entry presents five tabs, with shared tenant and calendar dates and tenant-scoped group and resource choices.
   - rule_id: OPS-MONITORING-UI-RULE-02
-    description: A tenant change clears all dependent selections and a service change clears its tool selection. A filter refresh reads only the active directories.
+    description: A tenant change clears all dependent selections and a service change clears its tool selection. Refresh reads the active directories and connected statistics.
+  - rule_id: OPS-MONITORING-UI-RULE-03
+    description: Agent inventory is scoped by tenant. Execution and Token cards and daily trends use the selected tenant, Agent, group and dates. Missing values, coverage and publication state remain explicit.
   required_test_stages: [D4]
   source:
-    requirement_ids: [OPS-MONITORING-UI-20261123]
+    requirement_ids: [OPS-MONITORING-UI-20261123, OPS-AGENT-UI-METRICS-20261123]
     spec_path: nexent/management-platform-monitoring/changes/ops-monitoring-ui-scope/proposal.md

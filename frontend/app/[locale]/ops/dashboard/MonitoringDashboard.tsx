@@ -18,6 +18,8 @@ import { useReducer, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { hasRole } from "@/lib/roles";
+import { AgentMonitoringPanels } from "./AgentMonitoringPanels";
+import { agentMonitoringSelection } from "./agentMonitoringValues";
 import {
   dateFormat,
   getMonitoringRange,
@@ -33,6 +35,7 @@ import {
   useMonitoringDirectories,
 } from "./useMonitoringDirectories";
 import styles from "./monitoring.module.css";
+import { useAgentMonitoring } from "./useAgentMonitoring";
 
 interface Choice {
   value: string;
@@ -172,6 +175,34 @@ function MonitoringScope({
     : t("common.loading");
 
   const range = getMonitoringRange(filters.datePreset, filters.customRange);
+  const group = directories.groups.data?.groups.some(
+    (item) => String(item.group_id) === filters.group
+  )
+    ? filters.group
+    : "";
+  const agents =
+    tab === "agent" && canReadInventory
+      ? directories.inventory.data?.filter((item) => item.kind === "agent")
+      : undefined;
+  const selectedAgent = agents?.find(
+    (item) => resourceKey(item.tenant_id, item.id) === resourceSelection
+  );
+  const selection =
+    tab === "agent"
+      ? agentMonitoringSelection(
+          directories.tenant,
+          range,
+          group,
+          selectedAgent
+        )
+      : null;
+  const agentMonitoring = useAgentMonitoring(userId, userTenant, selection);
+  const agentLoading =
+    Boolean(range && scopePending && !directories.scope.isError) ||
+    Boolean(
+      selection &&
+      (agentMonitoring.summary.isPending || agentMonitoring.trends.isPending)
+    );
   const dateControls = (
     <div className={styles.dateControls}>
       <Segmented<DatePreset>
@@ -219,8 +250,11 @@ function MonitoringScope({
       {!onOverview && (
         <Button
           icon={<RefreshCw size={15} aria-hidden />}
-          loading={directories.fetching}
-          onClick={() => void directories.refresh()}
+          loading={directories.fetching || agentMonitoring.fetching}
+          onClick={() => {
+            void directories.refresh();
+            if (selection) void agentMonitoring.refresh();
+          }}
         >
           {t("common.refresh")}
         </Button>
@@ -258,13 +292,7 @@ function MonitoringScope({
               <DirectorySelect
                 label={t("ops.monitoring.group")}
                 allLabel={t("ops.monitoring.allGroups")}
-                value={
-                  directories.groups.data?.groups.some(
-                    (group) => String(group.group_id) === filters.group
-                  )
-                    ? filters.group
-                    : ""
-                }
+                value={group}
                 choices={directories.groups.data?.groups.map((group) => ({
                   value: String(group.group_id),
                   label: group.group_name,
@@ -352,10 +380,36 @@ function MonitoringScope({
       ) : (
         <>
           <h2 className={styles.sectionHeading}>
-            {resource?.label ?? allResources} · {scopeLabel}
+            {selectedAgent
+              ? selectedAgent.name || selectedAgent.id
+              : (resource?.label ?? allResources)}{" "}
+            ·{" "}
+            {selectedAgent ? tenantLabel(selectedAgent.tenant_id) : scopeLabel}
           </h2>
           {dateLabel}
-          {placeholder}
+          {tab === "agent" ? (
+            <AgentMonitoringPanels
+              data={agentMonitoring}
+              inventory={{
+                count: agents
+                  ? new Set(
+                      agents.map((item) => resourceKey(item.tenant_id, item.id))
+                    ).size
+                  : null,
+                loading:
+                  canReadInventory &&
+                  !agents &&
+                  (directories.inventory.isFetching ||
+                    (scopePending && !directories.scope.isError)),
+                failed: canReadInventory && directories.inventory.isError,
+              }}
+              singleAgent={Boolean(selectedAgent)}
+              loading={agentLoading}
+              hasRange={Boolean(range)}
+            />
+          ) : (
+            placeholder
+          )}
         </>
       )}
     </>

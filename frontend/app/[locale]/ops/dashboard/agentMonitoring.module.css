@@ -1,0 +1,145 @@
+.panels {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 18px 0;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    var(--color-brand-soft),
+    var(--color-bg-3)
+  );
+}
+
+.card {
+  display: flex;
+  flex: 1 1 235px;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+  min-height: 82px;
+  padding: 10px 22px;
+}
+
+.card + .card {
+  border-inline-start: 1px solid var(--color-border-separator);
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--color-brand);
+}
+
+.card dt,
+.card dd span,
+.card small {
+  color: var(--color-text-secondary);
+}
+
+.card dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.card dd > strong {
+  margin-inline-end: 6px;
+  color: var(--color-text-primary);
+  font-size: clamp(20px, 2.1vw, 32px);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.card small {
+  display: block;
+  margin-top: 2px;
+}
+
+.statusList {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 20px;
+}
+
+.publication {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.publication strong {
+  color: var(--color-text-primary);
+}
+
+.stale {
+  color: var(--color-warning-bold);
+}
+
+.metricsTitle {
+  margin: 4px 0 0;
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.trend {
+  min-width: 0;
+  padding: 16px 20px;
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-lg);
+}
+
+.trendHeader {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 16px;
+  margin-bottom: 8px;
+  color: var(--color-text-secondary);
+}
+
+.trendHeader h3 {
+  margin: 0 0 4px;
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.trendMetric :global(.ant-segmented-item-selected) {
+  color: var(--color-brand);
+}
+
+.chart {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.chartState {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 192px;
+}
+
+.tooltip {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-3);
+}
+
+.tooltip p {
+  margin: 2px 0;
+}
