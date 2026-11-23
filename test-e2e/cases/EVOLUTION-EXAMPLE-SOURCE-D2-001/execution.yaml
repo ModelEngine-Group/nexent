@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: EVOLUTION-EXAMPLE-SOURCE-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: EVOLUTION-EXAMPLE-SOURCE-D2-001
+acceptance_bindings:
+  AC-01: [test_reject_same_source_before_trial_submission]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Native authentication provisions and drops a disposable database. No model, attachment, or live replay service is needed for preflight rejection.

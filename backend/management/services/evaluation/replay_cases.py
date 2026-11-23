@@ -55,6 +55,10 @@ def freeze_development_case(request: ReplayCaseRequest, user_id: str, tenant_id:
         _write(_archive_key(tenant_id, request.agent_id, digest), data)
         manifest.append({"name": file.name, "sha256": digest, "size": len(data)})
     task = {"family": request.family, "query": request.query, "expected": request.expected, "attachments": manifest}
+    if request.source_group is not None:
+        if not request.source_group.strip():
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Provide a non-empty source group")
+        task["source_group"] = request.source_group.strip()
     require_business_agent_edit(request.agent_id, tenant_id, user_id)
     return save_replay_case(tenant_id, request.agent_id, request.version_no, user_id, task)
 
@@ -65,6 +69,25 @@ def get_development_case(tenant_id, user_id, agent_id, version_no, case_id):
     if not row:
         raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Replay case is outside this Agent version")
     return row
+
+
+def approved_example_input(tenant, agent_id, task, selection):
+    if selection.attachment_name is None:
+        content = task["query"]
+    else:
+        file = next((f for f in task["attachments"] if f["name"] == selection.attachment_name), None)
+        if file is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Unknown example attachment")
+        raw = _read_bounded(_archive_key(tenant, agent_id, file["sha256"]), file["size"])
+        if sha256(raw).hexdigest() != file["sha256"]:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Example attachment changed")
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select an excerpt from a UTF-8 text attachment") from exc
+    if selection.input_excerpt not in content:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Example input must appear in the selected source")
+    return selection.input_excerpt
 
 
 def temporary_input_prefix(user_id, attempt):

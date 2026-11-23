@@ -3,3 +3,4 @@
 此页由结构化用例生成，不手工编辑。
 
 - D1 [EVOLUTION-PAIR-REPORT-D1-001](../../cases/EVOLUTION-PAIR-REPORT-D1-001/case.yaml) · active
+- D2 [EVOLUTION-EXAMPLE-SOURCE-D2-001](../../cases/EVOLUTION-EXAMPLE-SOURCE-D2-001/case.yaml) · active

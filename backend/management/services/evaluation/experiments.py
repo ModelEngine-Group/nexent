@@ -2,6 +2,7 @@
 """Paired development trials on a dedicated, fixture-backed AgentOS Runtime."""
 
 import asyncio
+import json
 import logging
 import re
 from collections import Counter
@@ -16,10 +17,12 @@ from contracts.evolution import DevelopmentExperimentRequest
 from infrastructure.agentos_client import AgentOSClient
 from management.db.conversation.evolution_review import recent_reviews
 from management.db.evaluation import experiments as jobs
+from management.db.evaluation.candidates import prompt_example_sources
 from management.db.evaluation.evaluator import get_evaluator
 from management.db.evaluation.replay_cases import task_digest
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
+from management.services.evaluation.example_candidates import example_source_keys
 from management.services.evaluation.replay_cases import get_development_case, remove_trial_inputs, stage_case_input
 from management.services.evaluation.scoring import grade_observed_case
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -64,6 +67,13 @@ async def _snapshot(request, tenant, user, variant):
         language=request.language, **options)
 
 
+async def _excluded_sources(request, tenant):
+    if request.candidate_type != "prompt":
+        return set()
+    return await _io("read-training-sources", prompt_example_sources, tenant, request.agent_id,
+                     request.version_no, request.candidate_id)
+
+
 async def create_experiment(request, tenant, user):
     await _io("authorize-development-experiment", require_business_agent_edit, request.agent_id, tenant, user)
     existing = await _io("read-experiment-submission", jobs.previous_submission, tenant, user, request)
@@ -78,10 +88,13 @@ async def create_experiment(request, tenant, user):
         raise AppException(ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED)
     if rule["evaluator_type"] != "code" and request.judge_model_id is None:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Select a judge model for this evaluator")
+    excluded = await _excluded_sources(request, tenant)
     cases = {}
     for case_id in request.case_ids:
         case = await _io("read-experiment-case", get_development_case, tenant, user, request.agent_id,
                          request.version_no, case_id)
+        if excluded.intersection(example_source_keys(case["task"])):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select fresh materials outside the prompt examples")
         cases[str(case_id)] = case["digest"]
     snapshots = {}
     for variant in ("base", "result"):
@@ -140,11 +153,41 @@ def _grade(request, job, task, observed):
     )[eid]
 
 
+def reported_step_input_tokens(events):
+    """Sum per-step input counters; summaries and estimates cannot substitute for usage."""
+    counts = {}
+    for event in events:
+        if event.get("type") != "token_count":
+            continue
+        payload = event.get("content")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        if "step_number" not in payload and "step_input_tokens" not in payload:
+            continue
+        step, tokens = payload.get("step_number"), payload.get("step_input_tokens")
+        if type(step) is not int or step < 0 or type(tokens) is not int or tokens < 0:
+            return None
+        key = (event.get("invocation_id"), event.get("agent_id"), step)
+        if any(value is not None and type(value) not in (str, int) for value in key[:2]) or key in counts:
+            return None
+        counts[key] = tokens
+    return sum(counts.values()) if counts else None
+
+
 async def execute_trial(job):
     request = DevelopmentExperimentRequest.model_validate(job["plan"]["request"])
     tenant, user = job["tenant_id"], job["created_by"]
     args = (tenant, user, request.agent_id, request.version_no, job["case_id"])
     case = await _io("load-frozen-development-case", get_development_case, *args)
+    # An identical prompt can acquire more source evidence while the trial is queued.
+    excluded = await _excluded_sources(request, tenant)
+    if excluded.intersection(example_source_keys(case["task"])):
+        return "invalid", {"error": "example_source_overlap"}
     digest = job["plan"]["snapshots"][job["variant"]]
     spec = await _snapshot(request, tenant, user, job["variant"])
     if case["digest"] != job["plan"]["cases"][str(job["case_id"])] or snapshot_digest(spec) != digest:
@@ -170,6 +213,7 @@ async def execute_trial(job):
     grade = await run_blocking("grade-development-trial", _grade, request, job, case["task"], observed,
                                lane="evaluation", owner="management")
     return grade["status"], {"judgment": grade, "answer": observed.answer, "event_count": len(observed.events),
+                             "reported_step_input_tokens": reported_step_input_tokens(observed.events),
                              "events_digest": task_digest(observed.events), "case_digest": case["digest"],
                              "snapshot_digest": digest, "evaluator_version": job["plan"]["evaluator"]["version_no"]}
 

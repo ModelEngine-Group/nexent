@@ -24,6 +24,7 @@ vi.mock("@/services/evolutionService", () => ({
     workspace: vi.fn(),
     report: vi.fn(),
     submit: vi.fn(),
+    exampleCandidates: vi.fn(),
   },
 }));
 
@@ -91,6 +92,23 @@ it("selects a published scope and opens its paired results with the original sta
   expect(screen.getByText("evolution.state.improved")).toBeInTheDocument();
   expect(evolutionService.workspace).toHaveBeenCalledWith(7, 1);
   expect(evolutionService.submit).not.toHaveBeenCalled();
+  vi.mocked(evolutionService.exampleCandidates).mockResolvedValue({
+    variants: [{ candidate_id: null, example_count: 0 }, { candidate_id: 6, example_count: 1 }],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "evolution.selectExamples" }));
+  await choose("evolution.failedTarget", "Owners");
+  await choose("evolution.passingTrial", "Owners · evolution.result");
+  for (const [label, value] of [["targetBehavior", "name"], ["exampleBehavior", "name"],
+    ["input_excerpt", "List"], ["output_excerpt", "unassigned"]]) {
+    fireEvent.change(screen.getByLabelText("evolution." + label), { target: { value } });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "evolution.generateExamples" }));
+  await waitFor(() => expect(evolutionService.exampleCandidates).toHaveBeenCalledWith(42, {
+    target_case_id: 9, target_behavior: "name", examples: [
+      { case_id: 9, variant: "result", behavior: "name", input_excerpt: "List", output_excerpt: "unassigned" },
+    ],
+  }));
+  fireEvent.click(await screen.findByRole("button", { name: "evolution.tryExampleCandidate" }));
   await choose("evolution.suggestion", "S-17 · Keep sources");
   await choose("evolution.candidate", "#5 · Skill");
   await choose("evolution.evaluator", "Rules");

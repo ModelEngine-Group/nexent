@@ -30,6 +30,7 @@ interface Trial {
   status: string;
   result?: {
     answer?: string;
+    reported_step_input_tokens?: number | null;
     error?: string;
     judgment?: { score?: number; reason?: string };
   };
@@ -40,6 +41,15 @@ export interface ExperimentReport {
   valid_pairs: number;
   total_pairs: number;
   pairs: Record<string, { base: Trial; result: Trial; comparison: string }>;
+}
+
+export interface ApprovedExample {
+  case_id: number;
+  variant: "base" | "result";
+  behavior: string;
+  attachment_name?: string;
+  input_excerpt: string;
+  output_excerpt: string;
 }
 
 async function read<T>(url: string, body?: unknown): Promise<T> {
@@ -72,6 +82,7 @@ export const evolutionService = {
     agent_id: number;
     version_no: number;
     family: string;
+    source_group?: string;
     query: string;
     expected: string;
     attachments: { name: string; object_name: string }[];
@@ -90,6 +101,13 @@ export const evolutionService = {
     language: string;
   }) => read<{ experiment_id: number }>(`${root}/experiments`, body),
   report: (id: number) => read<ExperimentReport>(`${root}/experiments/${id}`),
+  exampleCandidates: (id: number, body: {
+    target_case_id: number;
+    target_behavior: string;
+    examples: ApprovedExample[];
+  }) => read<{ variants: { candidate_id: number | null; example_count: number }[] }>(
+    `${root}/experiments/${id}/example-candidates`, body
+  ),
   cancel: (id: number) =>
     read<ExperimentReport>(`${root}/experiments/${id}/cancel`, {}),
 };

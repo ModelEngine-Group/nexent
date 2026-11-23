@@ -8,14 +8,14 @@ from fastapi import APIRouter, Header
 from contracts.agentos import EvaluationAgentRun
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
-from contracts.evolution import FeedbackHandoffRequest, GenerateFromFeedbackRequest
+from contracts.evolution import ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
 from management.db.evaluation.candidates import text_digest
 from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate, resolve_prompt_candidate
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
 from management.services.evaluation.replay_cases import freeze_development_case, get_development_case
 from management.services.evaluation.experiments import create_experiment, experiment_report, workspace_choices
-from management.services.evaluation.feedback_handoff import generate_from_handoff, handoff
+from management.services.evaluation.feedback_handoff import examples_from_experiment, generate_from_handoff, handoff
 from management.services.permission.identity.session import get_current_user_id
 from nexent.core.concurrency import run_blocking
 
@@ -44,6 +44,14 @@ async def create_from_feedback(feedback_id: int, request: GenerateFromFeedbackRe
     user_id, tenant_id = get_current_user_id(authorization)
     result = await run_blocking("generate-from-development-feedback", generate_from_handoff, tenant_id, user_id,
                                 feedback_id, request.model_id, lane="evaluation", owner="management")
+    return {"data": result}
+
+
+@router.post("/experiments/{experiment_id}/example-candidates")
+async def select_prompt_examples(experiment_id: int, request: ExampleCandidateRequest,
+                                 authorization: str | None = Header(None)):
+    user_id, tenant_id = get_current_user_id(authorization)
+    result = await examples_from_experiment(tenant_id, user_id, experiment_id, request)
     return {"data": result}
 
 

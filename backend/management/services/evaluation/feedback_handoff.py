@@ -13,6 +13,7 @@ from management.db.evaluation.candidates import text_digest
 from management.db.skill.repository import get_skill_by_id, query_skill_instances_by_agent_id
 from management.services.evaluation.evolution_access import published_business_agent, require_business_agent_edit
 from management.services.evaluation.experiments import _io, _snapshot, snapshot_digest
+from management.services.evaluation.example_candidates import generate_example_candidates
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate
 from management.services.evaluation.replay_cases import get_development_case
 from management.services.evaluation.skill_candidates import generate_skill_step_candidate
@@ -75,6 +76,21 @@ async def handoff(tenant, user, eid, request):
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The baseline has changed since evaluation")
     await _io("authorize-development-handoff", require_business_agent_edit, feedback["agent_id"], tenant, user)
     return await _io("save-development-handoff", jobs.store_handoff, tenant, user, eid, feedback)
+
+
+async def examples_from_experiment(tenant, user, eid, request):
+    scope = await _io("identify-example-source", jobs.scope, tenant, eid)
+    if not scope:
+        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
+    agent, version = scope["agent_id"], scope["version_no"]
+    await _io("authorize-example-source", require_business_agent_edit, agent, tenant, user)
+    plan = await _io("read-example-plan", jobs.read_plan, tenant, eid)
+    released = await _io("read-example-prompt", published_business_agent, tenant, agent, version)
+    snapshot = await _snapshot(DevelopmentExperimentRequest.model_validate(plan["request"]), tenant, user, "base")
+    if snapshot_digest(snapshot) != plan["snapshots"]["base"]:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The baseline has changed since evaluation")
+    return await _io("select-prompt-examples", generate_example_candidates, tenant, user, eid, request,
+                     released.get("prompt") or "", agent, version, plan["request"]["language"])
 
 
 def generate_from_handoff(tenant, user, feedback_id, model_id):

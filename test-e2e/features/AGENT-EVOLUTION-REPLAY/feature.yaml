@@ -10,4 +10,6 @@ feature:
   business_rules:
   - rule_id: AGENT-EVOLUTION-REPLAY-RULE-01
     description: 基线和候选均取得有效判分才计算改进或退步；未完成、故障及缺证保留在总题数中。
-  required_test_stages: [D1]
+  - rule_id: AGENT-EVOLUTION-REPLAY-RULE-02
+    description: 用于提示词示例的材料及相同来源组不能再次作为该候选的验证任务。
+  required_test_stages: [D1, D2]

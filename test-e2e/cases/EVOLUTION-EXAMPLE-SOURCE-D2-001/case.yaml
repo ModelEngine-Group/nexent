@@ -1,0 +1,32 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-EXAMPLE-SOURCE-D2-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-02]
+  title: 提示词示例及同源改写题不能用于候选对照
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 从业务题登记到对照试跑入口检查示例来源；拒绝后无实验或作业落库。
+  preconditions: [本机有可创建隔离临时数据库的 PostgreSQL 实例。]
+  test_data:
+    profile: 原生编辑者身份、已发布业务智能体、带已知示例来源的候选和判据。
+  steps:
+  - order: 1
+    action: 通过 HTTP 保存一条仅空格和大小写变化的示例原题，再保存一条不同措辞的同源业务题。分别发起候选对照。
+    expected: 两次请求均返回业务校验错误，提示另选新材料。
+  expected_results: [原题和同源改写题均被拦截。]
+  forbidden_side_effects: [未创建任何实验或试跑作业。]
+  acceptance:
+  - id: AC-01
+    description: 通过已登录用户的真实 API 请求和事后数据库查询验证来源隔离。
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: HTTP API
+    request_expectations: [普通开发题和实验创建接口均使用编辑者凭据。]
+    response_expectations: [建题返回题号，重用示例的试跑返回客户端错误。]

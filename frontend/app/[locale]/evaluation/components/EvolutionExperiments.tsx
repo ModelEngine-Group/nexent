@@ -18,6 +18,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { evolutionService as api } from "@/services/evolutionService";
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import ExampleCandidates from "./ExampleCandidates";
 
 function CaseForm({
   agent,
@@ -34,6 +35,7 @@ function CaseForm({
   const [files, setFiles] = useState<File[]>([]);
   const [form] = Form.useForm<{
     family: string;
+    source_group?: string;
     query: string;
     expected: string;
   }>();
@@ -56,6 +58,7 @@ function CaseForm({
         })) || [];
       return api.createCase({
         ...values,
+        source_group: values.source_group?.trim() || undefined,
         agent_id: agent,
         version_no: version,
         attachments,
@@ -88,6 +91,9 @@ function CaseForm({
             )}
           </Form.Item>
         ))}
+        <Form.Item label={t("evolution.sourceGroup")} name="source_group">
+          <Input maxLength={128} />
+        </Form.Item>
         <Form.Item label={t("evolution.attachments")}>
           <input
             type="file"
@@ -332,6 +338,16 @@ function Experiments({
               </Button>
             )}
           </Flex>
+          {report.data.status === "finished" && (
+            <ExampleCandidates key={report.data.experiment_id} report={report.data} cases={choices?.cases || []}
+              onGenerated={(id) => {
+                setCandidate(`prompt:${id}`);
+                setCases([]);
+                setSuggestion(undefined);
+                void workspace.refetch();
+              }}
+            />
+          )}
           <Table
             pagination={false}
             rowKey="id"
@@ -352,13 +368,16 @@ function Experiments({
                 dataIndex: key,
                 render: (trial: {
                   status: string;
-                  result?: { answer?: string; error?: string };
+                  result?: { answer?: string; error?: string; reported_step_input_tokens?: number | null };
                 }) => (
                   <div>
                     <strong>{t(`evolution.state.${trial.status}`)}</strong>
                     <div className="whitespace-pre-wrap">
                       {trial.result?.answer || trial.result?.error}
                     </div>
+                    {trial.result && <Typography.Text type="secondary">{t("evolution.stepTokens", {
+                      tokens: trial.result.reported_step_input_tokens ?? "—",
+                    })}</Typography.Text>}
                   </div>
                 ),
               })),

@@ -66,6 +66,7 @@ class ReplayCaseRequest(BaseModel):
     query: str = Field(min_length=1, max_length=16000)
     expected: str = Field(min_length=1, max_length=16000)
     attachments: list[ReplayAttachmentSource] = Field(default_factory=list, max_length=32)
+    source_group: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def check_inputs(self):
@@ -74,6 +75,31 @@ class ReplayCaseRequest(BaseModel):
             raise ValueError("Each attachment must have a distinct filename")
         if not all(value.strip() for value in (self.family, self.query, self.expected)):
             raise ValueError("A family, query and expected outcome are required")
+        return self
+
+
+class PromptExampleSelection(BaseModel):
+    """The editor approves only these excerpts for reuse in future prompts."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    case_id: int = Field(gt=0)
+    variant: Literal["base", "result"]
+    behavior: str = Field(min_length=1, max_length=128)
+    input_excerpt: str = Field(min_length=1, max_length=1200)
+    attachment_name: str | None = Field(default=None, min_length=1, max_length=240)
+    output_excerpt: str = Field(min_length=1, max_length=1200)
+
+
+class ExampleCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    target_case_id: int = Field(gt=0)
+    target_behavior: str = Field(min_length=1, max_length=128)
+    examples: list[PromptExampleSelection] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def distinct_cases(self):
+        if len({example.case_id for example in self.examples}) != len(self.examples):
+            raise ValueError("Approve one demonstration per case")
         return self
 
 
