@@ -3604,7 +3604,7 @@
   "mcpTools.mine.edit": "Edit",
   "mcpTools.mine.enable": "Enable",
   "mcpTools.mine.enabled": "Enabled",
-  "mcpTools.mine.connectionStatus.unchecked": "Not connected",
+  "mcpTools.mine.connectionStatus.unchecked": "Unchecked",
   "mcpTools.mine.connectionStatus.success": "Connected",
   "mcpTools.mine.connectionStatus.failed": "Connection failed",
   "mcpTools.mine.publishedService": "Published to Hub",
