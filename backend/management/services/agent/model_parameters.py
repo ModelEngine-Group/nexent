@@ -2,52 +2,14 @@
 
 """Apply explicit per-Agent values to an immutable saved model outlet."""
 
-import logging
-
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
-
-logger = logging.getLogger(__name__)
-
-# Values older clients sent to mean "inherit the outlet value".
-LEGACY_OMISSION_VALUES = {"enable_thinking": False, "reasoning_effort": "auto"}
-
-
-def drop_legacy_agent_omissions(profile, entry):
-    """Drop stored values that older clients used to express omission.
-
-    Legacy agent snapshots can carry ``enable_thinking: false`` (or
-    ``reasoning_effort: "auto"``) for outlets whose profile no longer declares
-    the parameter. Those values only meant "inherit the outlet", so they must
-    not make every later save or run of the agent fail.
-    """
-    from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-
-    profile = ensure_outlet_parameter_rules(profile)
-    canonical = read_agent_parameter_entry(entry, profile=profile)
-    values = canonical.get("parameter_values") or {}
-    declared = {rule.get("key") for rule in profile.parameter_rules}
-    omissions = {key for key, value in values.items()
-                 if key not in declared and key in LEGACY_OMISSION_VALUES
-                 and value == LEGACY_OMISSION_VALUES[key]}
-    if not omissions:
-        return canonical
-    logger.warning("Dropping legacy agent omission parameters %s", sorted(omissions))
-    return {
-        **canonical,
-        "parameter_values": {key: value for key, value in values.items() if key not in omissions},
-    }
 
 
 def merge_agent_model_parameters(profile, entry):
     from nexent.core.model_service.profiles.runtime_parameters import merge_agent_parameters
 
     return merge_agent_parameters(profile, entry)
-
-
-def merge_saved_agent_model_parameters(profile, entry):
-    """Merge a stored agent snapshot after repairing dropped parameters."""
-    return merge_agent_model_parameters(profile, drop_legacy_agent_omissions(profile, entry))
 
 
 def _apply_agent_parameters(profile, entry):
@@ -66,7 +28,6 @@ def merge_runtime_model_parameters(profile, entry, preferences):
     from contracts.errors.exceptions import ModelOutletValidationError
     from nexent.core.model_service.profiles.runtime_parameters import merge_agent_parameters, merge_runtime_parameters
 
-    entry = drop_legacy_agent_omissions(profile, entry)
     merge_agent_parameters(profile, entry)
     try:
         return merge_runtime_parameters(profile, entry, preferences)
@@ -91,7 +52,7 @@ def bind_agent_model_profiles(model_list, root_config, root_info, load_agent_inf
                 info = load_agent_info(config.agent_id, config.version_no)
             entry = ((info or {}).get("model_params_override") or {}).get(str(profile.outlet_id))
             if entry:
-                resolved = merge_saved_agent_model_parameters(profile, entry)
+                resolved = merge_agent_model_parameters(profile, entry)
                 private = deepcopy(model)
                 private.cite_name = "agent_model_" + uuid4().hex
                 private.resolved_profile = resolved

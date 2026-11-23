@@ -114,9 +114,9 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
     defaults = profile.parameter_values
     try:
         if entry:
-            from management.services.agent.model_parameters import merge_saved_agent_model_parameters
+            from management.services.agent.model_parameters import merge_agent_model_parameters
 
-            defaults = merge_saved_agent_model_parameters(profile, entry).parameter_values
+            defaults = merge_agent_model_parameters(profile, entry).parameter_values
         _merge_conversation_preferences(profile, entry, values)
     except (ModelOutletValidationError, ParameterValidationError) as error:
         issues.append({"category": error.category, "field": error.path})

@@ -2,7 +2,6 @@
 
 """Helpers for keeping agent-owned reasoning settings independent from models."""
 
-import logging
 from copy import deepcopy
 from typing import Optional
 
@@ -22,8 +21,6 @@ REASONING_EFFORT_VALUES = {
     "max",
 }
 COMMON_REASONING_LEVELS = {"low", "medium", "high"}
-
-logger = logging.getLogger(__name__)
 
 
 def _resolve_model_reasoning_capability(model_info: Optional[dict]) -> Optional[dict]:
@@ -151,37 +148,20 @@ def snapshot_agent_reasoning_config(
             # Validate only explicit overrides; omitted values keep inheriting the outlet.
             from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
             from nexent.core.model_service.registry import model_service_references
-            from management.services.agent.model_parameters import (
-                drop_legacy_agent_omissions,
-                merge_agent_model_parameters,
-            )
+            from management.services.agent.model_parameters import merge_agent_model_parameters
 
             if not entry:
                 continue
             from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
-            from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
             profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
             entry = read_agent_parameter_entry(entry, profile=profile)
-            if requested_overrides is None:
-                # Nothing was submitted for this model, so this entry is a
-                # historical snapshot: repair it instead of rejecting the save.
-                entry = drop_legacy_agent_omissions(profile, entry)
-                if (not entry["parameter_values"]
-                        and entry.get("context_window_tokens") is None
-                        and entry.get("custom_overrides") is None):
-                    override_map.pop(model_key, None)
-                    continue
-            if entry["parameter_values"] or entry.get("context_window_tokens") is not None or entry.get("custom_overrides") is not None:
-                try:
-                    merge_agent_model_parameters(profile, entry)
-                except ParameterValidationError:
-                    if requested_overrides is not None:
-                        raise
-                    logger.warning(
-                        "Dropping invalid persisted agent parameters for model %s", model_key
-                    )
-                    override_map.pop(model_key, None)
-                    continue
+            if (not entry["parameter_values"]
+                    and entry.get("context_window_tokens") is None
+                    and entry.get("custom_overrides") is None):
+                # Legacy values that only meant "inherit the outlet" leave nothing to store.
+                override_map.pop(model_key, None)
+                continue
+            merge_agent_model_parameters(profile, entry)
             override_map[model_key] = entry
             continue
         capability = _resolve_model_reasoning_capability(model_info)
