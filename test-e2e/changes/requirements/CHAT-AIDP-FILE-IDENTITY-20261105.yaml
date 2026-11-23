@@ -13,17 +13,12 @@ change:
     知识库 READ 和 AIDP KB 文件归属后转发当前最新原文件。普通页面运行不产生该字段，旧记录无定位不显示下载。
   affected_features:
     existing: [F-065]
-    added: [AIDP-CHAT-FILE-IDENTITY]
+    added: []
     modified: [F-065]
     retired: []
   affected_cases:
     existing: [UT-FE-AUTO-82166F602745F6D7]
-    added:
-      - AIDP-FILE-IDENTITY-D1-001
-      - AIDP-FILE-IDENTITY-D2-001
-      - AIDP-FILE-IDENTITY-D3-001
-      - AIDP-FILE-IDENTITY-D4-001
-      - AIDP-FILE-IDENTITY-D5-001
+    added: []
     modified: [UT-FE-AUTO-82166F602745F6D7]
     retired: []
   traditional_ut:
@@ -34,16 +29,17 @@ change:
       - SDK 工具只在北向实例的模型结果增加 northbound_api_download_url；页面来源数据与普通运行保持旧 schema。
       - 北向下载路由按 API Key 身份、目标知识库 READ 和 AIDP KB 文件归属校验，错误不泄露 AIDP 凭据；北向历史保持调用身份归属。
     reason: >-
-      现有 AIDP 工具转换、工具配置、北向服务与下载代理测试已拥有隔离契约。本变更在这些套件内补强身份、
-      请求级标识与错误边界；正式 D1/D2/D5 证明组件协作、HTTP 契约与并发安全，真实 AIDP/真实模型/浏览器
-      由 D3/D4 声明，不在 UT 中冒充。本机规则不新增前端 UT，只修改受影响的既有 D1 前端用例。
+      现有 AIDP 工具转换、工具配置、北向服务、AgentOS 工具物化与下载代理测试已拥有隔离契约。本变更在
+      这些套件内补强身份、请求级标识与错误边界；不新增 E2E 用例家族，只修改受影响的既有 D1 前端用例。
+      真实 AIDP/真实模型/浏览器场景不作为本 PR 的自动化通过条件。
     test_selectors:
       - test/ext_components/aidp/test_aidp_search_tool.py
       - test/backend/agents/test_create_agent_info.py
       - test/backend/services/test_northbound_service.py
-      - test/backend/services/test_runtime_knowledge_mount.py
+      - test/backend/services/test_prepared_public_turn.py
+      - test/backend/app/test_agentos_prepared_local_tool.py
+      - test/backend/app/test_northbound_knowledge_app.py
   notes: >-
+    按本机 E2E 规则删除新增的 AIDP-FILE-IDENTITY 用例家族，只保留既有引用 D1 的历史用例修改。
     真实 AIDP 是否已返回 metadata.file_uuid/metadata.kds_id、字段类型及当前版本下载字节仍需联调；
-    D3 因此保持 blocked，Mock AIDP + 真实模型只能证明协议与界面行为，不能替代真实原字节验收。
-    D4 保持 blocked，待同一 deploy commit 的前后端、真实模型与真实 AIDP 字段可用后执行；普通页面与北向
-    交错隔离的用户场景会以独立证据记录，不把 Mock 通过写成真实联调完成。
+    Mock AIDP + 真实模型只能证明协议与界面行为，不能替代真实原字节验收。
