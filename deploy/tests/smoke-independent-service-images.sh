@@ -83,14 +83,11 @@ with build_opener(ProxyHandler({})).open(sys.argv[1], timeout=2) as response:
 
 check_shared_monitoring() {
   docker exec "$1" sh -ec '
-    test -f /opt/backend/ops/monitoring/runtime.py
-    for source in $(find /opt/backend/ops -name "*.py"); do
-      case "${source#/opt/backend/ops/}" in
-        __init__.py|monitoring/__init__.py|monitoring/runtime.py|monitoring/contracts.py|\
-        monitoring/model.py|monitoring/agent.py|monitoring/search.py|monitoring/service.py|monitoring/store.py) ;;
-        *) echo "Unexpected Ops source in producer image: $source" >&2; exit 1 ;;
-      esac
-    done
+    test -f /opt/infrastructure/monitoring/runtime.py
+    if [ -d /opt/backend/ops ]; then
+      echo "Unexpected Ops source in producer image" >&2
+      exit 1
+    fi
     test -x /opt/nexent/scripts/run-sql-migrations.sh
     test -x /opt/nexent/scripts/run-ops-sql-migrations.sh
     test -f /opt/nexent/ops-sql/ops-init.sql
@@ -119,9 +116,9 @@ docker exec "$prefix-runtime" sh -ec '
 
 docker exec "$prefix-runtime" python -c '
 from contracts.constants.environment import OPS_MONITORING_ENABLED
-from ops.monitoring.runtime import control_store
+from infrastructure.monitoring.store import BatchStore, monitoring_engine
 assert OPS_MONITORING_ENABLED
-store = control_store()
+store = BatchStore(monitoring_engine())
 try:
     store.verify_schema()
 finally:

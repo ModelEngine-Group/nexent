@@ -107,6 +107,10 @@ those dates.
 Unconfirmed failed Elasticsearch batches mark affected query scopes stale until
 they recover and the replacement statistics are published.
 
+Shared collection lives in `infrastructure.monitoring`; producer services do not
+import or package Ops business modules. Register producer schemas in
+`infrastructure.monitoring.facts.FACT_MODELS`. Ops consumes those same schemas.
+
 Define a `MonitoringKind` with the typed fact and Elasticsearch fields. Supply
 a reducer when daily publication is available. Add the kind to `MONITORING_KINDS` in
 `ops.monitoring.runtime`. Ops installs the compatible mappings on its shared

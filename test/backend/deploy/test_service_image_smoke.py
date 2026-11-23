@@ -19,7 +19,7 @@ def smoke(tmp_path):
     for role in ("management", "runtime"):
         base = images / role / "opt"
         for relative in (
-            "backend/ops/__init__.py", "backend/ops/monitoring/runtime.py",
+            "infrastructure/monitoring/runtime.py",
             "nexent/scripts/run-sql-migrations.sh", "nexent/scripts/run-ops-sql-migrations.sh",
             "nexent/ops-sql/ops-init.sql",
         ):

@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from ops.monitoring.agent import AGENT_MONITORING, AgentFact, accumulate_agent
-from ops.monitoring.runtime import MONITORING_KINDS, Producer
+from infrastructure.monitoring.facts import FACT_MODELS
+from infrastructure.monitoring.runtime import Producer
+from ops.monitoring.runtime import MONITORING_KINDS
 
 
 def event(**values):
@@ -30,7 +32,7 @@ def test_main_full_start_preserves_actual_execution_day_partition_and_batch_date
     assert document["started_at"].startswith("2026-10-31")
     assert document["partition_anchor_at"].startswith("2026-11-01")
     assert document["statistic_date"] == "2026-11-01"
-    producer = Producer(Mock(), ZoneInfo("UTC"), MONITORING_KINDS)
+    producer = Producer(Mock(), ZoneInfo("UTC"), FACT_MODELS)
     producer.emit(payload)
     batch, = producer.drain()
     assert batch[-1] == [date(2026, 11, 1)]

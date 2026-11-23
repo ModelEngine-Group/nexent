@@ -29,6 +29,8 @@ from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import AgentRunMetadata, MonitoringConfig, agent_monitoring_context, get_monitoring_manager
 from nexent.monitor.facts import emit_fact, get_fact_sink, set_fact_sink
 from nexent.monitor.local_content import local_capture_enabled
+from infrastructure.monitoring import runtime as collector
+from infrastructure.monitoring import store as batch_store
 from ops.monitoring import runtime
 from ops.monitoring.contracts import stable_key
 from ops.monitoring.search import DAILY, DAILY_FIELDS, FACTS, filters, install_templates, mapping
@@ -159,7 +161,7 @@ def isolated_monitoring(monkeypatch):
         "POSTGRES_USER": os.environ.get("OPS_MONITORING_TEST_POSTGRES_USER", "postgres"),
         "NEXENT_POSTGRES_PASSWORD": os.environ.get("OPS_MONITORING_TEST_POSTGRES_PASSWORD"),
     }.items():
-        monkeypatch.setattr(runtime, key, value)
+        monkeypatch.setattr(collector if key.startswith("OPS_MONITORING_") else batch_store, key, value)
 
     tenant = f"agent-sample-{uuid4().hex}"
     store = runtime.control_store()
@@ -246,7 +248,7 @@ async def test_agent_start_finish_and_replay(isolated_monitoring):
     service, tenant = isolated_monitoring
     started, finished = _run_across_midnight(tenant)
     run_id = started["fact_id"]
-    async with runtime.producer_lifespan():
+    async with collector.producer_lifespan():
         first = await _submit_and_read(service, tenant, started)
         terminal = await _submit_and_read(service, tenant, finished)
         replay = await _submit_and_read(service, tenant, finished)
@@ -294,7 +296,7 @@ async def test_agent_daily_publication_switches_only_after_success(isolated_moni
     def interrupt_publication(*_):
         raise RuntimeError("Interrupt publication before the pointer switch")
 
-    async with runtime.producer_lifespan():
+    async with collector.producer_lifespan():
         await _submit_and_read(service, tenant, started)
         service.publish(tenant, "agent")
         original, initial = _published_agent_day(service, tenant, day)
@@ -613,7 +615,7 @@ async def test_real_root_agent_capture_survives_sse_reconnect(
         finally:
             channel.complete(info.attempt_outcome or "failed")
 
-    async with runtime.producer_lifespan():
+    async with collector.producer_lifespan():
         sink = get_fact_sink()
 
         def capture(event):
@@ -758,7 +760,7 @@ async def test_mixed_agent_results_merge_across_days_and_replay(isolated_monitor
     assert service.es.get(index=index, id="legacy")["_source"] == legacy
 
     events = _mixed_result_events(tenant)
-    async with runtime.producer_lifespan():
+    async with collector.producer_lifespan():
         for started, terminal in events:
             emit_fact(started)
             if terminal is not started:
@@ -873,7 +875,7 @@ async def test_real_parent_and_child_facts_publish_and_replay(
     })
     events = []
     model_events = []
-    async with runtime.producer_lifespan():
+    async with collector.producer_lifespan():
         sink = get_fact_sink()
 
         def capture(event):
@@ -1262,7 +1264,7 @@ async def test_complete_main_timing_matches_raw_trajectory_and_published_queries
     threads.start()
     processor.start(threads, ManagedThreadSpec("trajectory-writer", "main-timing", close_hook=processor.request_stop))
     try:
-        async with runtime.producer_lifespan():
+        async with collector.producer_lifespan():
             sink = get_fact_sink()
 
             def capture(event):
@@ -1435,7 +1437,7 @@ async def test_agent_list_sorts_filtered_published_resource_totals(isolated_moni
                     name=f"sort-{number}", group_ids="12,99",
                 ))
 
-    async with runtime.producer_lifespan():
+    async with collector.producer_lifespan():
         for fact in events:
             emit_fact(fact)
         async with asyncio.timeout(20):
@@ -1639,7 +1641,7 @@ async def test_actual_jiuwen_agent_monitoring_pipeline(
                                        enabled=mode != "normal_untraced")
         agents, models = [], []
         try:
-            async with runtime.producer_lifespan():
+            async with collector.producer_lifespan():
                 sink = get_fact_sink()
 
                 def capture(event):
@@ -1921,7 +1923,7 @@ async def test_child_complete_timing_outcomes_publish_and_replay(
     trajectory = _child_trajectory(threads, manager, monkeypatch, tmp_path, enabled=mode != "trajectory_off")
     events = []
     try:
-        async with runtime.producer_lifespan():
+        async with collector.producer_lifespan():
             sink = get_fact_sink()
 
             def capture(event):

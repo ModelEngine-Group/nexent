@@ -93,13 +93,6 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     --mount=type=cache,id=nexent-main-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends postgresql-client
 
-# Shared fact ingestion has no dependency on another service's business implementation.
-COPY backend/ops/__init__.py /opt/backend/ops/
-COPY backend/ops/monitoring/__init__.py backend/ops/monitoring/runtime.py \
-    backend/ops/monitoring/contracts.py backend/ops/monitoring/model.py \
-    backend/ops/monitoring/agent.py backend/ops/monitoring/search.py \
-    backend/ops/monitoring/service.py backend/ops/monitoring/store.py /opt/backend/ops/monitoring/
-
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
 VOLUME ["/opt/ssh-keys"]

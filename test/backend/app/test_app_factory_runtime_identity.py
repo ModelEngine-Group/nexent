@@ -31,7 +31,7 @@ def test_real_runtime_factory_call_preserves_identity_and_lifespan(monkeypatch, 
     key = "runtime-factory-isolated-gateway-signature"
     monkeypatch.setattr(app_factory, "OPS_MONITORING_ENABLED", monitoring_enabled)
     monkeypatch.setattr(app_factory, "monitoring_manager", None)
-    monkeypatch.setattr("ops.monitoring.runtime.producer_lifespan", producer)
+    monkeypatch.setattr("infrastructure.monitoring.runtime.producer_lifespan", producer)
     monkeypatch.setattr(middleware, "enabled", lambda: True)
     monkeypatch.setattr(middleware, "signing_key", lambda: key)
     monkeypatch.setattr(identity, "signing_key", lambda: key)

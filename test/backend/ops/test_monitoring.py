@@ -15,7 +15,7 @@ from nexent.monitor.model_fact import AttemptObservation
 from nexent.monitor.monitoring import _MonitoredChatCompletions
 from ops.monitoring.contracts import Fact, MonitoringKind, day_id
 from ops.monitoring.model import MODEL_MONITORING, ModelFact, accumulate_model, summarize
-from ops.monitoring.runtime import Producer
+from infrastructure.monitoring.runtime import Producer
 from ops.monitoring.search import delete_documents, install_templates
 from ops.monitoring.service import CLEANUP_INTERVAL_SECONDS, Monitoring, _apply_revision
 
@@ -44,7 +44,7 @@ def test_producer_persists_distinct_dates_from_the_fact_contract():
         def statistic_day(self, zone):
             return super().statistic_day(zone) + timedelta(days=1)
 
-    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), {"skill": MonitoringKind(SkillFact, lambda _: ())})
+    producer = Producer(Mock(), ZoneInfo("Asia/Shanghai"), {"skill": SkillFact})
     event = {
         "tenant_id": "tenant", "fact_kind": "skill", "fact_id": "attempt", "call_context_id": "request",
         "started_at": "2026-10-31T17:00:00Z", "record_revision": 1, "outcome": "started",

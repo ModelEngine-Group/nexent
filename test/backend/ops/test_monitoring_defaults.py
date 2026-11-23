@@ -53,19 +53,20 @@ def test_invalid_ops_database_configuration_fails_before_startup(overrides):
 
 
 def test_control_store_reuses_the_nexent_connection(monkeypatch):
+    from infrastructure.monitoring import store
     from ops.monitoring import runtime
 
     values = {"POSTGRES_HOST": "shared-pg", "POSTGRES_PORT": "6543", "POSTGRES_USER": "shared-owner",
               "NEXENT_POSTGRES_PASSWORD": "shared-password", "POSTGRES_DB": "nexent", "OPS_POSTGRES_DB": "nexent_ops"}
     for name, value in values.items():
-        monkeypatch.setattr(runtime, name, value)
+        monkeypatch.setattr(store, name, value)
     engine, calls = object(), []
 
     def create(url, **options):
         calls.append(url)
         return engine
 
-    monkeypatch.setattr(runtime, "create_engine", create)
+    monkeypatch.setattr(store, "create_engine", create)
     monkeypatch.setattr(runtime, "ControlStore", lambda value: value)
     assert runtime.control_store() is engine
     assert (calls[0].host, calls[0].port, calls[0].username, calls[0].password, calls[0].database) == (

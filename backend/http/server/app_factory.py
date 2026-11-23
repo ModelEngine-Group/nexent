@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def _with_ops_monitoring(lifespan):
     @asynccontextmanager
     async def combined(app):
-        from ops.monitoring.runtime import producer_lifespan
+        from infrastructure.monitoring.runtime import producer_lifespan
 
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(producer_lifespan())

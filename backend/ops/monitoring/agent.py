@@ -2,51 +2,17 @@
 """Agent execution facts and daily metrics for the shared monitoring pipeline."""
 
 from collections.abc import Iterable
-from datetime import timezone
-from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, model_validator
-
-from ops.monitoring.contracts import MAX_LONG, Fact, MonitoringKind, Outcome, stable_key
+from infrastructure.monitoring.contracts import stable_key
+from infrastructure.monitoring.facts import AgentFact
+from ops.monitoring.contracts import MonitoringKind
 
 
-RunId = Annotated[str, Field(min_length=1, max_length=128)]
 DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",
               "initiator_group_ids", "agent_id")
 COUNTERS = ("execution_count", "duration_sum_ms", "duration_sample_count")
 RESULT_COUNTERS = ("succeeded_count", "failed_count")
 TTFT_COUNTERS = ("ttft_sum_ms", "ttft_sample_count")
-
-
-class AgentFact(Fact):
-    fact_kind: Literal["agent"] = "agent"
-    root_run_id: RunId
-    agent_run_id: RunId
-    agent_id: int = Field(gt=0, le=2**31 - 1)
-    is_root: bool
-    parent_run_id: RunId | None = None
-    agent_version_no: int | None = Field(default=None, ge=0, le=2**31 - 1)
-    outcome: Outcome | Literal["timed_out"]
-    ttft_ms: int | None = Field(default=None, ge=0, le=MAX_LONG)
-    execution_started_at: AwareDatetime | None = None
-
-    def partition_anchor(self):
-        """Preserve the actual execution's original partition despite earlier preparation."""
-        return (self.execution_started_at or self.started_at).astimezone(timezone.utc)
-
-    def statistic_day(self, zone):
-        return self.partition_anchor().astimezone(zone).date()
-
-    @model_validator(mode="after")
-    def check_run_identity(self):
-        if self.fact_id != self.agent_run_id:
-            raise ValueError("Agent fact ID must match its run ID")
-        if self.is_root:
-            if self.root_run_id != self.agent_run_id or self.parent_run_id is not None:
-                raise ValueError("Invalid root Agent identity")
-        elif self.parent_run_id in {None, self.agent_run_id} or self.root_run_id == self.agent_run_id:
-            raise ValueError("Invalid child Agent identity")
-        return self
 
 
 def accumulate_agent(documents: Iterable[dict]) -> Iterable[tuple[str, dict]]:

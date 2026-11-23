@@ -9,11 +9,6 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
-MONITORING_PRODUCER_SOURCES = {
-    "backend/ops/__init__.py",
-    *("backend/ops/monitoring/" + name + ".py" for name in
-      ("__init__", "runtime", "contracts", "model", "agent", "search", "service", "store")),
-}
 
 
 def test_backend_dockerfile_does_not_declare_exposed_ports():
@@ -40,8 +35,7 @@ def test_independent_images_do_not_package_other_service_implementations():
     copies = [line.split() for line in common_and_services.replace("\\\n", " ").splitlines() if line.startswith("COPY ")]
     for parts in copies:
         assert all(
-            source in MONITORING_PRODUCER_SOURCES
-            or not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
+            not source.startswith(("backend/ops", "backend/data_process", "backend/services/"))
             for source in parts[1:-1]
         )
     runtime = dockerfile.split("FROM backend-common AS runtime\n", 1)[1].split("\nFROM ", 1)[0]
@@ -56,15 +50,17 @@ def test_independent_services_package_the_shared_monitoring_producer_and_ops_mig
     common = dockerfile.split("FROM base AS backend-common\n", 1)[1].split("\nFROM ", 1)[0]
     sources = {source for line in common.replace("\\\n", " ").splitlines() if line.startswith("COPY ")
                for source in line.split()[1:-1]}
-    assert MONITORING_PRODUCER_SOURCES <= sources
+    assert "infrastructure" in sources
+    assert not any(source.startswith("backend/ops") for source in sources)
     for target in (common, dockerfile.split(" AS standalone-service\n", 1)[1].split("\nFROM ", 1)[0]):
         assert "postgresql-client" in target
         assert "deploy/common/run-ops-sql-migrations.sh" in target
         assert "deploy/common/run-sql-migrations.sh" in target
         assert "deploy/sql/ops-init.sql" in target and "deploy/sql/migrations/ops/" in target
     packaging = run_path(str(ROOT / "deploy/images/dockerfiles/main/copy_service_sources.py"))
-    closure = packaging["collect_sources"](ROOT, ("ops.monitoring.runtime",))
-    assert not any(path.as_posix().startswith("backend/management/") for path in closure)
+    closure = packaging["collect_sources"](ROOT, ("infrastructure.monitoring.runtime",))
+    assert not any(path.as_posix().startswith(("backend/ops/", "backend/management/", "backend/runtime/"))
+                   for path in closure)
 
 
 def test_runtime_packages_aidp_search_without_management_extensions():

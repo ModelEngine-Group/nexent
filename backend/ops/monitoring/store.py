@@ -1,59 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Independent Ops PostgreSQL control store."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import date, timedelta
-from uuid import UUID
 
-from sqlalchemy import Engine, text
-from sqlalchemy.engine import Connection
+from sqlalchemy import text
 
-from ops.monitoring.contracts import day_id, stable_key
-
-
-BATCH = "ops.ops_monitoring_ingest_batch_t"
-DAY = "ops.ops_monitoring_day_state_t"
+from infrastructure.monitoring.store import BATCH, DAY, BatchStore
+from ops.monitoring.contracts import day_id
 
 
-class ControlStore:
-    def __init__(self, engine: Engine):
-        self.engine = engine
-
-    def verify_schema(self) -> None:
-        with self.engine.connect() as conn:
-            installed = conn.execute(text("SELECT to_regclass(:batch), to_regclass(:day)"),
-                                     {"batch": BATCH, "day": DAY}).one()
-            if not all(installed):
-                raise RuntimeError("Apply the Ops monitoring SQL migration before enabling Ops monitoring")
-
-    @contextmanager
-    def lock(self, namespace: str, tenant: str, kind: str) -> Iterator[Connection]:
-        """Hold a session lock across transactions and release it before pooling."""
-        key = stable_key(namespace, tenant, kind)
-        with self.engine.connect() as conn:
-            conn.execute(text("SELECT pg_advisory_lock(hashtextextended(:key, 0))"), {"key": key})
-            conn.commit()
-            try:
-                yield conn
-            finally:
-                try:
-                    conn.rollback()
-                    conn.execute(text("SELECT pg_advisory_unlock(hashtextextended(:key, 0))"), {"key": key})
-                    conn.commit()
-                except Exception:
-                    conn.invalidate()
-                    raise
-
-    def enqueue(self, batch_id: UUID, tenant: str, kind: str, payload: str, affected_dates: list[date]) -> None:
-        scope = {"id": batch_id, "tenant": tenant, "kind": kind, "payload": payload, "dates": affected_dates}
-        with self.lock("source", tenant, kind) as conn, conn.begin():
-            conn.execute(text(f"""
-                INSERT INTO {BATCH} (batch_id, tenant_id, fact_kind, replay_payload, affected_dates)
-                VALUES (:id, :tenant, :kind, CAST(:payload AS jsonb), CAST(:dates AS date[]))
-                ON CONFLICT (batch_id) DO NOTHING
-            """), scope)
-
+class ControlStore(BatchStore):
     def batch_scopes(self) -> list:
         with self.engine.connect() as conn:
             return conn.execute(text(f"""
