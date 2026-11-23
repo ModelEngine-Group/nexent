@@ -1,0 +1,61 @@
+schema_version: '1.0'
+stage: D5
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-MULTI-ROLE-D5-002
+  feature_id: AUTH-MULTI-ROLE
+  requirement_ids: [AUTH-MULTI-ROLE-20261031]
+  business_rule_ids: [AUTH-MULTI-ROLE-RULE-05]
+  title: Ops page identifier upgrade preserves grants and is repeatable
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the additive Ops navigation identifier migration on real PostgreSQL without altering authorization or unrelated records.
+  preconditions:
+  - NEXENT_AUTH_TEST_DSN points to an isolated PostgreSQL instance with permission to create and drop owned databases.
+  - Use the current-source role permission model and migration files; no shared deployment is mutated.
+  test_data:
+    roles: [OPS, SU, DEV]
+    legacy_routes: [/ops/dashboard, /ops/configuration]
+    new_identifiers: [ops-dashboard, ops-configuration]
+  steps:
+  - order: 1
+    action: Create an owned UUID database and seed legacy OPS and SU navigation grants, a custom DEV grant, an existing new identifier and unrelated grants.
+    expected: Record the complete initial rows and effective routes for comparison.
+  - order: 2
+    action: Apply the current additive Ops page identifier migration to real PostgreSQL.
+    expected: Only matching navigation subtypes change; IDs, roles and all other record fields are preserved. Effective routes remain unchanged and deduplicated.
+  - order: 3
+    action: Apply the migration again, then release connections and drop the owned database through the existing disposable factory.
+    expected: The second execution makes no changes; the owned database is removed.
+  expected_results:
+  - All old Ops navigation identifiers become their corresponding stable identifiers, preserving record identity, role and every other field.
+  - Effective accessibleRoutes remain identical before and after the migration, including when old and new grants coexist.
+  - Unrelated records are unchanged; repeat execution changes zero rows and cleanup removes the UUID database.
+  forbidden_side_effects:
+  - Adding or deleting grants, modifying resource action permissions or another page, changing user roles, or accessing shared tenant data.
+  acceptance:
+  - id: AC-01
+    description: Upgrade matching identifiers without changing grant identity or unrelated records.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Preserve effective route grants for mixed legacy and new identifiers.
+    steps: [2]
+    expected_results: [2]
+  - id: AC-03
+    description: Repeat migration without changes and release the owned database.
+    steps: [3]
+    expected_results: [3]
+  risk_type: DEPLOYMENT
+  risk: A permission identifier rename hides Ops navigation, grants additional access or rewrites unrelated authorization data.
+  condition:
+  - Upgrade a legacy permission dataset that also contains new identifiers, custom role grants and resource grants.
+  metrics:
+  - Changed record fields, effective route sets, second-run affected rows and remaining owned databases.
+  thresholds:
+  - Zero lost or added effective routes, zero unrelated changes, zero second-run writes and zero remaining owned databases.
+  recovery_expectations:
+  - Disposable database cleanup runs even on failure; the backend continues accepting legacy paths during a partial upgrade.

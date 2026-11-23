@@ -3,7 +3,7 @@
 
 Every caller owns a UUID database through the existing local-auth factory.
 The application uses current identity, group, tenant, model and operations routers.
-Only unrelated tool/skill installation and audit transport are controlled boundaries.
+Only unrelated catalog/audit transport and configuration loading are controlled boundaries.
 """
 
 import os
@@ -38,6 +38,14 @@ def isolated_runtime():
             "ENABLE_ASSET_OWNER_ROLE": "false",
         }.items():
             patch.setenv(name, value)
+        from infrastructure.system_configuration import runtime as configuration_runtime
+        from infrastructure.system_configuration.catalog import DEFAULT_CATALOG
+
+        configuration = configuration_runtime.SystemConfigurationRuntime(
+            loader=AsyncMock(return_value=DEFAULT_CATALOG.defaults)
+        )
+        configuration.store_snapshot(DEFAULT_CATALOG.defaults)
+        patch.setattr(configuration_runtime, "_process_runtime", configuration)
         from management.db import models
         from infrastructure.rdb.client import db_client
         from sqlalchemy import create_engine
@@ -119,12 +127,14 @@ def isolated_runtime():
             if len(upgrades) != 1:
                 raise RuntimeError("Expected the versioned operations-role migration")
             connection.connection.cursor().execute(upgrades[0].read_text(encoding="utf-8"))
+            for migration in sorted((ROOT / "deploy/sql/migrations").glob("*_ops_page_identifiers.sql")):
+                connection.connection.cursor().execute(migration.read_text(encoding="utf-8"))
         from management.services.permission.identity import authentication as auth
         from management.api.identity import api_key, user_management, user, invitation, group, tenant
         from management.api.configuration import tenant_config
         from management.api.model import model_managment
         from management.services.permission.identity import session as helpers
-        from ops.api import access
+        from management.api.permission import ops_access as access
         from backend.http.server.app_factory import create_app
 
         patch.setattr(auth, "init_tool_list_for_tenant", AsyncMock())
@@ -157,7 +167,7 @@ class Runtime:
         from infrastructure.rdb.client import get_db_session
         from management.db.identity.account import create_account
         from management.db.identity.user_tenant import insert_user_tenant
-        from infrastructure.security.passwords import hash_password
+        from management.utils.account_passwords import hash_password
 
         definitions = {
             "su": ("platform", ["SU"]),

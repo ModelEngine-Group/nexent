@@ -86,6 +86,12 @@ from infrastructure.rdb.orm import as_dict
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
 
+# Navigation identifiers are independent of routes exposed to existing clients.
+_NAVIGATION_PAGE_ROUTES = {
+    "ops-dashboard": "/ops/dashboard",
+    "ops-configuration": "/ops/configuration",
+}
+
 
 def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     """Return a non-empty username stored for a linked authentication provider."""
@@ -252,7 +258,7 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
     Format role permissions into permissions and accessibleRoutes lists.
 
     - permissions: List of permission strings (permission_type:permission_subtype for RESOURCE category)
-    - accessibleRoutes: List of accessible route subtypes (permission_subtype for LEFT_NAV_MENU permission_type)
+    - accessibleRoutes: Routes resolved from LEFT_NAV_MENU page identifiers or legacy paths
 
     Args:
         permissions (List[Dict[str, Any]]): Raw permission records from database
@@ -274,8 +280,9 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
             formatted_permissions.append(
                 f"{permission_type}:{permission_subtype}".lower())
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
-            # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
-            accessible_routes.append(permission_subtype)
+            accessible_routes.append(
+                _NAVIGATION_PAGE_ROUTES.get(permission_subtype, permission_subtype)
+            )
 
     accessible_routes = filter_accessible_routes_for_asset_owner_feature(
         accessible_routes
