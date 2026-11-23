@@ -62,7 +62,8 @@ Image options:
 - `--main` builds `nexent`
 - `--web` builds `nexent-web`
 - `--data-process` builds `nexent-data-process`
-- `--mcp` builds `nexent-mcp`
+- `--mcp` builds the shared `nexent-management` backend and the `nexent-mcp` proxy image. Use `--images mcp` to build just the proxy. The deployed MCP backend runs in a separate container using the Management image.
+- `--ops` builds the `nexent-ops` backend image.
 - `--terminal` builds `nexent-ubuntu-terminal`
 - `--docs` builds `nexent-docs`
 - `--sandbox` builds the default lightweight `nexent-sandbox`

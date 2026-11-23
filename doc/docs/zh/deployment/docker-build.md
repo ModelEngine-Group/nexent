@@ -63,7 +63,8 @@ bash build.sh --sandbox-full --version latest --load
 - `--main` 构建 `nexent`
 - `--web` 构建 `nexent-web`
 - `--data-process` 构建 `nexent-data-process`
-- `--mcp` 构建 `nexent-mcp`
+- `--mcp` 同时构建共享的 `nexent-management` 后端镜像和 `nexent-mcp` 代理镜像。用 `--images mcp` 可以单独构建代理。MCP 后端使用 Management 镜像启动独立容器。
+- `--ops` 构建运维后端镜像 `nexent-ops`
 - `--terminal` 构建 `nexent-ubuntu-terminal`
 - `--docs` 构建 `nexent-docs`
 - `--sandbox` 构建默认轻量 `nexent-sandbox`

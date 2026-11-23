@@ -107,11 +107,13 @@ jobs:
           APP_VERSION: ${{ inputs.app_version }}
         run: |
           set -euo pipefail
-          for service in management runtime mcp-service ops; do
+          for service in management runtime; do
             docker build --target "$service" \
               --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua \
               -t "nexent/nexent-$service:$APP_VERSION" -f deploy/images/dockerfiles/main/Dockerfile .
           done
+          docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple \
+            -t "nexent/nexent-ops:$APP_VERSION" -f deploy/images/dockerfiles/ops/Dockerfile .
       - name: Copy project to $HOME/nexent
         run: |
           rm -rf $HOME/nexent

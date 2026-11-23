@@ -408,7 +408,7 @@ push_log="$TMP_DIR/push-images.log"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-mcp-service:latest,nexent/nexent-ops:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-ops:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --image-registry-prefix https://registry.local/nexent/ \
@@ -424,7 +424,7 @@ grep -q '^push registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$'
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-mcp-service:latest,nexent/nexent-ops:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-management:latest,nexent/nexent-runtime:latest,nexent/nexent-ops:latest,nexent/nexent-gateway:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --load-images \

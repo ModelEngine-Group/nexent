@@ -60,7 +60,7 @@ grep -q 'io.nexent.sandbox.skills="docx,pdf,pptx,xlsx,canvas-design,frontend-des
 grep -q 'io.nexent.sandbox.variant="full"' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandbox should identify its variant"
 for workflow in "$MAINLAND_WORKFLOW" "$OVERSEAS_WORKFLOW"; do
   matrix="$(sed -n 's/^[[:space:]]*image: \[\(.*\)\]$/\1/p' "$workflow" | tr -d ' ')"
-  for image in mcp-service ops sandbox-full; do
+  for image in management mcp ops sandbox-full; do
     case ",$matrix," in
       *",$image,"*) ;;
       *) fail "$workflow should publish $image" ;;
@@ -101,6 +101,30 @@ assert_not_contains "$output" "nexent/nexent-sandbox-full:v1.2.3" "all should le
 output="$(bash "$ROOT_BUILD_SCRIPT" --web --version latest --dry-run)"
 assert_contains "$output" "nexent/nexent-web:latest" "root image build entrypoint should forward to deploy/images/build.sh"
 assert_not_contains "$output" "nexent/nexent:latest" "root image build entrypoint should preserve selected image arguments"
+
+output="$(bash "$ROOT_BUILD_SCRIPT" --mcp --version latest --dry-run)"
+assert_contains "$output" "nexent/nexent-management:latest" "--mcp should build the shared backend image"
+assert_contains "$output" "--target management" "--mcp should select the Management target for the backend"
+assert_contains "$output" "nexent/nexent-mcp:latest" "--mcp should also build the MCP proxy image"
+assert_contains "$output" "dockerfiles/mcp/Dockerfile" "--mcp should select the proxy Dockerfile"
+assert_not_contains "$output" "nexent/nexent-mcp-service:" "the standalone backend image should not be built"
+
+output="$(bash "$ROOT_BUILD_SCRIPT" --images mcp --version latest --dry-run)"
+assert_contains "$output" "dockerfiles/mcp/Dockerfile" "the image list should build the proxy on its own"
+assert_not_contains "$output" "nexent/nexent-management:latest" "selecting mcp in the image list should only build the proxy"
+
+output="$(bash "$ROOT_BUILD_SCRIPT" --ops --version latest --registry mainland --dry-run)"
+assert_contains "$output" "nexent/nexent-ops:latest" "--ops should build the Ops image"
+assert_contains "$output" "dockerfiles/ops/Dockerfile" "Ops should use its own Dockerfile"
+assert_contains "$output" "MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple" "Ops should receive the mainland index"
+assert_not_contains "$output" "--target ops" "Ops should build independently of main"
+
+for removed_flag in --mcp-service --mcp-proxy; do
+  if output="$(bash "$ROOT_BUILD_SCRIPT" "$removed_flag" --version latest --dry-run 2>&1)"; then
+    fail "removed option $removed_flag should be rejected"
+  fi
+  assert_contains "$output" "Unknown option: $removed_flag" "the removed flag should report an unknown option"
+done
 
 output="$(bash "$BUILD_SCRIPT" --main --version latest --no-cache --dry-run)"
 assert_contains "$output" "--no-cache" "explicit no-cache option should be forwarded"

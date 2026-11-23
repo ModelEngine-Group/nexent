@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: INDEPENDENT-OPS-MCP-BUILDS-20261123
+  change_type: refactor
+  title: Build Ops independently and share the Management image with MCP
+  description: Build Ops from its own dependency group, share the Management image with MCP, and package Gateway's shared identity code as one directory.
+  affected_features:
+    existing: [OPS-BOOTSTRAP, GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-BOOTSTRAP-D1-001, OPS-BOOTSTRAP-D5-001, GW-AUTH-D3-001, GW-AUTH-D3-003]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Ops and Gateway protocol contracts remain valid. The existing Gateway case follows the moved MCP modules, and the smoke test exercises both containers from the shared image.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Confirm Ops uses its own Dockerfile and the unified MCP flag selects Management and the proxy image.
+    - Confirm Management packages MCP sources, Runtime excludes them, and downstream images copy one shared identity package.
+    - Confirm Gateway and downstream callers retain signature, delegation and principal context behavior after moving the modules.
+    reason: Extend existing image selection and source packaging assertions alongside the Docker smoke test.
+    test_selectors:
+    - test/backend/deploy/test_service_image_sources.py
+    - test/backend/deploy/test_gateway_image.py
+    - test/backend/gateway/test_mcp_delegation.py
+    - test/backend/gateway/test_configuration.py
+    - test/backend/gateway/test_identity_signatures.py
+  notes: SPEC deploy-helm-single-command/changes/independent-mcp-ops-images/management-mcp-image.md.

@@ -3,9 +3,9 @@
 
 from contracts.constants.environment import JWT_SECRET
 from contracts.errors.exceptions import TokenExpiredError
-from gateway.security import service_tokens
-from gateway.security.identity import IdentityError
-from gateway.security.service_tokens import (
+from gateway.identity import service_tokens
+from gateway.identity.protocol import IdentityError
+from gateway.identity.service_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE, INTERNAL_RUNTIME_JWT_ISSUER,
     INTERNAL_RUNTIME_JWT_SCOPE, INTERNAL_RUNTIME_JWT_TTL_SECONDS,
 )

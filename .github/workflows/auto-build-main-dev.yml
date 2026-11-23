@@ -13,6 +13,7 @@ on:
       - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/images/dockerfiles/main/**'
+      - 'deploy/images/dockerfiles/ops/**'
       - 'deploy/common/**'
       - 'deploy/sql/**'
       - 'deploy/tests/smoke-independent-service-images.sh'
@@ -25,6 +26,7 @@ on:
       - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/images/dockerfiles/main/**'
+      - 'deploy/images/dockerfiles/ops/**'
       - 'deploy/common/**'
       - 'deploy/sql/**'
       - 'deploy/tests/smoke-independent-service-images.sh'
@@ -67,10 +69,12 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          for service in management runtime mcp-service ops; do
+          for service in management runtime; do
             docker build --target "$service" --platform "linux/$ARCH" \
               -t "nexent/nexent-$service:dev-$ARCH" -f deploy/images/dockerfiles/main/Dockerfile .
           done
+          docker build --platform "linux/$ARCH" \
+            -t "nexent/nexent-ops:dev-$ARCH" -f deploy/images/dockerfiles/ops/Dockerfile .
       - name: Start and check independent services
         timeout-minutes: 8
         env:
@@ -78,4 +82,4 @@ jobs:
         run: |
           bash deploy/tests/smoke-independent-service-images.sh \
             "nexent/nexent-management:dev-$ARCH" "nexent/nexent-runtime:dev-$ARCH" \
-            "nexent/nexent-mcp-service:dev-$ARCH" "nexent/nexent-ops:dev-$ARCH"
+            "nexent/nexent-ops:dev-$ARCH"

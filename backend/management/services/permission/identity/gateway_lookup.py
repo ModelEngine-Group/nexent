@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Authoritative account, membership and credential-state lookup for Gateway."""
 
-from gateway.downstream.identity import IdentityError
+from gateway.identity.downstream import IdentityError
 from contracts.roles import roles_from_record, primary_role
 
 

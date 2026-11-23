@@ -2183,7 +2183,6 @@ deployment_render_image_rollout_checksums() {
   printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
   printf '    managementImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_MANAGEMENT_IMAGE")"
   printf '    runtimeImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_RUNTIME_IMAGE")"
-  printf '    mcpServiceImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_MCP_SERVICE_IMAGE")"
   printf '    opsImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_OPS_IMAGE")"
   printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
   printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
@@ -2199,7 +2198,6 @@ deployment_apply_image_source() {
     export NEXENT_IMAGE="nexent/nexent:latest"
     export NEXENT_MANAGEMENT_IMAGE="nexent/nexent-management:latest"
     export NEXENT_RUNTIME_IMAGE="nexent/nexent-runtime:latest"
-    export NEXENT_MCP_SERVICE_IMAGE="nexent/nexent-mcp-service:latest"
     export NEXENT_OPS_IMAGE="nexent/nexent-ops:latest"
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
@@ -2212,7 +2210,6 @@ deployment_apply_image_source() {
   export NEXENT_IMAGE="${NEXENT_IMAGE:-nexent/nexent:$version}"
   export NEXENT_MANAGEMENT_IMAGE="${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:$version}"
   export NEXENT_RUNTIME_IMAGE="${NEXENT_RUNTIME_IMAGE:-nexent/nexent-runtime:$version}"
-  export NEXENT_MCP_SERVICE_IMAGE="${NEXENT_MCP_SERVICE_IMAGE:-nexent/nexent-mcp-service:$version}"
   export NEXENT_OPS_IMAGE="${NEXENT_OPS_IMAGE:-nexent/nexent-ops:$version}"
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
@@ -2264,7 +2261,6 @@ deployment_apply_image_source() {
       NEXENT_IMAGE \
       NEXENT_MANAGEMENT_IMAGE \
       NEXENT_RUNTIME_IMAGE \
-      NEXENT_MCP_SERVICE_IMAGE \
       NEXENT_OPS_IMAGE \
       NEXENT_WEB_IMAGE \
       NEXENT_DATA_PROCESS_IMAGE \
@@ -2339,7 +2335,6 @@ deployment_render_docker_env() {
     printf 'NEXENT_IMAGE="%s"\n' "$NEXENT_IMAGE"
     printf 'NEXENT_MANAGEMENT_IMAGE="%s"\n' "$NEXENT_MANAGEMENT_IMAGE"
     printf 'NEXENT_RUNTIME_IMAGE="%s"\n' "$NEXENT_RUNTIME_IMAGE"
-    printf 'NEXENT_MCP_SERVICE_IMAGE="%s"\n' "$NEXENT_MCP_SERVICE_IMAGE"
     printf 'NEXENT_OPS_IMAGE="%s"\n' "$NEXENT_OPS_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
@@ -2385,7 +2380,7 @@ deployment_render_image_values() {
   printf 'nexent-runtime:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_RUNTIME_IMAGE")" "$(deployment_image_tag "$NEXENT_RUNTIME_IMAGE")" "$local_pull_policy"
   printf 'nexent-mcp:\n'
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_SERVICE_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_SERVICE_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MANAGEMENT_IMAGE")" "$(deployment_image_tag "$NEXENT_MANAGEMENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-gateway:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
   printf 'nexent-ops:\n'
@@ -2483,7 +2478,7 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30014\n' "$internal_type"
   printf 'nexent-mcp:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_SERVICE_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_SERVICE_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MANAGEMENT_IMAGE")" "$(deployment_image_tag "$NEXENT_MANAGEMENT_IMAGE")" "$local_pull_policy"
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-gateway:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"

@@ -166,7 +166,7 @@ services:
     entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.runtime_service"]
 
   nexent-mcp:
-    image: ${NEXENT_MCP_SERVICE_IMAGE:-nexent/nexent-mcp-service:latest}
+    image: ${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:latest}
     container_name: nexent-mcp
     restart: always
     ports:
@@ -183,6 +183,7 @@ services:
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
+      PYTHON_DOTENV_DISABLED: "1"
       skip_proxy: "true"
       UMASK: "0022"
     env_file:

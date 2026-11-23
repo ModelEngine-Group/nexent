@@ -65,11 +65,6 @@ COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
 
-FROM builder AS full-builder
-RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
-    uv pip install --link-mode copy -r /opt/backend/management-requirements.txt \
-        $(test -n "$MIRROR" && echo "-i $MIRROR")
-
 FROM base AS backend-common
 
 ENV VIRTUAL_ENV=/opt/backend/.venv
@@ -128,12 +123,13 @@ COPY backend/adapters /opt/backend/adapters
 COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
 COPY backend/memory_provider_plugins /opt/backend/memory_provider_plugins
 COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
-COPY backend/http/client.py backend/http/logging.py /opt/backend/http/
+COPY backend/tool_collection/mcp /opt/backend/tool_collection/mcp
+COPY backend/mcp /opt/backend/mcp
+COPY backend/http/client.py backend/http/logging.py backend/http/mcp_service.py /opt/backend/http/
 RUN ln -s ../management/launcher.py /opt/backend/http/config_service.py
 COPY backend/http/server /opt/backend/http/server
 COPY backend/gateway/__init__.py /opt/backend/gateway/
-COPY backend/gateway/downstream /opt/backend/gateway/downstream
-COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
+COPY backend/gateway/identity /opt/backend/gateway/identity
 
 # Runtime target excludes Management business code.
 FROM backend-common AS runtime
@@ -159,44 +155,7 @@ COPY backend/http/client.py backend/http/logging.py /opt/backend/http/
 RUN ln -s ../runtime/launcher.py /opt/backend/http/runtime_service.py
 COPY backend/http/server /opt/backend/http/server
 COPY backend/gateway/__init__.py /opt/backend/gateway/
-COPY backend/gateway/downstream /opt/backend/gateway/downstream
-COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
-
-FROM python:3.11-slim AS standalone-service
-ENV VIRTUAL_ENV=/opt/backend/.venv
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-ENV PYTHONPATH=/opt:/opt/backend
-ENV NEXENT_SQL_STARTUP_MODE=off
-ENV PYTHON_DOTENV_DISABLED=1
-ENV TZ=Asia/Shanghai
-WORKDIR /opt
-
-COPY --from=full-builder /opt/backend/.venv /opt/backend/.venv
-COPY VERSION /opt/nexent/VERSION
-COPY deploy/common/start-backend.sh /opt/nexent/scripts/
-RUN chmod +x /opt/nexent/scripts/start-backend.sh
-
-FROM python:3.11-slim AS mcp-sources
-RUN --mount=type=bind,source=.,target=/source \
-    python /source/deploy/images/dockerfiles/main/copy_service_sources.py /source /mcp-service mcp-service
-
-FROM python:3.11-slim AS ops-sources
-RUN --mount=type=bind,source=.,target=/source \
-    python /source/deploy/images/dockerfiles/main/copy_service_sources.py /source /ops ops
-
-FROM standalone-service AS mcp-service
-ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
-COPY --from=mcp-sources /mcp-service /opt
-COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
-COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
-COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
-COPY backend/configs/model_catalog.json /opt/backend/configs/
-COPY backend/tool_collection/langchain/*.py /opt/backend/tool_collection/langchain/
-ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.mcp_service"]
-
-FROM standalone-service AS ops
-COPY --from=ops-sources /ops /opt
-ENTRYPOINT ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.ops_service"]
+COPY backend/gateway/identity /opt/backend/gateway/identity
 
 # Keep the existing full backend as the default build target.
 FROM management-base AS final
