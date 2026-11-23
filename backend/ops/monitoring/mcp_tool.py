@@ -3,8 +3,9 @@
 
 from collections.abc import Iterable
 
+from infrastructure.monitoring.contracts import stable_key
 from infrastructure.monitoring.facts import McpToolFact
-from ops.monitoring.contracts import MonitoringKind, stable_key
+from ops.monitoring.contracts import MonitoringKind
 
 
 DIMENSIONS = ("tenant_id", "fact_kind", "statistic_date", "group_snapshot_state", "group_key",

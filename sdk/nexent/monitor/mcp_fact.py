@@ -12,16 +12,16 @@ from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
+from opentelemetry.trace import get_current_span
+
 from nexent.consts.mcp_errors import classify_mcp_failure
 from nexent.core.concurrency.cancellation import RunTerminated
-from nexent.monitor.facts import emit_fact, get_fact_sink
+from nexent.monitor.facts import get_fact_sink
 from nexent.monitor.monitoring import get_agent_monitoring_context
-from opentelemetry.trace import get_current_span
 
 
 logger = logging.getLogger(__name__)
 _suppressed = ContextVar("suppress_mcp_tool_calls", default=False)
-_ERROR_CATEGORY_PATTERN = r"[A-Z0-9_]{1,50}"
 
 
 class McpToolCallObservation:
@@ -45,9 +45,9 @@ class McpToolCallObservation:
             "fact_kind": "mcp_tool",
             "fact_id": sha256(invocation.encode()).hexdigest(),
             "call_context_id": invocation,
-            "root_run_id": context.monitoring_root_run_id if context else None,
-            "agent_run_id": context.monitoring_run_id if context else None,
             "agent_id": context.agent_id if context else None,
+            "agent_run_id": context.monitoring_run_id if context else None,
+            "root_run_id": context.monitoring_root_run_id if context else None,
             "initiator_group_ids": context.monitoring_group_ids if context else None,
             "mcp_server_id": server.get("mcp_server_id"),
             "mcp_server_name": server.get("mcp_server_name"),
@@ -61,7 +61,10 @@ class McpToolCallObservation:
     def _emit(self, **fields):
         if self.sink is None:
             return
-        emit_fact({**self.payload, **fields})
+        try:
+            self.sink({**self.payload, **fields})
+        except Exception as error:
+            logger.warning("MCP tool monitoring observation rejected error=%s", type(error).__name__)
 
     def dispatch(self):
         if self.started is not None or self.sink is None:
@@ -101,7 +104,7 @@ class McpToolCallObservation:
         category, _leaf = classify_mcp_failure(error)
         if isinstance(category, str):
             category = category.upper()
-        return category if isinstance(category, str) and re.fullmatch(_ERROR_CATEGORY_PATTERN, category) \
+        return category if isinstance(category, str) and re.fullmatch(r"[A-Z0-9_]{1,50}", category) \
             else "MCP_TOOL_FAILURE"
 
 
