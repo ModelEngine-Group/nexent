@@ -95,55 +95,21 @@ async def run_historical_reader(
                 assert "original row" in json.dumps(body["messages"])
                 assert "next_offset" in json.dumps(body["messages"])
                 content = "<final_answer>AUTHORIZED_ORIGINAL_READ</final_answer>"
-            value = {
-                "id": "reader-response",
-                "model": body["model"],
-                "object": "chat.completion",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": content},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 100,
-                    "completion_tokens": 20,
-                    "total_tokens": 120,
-                },
-            }
+            choice = {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+            value = dict(id="reader-response", model=body["model"], object="chat.completion", choices=[choice],
+                         usage={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120})
             if body.get("stream"):
-                writer.write(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
-                )
-                chunk = {
-                    **value,
-                    "object": "chat.completion.chunk",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": value["choices"][0]["message"],
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-                chunk.pop("usage")
-                writer.write(("data: " + json.dumps(chunk) + "\n\n").encode())
-                chunk.update(
-                    usage=value["usage"],
-                    choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                )
-                writer.write(
-                    ("data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n").encode()
-                )
+                value["object"] = "chat.completion.chunk"
+                first = dict(value, choices=[{"index": 0, "delta": choice["message"], "finish_reason": None}])
+                first.pop("usage")
+                last = dict(value, choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}])
+                payload = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in (first, last))
+                headers = b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+                writer.write(headers + (payload + "data: [DONE]\n\n").encode())
             else:
                 payload = json.dumps(value).encode()
-                writer.write(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-                    + str(len(payload)).encode()
-                    + b"\r\nConnection: close\r\n\r\n"
-                    + payload
-                )
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                             + str(len(payload)).encode() + b"\r\nConnection: close\r\n\r\n" + payload)
             await writer.drain()
         except Exception as error:
             state["errors"].append(repr(error))

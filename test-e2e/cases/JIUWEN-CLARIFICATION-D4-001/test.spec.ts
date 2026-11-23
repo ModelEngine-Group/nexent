@@ -11,7 +11,8 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     readFileSync(process.env.NEXENT_REAL_HITL_CONFIG!, "utf8"),
   );
   const base = process.env.NEXENT_BASE_URL || "http://127.0.0.1:3000";
-  const container = config.container || "nexent-runtime";
+  const container = config.container || "nexent-config";
+  const expectedCore: "jiuwen" | "smolagents" = config.core ?? "jiuwen";
   const target =
     "/tmp/nexent_hitl_" + randomUUID().replaceAll("-", "").slice(0, 12);
   const privateState = join(contract.caseDir, "private-state.json");
@@ -28,7 +29,7 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
       docker(
         "exec",
         "-e",
-        "PYTHONPATH=/opt/backend",
+        "PYTHONPATH=/opt:/opt/backend",
         container,
         "/opt/backend/.venv/bin/python",
         target + ".py",
@@ -40,6 +41,8 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
         .split(/\r?\n/)
         .at(-1)!,
     );
+  const audit = (conversationId: number) =>
+    fixture("audit", conversationId, expectedCore);
   docker(
     "cp",
     join(
@@ -55,6 +58,8 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
   let form: any,
     secondWire: any[] = [],
     thirdWire: any[] = [];
+  let fallbackQuestions = "";
+  let submittedTimeOption: string | undefined;
   let first: any, continued: any, restored: any, finalAudit: any;
   const submitted: Record<string, string> = {};
   const errors: string[] = [];
@@ -114,18 +119,22 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
       response.request().postDataJSON().conversation_id ||
       Number(response.headers()["conversation_id"]);
     expect(cid).toBeGreaterThan(0);
-    const result = (await response.body())
-      .toString("utf8")
+    const body = (await response.body()).toString("utf8");
+    const result = body
       .split(/\r?\n/)
       .filter((line) => line.startsWith("data:"))
       .map((line) => JSON.parse(line.slice(5).trim()));
     expect(result.filter((event) => event.type === "error")).toEqual([]);
-    const terminal = result.filter(
-      (event) => event.type === "run_terminal" && !event.invocation_id,
-    );
-    expect(terminal).toHaveLength(1);
-    expect(terminal[0].status, terminal[0].error?.category).toBe("completed");
-    expect(terminal[0].agent_core).toBe("jiuwen");
+    const completed = body
+      .split(/\r?\n\r?\n/)
+      .filter((frame) => frame.includes("event: agentos_terminal\n"))
+      .map((frame) => JSON.parse(frame.split("\ndata: ")[1]).status);
+    expect(completed).toEqual(["completed"]);
+    expect(
+      result.filter((event) =>
+        ["model_output", "run_terminal"].includes(event.type),
+      ),
+    ).toEqual([]);
     return result;
   };
   const send = async (query: string) => {
@@ -163,29 +172,38 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     expect(response.status()).toBe(200);
     const body = await response.json();
     expect(JSON.stringify(body)).not.toContain("JIUWEN_FINAL_OUTPUT_INVALID");
-    const terminals: any[] = [];
-    const visit = (value: any) => {
-      if (typeof value === "string") {
-        try {
-          visit(JSON.parse(value));
-        } catch {
-          /* Plain message text is not a runtime event. */
-        }
-      } else if (value && typeof value === "object") {
-        if (
-          value.type === "run_terminal" &&
-          value.end_reason === "awaiting_input"
-        )
-          terminals.push(value);
-        for (const entry of Object.values(value)) visit(entry);
-      }
-    };
-    visit(body);
-    expect(terminals).toHaveLength(1);
-    expect(terminals[0].status).toBe("completed");
-    expect(terminals[0].final_content).toBe("");
-    expect(terminals[0].final_block_ids).toEqual([]);
-    expect(terminals[0].error).toBeNull();
+    const source = first.forms[0];
+    const message = body.data[0].message.find(
+      (entry: any) => entry.message_id === source.source_message_id,
+    );
+    expect(message?.status).toBe("completed");
+    const cards = message.message.filter(
+      (unit: any) => unit.type === "human_interaction",
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0].unit_index).toBe(source.unit_index);
+    const historyAnswers = message.message.filter(
+      (unit: any) => unit.type === "final_answer",
+    );
+    expect(historyAnswers.map((unit: any) => unit.content)).toEqual(
+      expectedCore === "jiuwen" ? [] : [fallbackQuestions],
+    );
+    if (expectedCore === "jiuwen") {
+      const terminals = audit(cid).terminals.filter(
+        (terminal: any) => terminal.message_id === source.source_message_id,
+      );
+      expect(terminals).toEqual([
+        {
+          message_id: source.source_message_id,
+          status: "completed",
+          end_reason: "awaiting_input",
+          agent_core: "jiuwen",
+          final_content: "",
+          final_block_ids: [],
+          error: null,
+        },
+      ]);
+    }
     await expect(
       page.getByText("JIUWEN_FINAL_OUTPUT_INVALID", { exact: true }),
     ).toHaveCount(0);
@@ -193,10 +211,6 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
   await contract.precondition(
     contract.expectedIds("preconditions")[0],
     async () => {
-      const deployed = await (
-        await page.request.get(base + "/api/tenant_config/deployment_version")
-      ).json();
-      expect(deployed.agent_core).toBe("jiuwen");
       setupAttempted = true;
       expect(
         fixture("setup", config.source_agent_id).same_model_and_config,
@@ -220,6 +234,11 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
           expires: state.expires_at,
         },
       ]);
+      const deployment = await page.request.get(
+        base + "/api/tenant_config/deployment_version",
+      );
+      expect(deployment.ok()).toBe(true);
+      expect((await deployment.json()).agent_core).toBe(expectedCore);
     },
   );
   const steps = contract.expectedIds("steps");
@@ -245,16 +264,18 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     });
     outcomes.push({
       no_core_setting: true,
-      deployment_core: "jiuwen",
+      deployment_core: expectedCore,
       source_models: state.source_models,
     });
     save();
   });
   await contract.step(steps[1], async () => {
     await page.goto(`${base}/zh/newchat?agent_id=${state.agent_id}`);
-    const response = await send("我的感情运势如何？");
-    await expect(card()).toBeVisible({ timeout: 180000 });
+    const response = await send(
+      "我的感情运势如何？如果需要我补资料，请用一个文本框让我一次填写。",
+    );
     const wire = await events(response);
+    await expect(card()).toBeVisible({ timeout: 180000 });
     const forms = wire.filter(
       (event) => event.type === "human_interaction" && !event.invocation_id,
     );
@@ -265,14 +286,28 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
         : forms[0].content;
     expect(form.schema_version).toBe(1);
     expect(form.questions.length).toBeGreaterThan(0);
-    expect(wire.filter((event) => event.type === "final_answer")).toHaveLength(
-      0,
-    );
+    if (expectedCore === "smolagents") {
+      fallbackQuestions = form.questions
+        .flatMap((question: any, index: number) => [
+          `${index + 1}. ${question.title}`,
+          ...(question.options ?? []).map(
+            (entry: any) => `   - ${entry.label}`,
+          ),
+          ...(question.allow_other ? ["   - 其他 / Other"] : []),
+          ...(question.placeholder ? [`   ${question.placeholder}`] : []),
+        ])
+        .join("\n");
+    }
+    expect(
+      wire
+        .filter((event) => event.type === "final_answer")
+        .map((event) => event.content),
+    ).toEqual(expectedCore === "jiuwen" ? [] : [fallbackQuestions]);
     expect(wire.filter((event) => event.type === "tool")).toHaveLength(0);
-    first = fixture("audit", cid);
+    first = audit(cid);
     expect(first.message_count).toBe(2);
     expect(first.forms).toHaveLength(1);
-    expect(first.terminals[0].end_reason).toBe("awaiting_input");
+    expect(first.message_statuses).toEqual(["completed", "completed"]);
     const before = runs;
     await page.goto(`${base}/zh/newchat?thread_id=${cid}`);
     await expect(
@@ -281,7 +316,7 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     await expect(card().locator("input, textarea").first()).toBeEnabled();
     await validWaitingHistory();
     expect(runs).toBe(before);
-    const pending = fixture("audit", cid);
+    const pending = audit(cid);
     expect(pending.messages_hash).toBe(first.messages_hash);
     expect(pending.units_hash).toBe(first.units_hash);
     await page.screenshot({
@@ -298,11 +333,11 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
   await contract.step(steps[2], async () => {
     for (const question of form.questions) {
       const hint = question.title + " " + question.id;
+      const time = /时间|几点|时辰|time/i.test(hint);
       if (question.type === "text") {
         let value =
           "公历1998年6月15日，上午9点30分，性别女，出生地杭州，目前单身。";
         const date = /日期|年月|生日|date|birthdate/i.test(hint),
-          time = /时间|几点|时辰|time/i.test(hint),
           sex = /性别|gender|sex/i.test(hint);
         if (date && !time && !sex) value = "公历1998年6月15日";
         else if (time && !date && !sex) value = "上午9点30分（09:30）";
@@ -316,9 +351,13 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
         const options = question.options;
         const option =
           options.find((entry: any) =>
-            /女|female|公历|阳历|Gregorian|单身/i.test(entry.label),
+            (time
+              ? /上午|9[：:点]|morning/i
+              : /女|female|公历|阳历|Gregorian|单身/i
+            ).test(entry.label),
           ) || options[0];
         submitted[question.id] = option.label;
+        if (time) submittedTimeOption = option.label;
         await card()
           .getByRole(question.type === "single_choice" ? "radio" : "checkbox", {
             name: option.label,
@@ -342,11 +381,34 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     expect(
       secondWire.filter((event) => event.type === "human_interaction"),
     ).toHaveLength(0);
+    const continuation = secondWire.filter(
+      (event) => event.type === "final_answer" && !event.invocation_id,
+    );
+    if (expectedCore === "jiuwen") {
+      expect(continuation).toHaveLength(1);
+      expect(continuation[0].answer_phase).toBe("complete");
+    }
     expect(
-      secondWire.filter((event) => event.type === "final_answer"),
-    ).toHaveLength(1);
-    continued = fixture("audit", cid);
+      continuation
+        .map((event) => event.content)
+        .join("")
+        .trim(),
+    ).not.toBe("");
+    continued = audit(cid);
     expect(continued.message_count).toBe(4);
+    expect(continued.raw_model_output_units).toBe(0);
+    if (expectedCore === "jiuwen") {
+      const fragments = secondWire.filter(
+        (event) =>
+          event.block_id &&
+          ["model_output_thinking", "model_output_deep_thinking"].includes(
+            event.type,
+          ),
+      );
+      expect(continued.native_thinking_units).toBeGreaterThan(0);
+      expect(continued.max_native_units_per_block).toBe(1);
+      expect(fragments.length).toBeGreaterThan(continued.native_thinking_units);
+    }
     expect(continued.responses).toHaveLength(1);
     expect(continued.responses[0].source_message_id).toBe(
       first.forms[0].source_message_id,
@@ -354,10 +416,16 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     expect(continued.responses[0].unit_index).toBe(first.forms[0].unit_index);
     await savedCard();
     await expect(answers().last()).not.toBeEmpty();
+    await expect(
+      answers().last().locator("[data-citation-index-map] > .aui-md"),
+    ).toHaveCount(1);
     outcomes.push({
       submitted_once: true,
       answer_persisted: true,
       successful_continuation: true,
+      raw_model_output_units: continued.raw_model_output_units,
+      native_thinking_units: continued.native_thinking_units,
+      max_native_units_per_block: continued.max_native_units_per_block,
     });
     save();
   });
@@ -372,26 +440,35 @@ journey("JIUWEN-CLARIFICATION-D4-001", async ({ page, contract, expect }) => {
     await page.goto(`${base}/zh/newchat?thread_id=${cid}`);
     await savedCard();
     expect(runs).toBe(before);
-    restored = fixture("audit", cid);
+    restored = audit(cid);
     expect(restored.messages_hash).toBe(continued.messages_hash);
     expect(restored.units_hash).toBe(continued.units_hash);
     thirdWire = await events(
-      await send("请只复述我刚才提供的出生日期和时间，不要重新计算。"),
+      await send(
+        "请只复述我刚才填写的出生日期和时间。如果是选项，请引用选项原文。不要重新计算。",
+      ),
     );
     expect(
       thirdWire.filter((event) =>
         ["human_interaction", "tool"].includes(event.type),
       ),
     ).toHaveLength(0);
-    const answer = thirdWire.find(
-      (event) => event.type === "run_terminal" && !event.invocation_id,
-    ).final_content;
+    const answer = thirdWire
+      .filter((event) => event.type === "final_answer" && !event.invocation_id)
+      .map((event) => event.content)
+      .join("");
     expect(answer).toContain("1998");
     expect(answer).toMatch(/6[月\/-]15|六月十五/);
-    expect(answer).toMatch(
-      /0?9[：:]30|(?:9|九)(?:点(?:30|三十)|时(?:30|三十)|点半)|九时三十分/,
-    );
-    finalAudit = fixture("audit", cid);
+    if (submittedTimeOption) {
+      const normalize = (value: string) =>
+        value.normalize("NFKC").replace(/\s/g, "");
+      expect(normalize(answer)).toContain(normalize(submittedTimeOption));
+    } else {
+      expect(answer).toMatch(
+        /0?9[：:]30|(?:9|九)(?:点(?:30|三十)|时(?:30|三十)|点半)|九时三十分/,
+      );
+    }
+    finalAudit = audit(cid);
     expect(finalAudit.message_count).toBe(6);
     expect(finalAudit.forms).toHaveLength(1);
     expect(finalAudit.responses).toHaveLength(1);

@@ -17,3 +17,7 @@ preparation:
   anchors: false
   special_assets: false
   d4_groups: []
+notes: >-
+  Self-contained loopback model/resource services, isolated PostgreSQL and SDK ThreadManagers;
+  finally blocks close responses/listeners, drain workers and remove owned containers/cards.
+  No shared factories or anchors; cloud model/Phoenix/container acceptance is separate.

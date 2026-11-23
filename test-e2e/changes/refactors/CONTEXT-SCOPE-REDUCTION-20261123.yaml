@@ -30,6 +30,8 @@ change:
       rebuild; local rejection dispatches no new recovery.
     - Ignore withdrawn checkpoint extras without modifying stored rows or granting user-message/covered-history
       sources.
+    - Measure summary gains using rendered request cost in both formats; skip noncompactable actions without
+      changing recent-action boundaries or discarding an otherwise valid history summary.
     reason: User-approved removal follows 2c18 behavior boundaries; keep old Cases and only withdraw capability-specific
       extensions. No duplicate D1 or new framework.
     test_selectors:
@@ -43,6 +45,7 @@ change:
     - test/backend/database/test_conversation_history_stopped.py
     - test/backend/services/test_agentos_conversation_projection.py
     - test/backend/app/test_history_source_contracts.py
-  notes: SPEC10 approved 2026-11-23. Manual Agent history real acceptance pending a dedicated new-source window.
-    Existing self-contained POST-RESPONSE HTTP/SSE provider and OUTPUT SDK/PostgreSQL fixtures retain owned cleanup;
-    no shared factories or 48-task dispatch.
+  notes: >-
+    SPEC10 Scope Reduction 20261123.md owns approved scope and test-only fixture/overlay/wire cleanup.
+    Preserve all variants and assertions; no new Cases/framework. Existing self-contained HTTP/PostgreSQL
+    Case preparation/cleanup is reused; manual real-model acceptance remains pending and48 paused.

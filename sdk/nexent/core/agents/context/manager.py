@@ -15,7 +15,6 @@ from enum import Enum
 from typing import Any, Callable, Dict, Literal, Optional, Sequence
 
 from nexent.core.agents.contracts.context import ContextEvidence, FinalContext, ModelMessage
-
 from nexent.monitor.run_capture import capture_context_assembly, capture_current_context_input
 
 from .budget import message_role
@@ -232,13 +231,8 @@ class ContextManager:
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
             if (turns or summary) and self._run_compaction_attempts < 3:
-                original_history_tokens = sum(
-                    item.token_estimate for item in final_items
-                    if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
-                )
-                if self.message_format == "openai_chat_completions":
-                    original_history_tokens = self._history_token_cost(
-                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                original_history_tokens = self._history_token_cost(
+                    final_items, purpose_stable, purpose_dynamic, canonical_tools)
                 compressible_history_tokens = original_history_tokens
                 non_history_tokens = max(0, raw_tokens - original_history_tokens)
                 if (
@@ -289,21 +283,18 @@ class ContextManager:
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
                     candidate_item = candidate.as_item()
-                    previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
-                    previous_tokens += sum(item.token_estimate for item in current_turns)
-                    candidate_tokens = candidate_item.token_estimate
-                    if self.message_format == "openai_chat_completions":
-                        previous_tokens = self._history_token_cost(
-                            final_items, purpose_stable, purpose_dynamic, canonical_tools)
-                        replacement = [item for item in final_items if item.type not in {
-                            ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
-                        candidate_tokens = self._history_token_cost(
-                            replacement, purpose_stable, purpose_dynamic, canonical_tools)
+                    previous_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
+                    replacement = [item for item in final_items if item.type not in {
+                        ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}] + [candidate_item]
+                    candidate_tokens = self._history_token_cost(
+                        replacement, purpose_stable, purpose_dynamic, canonical_tools)
                     required_saving = max(
                         self.config.minimum_history_reduction_tokens,
                         math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
                     )
-                    if previous_tokens - candidate_tokens < required_saving:
+                    saving = previous_tokens - candidate_tokens
+                    if saving <= 0 or saving < required_saving:
                         compaction_stop_reason = "insufficient_candidate_reduction"
                         break
                     last_valid = candidate
@@ -325,7 +316,8 @@ class ContextManager:
                     if should_compress_history:
                         compaction_stop_reason = "compaction_attempts_exhausted"
                 if last_valid is not None:
-                    final_history_tokens = last_valid.as_item().token_estimate
+                    final_history_tokens = self._history_token_cost(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools)
                     last_valid = replace(
                         last_valid,
                         history_tokens_before=original_history_tokens,
@@ -493,6 +485,8 @@ class ContextManager:
         for candidates in (old_actions, other_items, recent_actions):
             savings = []
             for item in candidates:
+                if not item.supports_compact:
+                    continue
                 if item.type == ContextItemType.CURRENT_ACTION:
                     if actions and item is actions[-1] and item.content.get("loaded_result"):
                         continue

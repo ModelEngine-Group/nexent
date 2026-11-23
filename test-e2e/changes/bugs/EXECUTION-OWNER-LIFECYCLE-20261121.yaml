@@ -37,9 +37,6 @@ change:
       no duplicate formal D1 is needed.
     test_selectors:
     - test/sdk/core/agents/test_execution_owner_lifecycle.py
-  notes: 'SPEC09 EXECUTION-OWNER-LIFECYCLE-20261121 owns root-approved minimal design and EO-01..04. The D3 reuses
-    the existing output Feature, actual CodeAgent SDK provider HTTP, canonical execution-fact PostgreSQL projection
-    and authorized history reload; the new reader assertion closes the integration gap. Preparation uses no shared
-    factories or anchors: an owned isolated PostgreSQL container, loopback model listener and SDK ThreadManager
-    are all released by finally blocks. Native protocol/capacity, current closed-action indexing, SQL, tool arguments
-    and reader budgets are unchanged.'
+  notes: >-
+    Current approved scope: SPEC10 Scope Reduction 20261123.md; original diagnosis: SPEC09 EO-01..04.
+    Reuse JIUWEN-OUTPUT-D3-001 execution preparation/cleanup; no new D1 or real-model acceptance claim.

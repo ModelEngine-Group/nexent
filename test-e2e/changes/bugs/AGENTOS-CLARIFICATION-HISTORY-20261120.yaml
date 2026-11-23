@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: AGENTOS-CLARIFICATION-HISTORY-20261120
+  change_type: bugfix
+  bug_id: AGENTOS-CLARIFICATION-HISTORY-20261120
+  title: Read historical context for a new turn before its user message is saved
+  description: Preserve the resolved history boundary when preparing the next turn in an existing conversation.
+  observed_behavior: Management returns HTTP 500 during clarification reply preparation when history is loaded by an explicit message index, and during a later turn when history includes tool execution records.
+  expected_behavior: Management returns history strictly before the boundary and carries authorized read-only execution records so Jiuwen and smolagents can continue the same conversation with the submitted answer.
+  escaped_stage: D4
+  coverage_gap:
+    type: no_gap
+    description: The existing real browser clarification journey submits the reply to the public run endpoint and checks the continued answer. Repository-level tests add direct regression coverage for the explicit boundary.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AOS-TRANSPORT, JIUWEN-MODEL-BRIDGE]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-CLARIFICATION-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Load owned history by an explicit message index before saving the reply, and exclude a row at that index.
+    - Preserve the equivalent boundary resolved from a saved message ID, the zero boundary and ownership checks.
+    - Round trip previously saved execution records across the strict AgentOS history contract, including nullable legacy fields and turns without records.
+    reason: The SQLite-backed repository tests exercise the two query branches directly. The real browser journey verifies submission and continuation through Gateway, Management and Runtime.
+    test_selectors:
+    - test/backend/database/test_conversation_history_stopped.py::test_historical_context_returns_the_exclusive_message_boundary
+    - test/backend/database/test_conversation_history_stopped.py::test_historical_context_before_first_message_and_without_ownership
+    - test/backend/services/test_jiuwen_history_boundary.py::test_prepared_history_preserves_read_only_execution_records
+  notes: >-
+    SPEC: ../nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-agentos-service-boundaries/design.md.
+    The existing D4 journey owns its assistant clone, conversations and temporary authentication, so it needs no shared preparation families. Its fixture uses the public Gateway on the split deployment. Run the same submit and continuation checks for the alternate core as a supplemental real browser check. No new D1 is needed for the repository branch.

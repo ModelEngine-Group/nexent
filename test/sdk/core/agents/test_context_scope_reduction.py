@@ -21,56 +21,22 @@ from nexent.core.agents.context.action_history import (
 )
 from nexent.core.agents.context.execution_history import ExecutionHistory, result_text
 from nexent.core.agents.context.history_compression import _validate_summary_contract
-from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
-from test_persisted_codeagent_actions import records
+from test_persisted_codeagent_actions import history_turn
+from test_post_response_context import runtime as make_runtime
 
 
 @pytest.mark.parametrize("reclaimable_history", [False, True])
 @pytest.mark.parametrize("message_format", ["codeagent", "openai_chat_completions"])
-def test_first_oversized_prompt_does_not_dispatch_recovery_or_mutate_history(
-    mocker, message_format, reclaimable_history
-):
-    manager = ContextManager(
-        ContextManagerConfig(
-            context_window_tokens=10000,
-            effective_input_limit_tokens=10000,
-            compaction_trigger_threshold_tokens=8000,
-            compaction_target_tokens=6000,
-            history_summary_sink=mocker.Mock(),
-            chars_per_token=1,
-            policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
-        ),
-        message_format=message_format,
-    )
-    summarize = mocker.patch.object(
-        manager._history_compressor,
-        "compress",
-        side_effect=AssertionError("No recovery"),
-    )
-    runtime = ManagedContextRuntime(
-        manager,
-        [
-            ContextItemInput(
-                id="old",
-                type="conversation_turn",
-                content={
-                    "user_message": "h" * 4500 if reclaimable_history else "old task",
-                    "assistant_final_answer": "completed",
-                    "user_message_id": 1,
-                    "assistant_message_id": 2,
-                },
-            )
-        ],
-    )
-    memory = SimpleNamespace(
-        steps=[
-            TaskStep(
-                task="n" * 7000
-                if reclaimable_history
-                else "new oversized prompt " * 10000
-            )
-        ]
-    )
+def test_first_oversized_prompt_does_not_dispatch_recovery_or_mutate_history(mocker, message_format, reclaimable_history):
+    runtime = make_runtime(10000, message_format=message_format)
+    manager = runtime.context_manager
+    manager.config.history_summary_sink = mocker.Mock()
+    summarize = mocker.patch.object(manager._history_compressor, "compress", side_effect=AssertionError("No recovery"))
+    turn = history_turn(2, execution_records=[], question="h" * 4500 if reclaimable_history else "old task",
+                        answer="completed")
+    runtime.replace_items([turn])
+    task = "n" * 7000 if reclaimable_history else "new oversized prompt " * 10000
+    memory = SimpleNamespace(steps=[TaskStep(task=task)])
     model = SimpleNamespace(model_id="local-no-provider")
     runtime.prepare_run(memory=memory, fallback_system_prompt="Original system")
     before = deepcopy(runtime.items)
@@ -141,17 +107,7 @@ def test_old_checkpoint_body_is_data_not_authorization(text, message_format):
 
 def test_only_actual_authorized_result_reenables_an_existing_execution_reference():
     store = ExecutionHistory()
-    turn = ContextItemInput(
-        id="turn",
-        type="conversation_turn",
-        content={
-            "user_message": "old task",
-            "assistant_final_answer": "done",
-            "user_message_id": 41,
-            "assistant_message_id": 42,
-            "execution_records": records(),
-        },
-    )
+    turn = history_turn(question="old task", answer="done")
     register_historical_results([turn], store, "fresh")
     assert (
         "actual stdout"
