@@ -389,7 +389,9 @@ class LegacyChatModel(Model):
                 )
                 if message.usage.input_tokens is not None and message.usage.output_tokens is not None:
                     result.token_usage = TokenUsage(message.usage.input_tokens, message.usage.output_tokens)
-                result.provider_input_tokens = message.usage.input_tokens
+                result.provider_input_tokens = (
+                    message.usage.input_tokens if message.usage.origin == "provider" else None
+                )
                 result.model_attempt_id = self.last_attempt_id
                 result.model_attempt_number = event.attempt
                 result.model_attempt_commit_deferred = _defer_attempt_commit and not _suppress_attempt_stream

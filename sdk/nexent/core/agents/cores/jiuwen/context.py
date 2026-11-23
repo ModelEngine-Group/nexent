@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from nexent.core.agents.context import ContextItem, ContextManager, ContextManagerConfig
 from nexent.core.agents.context.models import CurrentActionContextItem
 from nexent.core.agents.context.maintenance import complete_context
-from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
+from nexent.core.agents.context.usage import ContextUsageBaseline
 from nexent.core.agents.contracts.context import ContextItemInput
 from nexent.core.agents.contracts.output import ContextCapacityObservation
 from nexent.core.agents.cores.jiuwen.messages import _mapping, resource_view
@@ -170,13 +170,7 @@ class JiuwenContextBridge:
         self._current_items, self._tools = current, definitions
         local_estimate = self._estimate(context.messages, definitions)
         model_key = self._model_key()
-        estimated = self.usage_baseline.estimate(local_estimate, model_key)
-        limit = self.context_manager.effective_input_limit_tokens or self.context_manager.config.context_window_tokens
-        if limit and estimated >= limit:
-            record_capacity_rejection(local_tokens=local_estimate, estimated_tokens=estimated, limit=limit,
-                                      baseline=self.usage_baseline, model_key=model_key)
-            raise ValueError("Jiuwen input exceeds the combined context window")
-        self.usage_baseline.capture(self._estimate(context.messages, definitions), self._model_key())
+        self.usage_baseline.capture(local_estimate, model_key)
         self.last_evidence = context.evidence
         summary = self.context_manager.consume_history_summary_event()
         if summary:

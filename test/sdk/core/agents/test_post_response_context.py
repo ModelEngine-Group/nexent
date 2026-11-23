@@ -65,7 +65,7 @@ def test_ac008_usage_drives_maintenance_only_after_completed_step(monkeypatch):
     managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
     compact.assert_not_called()
     memory.steps.append(ActionStep(step_number=1, model_output="answer", timing=Timing(start_time=0)))
-    response = SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1800, output_tokens=3000))
+    response = SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=1800, output_tokens=3000))
     managed.complete_step(model=model, memory=memory, current_run_start_idx=0, response=response)
     assert compact.call_count == 1
     assert managed.usage_baseline.actual_input_tokens == 1800
@@ -81,7 +81,7 @@ def test_ac011_failed_maintenance_keeps_history_and_configuration(monkeypatch):
     original_steps = list(memory.steps)
     monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", Mock(side_effect=RuntimeError("summary failed")))
     managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1900)))
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=1900)))
     assert memory.steps == original_steps
     assert managed.context_manager._history_candidate is None
     assert managed.context_manager._representation_overrides == {}
@@ -89,34 +89,14 @@ def test_ac011_failed_maintenance_keeps_history_and_configuration(monkeypatch):
     assert managed.context_manager.config.compaction_target_tokens == 1200
 
 
-def test_ac012_oversized_new_input_is_rejected_without_compaction(monkeypatch):
+def test_ac012_oversized_new_input_is_prepared_without_compaction(monkeypatch):
     managed = runtime()
     memory = SimpleNamespace(steps=[TaskStep(task="x" * 2100)])
     compact = Mock(side_effect=AssertionError("hard check must not compact"))
     monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", compact)
-    with pytest.raises(ValueError, match="combined context window"):
-        managed.prepare_step(model=SimpleNamespace(model_id="controlled"), memory=memory, current_run_start_idx=0)
+    context = managed.prepare_step(model=SimpleNamespace(model_id="controlled"), memory=memory, current_run_start_idx=0)
+    assert "x" * 2100 in str(context.messages)
     compact.assert_not_called()
-
-
-@pytest.mark.parametrize("provider_usage,matching_model", [(None, True), (0, True), (100, True), (100, False)])
-def test_ac012_capacity_rejection_records_safe_estimate_provenance(caplog, provider_usage, matching_model):
-    managed = runtime(window=1000)
-    model = SimpleNamespace(model_id="controlled")
-    if provider_usage is not None:
-        managed.usage_baseline.capture(200, managed._model_key(model) if matching_model else "old-model")
-        managed.usage_baseline.accept(provider_usage)
-    memory = SimpleNamespace(steps=[TaskStep(task="PRIVATE_PROMPT " + "x" * 1400)])
-    with pytest.raises(ValueError, match="combined context window"):
-        managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
-    records = [record.getMessage() for record in caplog.records
-               if "event=context_input_rejected" in record.getMessage()]
-    assert len(records) == 1
-    assert "combined_window=1000" in records[0]
-    actual_usage = provider_usage if matching_model else None
-    assert f"provider_input={actual_usage}" in records[0]
-    assert "usage_source=" + ("provider_calibrated" if actual_usage is not None else "estimated") in records[0]
-    assert "PRIVATE_PROMPT" not in caplog.text
 
 
 def test_ac011_cancelled_response_cannot_start_maintenance(monkeypatch):
@@ -129,7 +109,7 @@ def test_ac011_cancelled_response_cannot_start_maintenance(monkeypatch):
     maintain = Mock(side_effect=AssertionError("cancelled run must not maintain"))
     monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", maintain)
     assert managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1900))) is None
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=1900))) is None
     maintain.assert_not_called()
     assert managed.usage_baseline.actual_input_tokens is None
 
@@ -142,10 +122,10 @@ def test_ac009_duplicate_completion_cannot_replace_usage_or_repeat_maintenance(m
     compact = Mock(side_effect=lambda items, *args, **kwargs: items)
     monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", compact)
     first = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1800)))
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=1800)))
 
     duplicate = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=9999)))
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=9999)))
 
     assert first.maintenance_phase == "post_response"
     assert duplicate is None
@@ -166,7 +146,7 @@ def test_ac011_post_response_assembly_failure_preserves_source_and_policy(monkey
         Mock(side_effect=RuntimeError("assembly unavailable")))
 
     result = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1900)))
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=1900)))
 
     assert result is None
     assert memory.steps == original_steps
@@ -206,7 +186,7 @@ def test_ac011_cancellation_after_staging_rolls_back_without_persistence(monkeyp
 
     monkeypatch.setattr(manager, "assemble_context_items", assemble)
     result = managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=1900)))
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=1900)))
 
     assert result.maintenance_phase != "post_response"
     assert manager._history_candidate is old_candidate
@@ -235,7 +215,7 @@ def test_ac010_estimated_legacy_token_usage_is_not_a_provider_anchor():
     managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
     managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
         response=SimpleNamespace(provider_input_tokens=None,
-            token_usage=SimpleNamespace(input_tokens=1900)))
+            token_usage=SimpleNamespace(origin="provider", input_tokens=1900)))
     assert managed.usage_baseline.actual_input_tokens is None
     assert managed.usage_baseline.source == "estimated"
     assert managed.last_maintenance_evidence is None
@@ -255,11 +235,13 @@ def test_ac008_post_response_uses_the_same_request_overlay_basis(monkeypatch, ov
     compact.assert_not_called()
     memory.steps.append(ActionStep(step_number=1, model_output="accepted", observations="R" * 2000,
                                    timing=Timing(start_time=0)))
-    usage = {"input_tokens": 7000} if clear else {"input_tokens": 7000, "output_tokens": 20}
+    usage = {"origin": "provider", "input_tokens": 9000, "output_tokens": 20}
     managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
         response=SimpleNamespace(token_usage=SimpleNamespace(**usage)),
         **({"request_system_messages": (), "request_tail_messages": ()} if clear else {}))
-    assert compact.call_count == (0 if clear else 1)
+    compact.assert_called_once()
+    rendered = str(compact.call_args.args[1:])
+    assert ("overlay " in rendered) is not clear
 
 
 
@@ -377,3 +359,91 @@ def test_ac008_native_actions_remain_intact_when_the_target_is_unreachable(with_
         assert manager._history_candidate is None
         manager._history_compressor.compress.assert_not_called()
         sink.assert_not_called()
+
+
+@pytest.mark.parametrize("core", ["smolagents", "jiuwen"])
+@pytest.mark.parametrize("local,actual,expected", [
+    (10000, 100, False), (100, 1800, True), (100, 1600, True),
+    (10000, None, False), (10000, True, False), (10000, -1, False),
+])
+def test_only_real_provider_input_usage_triggers_maintenance(monkeypatch, core, local, actual, expected):
+    from concurrent.futures import Future
+    from test_jiuwen_context import make_bridge
+
+    if core == "smolagents":
+        managed = runtime()
+        manager = managed.context_manager
+    else:
+        bridge, info = make_bridge("adaptive_compact")
+        manager = bridge.context_manager
+        manager.config.compaction_trigger_threshold_tokens = 1600
+    tokens = [100 if local == 10000 else 10000]
+    monkeypatch.setattr(manager, "_message_tokens", lambda _messages: tokens[0])
+    compact = Mock(side_effect=lambda items, *args, **kwargs: items)
+    monkeypatch.setattr(manager, "_compact_to_compaction_target", compact)
+    if core == "smolagents":
+        model = SimpleNamespace(model_id="controlled")
+        memory = SimpleNamespace(steps=[TaskStep(task="task")])
+        managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+        tokens[0] = local
+        managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+            response=SimpleNamespace(provider_input_tokens=actual,
+                                     token_usage=SimpleNamespace(origin="provider", input_tokens=10000)))
+    else:
+        def submit(_lane, _spec, work):
+            future = Future()
+            future.set_result(work())
+            return SimpleNamespace(future=future)
+        bridge.manager.submit.side_effect = submit
+        bridge._assemble([{"role": "user", "content": info.query}], [])
+        tokens[0] = local
+        bridge.accepted_response(SimpleNamespace(
+            usage=SimpleNamespace(origin="provider", input_tokens=actual), content_parts=[]),
+            SimpleNamespace(tool_calls=[]))
+        bridge._maintenance_execution.future.result()
+    assert compact.call_count == int(expected)
+
+
+@pytest.mark.parametrize("max_steps", [0, 1], ids=["final-answer", "action"])
+def test_codeagent_over_window_input_reaches_model_without_context_rebuild(monkeypatch, max_steps):
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+    from nexent.core.utils.observer import MessageObserver
+    from smolagents.models import ChatMessage, Model, TokenUsage
+
+    sent = []
+    class ControlledModel(Model):
+        def generate(self, messages, **kwargs):
+            assert "context_rebuild" not in kwargs
+            sent.append(messages)
+            response = ChatMessage(role="assistant", content="<final_answer>done</final_answer>",
+                                   token_usage=TokenUsage(input_tokens=128, output_tokens=3))
+            response.provider_input_tokens = 128
+            return response
+    managed = runtime(window=1000)
+    compact = Mock(side_effect=AssertionError("low provider usage must not compact"))
+    monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", compact)
+    agent = CoreAgent(observer=MessageObserver(lang="en"), model=ControlledModel(model_id="controlled"),
+                      tools=[], context_runtime=managed, max_steps=1)
+    query = "OVER_WINDOW " + "x" * 3000
+    agent.memory.steps.append(TaskStep(task=query))
+    assert list(agent._run_stream(query, max_steps=max_steps))[-1].output == "done"
+    assert len(sent) == 1 and query in str(sent[0])
+    assert managed.usage_baseline.request_estimate > 1000
+    assert managed.usage_baseline.actual_input_tokens == 128
+    compact.assert_not_called()
+
+
+@pytest.mark.parametrize("origin", [None, "unknown"])
+def test_custom_model_unproven_usage_cannot_trigger_maintenance(monkeypatch, origin):
+    managed = runtime()
+    model = SimpleNamespace(model_id="controlled")
+    memory = SimpleNamespace(steps=[TaskStep(task="x" * 10000)])
+    compact = Mock(side_effect=AssertionError("unknown usage must not compact"))
+    monkeypatch.setattr(managed.context_manager, "_compact_to_compaction_target", compact)
+    managed.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    usage = SimpleNamespace(input_tokens=10000)
+    if origin is not None:
+        usage.origin = origin
+    managed.complete_step(model=model, memory=memory, current_run_start_idx=0,
+        response=SimpleNamespace(token_usage=usage))
+    compact.assert_not_called()

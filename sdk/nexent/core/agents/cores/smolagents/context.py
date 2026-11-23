@@ -22,7 +22,7 @@ from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
 from nexent.core.agents.context.run_context import ManagedRunContext
-from nexent.core.agents.context.usage import ContextUsageBaseline, record_capacity_rejection
+from nexent.core.agents.context.usage import ContextUsageBaseline
 from nexent.core.agents.context.maintenance import complete_context
 from nexent.core.agents.contracts.context import ContextEvidence, ContextMessage, ContextToolView, FinalContext
 from nexent.core.agents.cores.smolagents.context_contracts import (
@@ -112,35 +112,6 @@ class ManagedContextRuntime:
             request_system_messages=self._request_system_messages,
             request_tail_messages=self._request_tail_messages,
         )
-        self.check_input_capacity(final_context.messages, final_context.tools, model)
-        self.capture_request(final_context.messages, final_context.tools, model)
-        final_context = self._with_usage_evidence(final_context, model)
-        self._evidence.record_call(final_context.evidence)
-        return final_context
-
-    def recover_step(
-        self,
-        *,
-        model: Model,
-        memory: AgentMemory,
-        current_run_start_idx: int,
-        tools: Sequence[ModelTool] | None = None,
-        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
-        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
-    ) -> FinalContext:
-        """Force a source-backed rebuild after explicit Provider overflow."""
-        self._request_system_messages = tuple(context_messages(request_system_messages))
-        self._request_tail_messages = tuple(context_messages(request_tail_messages))
-        final_context = self.context_manager.assemble_context_items(
-            model=adapt_context_model(model),
-            current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-            tools=context_tool_views(tools),
-            purpose="step",
-            run_context=self._ensure_run_context(memory),
-            force_compaction=True,
-            request_system_messages=context_messages(request_system_messages),
-            request_tail_messages=context_messages(request_tail_messages),
-        )
         self.capture_request(final_context.messages, final_context.tools, model)
         final_context = self._with_usage_evidence(final_context, model)
         self._evidence.record_call(final_context.evidence)
@@ -164,33 +135,6 @@ class ManagedContextRuntime:
             task=task,
             final_answer_templates=final_answer_templates,
             run_context=self._ensure_run_context(memory),
-        )
-        self.check_input_capacity(final_context.messages, final_context.tools, model)
-        self.capture_request(final_context.messages, final_context.tools, model)
-        final_context = self._with_usage_evidence(final_context, model)
-        self._evidence.record_call(final_context.evidence)
-        return final_context
-
-    def recover_final_answer(
-        self,
-        *,
-        model: Model,
-        memory: AgentMemory,
-        current_run_start_idx: int,
-        task: str,
-        final_answer_templates: Mapping[str, Mapping[str, str]],
-        tools: Sequence[ModelTool] | None = None,
-    ) -> FinalContext:
-        """Force a final-answer rebuild after explicit Provider overflow."""
-        final_context = self.context_manager.assemble_context_items(
-            model=adapt_context_model(model),
-            current_items=self._memory_adapter._project_current_run(memory, current_run_start_idx),
-            tools=context_tool_views(tools),
-            purpose="final_answer",
-            task=task,
-            final_answer_templates=final_answer_templates,
-            run_context=self._ensure_run_context(memory),
-            force_compaction=True,
         )
         self.capture_request(final_context.messages, final_context.tools, model)
         final_context = self._with_usage_evidence(final_context, model)
@@ -222,23 +166,17 @@ class ManagedContextRuntime:
         """Capture the actual main invocation after overlays and guardrails."""
         self.usage_baseline.capture(self._estimate(messages, tools), self._model_key(model))
 
-    def check_input_capacity(self, messages, tools, model):
-        local = self._estimate(messages, tools)
-        model_key = self._model_key(model)
-        estimate = self.usage_baseline.estimate(local, model_key)
-        limit = self.effective_input_limit_tokens or self.context_window_tokens
-        if limit and estimate >= limit:
-            record_capacity_rejection(local_tokens=local, estimated_tokens=estimate, limit=limit,
-                                      baseline=self.usage_baseline, model_key=model_key)
-            raise ValueError("Context input exceeds the combined context window; reduce the new input")
-        return estimate
-
     def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
                       request_system_messages=None, request_tail_messages=None):
         """Maintain only accepted steps after all native tool results are present."""
         if response is None:
             return None
         usage = getattr(response, "token_usage", None)
+        # A numeric token_usage alone does not establish provider provenance.
+        # Adapters explicitly override it, including None for unknown usage.
+        provider_input = getattr(response, "provider_input_tokens", None)
+        if not hasattr(response, "provider_input_tokens") and getattr(usage, "origin", None) == "provider":
+            provider_input = getattr(usage, "input_tokens", None)
         stop_event = getattr(model, "stop_event", None)
         system_messages = (self._request_system_messages if request_system_messages is None
                            else context_messages(request_system_messages))
@@ -255,7 +193,7 @@ class ManagedContextRuntime:
             )
         evidence = complete_context(manager=self.context_manager, baseline=self.usage_baseline,
             model_key=self._model_key(model),
-            input_tokens=getattr(response, "provider_input_tokens", getattr(usage, "input_tokens", None)),
+            input_tokens=provider_input,
             assemble=assemble, cancelled=lambda: stop_event is not None and stop_event.is_set() is True,
             estimate=self._estimate)
         if evidence is not None and evidence.maintenance_phase == "post_response":

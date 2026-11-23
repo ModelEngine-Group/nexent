@@ -423,24 +423,6 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
     context_manager.get_summary.assert_called_once_with()
 
 
-def test_provider_overflow_recovery_is_disabled_after_a_tool_call():
-    agent = object.__new__(core_agent_module.CoreAgent)
-    agent.stop_event = threading.Event()
-    agent._history_step_count = 1
-    agent.memory = SimpleNamespace(steps=[
-        SimpleNamespace(tool_calls=["previous-run-tool"]),
-        SimpleNamespace(tool_calls=None),
-    ])
-
-    assert agent._provider_overflow_recovery_safe() is True
-
-    agent.memory.steps.append(SimpleNamespace(tool_calls=["current-run-tool"]))
-    assert agent._provider_overflow_recovery_safe() is False
-
-
-
-
-
 # ----------------------------------------------------------------------------
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
@@ -2314,8 +2296,8 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
-    def test_step_stream_provider_overflow_callback_rebuilds_from_runtime(self):
-        """The model receives a callback that records and returns rebuilt context."""
+    def test_step_stream_sends_without_provider_overflow_rebuild(self):
+        """The send boundary never installs a context compression callback."""
         module = self._load_core_agent_in_isolation()
         agent = object.__new__(module.CoreAgent)
         agent.enable_protocol_repair_retry = True
@@ -2330,11 +2312,8 @@ class TestRunStreamRealExecution:
         agent.context_runtime = self._context_runtime_mock()
         agent.context_runtime.chars_per_token = 1.0
         initial_context = MagicMock(messages=[MagicMock()])
-        rebuilt_context = MagicMock(messages=[MagicMock()])
         initial_context.memory_messages = ["original history"]
-        rebuilt_context.memory_messages = ["rebuilt history"]
         agent.context_runtime.prepare_step.return_value = initial_context
-        agent.context_runtime.recover_step.return_value = rebuilt_context
         agent._history_step_count = 0
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
@@ -2344,7 +2323,7 @@ class TestRunStreamRealExecution:
 
         def invoke_rebuild(messages, **kwargs):
             assert messages is initial_context.messages
-            assert kwargs["context_rebuild"]() is rebuilt_context
+            assert "context_rebuild" not in kwargs
             return response
 
         agent.model = MagicMock(side_effect=invoke_rebuild)
@@ -2357,16 +2336,8 @@ class TestRunStreamRealExecution:
             # Parsing the synthetic response is outside this callback contract test.
             pass
 
-        agent.context_runtime.recover_step.assert_called_once_with(
-            model=agent.model,
-            memory=agent.memory,
-            current_run_start_idx=0,
-            tools=[],
-            request_system_messages=agent.context_runtime.prepare_step.call_args.kwargs["request_system_messages"],
-            request_tail_messages=agent.context_runtime.prepare_step.call_args.kwargs["request_tail_messages"],
-        )
-        assert module.get_monitoring_manager().record_final_context_evidence.call_count >= 2
-        assert action_step.model_input_messages == ["rebuilt history"]
+        agent.context_runtime.recover_step.assert_not_called()
+        assert action_step.model_input_messages == ["original history"]
 
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""

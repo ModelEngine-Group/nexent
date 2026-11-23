@@ -117,7 +117,7 @@ def test_fix01_unproven_projection_never_hides_raw_evidence(mutation):
     assert "<tool_call>" not in text
 
 
-def test_fix01_real_renderer_and_hard_guard_use_restored_representation():
+def test_fix01_real_renderer_and_request_capture_use_restored_representation():
     from nexent.core.agents.context.manager import ContextManager
     from nexent.core.agents.context.models import ConversationTurnContextItem
     from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
@@ -137,11 +137,10 @@ def test_fix01_real_renderer_and_hard_guard_use_restored_representation():
     assert manager._message_tokens(messages) < 2000
     runtime = ManagedContextRuntime(manager)
     manager.config.effective_input_limit_tokens = 2000
-    assert runtime.check_input_capacity(messages, [], object()) < 2000
-    with pytest.raises(ValueError, match="combined context window"):
-        runtime.check_input_capacity(
-            [*messages, {"role": "user", "content": "x" * 4000}], [], object()
-        )
+    runtime.capture_request(messages, [], object())
+    assert runtime.usage_baseline.pending_estimate < 2000
+    runtime.capture_request([*messages, {"role": "user", "content": "x" * 4000}], [], object())
+    assert runtime.usage_baseline.pending_estimate > 2000
 
 
 @pytest.mark.parametrize("dispatched", [False, True])
@@ -222,7 +221,7 @@ def test_fix01_post_response_acceptance_saves_view_without_changing_raw_result()
         model=model,
         memory=memory,
         current_run_start_idx=0,
-        response=SimpleNamespace(token_usage=SimpleNamespace(input_tokens=17000)),
+        response=SimpleNamespace(token_usage=SimpleNamespace(origin="provider", input_tokens=17000)),
     )
     assert result.maintenance_phase == "post_response"
     assert history.get(key).model_view == {"summary": "accepted factual summary"}

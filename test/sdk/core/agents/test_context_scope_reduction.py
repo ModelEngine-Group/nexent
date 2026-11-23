@@ -40,8 +40,9 @@ def test_first_oversized_prompt_does_not_dispatch_recovery_or_mutate_history(moc
     model = SimpleNamespace(model_id="local-no-provider")
     runtime.prepare_run(memory=memory, fallback_system_prompt="Original system")
     before = deepcopy(runtime.items)
-    with pytest.raises(ValueError, match="combined context window"):
-        runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    context = runtime.prepare_step(model=model, memory=memory, current_run_start_idx=0)
+    assert task in str(context.messages)
+    assert runtime.usage_baseline.pending_estimate > manager.effective_input_limit_tokens
     summarize.assert_not_called()
     manager.config.history_summary_sink.assert_not_called()
     assert runtime.items == before and manager._history_candidate is None

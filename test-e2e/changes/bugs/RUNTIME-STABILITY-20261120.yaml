@@ -30,7 +30,7 @@ change:
     decision: strengthen
     behaviors:
       - Restore closed actions, committed summary/preview and raw uncovered facts/errors through authorized storage and signed transport,
-        with bounded owner-scoped originals and hard capacity checks.
+        with bounded owner-scoped originals and provider capacity reporting.
       - Each fresh CoreAgent run aligns Core/reader owners and restores only real results in current authorized history;
         reject foreign, previous live-only and unproven checkpoint/catalog grants.
       - Preserve complete native groups and registered LocalFunction schema-default provenance, including original provider
@@ -41,8 +41,8 @@ change:
         and truthful terminal confirmation; retain ordinary CodeAgent/files/creator behavior.
       - Resume cursors from the same authorized retained prefix through ACK once, preserving cursor errors, group acknowledgement
         and transport cleanup without inference/tool replay or new retention/RPC limits.
-      - Keep ordinary summary triggers, persistence/failure contracts and existing Smol provider-overflow rebuild; local
-        rejection performs no recovery and stored legacy summary text grants no source authority.
+      - Keep persistence/failure contracts and source authority; stored legacy summary text grants no source authority.
+        Completion input estimates never reject a send or trigger compression in either runtime.
       - Measure summary gain by rendered request cost in both formats; preserve recent-action boundaries, immutable native
         actions and valid history summaries.
       - Replay accepted visible code as assistant then user runtime results, without synthetic actions; cross-turn execution
@@ -50,11 +50,14 @@ change:
       - AgentOS HTTP fixtures keep retired output-limit inputs as negative tests and the existing authorization allowlist
         on all three Skill tools.
       - Preserve successful tools/answers when maintenance admission is full; retry only unaccepted maintenance within
-        existing deadlines off the tool worker, with cancellation, busy errors and unchanged hard capacity checks.
+        existing deadlines off the tool worker, with cancellation, busy errors and preserved provider capacity errors.
       - Read summary-covered CodeAgent/native originals through a backend-bound conversation reader with unchanged
         pagination/budgets; reject foreign/deleted/non-result units and never authorize reads from summary references.
       - Close native context transactions only for parentless results with an exact provider ID; nested same-name
         successes, structured failures and exceptions cannot consume a pending top-level call or start maintenance early.
+      - Treat local input estimates as advisory in both runtimes; over-window estimates reach model send boundaries.
+        Only valid provider input usage reaching the existing threshold triggers post-response compression; missing
+        or unknown usage never substitutes an estimate. No overflow rebuild callback or new recovery flow.
     reason: Reuse targeted UT and existing self-contained Case preparation/cleanup; preserve all prior variants and D1
       contracts without a new test framework.
     test_selectors:
@@ -83,8 +86,11 @@ change:
       - test/sdk/core/agents/test_jiuwen_tool_spans.py
       - test/sdk/core/agents/test_persisted_codeagent_actions.py
       - test/sdk/core/agents/test_post_response_context.py
+      - test/sdk/core/agents/test_core_agent.py
+      - test/sdk/core/agents/test_pr4005_continuation.py
+      - test/sdk/core/model_service/test_legacy_chat_model.py
   notes: SPEC10 Scope Reduction defines retained behavior; SPEC09 retains original failure evidence. Recovery/catalog
     extensions and independent Ops fixes remain withdrawn. Raw journal/DB/context history and current mapper contracts
-    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03 in the current technical design
+    remain unchanged; real-model/container acceptance is separate. AC-REVIEW-01/02/03/04 in the current technical design
     cover bounded maintenance admission, backend-authorized originals after summaries and exact root native-result
-    correlation; existing D3 preparation is reused.
+    correlation; AC-REVIEW-04 supersedes both runtimes' estimate-based rejection and compression triggers. Existing D3 preparation is reused.

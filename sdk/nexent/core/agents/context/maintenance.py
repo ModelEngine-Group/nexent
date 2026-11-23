@@ -12,6 +12,10 @@ def complete_context(*, manager, baseline, model_key, input_tokens, assemble, ca
         return None
     if not baseline.accept(input_tokens):
         return None
+    actual_input = baseline.actual_input_tokens
+    threshold = manager._compaction_trigger_threshold_tokens()
+    if actual_input is None or actual_input < threshold or manager.processing_mode != "adaptive_compact":
+        return None
     try:
         before = assemble(False)
     except Exception:
@@ -20,9 +24,6 @@ def complete_context(*, manager, baseline, model_key, input_tokens, assemble, ca
     estimated = baseline.estimate(
         estimate(before.messages, before.tools), model_key,
     )
-    threshold = manager._compaction_trigger_threshold_tokens()
-    if estimated < threshold or manager.processing_mode != "adaptive_compact":
-        return before.evidence
     # Bound attempts per accepted response rather than per entire Agent run.
     manager._run_compaction_attempts = 0
     config = manager.config

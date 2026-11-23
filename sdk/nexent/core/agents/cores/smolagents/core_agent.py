@@ -47,7 +47,6 @@ from nexent.core.agents.cores.smolagents.context_contracts import (
     ContextRuntime,
     UnconfiguredContextRuntime,
     native_context_messages,
-    native_context_rebuild,
 )
 from nexent.core.agents.cores.smolagents.delegation import DelegationPolicy
 from nexent.core.agents.cores.smolagents.output_protocol import (
@@ -1025,13 +1024,6 @@ Additional Args:
                 json.dumps(payload, ensure_ascii=False),
             )
 
-    def _provider_overflow_recovery_safe(self) -> bool:
-        """Only replay while the current Agent run has produced no tool effect."""
-        return not any(
-            getattr(step, "tool_calls", None)
-            for step in self.memory.steps[self._history_step_count:]
-        )
-
     def _record_output_protocol(
         self,
         classification: str,
@@ -1486,34 +1478,10 @@ Additional Args:
         try:
             self._emit_step_count_before_model()
 
-            def rebuild_after_provider_overflow():
-                rebuilt = self.context_runtime.recover_step(
-                    model=self.model,
-                    memory=self.memory,
-                    current_run_start_idx=self._history_step_count,
-                    tools=self._context_tools(),
-                    **request_kwargs,
-                )
-                get_monitoring_manager().record_final_context_evidence(
-                    rebuilt.evidence, step_number=self.step_number
-                )
-                memory_step.model_input_messages = (
-                    rebuilt.memory_messages
-                    if rebuilt.memory_messages is not None else rebuilt.messages
-                )
-                self._emit_history_summary_event()
-                return native_context_rebuild(rebuilt)
-
-            self.context_runtime.check_input_capacity(input_messages, self._context_tools(), self.model)
             self.context_runtime.capture_request(input_messages, self._context_tools(), self.model)
             chat_message: ChatMessage = self.model(
                 input_messages,
                 stop_sequences=stop_sequences,
-                context_rebuild=(
-                    rebuild_after_provider_overflow
-                    if self._provider_overflow_recovery_safe()
-                    else None
-                ),
                 **additional_args,
             )
             memory_step.model_output_message = chat_message
@@ -2654,33 +2622,12 @@ Additional Args:
             # Use streaming call (model.__call__) to generate final answer
             # This will trigger observer.add_model_new_token() and
             # observer.add_model_reasoning_content() in OpenAIModel
-            def rebuild_final_after_provider_overflow():
-                rebuilt = self.context_runtime.recover_final_answer(
-                    model=self.model,
-                    memory=self.memory,
-                    current_run_start_idx=self._history_step_count,
-                    tools=self._context_tools(),
-                    task=task,
-                    final_answer_templates=self.prompt_templates,
-                )
-                get_monitoring_manager().record_final_context_evidence(
-                    rebuilt.evidence, step_number=self.step_number
-                )
-                self._emit_history_summary_event()
-                return native_context_rebuild(rebuilt)
-
             model_kwargs: dict[str, Any] = {}
             if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
                 model_kwargs["_defer_attempt_commit"] = True
-            self.context_runtime.check_input_capacity(messages, self._context_tools(), self.model)
             self.context_runtime.capture_request(messages, self._context_tools(), self.model)
             chat_message = self.model(
                 messages,
-                context_rebuild=(
-                    rebuild_final_after_provider_overflow
-                    if self._provider_overflow_recovery_safe()
-                    else None
-                ),
                 **model_kwargs,
             )
 

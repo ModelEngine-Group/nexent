@@ -277,16 +277,14 @@ def test_ambiguous_or_foreign_completion_cannot_consume_pending_call(provider_id
     assert bridge._maintenance_execution is None
 
 
-def test_capacity_rejection_reports_safe_local_estimate_and_no_provider_usage(caplog):
+def test_over_window_estimate_is_captured_without_rejection():
     bridge, info = make_bridge()
     bridge.context_manager.config.effective_input_limit_tokens = 1000
-    info.query = "PRIVATE_PROMPT " + "x" * 3000
-    with pytest.raises(ValueError, match="combined context window"):
-        bridge._assemble([{"role": "user", "content": info.query}], [])
-    records = [record.getMessage() for record in caplog.records
-               if "event=context_input_rejected" in record.getMessage()]
-    assert len(records) == 1
-    assert "combined_window=1000" in records[0]
-    assert "usage_source=estimated" in records[0]
-    assert "provider_input=None" in records[0]
-    assert "PRIVATE_PROMPT" not in caplog.text
+    info.query = "ESTIMATED_INPUT " + "x" * 3000
+    messages = bridge._assemble([{"role": "user", "content": info.query}], [])
+    assert info.query in str(messages)
+    assert bridge.usage_baseline.pending_estimate == bridge._estimate(messages, [])
+    assert bridge.usage_baseline.pending_estimate > 1000
+    assert bridge.usage_baseline.pending_model_key == bridge._model_key()
+    assert bridge.usage_baseline.actual_input_tokens is None
+    assert not bridge.last_evidence.compression_attempted

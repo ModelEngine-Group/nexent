@@ -68,9 +68,6 @@ class ContextRuntime(Protocol):
     def capture_request(self, messages, tools, model) -> None:
         """Capture the final outgoing input for accepted-response calibration."""
 
-    def check_input_capacity(self, messages, tools, model) -> int:
-        """Reject an oversized input without invoking normal maintenance."""
-
     def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None,
                       request_system_messages=None, request_tail_messages=None):
         """Maintain context with current request framing after the accepted tool step."""
@@ -86,30 +83,6 @@ class ContextRuntime(Protocol):
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
         """Return all model messages for final-answer generation."""
-
-    def recover_step(
-        self,
-        *,
-        model: Model,
-        memory: AgentMemory,
-        current_run_start_idx: int,
-        tools: Sequence[ModelTool] | None = None,
-        request_system_messages: Sequence[ModelMessage] = (),
-        request_tail_messages: Sequence[ModelMessage] = (),
-    ) -> FinalContext:
-        """Force a source-backed step rebuild after Provider overflow."""
-
-    def recover_final_answer(
-        self,
-        *,
-        model: Model,
-        memory: AgentMemory,
-        current_run_start_idx: int,
-        task: str,
-        final_answer_templates: Mapping[str, Mapping[str, str]],
-        tools: Sequence[ModelTool] | None = None,
-    ) -> FinalContext:
-        """Force a source-backed final-answer rebuild after Provider overflow."""
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:
         """Return display-only messages without triggering compression."""
@@ -184,12 +157,6 @@ class UnconfiguredContextRuntime:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def complete_step(self, **kwargs):
-        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
-
-    def recover_step(self, **kwargs) -> FinalContext:
-        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
-
-    def recover_final_answer(self, **kwargs) -> FinalContext:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:

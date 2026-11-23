@@ -2,11 +2,13 @@
 """Rejected maintenance must preserve business success and recover outside its lane."""
 
 import asyncio
+import json
 from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from test_jiuwen_context import make_bridge
+from test_jiuwen_model_service import saved_profile as saved_profile
 
 from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -107,8 +109,8 @@ async def test_running_maintenance_is_cancelled_without_committing_after_wait_en
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ending", ["busy", "cancel", "capacity"])
-async def test_pending_maintenance_wait_is_bounded_cancellable_and_keeps_capacity_checks(ending):
+@pytest.mark.parametrize("ending", ["busy", "cancel", "over_window"])
+async def test_pending_maintenance_wait_is_bounded_cancellable_and_preserves_results(ending):
     bridge, info = make_bridge()
     manager = ThreadManager("maintenance-wait-test", {
         "model-tool-io": LanePolicy(name="model-tool-io", max_workers=1, max_queue_size=0),
@@ -138,12 +140,53 @@ async def test_pending_maintenance_wait_is_bounded_cancellable_and_keeps_capacit
         else:
             bridge.context_manager.config.effective_input_limit_tokens = 1
             release.set()
-            with pytest.raises(ValueError, match="combined context window"):
-                await task
+            prepared = await task
+            assert "actual result" in str(prepared)
+            assert bridge.usage_baseline.pending_estimate > 1
         assert "actual result" in str(bridge._current_items)
         assert sum(e.spec.task_name == "jiuwen-context-maintenance" for e in bridge.executions) <= 1
     finally:
         release.set()
         await asyncio.wrap_future(blocker.future)
+        bridge.close()
+        assert not (await manager.shutdown(timeout=2)).stuck_execution_ids
+
+
+@pytest.mark.asyncio
+async def test_over_window_estimate_reaches_http_sender_and_keeps_provider_usage(saved_profile):
+    from nexent.core.agents.cores.jiuwen.context import SummaryModel
+    from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
+    from nexent.core.model_service.http_contracts import RawHttpResponse
+    from nexent.core.model_service.service import ModelService
+    from test.sdk.core.model_service.test_model_service import Sender, complete
+
+    bridge, info = make_bridge()
+    bridge.context_manager.config.effective_input_limit_tokens = 1000
+    info.query = "ESTIMATED_INPUT " + "x" * 3000
+    manager = ThreadManager("estimate-send-test", {
+        "model-tool-io": LanePolicy(name="model-tool-io", max_workers=1, max_queue_size=0),
+    })
+    manager.start()
+    bridge.manager = manager
+    payload = json.loads(complete().body)
+    payload["usage"] = {"prompt_tokens": 128, "completion_tokens": 3, "total_tokens": 131}
+    sender = Sender([RawHttpResponse(200, {}, json.dumps(payload).encode())])
+    model = JiuwenServiceModel(ModelService(lambda _profile: sender), saved_profile, bridge.scope,
+        prepare_messages=bridge.prepare_messages,
+        on_event=lambda event: bridge.accepted_response(event.message, model.last_native_message))
+    bridge.summary_model = SummaryModel(model)
+    bridge.context_manager._request_token_estimator = bridge._estimate_wire
+    try:
+        response = await model.invoke([{"role": "user", "content": info.query}])
+        assert response.content == "answer"
+        assert len(sender.calls) == 1
+        assert info.query in json.dumps(json.loads(sender.calls[0].body_bytes))
+        await asyncio.wrap_future(bridge._maintenance_execution.future)
+        assert bridge.usage_baseline.request_estimate > 1000
+        assert bridge.usage_baseline.actual_input_tokens == 128
+        assert bridge.usage_baseline.source == "provider_calibrated"
+        assert bridge.usage_baseline.pending_estimate is None
+        assert sum(e.spec.task_name == "jiuwen-context-maintenance" for e in bridge.executions) == 1
+    finally:
         bridge.close()
         assert not (await manager.shutdown(timeout=2)).stuck_execution_ids
