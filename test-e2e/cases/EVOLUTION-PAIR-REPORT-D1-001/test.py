@@ -78,3 +78,40 @@ def test_grade_and_compare(monkeypatch):
     assert report["combination_counts"] == {"joint_only": 1, "lost_single_pass": 1, "inconclusive": 1}
     assert report["fixed_regression"]["failed"] == [2]
     assert report["fixed_regression"]["incomplete"] == [3]
+
+    from contracts.replay_files import FileStateReceipt
+    from management.services.evaluation.replay_dialogue import judge_file_state
+    from nexent.core.agents.resources.replay_files import files_digest
+
+    criteria = {"target_case_ids": [1], "metric": "tasks_fixed", "minimum": 1}
+    scope.update(screening=criteria, cancelled=False, components=None, planned_cases=["1","2"], planned_arms=["base","result"])
+    rule = {**job["plan"]["evaluator"], "version_no":1, "evaluator_id":42}
+    fixed_rule = {**rule, "version_no": 3, "evaluator_id": 43}
+    fixed = {"2":{"scoring":{"evaluator":fixed_rule, "language":"en", "judge_model_id":None}}}
+    scope["regression_cases"] = fixed
+    plan = {"request":{"candidate_type":"prompt","screening":criteria}, "evaluator":rule, "regression_cases":fixed,
+            "cases":{"1":"target","2":"fixed"},"snapshots":{"base":"old","result":"new"}}
+    monkeypatch.setattr(service.jobs, "read_plan", lambda *args: plan)
+    rows.clear()
+    for case_id in (1,2):
+        for arm, snapshot in plan["snapshots"].items():
+            job = {"plan":plan,"case_id":case_id,"created_by":"editor","tenant_id":"tenant"}
+            obs = EvaluationAgentResult(answer="n" if (case_id,arm) == (1,"base") else "y",
+                                       events=[{"type":"final_answer"}])
+            grade = service._grade(request, job, {"query":"deliver","expected":"y"}, obs)
+            rows.append({"case_id":case_id,"variant":arm,"status":grade["status"],"receipt_id":f"{case_id}-{arm}",
+                         "result":{"judgment":grade,"case_digest":plan["cases"][str(case_id)],"snapshot_digest":snapshot,
+                                   "evaluator_id":grade["evaluator_id"],"evaluator_version":grade["evaluator_version"]}})
+    report = service.experiment_report("tenant", "editor", 9)
+    assert report["screening"]["status"] == "eligible" and report["screening"]["gain"] == 1
+    files = {"locked.txt":"keep"}
+    receipt = FileStateReceipt(initial_digest=files_digest(files), files=files, writes_by_tool={"create_file":["locked.txt"]},
+                               bound=["create_file"], writes=["locked.txt"], complete=True)
+    from types import SimpleNamespace
+    state = judge_file_state({"adapter":"text-files-v1","initial":files,"expected":files,"protected":["locked.txt"]},
+                             [SimpleNamespace(file_state=receipt)])
+    assert state["status"] == "fail"
+    rows[-1]["status"] = state["status"]
+    rows[-1]["result"]["file_state"] = state
+    decision = service.experiment_report("tenant", "editor", 9)["screening"]
+    assert decision["status"] == "failed" and decision["failures"] == {"forbidden_action":[2],"protection_failed":[2]}

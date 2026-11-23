@@ -79,6 +79,8 @@ it("selects a published scope and opens its paired results with the original sta
     valid_pairs: 1,
     valid_triplets: 1,
     verified_guide_pairs: 0,
+    screening: { status:"incomplete", gain:null, criteria:{metric:"tasks_fixed", minimum:1, target_case_ids:[9]},
+      missing:{no_fixed_regression:[]}, failures:{} },
     pairs: {
       "9": {
         no_skill: { status: "fail", result: { answer: "omitted control", skill: {
@@ -113,6 +115,8 @@ it("selects a published scope and opens its paired results with the original sta
   expect(screen.getByText("evolution.fileVerdict")).toBeInTheDocument();
   expect(screen.getByText("omitted control")).toBeInTheDocument();
   expect(screen.getByText("evolution.skillCoverage")).toBeInTheDocument();
+  expect(screen.getByText("evolution.screen.incomplete")).toBeInTheDocument();
+  expect(screen.getByText("evolution.screen.no_fixed_regression")).toBeInTheDocument();
   expect(screen.getByText("missing owner")).toBeInTheDocument();
   expect(screen.getByText("evolution.state.improved")).toBeInTheDocument();
   expect(evolutionService.workspace).toHaveBeenCalledWith(7, 1);
@@ -144,10 +148,14 @@ it("selects a published scope and opens its paired results with the original sta
   await choose("evolution.cases", "Sources · Extract");
   expect(compare).toBeDisabled();
   await choose("evolution.suggestionTarget", "Sources");
+  fireEvent.click(screen.getByRole("checkbox", {name:"evolution.screen.enable"}));
+  expect(compare).toBeDisabled();
+  await choose("evolution.screen.targets", "Extract");
   vi.mocked(evolutionService.submit).mockResolvedValue({ experiment_id: 42 });
   fireEvent.click(compare);
   await waitFor(() => expect(evolutionService.submit).toHaveBeenCalledWith(expect.objectContaining({
     suggestion_id: 17, suggestion_target_case_id: 10, case_ids: [9, 10], candidate_id: 5,
+    screening: { target_case_ids:[10], metric:"tasks_fixed", minimum:1 },
   })));
 });
 

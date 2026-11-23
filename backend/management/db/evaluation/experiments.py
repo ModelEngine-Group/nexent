@@ -69,7 +69,8 @@ def submit(tenant, user, request, plan):
 def scope(tenant, eid):
     with get_db_session() as session:
         row = session.execute(text("""
-            SELECT agent_id, version_no, plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
+            SELECT agent_id, version_no, cancelled, plan->'request'->'screening' AS screening,
+                   plan->'regression_cases' AS regression_cases, plan->'request'->'components' AS components,
                    ARRAY(SELECT jsonb_object_keys(plan->'cases')) AS planned_cases,
                    ARRAY(SELECT jsonb_object_keys(plan->'snapshots')) AS planned_arms
               FROM nexent.evolution_experiment_t WHERE tenant_id=:tenant AND experiment_id=:eid

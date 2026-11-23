@@ -11,3 +11,4 @@ acceptance_bindings:
   AC-04: [test_grade_and_compare]
   AC-05: [test_grade_and_compare]
   AC-06: [test_grade_and_compare]
+  AC-07: [test_grade_and_compare]

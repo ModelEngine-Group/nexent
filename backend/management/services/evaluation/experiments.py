@@ -28,6 +28,7 @@ from management.services.evaluation.replay_cases import (
     freeze_regression_members, get_development_case, remove_trial_inputs, require_trace_baseline, stage_case_input,
 )
 from management.services.evaluation.scoring import grade_observed_case
+from management.services.evaluation.screening import screen_development
 from management.services.evaluation.skill_candidates import pin_skill_candidate
 from management.services.evaluation.replay_dialogue import judge_file_state, run_turns, skill_evidence
 from management.services.evaluation.tool_use import judge_dialogue_tools
@@ -192,6 +193,8 @@ async def create_experiment(request, tenant, user):
     if request.candidate_type != "baseline":
         fixed = await _io("freeze-fixed-regression-suite", freeze_regression_members, tenant, user,
                           request.agent_id, request.version_no)
+    if request.screening and set(request.screening.target_case_ids).intersection(map(int, fixed)):
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Select development targets outside the fixed regression suite")
     cases = {}
     trace_baseline_digest = None
     development_sources, fixed_sources = set(), set()
@@ -320,7 +323,12 @@ def experiment_report(tenant, user, eid, *, cancel=False):
     else:
         status = "cancelled" if "cancelled" in states else "finished"
     pair_count = sum("result" in p for p in pairs.values())
+    decision = {}
+    if scope.get("screening"):
+        plan = jobs.read_plan(tenant, eid)
+        decision["screening"] = screen_development(plan, pairs, cancelled=scope["cancelled"] or cancel)
     return {"experiment_id": eid, "agent_id": scope["agent_id"], "version_no": scope["version_no"],
+            **decision,
             **({"fixed_regression": regression_coverage(fixed, pairs, ("base", "only_a", "only_b", "result")
                                                        if scope.get("components") else ("base", "result"))}
                if fixed is not None else {}),

@@ -204,6 +204,23 @@ class EvaluatedCandidate(BaseModel):
     candidate_id: int = Field(gt=0)
 
 
+class DevelopmentScreening(BaseModel):
+    """Criteria chosen before trying the candidate against the development and regression tasks."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    target_case_ids: list[int] = Field(min_length=1, max_length=100)
+    metric: Literal["tasks_fixed", "input_token_reduction_pct"] = "tasks_fixed"
+    minimum: int = Field(ge=1, le=100)
+
+    @model_validator(mode="after")
+    def check_targets(self):
+        if min(self.target_case_ids) <= 0 or len(set(self.target_case_ids)) != len(self.target_case_ids):
+            raise ValueError("Choose distinct target tasks")
+        if self.metric == "tasks_fixed" and self.minimum > len(self.target_case_ids):
+            raise ValueError("The minimum gain exceeds the number of target tasks")
+        return self
+
+
 class DevelopmentExperimentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     suggestion_id: int | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
@@ -219,6 +236,7 @@ class DevelopmentExperimentRequest(BaseModel):
     judge_model_id: int | None = Field(default=None, gt=0)
     language: Literal["en", "zh"] = "zh"
     timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    screening: DevelopmentScreening | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("case_ids")
     @classmethod
@@ -229,6 +247,9 @@ class DevelopmentExperimentRequest(BaseModel):
 
     @model_validator(mode="after")
     def check_suggestion_cases(self):
+        if self.screening and (self.candidate_type == "baseline" or
+                               set(self.screening.target_case_ids).difference(self.case_ids)):
+            raise ValueError("Screen a candidate against targets from the selected development tasks")
         combined = self.candidate_type == "combination"
         if combined != (self.components is not None):
             raise ValueError("Select exactly two evaluated revisions for a combination")

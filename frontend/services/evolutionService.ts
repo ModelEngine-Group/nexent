@@ -60,7 +60,15 @@ export interface Trial {
     judgment?: { score?: number; reason?: string; status?: string };
   };
 }
+export interface ScreeningCriteria {
+  metric: "tasks_fixed" | "input_token_reduction_pct";
+  minimum: number;
+  target_case_ids: number[];
+}
+
 export interface ExperimentReport {
+  screening?: { status: "eligible" | "failed" | "incomplete"; criteria: ScreeningCriteria; gain: number | null;
+    failures: Record<string, number[]>; missing: Record<string, number[]> };
   components?: EvaluatedCandidate[];
   valid_quartets?: number;
   fixed_regression?: { case_ids: number[]; failed: number[]; incomplete: number[] };
@@ -139,6 +147,7 @@ export const evolutionService = {
     suggestion_id?: number;
     suggestion_target_case_id?: number;
     request_id: string;
+    screening?: ScreeningCriteria;
     agent_id: number;
     version_no: number;
     candidate_type: string;

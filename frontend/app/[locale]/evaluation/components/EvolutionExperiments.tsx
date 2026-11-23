@@ -8,6 +8,7 @@ import {
   Flex,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Table,
@@ -16,7 +17,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useModelList } from "@/hooks/model/useModelList";
-import { evolutionService as api, type Trial, type TraceCaseDraft } from "@/services/evolutionService";
+import { evolutionService as api, type Trial, type TraceCaseDraft, type ScreeningCriteria } from "@/services/evolutionService";
 import { storageService } from "@/services/storageService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import ExampleCandidates from "./ExampleCandidates";
@@ -204,6 +205,10 @@ function Experiments({
   const { t, i18n } = useTranslation("common");
   const { availableLlmModels } = useModelList();
   const [caseIds, setCases] = useState<number[]>([]);
+  const [screen, setScreen] = useState(false);
+  const [metric, setMetric] = useState<ScreeningCriteria["metric"]>("tasks_fixed");
+  const [minimum, setMinimum] = useState<number | null>(1);
+  const [targets, setTargets] = useState<number[]>([]);
   const [candidate, setCandidate] = useState<string>();
   const [sourceIds, setSources] = useState<number[]>([]);
   const [suggestion, setSuggestion] = useState<number>();
@@ -258,6 +263,7 @@ function Experiments({
         suggestion_id: suggestion,
         suggestion_target_case_id: suggestion ? targetCase : undefined,
         case_ids: caseIds,
+        screening: screen && kind !== "baseline" ? { metric, minimum: minimum!, target_case_ids: targets } : undefined,
         evaluator_id: evaluatorId!,
         judge_model_id: needsJudge ? judge : undefined,
         language: i18n.language.startsWith("zh") ? "zh" : "en",
@@ -367,7 +373,7 @@ function Experiments({
               placeholder={t("evolution.cases")}
               style={{ minWidth: 260 }}
               value={caseIds}
-              onChange={setCases}
+              onChange={ids => { setCases(ids); setTargets(targets.filter(id => ids.includes(id))); }}
               options={choices.cases.filter(c => !discoveryRun || c.expected_skill_names != null).map((c) => ({
                 value: c.case_id,
                 label: `${c.family} · ${c.query}`,
@@ -377,6 +383,22 @@ function Experiments({
               {t("evolution.newCase")}
             </Button>
           </Flex>
+          {candidate && candidate !== "baseline" && <>
+            <Checkbox checked={screen} onChange={e => setScreen(e.target.checked)}>{t("evolution.screen.enable")}</Checkbox>
+            {screen && <Flex gap={8} wrap>
+              <Select mode="multiple" aria-label={t("evolution.screen.targets")} placeholder={t("evolution.screen.targets")}
+                value={targets} onChange={setTargets} style={{ minWidth: 240 }}
+                options={choices.cases.filter(c => caseIds.includes(c.case_id) && !fixedDigests.has(c.digest ?? ""))
+                  .map(c => ({value:c.case_id, label:c.query}))} />
+              <Select value={metric} onChange={setMetric} aria-label={t("evolution.screen.metric")}
+                options={(["tasks_fixed", "input_token_reduction_pct"] as const).map(value => ({
+                  value, label:t(`evolution.screen.${value}`),
+                }))} />
+              <label>{t("evolution.screen.minimum")} <InputNumber min={1} max={100} precision={0} value={minimum}
+                aria-label={t("evolution.screen.minimum")} onChange={setMinimum} /></label>
+              <Typography.Text>{t("evolution.screen.protection")}</Typography.Text>
+            </Flex>}
+          </>}
           <Flex gap={8} wrap>
             {suggestion && (
               <Select
@@ -417,6 +439,9 @@ function Experiments({
               type="primary"
               disabled={
                 !candidate ||
+                (candidate !== "baseline" && screen && (!targets.length || !minimum ||
+                  (metric === "tasks_fixed" && minimum > targets.length) ||
+                  targets.some(id => !caseIds.includes(id) || fixedDigests.has(choices.cases.find(c => c.case_id === id)?.digest ?? "")))) ||
                 (candidate === "combination" && (sourceIds.length !== 2 || !!suggestion || !sourceIds.every(id => eligible.some(e => e.experiment_id === id)))) ||
                 (candidate === "baseline" && !!suggestion) ||
                 (discoveryRun && caseIds.some(id => {
@@ -468,6 +493,13 @@ function Experiments({
               failed: report.data.fixed_regression.failed.join(", ") || "—",
               incomplete: report.data.fixed_regression.incomplete.join(", ") || "—",
             })}</Typography.Text>}
+            {report.data.screening && <div>
+              <strong>{t(`evolution.screen.${report.data.screening.status}`)}</strong>
+              <p>{t(`evolution.screen.${report.data.screening.criteria.metric}`)} · {t("evolution.screen.minimum")} {report.data.screening.criteria.minimum}
+                {" · "}{t("evolution.screen.observed")} {report.data.screening.gain?.toLocaleString(undefined, {maximumFractionDigits: 2}) ?? "—"}</p>
+              {Object.entries({...report.data.screening.failures, ...report.data.screening.missing}).map(([reason, ids]) =>
+                <p key={reason}>{t(`evolution.screen.${reason}`)}{ids.length > 0 && ` (#${ids.join(", #")})`}</p>)}
+            </div>}
             {active && (
               <Button
                 onClick={() => cancel.mutate()}
