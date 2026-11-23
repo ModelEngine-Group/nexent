@@ -14,6 +14,16 @@ from infrastructure.skill_execution import MAX_SKILL_BYTES, MAX_SKILL_FILES, ski
 MAX_ARCHIVE_BYTES = MAX_SKILL_BYTES + 2 * 1024 * 1024
 
 
+def released_skill_files(tenant, agent, version, row):
+    """Recheck the exact approved package and binding even when the shared directory changes."""
+    from infrastructure.skill_execution import skill_execution_revision
+    package = row["release_package"]
+    files = load_skill_package(tenant, package["skill_id"], package["digest"])
+    if skill_execution_revision(tenant, agent, version, row, files) != package["revision"]:
+        raise ValueError("Published Skill configuration differs from its verified revision")
+    return files
+
+
 def _validate_paths(files):
     if "SKILL.md" not in files or len(files) > MAX_SKILL_FILES:
         raise ValueError("Invalid Skill package manifest")

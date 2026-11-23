@@ -10,6 +10,9 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
+from contracts.releases import PromotionRequest, RollbackRequest
+from management.db.evaluation.releases import release_view, set_publisher
+from management.services.evaluation.releases import promote, rollback
 from management.db.evaluation.candidates import text_digest
 from management.db.evaluation.confirmation import register_suite, set_curator
 from management.db.evaluation.confirmation_locks import locked_protocol
@@ -30,6 +33,48 @@ from nexent.core.concurrency import run_blocking
 
 
 router = APIRouter(prefix="/agent-evolution")
+
+
+@router.put("/agents/{agent_id}/release-owners")
+async def change_release_owner(
+    agent_id: int, request: CuratorGrant, authorization: str | None = Header(None)
+):
+    user, tenant = get_current_user_id(authorization)
+
+    def configure():
+        require_business_agent_edit(agent_id, tenant, user)
+        set_publisher(tenant, agent_id, user, request)
+
+    await run_blocking("configure-evolution-publisher", configure, lane="control-io", owner="management")
+    return {"data": request.model_dump()}
+
+
+@router.post("/confirmation-locks/{lock_id}/promote")
+async def promote_release(lock_id: int, request: PromotionRequest, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await promote(tenant, user, lock_id, request)}
+
+
+@router.get("/confirmation-locks/{lock_id}/release")
+async def read_release(lock_id: int, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {
+        "data": await run_blocking(
+            "read-evolution-release",
+            release_view,
+            tenant,
+            user,
+            lock_id,
+            lane="control-io",
+            owner="management",
+        )
+    }
+
+
+@router.post("/confirmation-locks/{lock_id}/rollback")
+async def rollback_release(lock_id: int, request: RollbackRequest, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": await rollback(tenant, user, lock_id, request)}
 
 
 @router.get("/experiments/{experiment_id}/confirmation-results")

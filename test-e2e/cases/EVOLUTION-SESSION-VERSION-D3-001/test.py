@@ -33,7 +33,13 @@ def test_session_versions(runtime):
             "006_prepared_conversation_turn",
             "011_trajectory",
             "015_conversation_evolution",
+            "018_evolution_replay_cases",
+            "019_evolution_experiments",
+            "028_evolution_confirmation_suites",
+            "029_evolution_confirmation_locks",
+            "030_evolution_confirmation_results",
             "031_evolution_session_versions",
+            "032_evolution_releases",
         ):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     tenant, owner, agent = "release-pilot", "chat-user", 901

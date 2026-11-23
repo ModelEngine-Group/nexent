@@ -9,7 +9,6 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, SkillStepCandidateRequest
 from infrastructure.rdb.skill_candidate_records import read_bound_skill_candidate
-from infrastructure.skill_execution import capture_skill_files
 from infrastructure.skill_package import encode_skill_package
 from management.db.evaluation import experiments as jobs
 from management.db.evaluation.candidates import text_digest
@@ -22,7 +21,7 @@ from management.db.evaluation.candidates import selectable_tool_names
 from management.services.evaluation.example_candidates import generate_example_candidates
 from management.services.evaluation.prompt_candidates import generate_prompt_candidate
 from management.services.evaluation.replay_cases import get_development_case
-from management.services.evaluation.skill_candidates import generate_skill_discovery_candidate, generate_skill_step_candidate
+from management.services.evaluation.skill_candidates import feedback_skill_files, generate_skill_discovery_candidate, generate_skill_step_candidate
 
 
 def _approved_excerpt(excerpt, required_status, trial, task):
@@ -91,7 +90,7 @@ def _prepare_handoff(tenant, user, eid, request):
             raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND)
         feedback = dict(method="S1", source_case_ids=source_ids, agent_id=agent_id, version_no=version, skill_id=request.skill_id,
                         skill_name=skill["name"], source_text=skill.get("description") or "", goal=request.goal)
-        files = capture_skill_files(tenant, skill["name"])
+        files = feedback_skill_files(tenant, skill["name"], (agent_id, version))
         feedback["source_digest"] = sha256(encode_skill_package(files)).hexdigest()
         for category in ("missed", "overused", "correct"):
             excerpt = getattr(request, category)
@@ -152,7 +151,7 @@ def _prepare_handoff(tenant, user, eid, request):
             target = (read_bound_skill_candidate(tenant, agent_id, version, provenance["candidate_id"])
                       if provenance.get("candidate_type") == "skill_step" else None)
             _require_baseline_guide(target, request.skill_id, provenance.get("candidate_id"), selected)
-        files = capture_skill_files(tenant, skill["name"])
+        files = feedback_skill_files(tenant, skill["name"], (agent_id, version))
         feedback["source_digest"] = sha256(encode_skill_package(files)).hexdigest()
         source = files["SKILL.md"].decode("utf-8")
     else:
@@ -246,7 +245,7 @@ def generate_from_handoff(tenant, user, feedback_id, model_id):
     provenance = {"feedback_id": feedback_id, "source_digest": feedback["source_digest"]}
     if feedback["method"] == "S2":
         request = SkillStepCandidateRequest(model_id=model_id, skill_id=feedback["skill_id"], **common)
-        return generate_skill_step_candidate(request, tenant, user, **provenance)
+        return generate_skill_step_candidate(request, tenant, user, agent_version=(feedback["agent_id"], feedback["version_no"]), **provenance)
     request = PromptCandidateRequest(model_id=model_id, agent_id=feedback["agent_id"],
         version_no=feedback["version_no"], method=feedback["method"], **common)
     return generate_prompt_candidate(request, tenant, user, **provenance)

@@ -173,7 +173,10 @@ def materialize_skill_tools(
             revision_row = dict(row)
             owner = revision_row.pop("owner_tenant_id") if workbench_refs else tenant
             candidate = getattr(ref, "package_candidate_id", None)
-            if candidate is None:
+            if candidate is None and not workbench_refs and "release_package" in revision_row:
+                from infrastructure.skill_package import released_skill_files
+                files = released_skill_files(tenant,resource.agent_id,resource.version_no,revision_row)
+            elif candidate is None:
                 files = capture_skill_files(owner, name)
             else:
                 from infrastructure.skill_package import load_skill_package

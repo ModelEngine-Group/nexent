@@ -34,13 +34,22 @@ def _status_reply(session, scope, query, reply):
     number = NUMBER.search(query)
     match = "s.suggestion_id=:sid" if number else "s.conversation_id=:cid"
     rows = session.execute(text(f"""
-        SELECT s.suggestion_id, s.status, s.experiment_id,
+        SELECT s.suggestion_id, s.status, s.experiment_id,s.agent_id,decision.*,
             (SELECT count(*) FROM nexent.evolution_trial_t t WHERE t.experiment_id=s.experiment_id
                 AND t.status IN ('running','pending')) AS active,
             (SELECT cancelled FROM nexent.evolution_experiment_t e WHERE e.experiment_id=s.experiment_id
                 AND e.tenant_id=s.tenant_id) AS stopped
         FROM nexent.evolution_suggestion_t s
         JOIN nexent.conversation_record_t c ON c.conversation_id=s.conversation_id AND c.created_by=s.submitter_id
+        LEFT JOIN LATERAL (
+            SELECT l.lock_id,r.decision AS independent,z.new_version,z.rollback_at,z.disabled
+              FROM nexent.evolution_confirmation_lock_t l
+              JOIN nexent.evolution_experiment_t e ON e.experiment_id=l.experiment_id
+              LEFT JOIN nexent.evolution_confirmation_result_t r ON r.lock_id=l.lock_id AND r.lock_digest=l.digest
+              LEFT JOIN nexent.evolution_release_t z ON z.lock_id=l.lock_id AND z.tenant_id=s.tenant_id
+             WHERE l.experiment_id=s.experiment_id AND e.tenant_id=s.tenant_id AND e.agent_id=s.agent_id
+             ORDER BY z.published_at DESC NULLS LAST,l.lock_id DESC LIMIT 1
+        ) decision ON true
         WHERE s.tenant_id=:tenant AND s.submitter_id=:owner AND {match} AND c.delete_flag='N' AND s.status='submitted'
         ORDER BY s.suggestion_id DESC LIMIT 2
     """), {**scope, "sid": int(number[1]) if number else None}).mappings().all()
@@ -50,7 +59,22 @@ def _status_reply(session, scope, query, reply):
         ids = "、".join(f"S-{r['suggestion_id']}" for r in rows)
         return reply(f"你提交了多条建议，请指定编号，例如 {ids}。", f"Please specify a suggestion ID, for example {ids}.")
     sid = rows[0]["suggestion_id"]
-    if rows[0]["experiment_id"] is not None:
+    row = rows[0]
+    if row["new_version"] is not None:
+        version = row["new_version"]
+        if row["disabled"]:
+            return reply(f"建议 S-{sid} 曾用于 V{version}，该版本已紧急停用。", f"S-{sid} was released in V{version}, which has been stopped.")
+        if row["rollback_at"]:
+            return reply(f"建议 S-{sid} 曾用于 V{version}，该次发布已回退。", f"S-{sid} was released in V{version}. That release was rolled back.")
+        agent = row["agent_id"]
+        return reply(f"建议 S-{sid} 已采用，已在本租户智能体 #{agent} 发布 V{version}。", f"S-{sid} was adopted in V{version} of agent #{agent} in this tenant.")
+    if row["lock_id"] is not None and not row["stopped"]:
+        if row["independent"] == "passed":
+            return reply(f"建议 S-{sid} 已通过独立确认，等待发布。", f"S-{sid} passed independent evaluation and awaits publication.")
+        if row["independent"] in {"failed", "insufficient"}:
+            return reply(f"建议 S-{sid} 的独立确认未达到发布条件。", f"The independent result for S-{sid} did not qualify for publication.")
+        return reply(f"建议 S-{sid} 正在独立确认。", f"S-{sid} is undergoing independent evaluation.")
+    if row["experiment_id"] is not None:
         if rows[0]["stopped"]:
             return reply(f"建议 S-{sid} 的对比评测已取消。", f"The evaluation for S-{sid} was cancelled.")
         if rows[0]["active"]:

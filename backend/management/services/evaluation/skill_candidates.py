@@ -13,7 +13,7 @@ from contracts.evolution import SkillStepCandidateRequest
 from infrastructure.rdb.skill_candidate_records import candidate_skill_row, read_bound_skill_candidate
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision
-from infrastructure.skill_package import encode_skill_package, load_skill_package, store_skill_package
+from infrastructure.skill_package import encode_skill_package, load_skill_package, released_skill_files, store_skill_package
 from management.clients.model import invoke_chat_prompt_in_worker
 from management.db.evaluation.candidates import store_skill_candidate
 from management.db.identity.group import query_group_ids_by_user_in_tenant
@@ -32,10 +32,22 @@ def _editable_skill(tenant_id, user_id, skill_id):
     return skill
 
 
+def feedback_skill_files(tenant, name, agent_version):
+    """Read the same authorized version that produced the development feedback."""
+    if agent_version is not None:
+        agent, version = agent_version
+        matches = [row for row in read_bound_skills(agent, version, tenant) if row["name"] == name]
+        if len(matches) != 1:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Feedback Skill binding is missing or ambiguous")
+        if "release_package" in matches[0]:
+            return released_skill_files(tenant, agent, version, matches[0])
+    return capture_skill_files(tenant, name)
+
+
 def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id: str, user_id: str, *,
-                                 feedback_id=None, source_digest=None):
+                                 feedback_id=None, source_digest=None, agent_version=None):
     skill = _editable_skill(tenant_id, user_id, request.skill_id)
-    files = capture_skill_files(tenant_id, skill["name"])
+    files = feedback_skill_files(tenant_id, skill["name"], agent_version)
     if source_digest is not None and sha256(encode_skill_package(files)).hexdigest() != source_digest:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The Skill differs from the approved feedback source")
     guide = files["SKILL.md"].decode("utf-8")
@@ -50,7 +62,7 @@ def generate_skill_step_candidate(request: SkillStepCandidateRequest, tenant_id:
     )
     updated = {**files, "SKILL.md": (guide[:header.end()] + result).encode("utf-8")}
     current = _editable_skill(tenant_id, user_id, request.skill_id)
-    if current["name"] != skill["name"] or capture_skill_files(tenant_id, current["name"]) != files:
+    if current["name"] != skill["name"] or feedback_skill_files(tenant_id, current["name"], agent_version) != files:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "The source Skill changed during generation")
     base = store_skill_package(tenant_id, request.skill_id, files)
     candidate = store_skill_package(tenant_id, request.skill_id, updated)
@@ -77,7 +89,7 @@ def generate_skill_discovery_candidate(feedback, feedback_id, model_id, tenant, 
         skill = _editable_skill(tenant, user, skill_id)
         if (skill["name"] != feedback["skill_name"] or (skill.get("description") or "") != feedback["source_text"]):
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Skill description changed since evaluation")
-        files = capture_skill_files(tenant, skill["name"])
+        files = feedback_skill_files(tenant, skill["name"], (feedback["agent_id"], feedback["version_no"]))
         if sha256(encode_skill_package(files)).hexdigest() != feedback["source_digest"]:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Skill package changed since evaluation")
         return skill, files

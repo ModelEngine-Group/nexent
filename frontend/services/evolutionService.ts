@@ -118,6 +118,16 @@ async function read<T>(url: string, body?: unknown): Promise<T> {
 }
 
 export const evolutionService = {
+  release: (id: number) => read<{
+    agent_id: number; experiment_id: number; base_version: number; current_version: number;
+    candidate_digest: string; candidate_type: string; paused: boolean;
+    summary: null | {decision: "passed" | "insufficient" | "failed"; valid_pairs: number; total_pairs: number; regressed: number};
+    release: null | {new_version: number; rollback_at: string | null; disabled: boolean};
+  }>(`${root}/confirmation-locks/${id}/release`),
+  promote: (id: number, expected_version: number, candidate_digest: string, reason: string) =>
+    read(`${root}/confirmation-locks/${id}/promote`, {expected_version,candidate_digest,reason}),
+  rollback: (id: number, expected_version: number, reason: string, emergency: boolean) =>
+    read(`${root}/confirmation-locks/${id}/rollback`, {expected_version,reason,emergency}),
   agents: () => read<AgentChoice[]>(API_ENDPOINTS.agent.publishedList),
   versions: (agent: number) =>
     read<VersionChoice[]>(API_ENDPOINTS.agent.versions.list(agent)),

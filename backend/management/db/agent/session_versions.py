@@ -24,7 +24,7 @@ def _select(session, params, requested):
     scope = (
         session.execute(
             text("""
-        SELECT s.initial_version, a.current_version_no,b.created_by AS owner,b.version_no AS bound_version
+        SELECT s.initial_version, s.paused, a.current_version_no,b.created_by AS owner,b.version_no AS bound_version
           FROM nexent.evolution_release_scope_t s
           LEFT JOIN nexent.evolution_session_version_t b ON (b.tenant_id,b.agent_id)=(s.tenant_id,s.agent_id)
                AND b.conversation_id=:cid
@@ -42,7 +42,7 @@ def _select(session, params, requested):
     if scope["bound_version"] is not None:
         if scope["owner"] != params["owner"]:
             raise ForbiddenError("Conversation version is outside the current identity")
-        return scope["bound_version"], False
+        return _enabled_version(session,params,scope["bound_version"]), False
     # Existing chats can predate this feature. Only read root identifiers from a trusted run.
     history = (
         session.execute(
@@ -70,7 +70,7 @@ def _select(session, params, requested):
             history["receipt_version"] if history["receipt_version"] is not None else history["trace_version"]
         )
         if type(recorded) is int and recorded > 0:
-            return recorded, True
+            return _enabled_version(session,params,recorded), True
     legacy = session.scalar(
         text("""
         SELECT EXISTS (SELECT 1 FROM nexent.conversation_message_t m
@@ -85,11 +85,27 @@ def _select(session, params, requested):
     if legacy:
         # An old page can explicitly select an old version. Do not silently migrate a chat
         # whose last running version could not be reconstructed.
-        return requested or scope["initial_version"], False
+        return _enabled_version(session,params,requested or scope["initial_version"]), False
     current = scope["current_version_no"]
-    if not current or current <= 0:
+    if scope["paused"] or not current or current <= 0:
         raise ReleaseVersionConflict("No active published version for this business agent")
-    return current, True
+    return _enabled_version(session,params,current), True
+
+
+def _enabled_version(session,params,version):
+    if session.scalar(text("""SELECT disabled FROM nexent.evolution_release_t
+        WHERE tenant_id=:tenant AND agent_id=:agent AND new_version=:v"""),{**params,"v":version}):
+        raise ReleaseVersionConflict("This business agent version has been stopped")
+    if session.scalar(text("""SELECT EXISTS (
+        SELECT 1 FROM nexent.evolution_release_skill_t p
+        LEFT JOIN nexent.ag_skill_instance_t i ON i.tenant_id=p.tenant_id AND i.agent_id=p.agent_id
+          AND i.version_no=p.version_no AND i.skill_instance_id=p.instance_id AND i.skill_id=p.skill_id
+          AND i.delete_flag='N' AND i.enabled
+        LEFT JOIN nexent.ag_skill_info_t s ON s.tenant_id=p.tenant_id AND s.skill_id=p.skill_id AND s.delete_flag='N'
+        WHERE p.tenant_id=:tenant AND p.agent_id=:agent AND p.version_no=:v
+          AND (i.skill_instance_id IS NULL OR s.skill_id IS NULL))"""),{**params,"v":version}):
+        raise ReleaseVersionConflict("A published Skill is no longer authorized for this agent version")
+    return version
 
 
 def select_chat_version(tenant, agent, cid, owner, requested):

@@ -51,4 +51,4 @@ def test_resource_editor_generation_uses_referenced_target_and_provenance(monkey
     reader.assert_called_once_with("tenant",19)
     request, tenant, user = generate.call_args.args
     assert request.skill_id == 84 and request.model_id == 3 and user == "skill-editor" and tenant == "tenant"
-    assert generate.call_args.kwargs == {"feedback_id":19, "source_digest":"d"*64}
+    assert generate.call_args.kwargs == {"agent_version":(45,2), "feedback_id":19, "source_digest":"d"*64}

@@ -41,6 +41,8 @@ change:
     - frontend/tests/component/conversationEvolutionSwitch.test.tsx
     - frontend/tests/component/evolutionExperiments.test.tsx
     - test/backend/services/test_evolution_screening.py
+    - test/backend/services/test_evolution_releases.py
+    - frontend/tests/component/evolutionRelease.test.tsx
     - test/backend/services/test_evolution_confirmation.py
     - test/backend/services/test_prepared_public_turn.py
     behaviors:
@@ -63,5 +65,6 @@ change:
     - 编辑者提交通过筛选的候选。独立评测人锁定题集与门槛，同源任务只用于这一轮确认。资源或判据漂移不能复用开发结果。
     - 独立执行按题配对，核对回执、有效覆盖和预设门槛。开发侧可查看进度和汇总，不能取回独立题。撤权阻止写入，重试复用已完成的结论。
     - 新会话采用当前发布版本；已有会话按实际版本续跑。提交时重新核对，竞争导致的旧编译不能启动。
+    - 发布人授权、候选摘要和业务基线版本分别校验；旧版无法读取则暂停新会话，恢复后可重试回退。
     reason: UT 覆盖授权和计分边界，D2 另测带身份的校准请求、持久化判据及返回契约。
   notes: 对应 management-agent-self-evolution 的 proposal、design 和 task。随开发增量登记其余 AC 的证明边界。

@@ -522,6 +522,9 @@ function Experiments({
                   #{lock_id} · {t(`evolution.confirmation.${summary?.decision ?? "pending"}`)}
                   {summary && <> · {t("evolution.confirmation.pairs", {valid: summary.valid_pairs,
                     total: summary.total_pairs, regressed: summary.regressed})}</>}
+                  {summary?.decision === "passed" && <> · <a href={`/${i18n.language.startsWith("zh") ? "zh" : "en"}/evaluation/releases/${lock_id}`}>
+                    {t("evolution.release.open")}
+                  </a></>}
                 </p>)}
               </div>}
             </div>}

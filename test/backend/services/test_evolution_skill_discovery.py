@@ -50,14 +50,14 @@ def test_permission_checked_before_and_after_rewrite(monkeypatch):
     from json import dumps
     skill = {"name": "meeting", "description": "old"}
     files = {"SKILL.md": b"untouched"}
-    feedback = dict(skill_id=4, skill_name="meeting", source_text="old", goal="better selection",
+    feedback = dict(agent_id=5, version_no=1, skill_id=4, skill_name="meeting", source_text="old", goal="better selection",
                     source_digest=sha256(encode_skill_package(files)).hexdigest(),
                     **{k: {"example_id": k} for k in ("missed", "overused", "correct")})
     denied = AppException(ErrorCode.COMMON_FORBIDDEN)
     model = Mock(return_value=dumps(dict(old="old", new="new", reason="conditions",
                                          evidence_ids=["missed", "overused", "correct"])))
     store = Mock()
-    monkeypatch.setattr(skill_candidates, "capture_skill_files", lambda *_: files)
+    monkeypatch.setattr(skill_candidates, "feedback_skill_files", lambda *_: files)
     monkeypatch.setattr(skill_candidates, "store_skill_package", store)
     monkeypatch.setattr(skill_candidates, "invoke_chat_prompt_in_worker", model)
     monkeypatch.setattr(skill_candidates, "_editable_skill", Mock(side_effect=denied))

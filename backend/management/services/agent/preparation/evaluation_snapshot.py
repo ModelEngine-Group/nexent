@@ -62,6 +62,7 @@ from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
+from infrastructure.skill_package import released_skill_files
 from management.db.conversation.repository import get_conversation, get_historical_context
 from management.services.agent.context import prepend_current_time
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -651,7 +652,9 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
         SkillExecutionBinding(
             instance_id=row["instance_id"],
             revision=skill_execution_revision(
-                tenant_id, agent.agent_id, agent.version_no, row, capture_skill_files(tenant_id, row["name"]),
+                tenant_id, agent.agent_id, agent.version_no, row,
+                released_skill_files(tenant_id,agent.agent_id,agent.version_no,row)
+                if "release_package" in row else capture_skill_files(tenant_id, row["name"]),
             ),
         )
         for row in rows

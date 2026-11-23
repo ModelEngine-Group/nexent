@@ -40,7 +40,7 @@ def test_reject_same_source_before_trial_submission(runtime, monkeypatch, tmp_pa
                      "015_conversation_evolution", "016_evolution_candidates", "017_evolution_skill_candidates",
                      "018_evolution_replay_cases", "019_evolution_experiments", "021_evolution_online_reviews", "022_evolution_suggestions",
                      "025_evolution_regression_cases", "026_evolution_combination", "028_evolution_confirmation_suites",
-                     "029_evolution_confirmation_locks", "030_evolution_confirmation_results"):
+                     "029_evolution_confirmation_locks", "030_evolution_confirmation_results", "031_evolution_session_versions", "032_evolution_releases"):
             cursor.execute((migrations / f"v2.9.0_{name}.sql").read_text(encoding="utf-8"))
     with get_db_session() as session:
         for version in (0, 1, 2):
@@ -294,10 +294,31 @@ def check_confirmation_space(client, identity, editor, editor_id, tenant, privat
     results_url = root + f"/experiments/{experiment}/confirmation-results"
     assert client.get(results_url,headers=editor).json()["data"] == [{"lock_id":protocol["lock_id"],"summary":None}]
     assert client.get(results_url).status_code in (401,403)
+    owners = root + "/agents/7/release-owners"
+    publish_grant = {"user_id": editor_id, "enabled": True}
+    release_url = read_url + "/release"
+    publish_url = read_url + "/promote"
+    request = {"expected_version": 2, "candidate_digest": candidate["candidate_digest"], "reason": "Business confirmation passed"}
+    assert client.put(owners, headers=curator, json=grant).status_code == 403
+    assert client.get(release_url, headers=editor).status_code == 403
+    assert client.put(owners, headers=editor, json=publish_grant).is_success
+    assert client.post(publish_url, headers=editor, json=request).status_code == 400
     arm = {"status":"fail","ms":1,"tokens":None,"forbidden":False}
     summary = comparison_summary(ConfirmationPolicy(**policy), [("meeting",arm,{**arm,"status":"pass"})])
     assert finalize(tenant,curator_id,protocol,summary) == summary
     assert finalize(tenant,curator_id,protocol,{**summary,"decision":"failed"}) == summary
+    release = client.get(release_url, headers=editor)
+    assert release.is_success, release.text
+    assert release.json()["data"]["summary"]["decision"] == "passed"
+    assert "PRIVATE ANSWER" not in release.text
+    assert client.get(release_url, headers=curator).status_code == 403
+    for mismatch in ({"expected_version": 3}, {"candidate_digest": "1" * 64}):
+        rejected = client.post(publish_url, headers=editor, json={**request, **mismatch})
+        assert rejected.status_code == 400, rejected.text
+    assert client.put(owners, headers=editor, json={**publish_grant, "enabled": False}).is_success
+    assert client.post(publish_url, headers=editor, json=request).status_code == 403
+    with get_db_session() as session:
+        assert session.scalar(text("SELECT count(*) FROM nexent.evolution_release_t")) == 0
     public = client.get(results_url,headers=editor)
     assert public.json()["data"] == [{"lock_id":protocol["lock_id"],"summary":summary}]
     assert not any(secret in public.text for secret in ("PRIVATE ANSWER","new-private-series","meeting"))

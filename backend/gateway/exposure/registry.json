@@ -353,6 +353,26 @@
       "credential_kinds": ["session"]
     },
     {
+      "method": "POST", "path": "/api/agent-evolution/confirmation-locks/{lock_id}/promote",
+      "transport": "http", "target": "management", "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-promote", "credential_kinds": ["session"]
+    },
+    {
+      "method": "GET", "path": "/api/agent-evolution/confirmation-locks/{lock_id}/release",
+      "transport": "http", "target": "management", "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-release-read", "credential_kinds": ["session"]
+    },
+    {
+      "method": "POST", "path": "/api/agent-evolution/confirmation-locks/{lock_id}/rollback",
+      "transport": "http", "target": "management", "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-rollback", "credential_kinds": ["session"]
+    },
+    {
+      "method": "PUT", "path": "/api/agent-evolution/agents/{agent_id}/release-owners",
+      "transport": "http", "target": "management", "source": "backend/management/api/evaluation/evolution.py",
+      "route_id": "agent-evolution-release-owner", "credential_kinds": ["session"]
+    },
+    {
       "method": "POST",
       "path": "/api/agent-evolution/experiments/{experiment_id}/confirmation-candidate",
       "transport": "http",

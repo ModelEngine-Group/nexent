@@ -89,5 +89,6 @@ def skill_execution_revision(tenant_id: str, agent_id: int, version_no: int,
         raise ValueError("AgentOS signing is not configured")
     key = hmac.digest(environment.JWT_SECRET.encode(), b"nexent/agentos/skill-execution/v1", "sha256")
     hashes = {name: sha256(content).hexdigest() for name, content in files.items()}
+    row = {key:value for key,value in row.items() if key != "release_package"}
     payload = json.dumps([tenant_id, agent_id, version_no, row, hashes], sort_keys=True, separators=(",", ":"))
     return hmac.digest(key, payload.encode(), "sha256").hex()
