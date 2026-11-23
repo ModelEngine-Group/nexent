@@ -307,6 +307,8 @@ class RunSkillScriptTool(Tool):
                             f"run_skill_script before continuing: {result_data['error']}"
                         )
             else:
+                if getattr(self, "_require_replay_sandbox", False):
+                    raise RuntimeError("Script process evaluation requires a Docker sandbox execution backend")
                 if normalized_source == "workspace":
                     raise RuntimeError(
                         "Workspace scripts require an available Docker sandbox execution backend"

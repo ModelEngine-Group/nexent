@@ -1,0 +1,32 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: EVOLUTION-SKILL-SCRIPT-D2-001
+  feature_id: AGENT-EVOLUTION-REPLAY
+  business_rule_ids: [AGENT-EVOLUTION-REPLAY-RULE-05]
+  title: 脚本错误复现和维护者改动分权
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 从同一脚本的两次失败及一次正常结果冻结修复反馈，按维护权限生成局部改动。
+  preconditions: [可创建临时数据库的 PostgreSQL 测试实例。]
+  test_data:
+    profile: 业务智能体和私有周报技能分别归属于同一租户的不同开发者。
+  steps:
+  - order: 1
+    action: 维护人和智能体编辑者分别提交证据，另将首跑编号充当复现编号。
+    expected: 仅智能体编辑者提交的独立复现有效；重试得到同一反馈编号。
+  - order: 2
+    action: 两种身份提交同一函数修订，随后修改包依赖再次提交。
+    expected: 仅技能维护人可获得差异，依赖变化后拒绝旧证据。
+  expected_results: [不同职责按资源分别授权。, 草稿对应实际基线包。]
+  forbidden_side_effects: [草稿不改动已发布的脚本。]
+  acceptance:
+  - {id: AC-01, description: 确认复现与任务编辑权, steps: [1], expected_results: [1]}
+  - {id: AC-02, description: 核对草稿权限与基线, steps: [2], expected_results: [2], forbidden_side_effects: [1]}
+  contract:
+    protocol: HTTP API
+    request_expectations: [使用原生会话凭据。]
+    response_expectations: [已授权的请求取得反馈编号或函数差异，越权返回 403。]

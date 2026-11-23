@@ -252,6 +252,8 @@ def generate_from_handoff(tenant, user, feedback_id, model_id):
                 raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Cannot verify original feedback task")
             source_ids.append(int(match[1]))
     require_development_sources(tenant, feedback["agent_id"], source_ids, {})
+    if feedback["method"] == "S4":
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Use the script draft endpoint for maintainer review")
     if feedback["method"] == "S1":
         return generate_skill_discovery_candidate(feedback, feedback_id, model_id, tenant, user)
     common = {key: feedback[key] for key in ("goal", "source_passage", "failure", "protection")}

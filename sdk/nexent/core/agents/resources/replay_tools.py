@@ -17,8 +17,9 @@ def argument_digest(value):
 
 
 class ReplayToolRecorder:
-    def __init__(self, root_config, watched, probe_names=()):
+    def __init__(self, root_config, watched, probe_names=(), *, watch_skill_process=False):
         self.root_config = root_config
+        self.watch_skill_process = watch_skill_process
         self.watched = watched
         self.requested = ContextVar("replay_requested_arguments", default=None)
         self.registered = set()
@@ -58,7 +59,21 @@ class ReplayToolRecorder:
         if name not in self.watched or not callable(getattr(tool, "forward", None)):
             return
         input_names = list(getattr(tool, "inputs", {}) or {})
-        tool.forward = self.wrap_forward(name, tool.forward, input_names, mapping_input)
+        forward = tool.forward
+        if name == "run_skill_script" and self.watch_skill_process:
+            from nexent.core.agents.resources.replay_scripts import active_script_call
+            tool._require_replay_sandbox = True
+
+            def bind_process(call, *args, **kwargs):
+                token = active_script_call.set(call)
+                try:
+                    return forward(*args, **kwargs)
+                finally:
+                    active_script_call.reset(token)
+
+            tool.forward = self.wrap_forward(name, forward, input_names, mapping_input, process_call=bind_process)
+        else:
+            tool.forward = self.wrap_forward(name, forward, input_names, mapping_input)
 
     @contextmanager
     def observe_requested(self, name, values, public_fields):
@@ -110,7 +125,7 @@ class ReplayToolRecorder:
 
         tool.forward = async_forward if inspect.iscoroutinefunction(forward) else sync_forward
 
-    def wrap_forward(self, name, forward, input_names, mapping_input=False):
+    def wrap_forward(self, name, forward, input_names, mapping_input=False, *, process_call=None):
         if name not in self.watched:
             return forward
         fields = self.watched[name]
@@ -159,7 +174,7 @@ class ReplayToolRecorder:
         def sync_forward(*args, **kwargs):
             call = begin(args, kwargs)
             try:
-                result = forward(*args, **kwargs)
+                result = process_call(call, *args, **kwargs) if process_call else forward(*args, **kwargs)
             except BaseException:
                 finish(call, "raised")
                 raise

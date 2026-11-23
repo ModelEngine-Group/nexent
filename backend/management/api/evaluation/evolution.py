@@ -10,6 +10,8 @@ from contracts.confirmation import ConfirmationLockRequest, ConfirmationManifest
 
 from contracts.evolution import DevelopmentExperimentRequest, PromptCandidateRequest, ReplayCaseRequest, SkillStepCandidateRequest
 from contracts.evolution import DiscoveryHandoffRequest, ExampleCandidateRequest, FeedbackHandoffRequest, GenerateFromFeedbackRequest
+from contracts.skill_script_repair import ScriptDraftRequest, ScriptRepairFeedback
+from management.services.evaluation.skill_script_repairs import draft_script, share_script_feedback
 from contracts.new_skill_candidates import NewSkillBriefRequest
 from contracts.releases import PromotionRequest, RollbackRequest
 from management.db.evaluation.experiments import read_handoff
@@ -186,6 +188,20 @@ async def select_prompt_examples(experiment_id: int, request: ExampleCandidateRe
                                  authorization: str | None = Header(None)):
     user_id, tenant_id = get_current_user_id(authorization)
     result = await examples_from_experiment(tenant_id, user_id, experiment_id, request)
+    return {"data": result}
+
+
+@router.post("/experiments/{experiment_id}/skill-script-feedback")
+async def freeze_script_examples(experiment_id: int, request: ScriptRepairFeedback, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    return {"data": {"feedback_id": await share_script_feedback(tenant, user, experiment_id, request)}}
+
+
+@router.post("/feedback/{feedback_id}/skill-script-draft")
+async def preview_script_draft(feedback_id: int, request: ScriptDraftRequest, authorization: str | None = Header(None)):
+    user, tenant = get_current_user_id(authorization)
+    result = await run_blocking("draft-skill-function", draft_script, tenant, user, feedback_id, request,
+                                lane="evaluation", owner="management")
     return {"data": result}
 
 

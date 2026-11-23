@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: EVOLUTION-SKILL-SCRIPT-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_script_process
+acceptance_bindings:
+  AC-01: [test_script_process]
+  AC-02: [test_script_process]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

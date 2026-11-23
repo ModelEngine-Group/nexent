@@ -71,6 +71,8 @@ async def run_turns(client, spec, task, load_input, job, user, tenant):
         current = current.model_copy(update={"history": list(history)})
         updates = {"input": current, "conversation_id": -job["trial_id"], "replay_trial_id": attempt}
         if watch:
+            if any(r.get("expected_script_stdout") is not None for r in watch["rules"]):
+                updates["watch_skill_process"] = True
             updates["watch_tool_arguments"] = {r["name"]: sorted(r["arguments"]) for r in watch["rules"]}
         if files is not None:
             updates["replay_files"] = files

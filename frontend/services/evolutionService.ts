@@ -57,7 +57,9 @@ export interface Trial {
     tool_catalog?: { core: string; prompt_tools: string[]; schema_tools: string[]; executable: string[];
       model_inputs?: number; instruction_mentions?: string[]; native_definitions?: string[] };
     new_skill_trial?: {candidate_id: number; name: string; digest: string; arm: "base" | "result"};
-    tool_use?: { status: string; argument_evidence?: {
+    tool_use?: { status: string; reason?: string; script_evidence?: {
+      call: number; exit_code: number; input_matches: boolean; stdout_matches: boolean; script: string; image: string;
+    }[]; argument_evidence?: {
       tool: string; field: string; call: number; requested: string | null; effective: string | null; expected: string;
     }[]; checked?: string[]; sequence?: string[]; issues?: { reason: string; tool?: string; fields?: string[]; max_calls?: number }[] };
     error?: string;
@@ -210,6 +212,11 @@ export const evolutionService = {
       `${root}/agents/${agent}/versions/${version}/development-cases/${id}`),
   shareLocalEdit: (id: number, body: LocalFeedback) =>
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
+  shareScriptFeedback: (id: number, body: ScriptFeedback) =>
+    read<{feedback_id: number}>(`${root}/experiments/${id}/skill-script-feedback`, body),
+  scriptDraft: (id: number, body: {model_id: number} | {replacement: string}) =>
+    read<{script_path: string; function: string; replacement: string; diff: string; draft_digest: string}>(
+      `${root}/feedback/${id}/skill-script-draft`, body),
   shareDiscovery: (id: number, body: { method: "S1"; skill_id: number; goal: string } &
     Record<"missed" | "overused" | "correct", { case_id: number; query_excerpt: string }>) =>
     read<{ feedback_id: number }>(`${root}/experiments/${id}/feedback`, body),
@@ -230,8 +237,13 @@ export const evolutionService = {
 };
 
 export interface ToolExpectation {
-  rules: { name: string; min_calls: number; max_calls: number | null; arguments: Record<string, unknown> }[];
+  rules: { name: string; min_calls: number; max_calls: number | null; expected_script_stdout?: string; arguments: Record<string, unknown> }[];
   order?: string[];
+}
+
+export interface ScriptFeedback {
+  skill_id: number; failure_case_id: number; protection_case_id: number; repeat_experiment_id: number;
+  function: string; goal: string; share_script_examples: boolean;
 }
 
 export interface LocalFeedback {

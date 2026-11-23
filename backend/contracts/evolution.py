@@ -64,10 +64,19 @@ class ToolUseRule(BaseModel):
     name: str = Field(min_length=1, max_length=180, pattern=r"^\S+$")
     min_calls: int = Field(default=1, ge=0, le=512)
     max_calls: int | None = Field(default=None, ge=0, le=512)
+    expected_script_stdout: str | None = Field(default=None, max_length=16384, exclude_if=lambda v: v is None)
     arguments: dict[str, JsonValue] = Field(default_factory=dict, max_length=32)
 
     @model_validator(mode="after")
     def valid_bounds(self):
+        if self.expected_script_stdout is not None:
+            import shlex
+            if (self.name != "run_skill_script" or self.arguments.get("source", "skill") != "skill"
+                    or not all(isinstance(self.arguments.get(k), str) and self.arguments[k].strip()
+                               for k in ("skill_name", "script_path"))
+                    or not isinstance(self.arguments.get("params", ""), str) or self.min_calls < 1):
+                raise ValueError("A script check requires a bundled Skill, script path and at least one call")
+            shlex.split(self.arguments.get("params", ""))
         if self.max_calls is not None and self.max_calls < self.min_calls:
             raise ValueError("Maximum call count must cover the minimum")
         if any(not key.strip() or len(key) > 128 for key in self.arguments):

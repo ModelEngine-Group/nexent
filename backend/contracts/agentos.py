@@ -756,6 +756,7 @@ class PreparedEvaluationRun(AgentRunSpec):
     new_skill_trial: NewSkillTrial | None = Field(default=None, exclude_if=lambda v: v is None)
     omit_root_skill_candidate_id: PositiveInt | None = Field(default=None, exclude_if=lambda v: v is None)
     observe_root_skill_choices: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
+    watch_skill_process: Literal[True] | None = Field(default=None, exclude_if=lambda v: v is None)
     watch_tool_arguments: dict[str, list[str]] | None = Field(default=None, min_length=1, max_length=32,
                                                               exclude_if=lambda v: v is None)
     tool_set_check: ToolSetCheck | None = Field(default=None, exclude_if=lambda v: v is None)
@@ -779,7 +780,18 @@ class SkillTrialObservation(RunSpecModel):
     guide_reads: int = Field(ge=0)
 
 
+class SkillProcessEvidence(RunSpecModel):
+    skill: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    path: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    argv: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    image: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    script: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    stdout: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    exit_code: int
+
+
 class ToolForwardCall(RunSpecModel):
+    skill_process: SkillProcessEvidence | None = Field(default=None, exclude_if=lambda v: v is None)
     name: str
     start: PositiveInt
     end: PositiveInt | None

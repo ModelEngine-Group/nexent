@@ -12,7 +12,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
+    added: [EVOLUTION-SKILL-SCRIPT-D2-001, EVOLUTION-SKILL-SCRIPT-D3-001, EVOLUTION-TOOL-MAPPING-D3-001, EVOLUTION-NEW-SKILL-D3-001, EVOLUTION-NEW-SKILL-D2-001, EVAL-CALIBRATION-D2-001, EVOLUTION-PAIR-REPORT-D1-001, EVOLUTION-ONLINE-SCOPE-D2-001, EVOLUTION-EXAMPLE-SOURCE-D2-001, EVOLUTION-REVIEW-BATCH-D3-001, EVOLUTION-FILE-STATE-D3-001, EVOLUTION-SESSION-VERSION-D3-001]
     modified: []
     retired: []
   traditional_ut:
@@ -23,6 +23,7 @@ change:
     - test/backend/services/test_evolution_suggestion.py
     - test/backend/services/test_evolution_observation.py
     - test/backend/services/test_evolution_prompt_candidates.py
+    - test/backend/services/test_evolution_skill_script_repair.py
     - test/backend/services/test_evolution_skill_package.py
     - test/backend/services/test_evolution_skill_discovery.py
     - test/backend/services/test_evolution_tool_use.py

@@ -6,6 +6,8 @@ import EvolutionExperiments from "@/app/evaluation/components/EvolutionExperimen
 import NewSkillBriefForm from "@/app/evaluation/components/NewSkillBriefForm";
 import DiscoveryFeedback from "@/app/evaluation/components/DiscoveryFeedback";
 import LocalEditFeedback from "@/app/evaluation/components/LocalEditFeedback";
+import { ScriptDraftForm } from "@/app/evaluation/components/SkillScriptRepair";
+import { toolExpectation } from "@/app/evaluation/components/ToolUseRules";
 import ToolMappingCandidate from "@/app/evaluation/components/ToolMappingCandidate";
 import ToolSetCandidates from "@/app/evaluation/components/ToolSetCandidates";
 import FixedRegressionCases from "@/app/evaluation/components/FixedRegressionCases";
@@ -44,6 +46,7 @@ vi.mock("@/services/evolutionService", () => ({
     shareLocalEdit: vi.fn(),
     toolSetCandidates: vi.fn(),
     toolMappingCandidate: vi.fn(),
+    scriptDraft: vi.fn(),
     setFixedRegression: vi.fn(),
   },
 }));
@@ -487,4 +490,25 @@ it("uses the selected argument evidence and a passing case to request a mapping"
     failure_case_id: 9, protection_case_id: 10, tool_name: "lookup", field: "day", supplied_value: "2026/09/01",
   });
   expect(onSelect).toHaveBeenCalledWith(37);
+});
+
+it("keeps exact stdout for script tasks and drops stale script checks for other tools", () => {
+  const rule = { name:"run_skill_script", min:1, args:"{}", checkScript:true, stdout:"A\n" };
+  expect(toolExpectation({toolRules:[rule]})?.rules[0].expected_script_stdout).toBe("A\n");
+  expect(toolExpectation({toolRules:[{...rule,stdout:undefined}]})?.rules[0].expected_script_stdout).toBe("");
+  expect(toolExpectation({toolRules:[{...rule,name:"lookup"}]})?.rules[0]).not.toHaveProperty("expected_script_stdout");
+});
+
+it("previews the maintainer's function diff without starting an experiment", async () => {
+  const replacement = "def report(value):\n    return value.upper()";
+  vi.mocked(evolutionService.scriptDraft).mockResolvedValue({script_path:"scripts/report.py", function:"report",
+    replacement, diff:"+    return value.upper()", draft_digest:"pinned"});
+  render(<QueryClientProvider client={new QueryClient()}><ScriptDraftForm/></QueryClientProvider>);
+  fireEvent.click(screen.getByText("evolution.scriptDraft", {selector:"summary"}));
+  fireEvent.change(screen.getByRole("spinbutton", {name:"evolution.feedbackId"}), {target:{value:"32"}});
+  fireEvent.click(screen.getByRole("radio", {name:"evolution.scriptManual"}));
+  fireEvent.change(screen.getByRole("textbox", {name:"evolution.scriptReplacement"}), {target:{value:replacement}});
+  fireEvent.click(screen.getByRole("button", {name:"evolution.scriptDraft"}));
+  expect(await screen.findByText("+ return value.upper()")).toBeInTheDocument();
+  expect(evolutionService.scriptDraft).toHaveBeenCalledWith(32,{replacement});
 });

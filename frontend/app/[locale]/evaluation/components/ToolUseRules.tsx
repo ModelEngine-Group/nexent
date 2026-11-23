@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
-import { Button, Form, Input, InputNumber, Space } from "antd";
+import { Button, Checkbox, Form, Input, InputNumber, Space } from "antd";
 import { useTranslation } from "react-i18next";
 import type { ToolExpectation } from "@/services/evolutionService";
 
 export interface ToolRuleFields {
-  toolRules?: { name: string; min: number; max?: number; args?: string }[];
+  toolRules?: { name: string; min: number; max?: number; args?: string; checkScript?: boolean; stdout?: string }[];
   toolOrder?: string;
 }
 
@@ -13,6 +13,7 @@ export function toolExpectation({ toolRules, toolOrder }: ToolRuleFields): ToolE
   if (!toolRules?.length) return undefined;
   return {
     rules: toolRules.map(r => ({
+      ...(r.name.trim() === "run_skill_script" && r.checkScript ? { expected_script_stdout: r.stdout ?? "" } : {}),
       name: r.name.trim(), min_calls: r.min, max_calls: r.max ?? null, arguments: JSON.parse(r.args?.trim() || "{}"),
     })),
     order: toolOrder?.trim() ? toolOrder.split(",").map(n => n.trim()) : undefined,
@@ -48,6 +49,14 @@ export default function ToolUseRules() {
       }]}>
         <Input.TextArea rows={2} placeholder={'{"skill_name":"meeting-action-list"}'} />
       </Form.Item>
+      {rules?.[f.name]?.name?.trim() === "run_skill_script" && <>
+        <Form.Item name={[f.name, "checkScript"]} valuePropName="checked">
+          <Checkbox>{t("evolution.checkScript")}</Checkbox>
+        </Form.Item>
+        {rules[f.name].checkScript && <Form.Item name={[f.name, "stdout"]} label={t("evolution.scriptStdout")}>
+          <Input.TextArea rows={3} maxLength={16384} />
+        </Form.Item>}
+      </>}
       <Button onClick={() => remove(f.name)}>{t("evolution.removeToolRule")}</Button>
     </div>)}
     <Button disabled={fields.length >= 32} onClick={() => add({ min: 1 })}>{t("evolution.addToolRule")}</Button>

@@ -380,12 +380,13 @@ class SandboxSkillScriptRunner:
         else:
             raise ValueError("source must be either 'skill' or 'workspace'")
 
+        argv = shlex.split(params or "")
         command = [
             "timeout",
             "--signal=KILL",
             str(self._timeout_seconds),
             *interpreter_args,
-            *shlex.split(params or ""),
+            *argv,
         ]
         if working_directory:
             workspace_dir = working_directory.rstrip("/")
@@ -429,6 +430,8 @@ class SandboxSkillScriptRunner:
         }
         if self._network_enabled and interpreter_args[0] == "bash":
             self._ensure_network_pnpm_store(workspace_dir)
+        from nexent.core.agents.resources.replay_scripts import identify_script, record_script_exit
+        identity = identify_script(self._container, sandbox_script) if normalized_source == "skill" else None
         result = self._container.exec_run(
             command,
             user="sandbox",
@@ -442,12 +445,14 @@ class SandboxSkillScriptRunner:
             stdout, stderr = raw_output
         else:
             stdout, stderr = raw_output, b""
+        if identity is not None:
+            record_script_exit(identity, skill_name, Path(normalized_script).as_posix(), argv, exit_code, stdout)
         output = self._output_text(stdout)
         error_output = self._output_text(stderr)
         if exit_code == 124 or exit_code == 137:
             raise TimeoutError(f"Script execution timed out: {normalized_script}")
         if exit_code != 0:
-            failure_message = error_output or output
+            failure_message = error_output or output or f"Script exited with code {exit_code}"
             logger.error(
                 "Sandbox skill script failed skill=%s script=%s exit=%s output=%s",
                 skill_name,

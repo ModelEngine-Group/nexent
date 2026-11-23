@@ -480,6 +480,8 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
 
     if (payload.omit_root_skill_candidate_id or payload.observe_root_skill_choices or payload.new_skill_trial) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_SKILL_CONTROL_REQUIRES_REPLAY"})
+    if payload.watch_skill_process and "run_skill_script" not in (payload.watch_tool_arguments or {}):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_SCRIPT_CHECK_REQUIRES_TOOL"})
     if (payload.watch_tool_arguments or payload.tool_set_check) and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_TOOL_OBSERVATION_REQUIRES_REPLAY"})
     if payload.replay_files is not None and not (EVOLUTION_REPLAY_RUNTIME and payload.replay_trial_id):
@@ -558,7 +560,8 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
         if payload.watch_tool_arguments or payload.tool_set_check:
             from nexent.core.agents.resources.replay_tools import ReplayToolRecorder
             recorder = ReplayToolRecorder(info.agent_config, payload.watch_tool_arguments or {},
-                                         payload.tool_set_check.removed if payload.tool_set_check else ())
+                                         payload.tool_set_check.removed if payload.tool_set_check else (),
+                                         watch_skill_process=bool(payload.watch_skill_process))
             info.observer.replay_tool_recorder = recorder
         if payload.replay_trial_id:
             for ref in payload.resource.skill_refs:

@@ -26,6 +26,7 @@ import ToolUseRules, { toolExpectation, type ToolRuleFields } from "./ToolUseRul
 import FileStateRules, { fileStateRule, type FileRule } from "./FileStateRules";
 import LocalEditFeedback from "./LocalEditFeedback";
 import NewSkillBriefForm from "./NewSkillBriefForm";
+import { ScriptFeedbackForm, ScriptDraftForm } from "./SkillScriptRepair";
 import ToolMappingCandidate from "./ToolMappingCandidate";
 import ToolSetCandidates from "./ToolSetCandidates";
 import FixedRegressionCases from "./FixedRegressionCases";
@@ -566,6 +567,8 @@ function Experiments({
             <ToolMappingCandidate key={report.data.experiment_id} report={development} cases={choices.cases} onSelect={id => {
               setCandidate(`tool_mapping:${id}`); setCases([]); setSuggestion(undefined); void workspace.refetch();
             }}/>}
+          {development && report.data.status === "finished" && baselineReport && choices && <ScriptFeedbackForm
+            key={report.data.experiment_id} report={development} workspace={choices} agent={agent} version={version} viewer={viewer}/>}
           {development && report.data.status === "finished" && baselineReport && choices && <NewSkillBriefForm key={report.data.experiment_id} report={development} workspace={choices}/>}
           {development && report.data.status === "finished" && baselineReport && <ToolSetCandidates key={report.data.experiment_id}
             report={development} cases={choices?.cases || []} onSelect={id => {
@@ -624,6 +627,11 @@ function Experiments({
                       {t("evolution.toolAndDelivery", { tool: t(`evolution.state.${trial.result.tool_use.status}`),
                         delivery: t(`evolution.state.${trial.result.judgment?.status}`) })}
                       <div>{trial.result.tool_use.sequence?.join(" → ")}</div>
+                      {trial.result.tool_use.reason === "unverified_skill_process" && <div>{t("evolution.scriptMissing")}</div>}
+                      {trial.result.tool_use.script_evidence?.map(s => <div key={s.call}>{t("evolution.scriptOutcome", {
+                        call: s.call, code: s.exit_code, input: t(s.input_matches ? "evolution.match" : "evolution.mismatch"),
+                        output: t(s.stdout_matches ? "evolution.match" : "evolution.mismatch"),
+                      })}</div>)}
                       {trial.result.tool_use.issues?.map((issue, i) => <div key={i}>
                         {issue.tool} {t(`evolution.issue.${issue.reason}`)} {issue.fields?.join(", ")}
                       </div>)}
@@ -732,6 +740,7 @@ function AgentPicker({ viewer }: { viewer: string }) {
   return (
     <Flex vertical gap={16}>
       <ResourceCandidateGenerator />
+      <ScriptDraftForm/>
       {error instanceof Error && <Alert type="error" message={error.message} />}
       <Flex gap={8}>
         <Select
