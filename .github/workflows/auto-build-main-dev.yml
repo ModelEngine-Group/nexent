@@ -15,6 +15,8 @@ on:
       - 'deploy/images/dockerfiles/main/**'
       - 'deploy/common/**'
       - 'deploy/sql/**'
+      - 'deploy/tests/smoke-independent-service-images.sh'
+      - 'VERSION'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
@@ -25,6 +27,8 @@ on:
       - 'deploy/images/dockerfiles/main/**'
       - 'deploy/common/**'
       - 'deploy/sql/**'
+      - 'deploy/tests/smoke-independent-service-images.sh'
+      - 'VERSION'
       - '.github/workflows/**'
 
 jobs:
@@ -45,3 +49,33 @@ jobs:
       - name: Build main image (arm64) and load locally
         run: |
           docker build --platform linux/arm64 -t nexent/nexent:dev-arm64 -f deploy/images/dockerfiles/main/Dockerfile .
+
+  build-independent-services:
+    name: Build and start independent services (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build independent backend images
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          for service in management runtime mcp-service ops; do
+            docker build --target "$service" --platform "linux/$ARCH" \
+              -t "nexent/nexent-$service:dev-$ARCH" -f deploy/images/dockerfiles/main/Dockerfile .
+          done
+      - name: Start and check independent services
+        timeout-minutes: 8
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          bash deploy/tests/smoke-independent-service-images.sh \
+            "nexent/nexent-management:dev-$ARCH" "nexent/nexent-runtime:dev-$ARCH" \
+            "nexent/nexent-mcp-service:dev-$ARCH" "nexent/nexent-ops:dev-$ARCH"

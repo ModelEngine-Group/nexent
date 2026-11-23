@@ -49,6 +49,8 @@ class BusinessImportGuard(importlib.abc.MetaPathFinder):
             'management.utils.exception_handlers', 'management.utils.request_context',
             'management.utils.account_passwords',
             'management.configuration',
+            'management.api', 'management.api.permission',
+            'management.api.permission.ops_access', 'management.services.permission.ops_access',
         }
         allowed_shared_import = (
             fullname in allowed_base_imports
@@ -62,9 +64,10 @@ class BusinessImportGuard(importlib.abc.MetaPathFinder):
             'management', 'runtime', 'nexent', 'elasticsearch', 'minio', 'supabase',
         }:
             raise RuntimeError('Forbidden business import: ' + fullname)
-        if fullname.startswith('infrastructure.') and fullname not in {
-            'infrastructure.rdb', 'infrastructure.rdb.orm', 'infrastructure.rdb.client',
-        }:
+        if fullname.startswith('infrastructure.') and not fullname.startswith((
+            'infrastructure.rdb', 'infrastructure.system_configuration', 'infrastructure.trace',
+            'infrastructure.skill_execution',
+        )):
             raise RuntimeError('Forbidden business import: ' + fullname)
 
 def audit(event, args):
@@ -119,6 +122,7 @@ runpy.run_module('backend.http.ops_service', run_name='__main__')
                     assert set(schema['paths']) == {
                         '/system_configurations', '/system_configurations/recommendations',
                         '/ops/authorization', '/ops/resources', '/ops/scope',
+                        '/trajectory/imports', '/trajectory/imports/{import_id}',
                     }
                 try:
                     opener.open(f'http://127.0.0.1:{port}/system_configurations', timeout=2)
